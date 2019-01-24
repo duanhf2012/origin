@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"origin/rpc"
-	"origin/service"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/duanhf2012/origin/service"
+
+	"github.com/duanhf2012/origin/rpc"
 )
 
 //https://github.com/rocket049/rpc2d/blob/master/rpcnode.go

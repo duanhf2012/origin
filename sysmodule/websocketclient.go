@@ -2,10 +2,11 @@ package sysmodule
 
 import (
 	"fmt"
-	"gorilla/websocket"
 	"log"
 	"net/http"
 	"net/url"
+
+	"github.com/gorilla/websocket"
 
 	"time"
 )

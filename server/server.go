@@ -6,12 +6,13 @@ import (
 
 	"net/http"
 	_ "net/http/pprof"
-	"origin/cluster"
-	"origin/service"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+
+	"github.com/duanhf2012/origin/cluster"
+	"github.com/duanhf2012/origin/service"
 )
 
 type CExitCtl struct {
