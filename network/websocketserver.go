@@ -83,7 +83,7 @@ func (slf *WebsocketServer) Init(pattern string, port uint16, messageReciver IMe
 	slf.mapClient = make(map[uint64]*WSClient)
 	slf.messageReciver = messageReciver
 
-	http.HandleFunc("/ws", slf.wsHandler)
+	http.HandleFunc(slf.pattern, slf.wsHandler)
 }
 
 func (slf *WebsocketServer) startListen() {

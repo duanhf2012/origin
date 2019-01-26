@@ -35,6 +35,7 @@ type IService interface {
 	OnFetchService(iservice IService) error
 	GetServiceType() int
 	GetServiceName() string
+	SetServiceName(serviceName string) bool
 	GetServiceId() int
 	IsTimeOutTick(microSecond int64) bool
 
@@ -92,6 +93,11 @@ func (slf *BaseService) GetServiceType() int {
 
 func (slf *BaseService) GetServiceName() string {
 	return slf.servicename
+}
+
+func (slf *BaseService) SetServiceName(serviceName string) bool {
+	slf.servicename = serviceName
+	return true
 }
 
 func (slf *BaseService) GetStatus() int {
