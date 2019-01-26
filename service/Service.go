@@ -30,6 +30,7 @@ type IService interface {
 	OnInit() error
 	OnEndInit() error
 	OnRun() error
+	OnRunLoop() error
 	OnDestory() error
 	OnFetchService(iservice IService) error
 	GetServiceType() int
@@ -120,8 +121,13 @@ func (slf *BaseService) Init(Iservice interface{}, servicetype int) error {
 	return nil
 }
 
+func (slf *BaseService) OnRunLoop() error {
+	return nil
+}
+
 func (slf *BaseService) Run(service IService, exit chan bool, pwaitGroup *sync.WaitGroup) error {
 	defer pwaitGroup.Done()
+	service.OnRun()
 	for {
 		select {
 		case <-exit:
@@ -130,7 +136,7 @@ func (slf *BaseService) Run(service IService, exit chan bool, pwaitGroup *sync.W
 		default:
 		}
 		slf.tickTime = time.Now().UnixNano() / 1e6
-		service.OnRun()
+		service.OnRunLoop()
 		slf.tickTime = time.Now().UnixNano() / 1e6
 	}
 

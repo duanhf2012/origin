@@ -30,7 +30,3 @@ func (slf *HttpServer) startListen() error {
 
 	return nil
 }
-
-func (slf *WebsocketServer) Stop() {
-
-}
