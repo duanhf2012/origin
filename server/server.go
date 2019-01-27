@@ -66,9 +66,8 @@ func (s *cserver) Start() {
 
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
-
-	service.InstanceServiceMgr().Start(s.exit, s.waitGroup)
 	cluster.InstanceClusterMgr().Start()
+	service.InstanceServiceMgr().Start(s.exit, s.waitGroup)
 
 	select {
 	case <-s.sigs:

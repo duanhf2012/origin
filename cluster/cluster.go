@@ -133,7 +133,7 @@ func (slf *CPing) Ping(ping *CPing, pong *CPong) error {
 func (slf *CCluster) ConnService() error {
 	ping := CPing{0}
 	pong := CPong{0}
-	fmt.Println(rpc.RegisterName("CPing", &ping))
+	fmt.Println(rpc.RegisterName("CPing", "", &ping))
 
 	//连接集群服务器
 	for _, nodeList := range slf.cfg.mapClusterNodeService {
@@ -333,7 +333,7 @@ func (slf *CCluster) GoNode(nodeid int, args interface{}, servicemethod string) 
 }
 
 func (ws *CCluster) OnFetchService(iservice service.IService) error {
-	rpc.RegisterName(iservice.GetServiceName(), iservice)
+	rpc.RegisterName(iservice.GetServiceName(), "RPC_", iservice)
 	return nil
 }
 

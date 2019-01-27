@@ -7,9 +7,20 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/duanhf2012/origin/rpc"
+
+	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/service"
 )
+
+type HttpRequest struct {
+	Body string
+}
+
+type HttpRespone struct {
+	Respone string
+}
 
 type ControllerMapsType map[string]reflect.Value
 
@@ -22,7 +33,6 @@ type HttpServerService struct {
 }
 
 func (slf *HttpServerService) OnInit() error {
-
 	slf.httpserver.Init(slf.port)
 	slf.httpserver.HandleFunc("/{server:[a-zA-Z0-9]+}/{method:[a-zA-Z0-9]+}", func(w http.ResponseWriter, r *http.Request) {
 		slf.httpHandler(w, r)
@@ -51,21 +61,7 @@ func (slf *HttpServerService) OnDestory() error {
 
 func (slf *HttpServerService) OnSetupService(iservice service.IService) {
 	//
-
-	//反射
-	vf := reflect.ValueOf(iservice)
-	vft := vf.Type()
-	//读取方法数量
-	mNum := vf.NumMethod()
-	for i := 0; i < mNum; i++ {
-		mName := vft.Method(i).Name
-		startPos := strings.Index(mName, "Http_")
-		if startPos != 0 {
-			continue
-		}
-		fmt.Println("index:", i, " MethodName:", mName)
-		slf.controllerMaps[mName] = vf.Method(i)
-	}
+	rpc.RegisterName(iservice.GetServiceName(), "HTTP_", iservice)
 }
 
 func (slf *HttpServerService) OnRemoveService(iservice service.IService) {
@@ -97,22 +93,23 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 		writeError(http.StatusBadRequest, "rpc: ioutil.ReadAll "+err.Error())
 		return
 	}
-	strCallPath := vstr[1] + "." + vstr[2]
+	strCallPath := "_" + vstr[1] + "." + vstr[2]
+	/*
+		method, err := slf.GetMethod(strCallPath)
+		var respone string
+		if err != nil {
+			respone = fmt.Sprintf("http respone => %v\n", err)
 
-	method, err := slf.GetMethod(strCallPath)
-	var respone string
-	if err != nil {
-		respone = fmt.Sprintf("http respone => %v\n", err)
+		} else {
+			cluster.InstanceClusterMgr().Call(NodeServiceMethod, args, reply)
+		}
+	*/
+	request := HttpRequest{string(msg)}
+	var resp HttpRespone
 
-	} else {
-		params := make([]reflect.Value, 0) // 参数
-		params = append(params, reflect.ValueOf(msg))
-		method.Call(params)
-		//respone = method.Call(params)
-	}
-
+	cluster.InstanceClusterMgr().Call(strCallPath, &request, &resp)
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
-	w.Write([]byte(respone))
+	w.Write([]byte(resp.Respone))
 }
 
 func (slf *HttpServerService) GetMethod(strCallPath string) (*reflect.Value, error) {

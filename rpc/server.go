@@ -229,16 +229,16 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 // The client accesses each method using a string of the form "Type.Method",
 // where Type is the receiver's concrete type.
 func (server *Server) Register(rcvr interface{}) error {
-	return server.register(rcvr, "", false)
+	return server.register(rcvr, "", "", false)
 }
 
 // RegisterName is like Register but uses the provided name for the type
 // instead of the receiver's concrete type.
-func (server *Server) RegisterName(name string, rcvr interface{}) error {
-	return server.register(rcvr, name, true)
+func (server *Server) RegisterName(name string, prefix string, rcvr interface{}) error {
+	return server.register(rcvr, name, prefix, true)
 }
 
-func (server *Server) register(rcvr interface{}, name string, useName bool) error {
+func (server *Server) register(rcvr interface{}, name string, prefix string, useName bool) error {
 	s := new(service)
 	s.typ = reflect.TypeOf(rcvr)
 	s.rcvr = reflect.ValueOf(rcvr)
@@ -260,13 +260,13 @@ func (server *Server) register(rcvr interface{}, name string, useName bool) erro
 	s.name = sname
 
 	// Install the methods
-	s.method = suitableMethods(s.typ, true)
+	s.method = suitableMethods(prefix, s.typ, true)
 
 	if len(s.method) == 0 {
 		str := ""
 
 		// To help the user, see if a pointer receiver would work.
-		method := suitableMethods(reflect.PtrTo(s.typ), false)
+		method := suitableMethods(prefix, reflect.PtrTo(s.typ), false)
 		if len(method) != 0 {
 			str = "rpc.Register: type " + sname + " has no exported methods of suitable type (hint: pass a pointer to value of that type)"
 		} else {
@@ -285,15 +285,17 @@ func (server *Server) register(rcvr interface{}, name string, useName bool) erro
 
 // suitableMethods returns suitable Rpc methods of typ, it will report
 // error using log if reportErr is true.
-func suitableMethods(typ reflect.Type, reportErr bool) map[string]*methodType {
+func suitableMethods(prefix string, typ reflect.Type, reportErr bool) map[string]*methodType {
 	methods := make(map[string]*methodType)
 	for m := 0; m < typ.NumMethod(); m++ {
 		method := typ.Method(m)
 		mtype := method.Type
 		mname := method.Name
 
-		if len(mname) > 4 && mname[:4] != "RPC_" {
-			continue
+		if prefix != "" {
+			if len(mname) < 4 || mname[:4] != prefix {
+				continue
+			}
 		}
 
 		// Method must be exported.
@@ -650,8 +652,8 @@ func Register(rcvr interface{}) error { return DefaultServer.Register(rcvr) }
 
 // RegisterName is like Register but uses the provided name for the type
 // instead of the receiver's concrete type.
-func RegisterName(name string, rcvr interface{}) error {
-	return DefaultServer.RegisterName(name, rcvr)
+func RegisterName(name string, prefix string, rcvr interface{}) error {
+	return DefaultServer.RegisterName(name, prefix, rcvr)
 }
 
 // A ServerCodec implements reading of RPC requests and writing of
