@@ -44,6 +44,21 @@ func (s *cserver) SetupService(services ...service.IService) {
 
 	}
 
+	//将其他服务通知已经安装
+	for i := 0; i < len(services); i++ {
+		for j := 0; j < len(services); j++ {
+			if cluster.InstanceClusterMgr().HasLocalService(services[i].GetServiceName()) == false {
+				continue
+			}
+
+			if services[i].GetServiceName() == services[j].GetServiceName() {
+				continue
+			}
+
+			services[i].OnSetupService(services[j])
+		}
+	}
+
 }
 
 func (s *cserver) Start() {

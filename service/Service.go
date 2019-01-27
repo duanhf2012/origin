@@ -33,6 +33,9 @@ type IService interface {
 	OnRunLoop() error
 	OnDestory() error
 	OnFetchService(iservice IService) error
+	OnSetupService(iservice IService)  //其他服务被安装
+	OnRemoveService(iservice IService) //其他服务被安装
+
 	GetServiceType() int
 	GetServiceName() string
 	SetServiceName(serviceName string) bool
@@ -110,6 +113,14 @@ func (slf *BaseService) OnEndInit() error {
 
 func (slf *BaseService) OnFetchService(iservice IService) error {
 	return nil
+}
+
+func (slf *BaseService) OnSetupService(iservice IService) {
+	return
+}
+
+func (slf *BaseService) OnRemoveService(iservice IService) {
+	return
 }
 
 func (slf *BaseService) Init(Iservice interface{}, servicetype int) error {
