@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/duanhf2012/origin/rpc"
+	"github.com/gorilla/mux"
+	"github.com/gotoxu/cors"
 
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/network"
@@ -33,12 +36,19 @@ type HttpServerService struct {
 }
 
 func (slf *HttpServerService) OnInit() error {
-	slf.httpserver.Init(slf.port)
-	slf.httpserver.HandleFunc("/{server:[a-zA-Z0-9]+}/{method:[a-zA-Z0-9]+}", func(w http.ResponseWriter, r *http.Request) {
+	slf.httpserver.Init(slf.port, slf.initRouterHandler(), 10*time.Second, 10*time.Second)
+	return nil
+}
+
+func (slf *HttpServerService) initRouterHandler() http.Handler {
+	r := mux.NewRouter()
+	r.HandleFunc("/{server:[a-zA-Z0-9]+}/{method:[a-zA-Z0-9]+}", func(w http.ResponseWriter, r *http.Request) {
 		slf.httpHandler(w, r)
 	})
 
-	return nil
+	cors := cors.AllowAll()
+	//return cors.Handler(gziphandler.GzipHandler(r))
+	return cors.Handler(r)
 }
 
 func (slf *HttpServerService) OnRun() error {
@@ -93,17 +103,8 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 		writeError(http.StatusBadRequest, "rpc: ioutil.ReadAll "+err.Error())
 		return
 	}
-	strCallPath := "_" + vstr[1] + "." + vstr[2]
-	/*
-		method, err := slf.GetMethod(strCallPath)
-		var respone string
-		if err != nil {
-			respone = fmt.Sprintf("http respone => %v\n", err)
+	strCallPath := "_" + vstr[1] + ".HTTP_" + vstr[2]
 
-		} else {
-			cluster.InstanceClusterMgr().Call(NodeServiceMethod, args, reply)
-		}
-	*/
 	request := HttpRequest{string(msg)}
 	var resp HttpRespone
 

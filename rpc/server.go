@@ -293,7 +293,7 @@ func suitableMethods(prefix string, typ reflect.Type, reportErr bool) map[string
 		mname := method.Name
 
 		if prefix != "" {
-			if len(mname) < 4 || mname[:4] != prefix {
+			if strings.Contains(mname, prefix) == false {
 				continue
 			}
 		}

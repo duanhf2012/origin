@@ -78,10 +78,10 @@ type CTestData struct {
 }
 
 func (slf *CCluster) AcceptRpc(tpcListen *net.TCPListener) error {
-	slf.reader, slf.writer = net.Pipe()
+	/*slf.reader, slf.writer = net.Pipe()
 	go rpc.ServeConn(slf.reader)
 	slf.LocalRpcClient = rpc.NewClient(slf.writer)
-
+	*/
 	for {
 		conn, err := tpcListen.Accept()
 		if err != nil {
@@ -112,6 +112,10 @@ func (slf *CCluster) ListenService() error {
 	if err2 != nil {
 		return err2
 	}
+
+	slf.reader, slf.writer = net.Pipe()
+	go rpc.ServeConn(slf.reader)
+	slf.LocalRpcClient = rpc.NewClient(slf.writer)
 
 	go slf.AcceptRpc(tcplisten)
 	return nil
