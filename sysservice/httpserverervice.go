@@ -22,7 +22,7 @@ type HttpRequest struct {
 }
 
 type HttpRespone struct {
-	Respone string
+	Respone []byte
 }
 
 type ControllerMapsType map[string]reflect.Value

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -63,7 +64,8 @@ func (ws *CTest) RPC_LogTicker2(args *CTestData, quo *CTestData) error {
 
 func (ws *CTest) HTTP_LogTicker2(request *sysservice.HttpRequest, resp *sysservice.HttpRespone) error {
 
-	resp.Respone = "hello world!"
+	data := CTestData{111, 333, "34444"}
+	resp.Respone, _ = json.Marshal(&data)
 	return nil
 }
 
