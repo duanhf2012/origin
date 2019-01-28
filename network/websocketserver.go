@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/gotoxu/cors"
 )
 
 type IWebsocketServer interface {
@@ -39,14 +42,11 @@ type WebsocketServer struct {
 	bEnableCompression bool
 	locker             sync.Mutex
 	messageReciver     IMessageReceiver
+
+	httpserver *http.Server
 }
 
 func (slf *WebsocketServer) wsHandler(w http.ResponseWriter, r *http.Request) {
-	/*if r.Header.Get("Origin") != "http://"+r.Host {
-		http.Error(w, "Origin not allowed", 403)
-		return
-	}
-	*/
 	conn, err := websocket.Upgrade(w, r, w.Header(), 1024, 1024)
 	if err != nil {
 		http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
@@ -83,14 +83,24 @@ func (slf *WebsocketServer) Init(pattern string, port uint16, messageReciver IMe
 	slf.mapClient = make(map[uint64]*WSClient)
 	slf.messageReciver = messageReciver
 
-	http.HandleFunc(slf.pattern, slf.wsHandler)
+	//http.HandleFunc(slf.pattern, slf.wsHandler)
 }
 
 func (slf *WebsocketServer) startListen() {
-	address := fmt.Sprintf(":%d", slf.port)
-	err := http.ListenAndServe(address, nil)
+
+	listenPort := fmt.Sprintf(":%d", slf.port)
+
+	slf.httpserver = &http.Server{
+		Addr:           listenPort,
+		Handler:        slf.initRouterHandler(),
+		ReadTimeout:    10 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+
+	err := slf.httpserver.ListenAndServe()
 	if err != nil {
-		fmt.Printf("%v", err)
+		fmt.Printf("http.ListenAndServe(%d, nil) error\n", slf.port)
 	}
 }
 
@@ -120,4 +130,19 @@ func (slf *WebsocketServer) SendMsg(clientid uint64, messageType int, msg []byte
 
 func (slf *WebsocketServer) Stop() {
 
+}
+
+func (slf *WebsocketServer) initRouterHandler() http.Handler {
+	r := mux.NewRouter()
+	/*r.HandleFunc("/{server:[a-zA-Z0-9]+}/{method:[a-zA-Z0-9]+}", func(w http.ResponseWriter, r *http.Request) {
+		slf.wsHandler(w, r)
+	})
+	*/
+	r.HandleFunc(slf.pattern, func(w http.ResponseWriter, r *http.Request) {
+		slf.wsHandler(w, r)
+	})
+
+	cors := cors.AllowAll()
+	//return cors.Handler(gziphandler.GzipHandler(r))
+	return cors.Handler(r)
 }

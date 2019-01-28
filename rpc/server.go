@@ -277,9 +277,16 @@ func (server *Server) register(rcvr interface{}, name string, prefix string, use
 		return errors.New(str)
 	}
 
-	if _, dup := server.serviceMap.LoadOrStore(sname, s); dup {
-		return errors.New("rpc: service already defined: " + sname)
+	//将已经注册的消息加载
+	svci, ok := server.serviceMap.Load(sname)
+	if ok {
+		svc := svci.(*service)
+		for key, value := range svc.method {
+			s.method[key] = &methodType{method: value.method, ArgType: value.ArgType, ReplyType: value.ReplyType}
+		}
 	}
+
+	server.serviceMap.Store(sname, s)
 	return nil
 }
 

@@ -61,7 +61,7 @@ func (ws *CTest) RPC_LogTicker2(args *CTestData, quo *CTestData) error {
 	return nil
 }
 
-func (ws *CTest) Http_LogTicker2(request *sysservice.HttpRequest, resp *sysservice.HttpRespone) error {
+func (ws *CTest) HTTP_LogTicker2(request *sysservice.HttpRequest, resp *sysservice.HttpRespone) error {
 
 	resp.Respone = "hello world!"
 	return nil
@@ -111,8 +111,8 @@ func main() {
 	var receiver CMessageReceiver
 	wsservice := sysservice.NewWSServerService("/ws", 1314, &receiver, false)
 	test := NewCTest(0)
-	httpserver := sysservice.NewHttpServerService(80)
-	server.SetupService(wsservice, test, httpserver)
+	httpserver := sysservice.NewHttpServerService(9120)
+	server.SetupService(test, httpserver, wsservice)
 
 	server.Init()
 	server.Start()
