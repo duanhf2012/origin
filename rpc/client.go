@@ -247,9 +247,13 @@ func DialHTTP(network, address string) (*Client, error) {
 func DialHTTPPath(network, address, path string) (*Client, error) {
 	var err error
 	conn, err := net.Dial(network, address)
+
 	if err != nil {
 		return nil, err
 	}
+	tcpconn, _ := conn.(*net.TCPConn)
+	tcpconn.SetNoDelay(true)
+
 	io.WriteString(conn, "CONNECT "+path+" HTTP/1.0\n\n")
 
 	// Require successful HTTP response
@@ -276,6 +280,9 @@ func Dial(network, address string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	tcpconn, _ := conn.(*net.TCPConn)
+	tcpconn.SetNoDelay(true)
+
 	return NewClient(conn), nil
 }
 
