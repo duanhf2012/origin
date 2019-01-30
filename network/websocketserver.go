@@ -3,6 +3,7 @@ package network
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -101,6 +102,7 @@ func (slf *WebsocketServer) startListen() {
 	err := slf.httpserver.ListenAndServe()
 	if err != nil {
 		fmt.Printf("http.ListenAndServe(%d, nil) error\n", slf.port)
+		os.Exit(1)
 	}
 }
 

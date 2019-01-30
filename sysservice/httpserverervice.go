@@ -85,8 +85,8 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 		w.Write([]byte(msg))
 	}
 	if r.Method != "POST" {
-		writeError(http.StatusMethodNotAllowed, "rpc: POST method required, received "+r.Method)
-		return
+		//writeError(http.StatusMethodNotAllowed, "rpc: POST method required, received "+r.Method)
+		//return
 	}
 	defer r.Body.Close()
 	msg, err := ioutil.ReadAll(r.Body)
@@ -94,7 +94,7 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 		writeError(http.StatusBadRequest, "rpc: ioutil.ReadAll "+err.Error())
 		return
 	}
-	fmt.Printf("PATH: %s\n%s\n", r.URL.Path, string(msg))
+
 	// 在这儿处理例外路由接口
 
 	// 拼接得到rpc服务的名称

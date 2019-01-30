@@ -105,11 +105,13 @@ func (slf *CCluster) ListenService() error {
 
 	tcpaddr, err := net.ResolveTCPAddr("tcp4", bindStr)
 	if err != nil {
+		os.Exit(1)
 		return err
 	}
 
 	tcplisten, err2 := net.ListenTCP("tcp", tcpaddr)
 	if err2 != nil {
+		os.Exit(1)
 		return err2
 	}
 

@@ -139,7 +139,7 @@ func (slf *BaseService) Init(Iservice interface{}, servicetype int) error {
 }
 
 func (slf *BaseService) OnRunLoop() error {
-	return nil
+	return fmt.Errorf("None Loop")
 }
 
 func (slf *BaseService) Run(service IService, exit chan bool, pwaitGroup *sync.WaitGroup) error {
@@ -153,7 +153,9 @@ func (slf *BaseService) Run(service IService, exit chan bool, pwaitGroup *sync.W
 		default:
 		}
 		slf.tickTime = time.Now().UnixNano() / 1e6
-		service.OnRunLoop()
+		if service.OnRunLoop() != nil {
+			break
+		}
 		slf.tickTime = time.Now().UnixNano() / 1e6
 	}
 
