@@ -24,10 +24,12 @@ type IBaseModule interface {
 	OnRun() error
 	AddModule(module IBaseModule) bool
 	GetModuleByType(moduleType uint32) IBaseModule
+	GetOwnerService() IService
+	SetOwnerService(iservice IService)
 }
 
 type IService interface {
-	Init(Iservice interface{}, servicetype int) error
+	Init(Iservice IService, servicetype int) error
 	Run(service IService, exit chan bool, pwaitGroup *sync.WaitGroup) error
 	OnInit() error
 	OnEndInit() error
@@ -76,6 +78,8 @@ type BaseService struct {
 type BaseModule struct {
 	moduleType uint32
 	mapModule  map[uint32]IBaseModule
+
+	ownerService IService
 }
 
 func (slf *BaseService) GetServiceId() int {
@@ -115,8 +119,9 @@ func (slf *BaseService) OnRemoveService(iservice IService) {
 	return
 }
 
-func (slf *BaseService) Init(Iservice interface{}, servicetype int) error {
-	slf.servicename = fmt.Sprintf("%T", Iservice)
+func (slf *BaseService) Init(iservice IService, servicetype int) error {
+	slf.ownerService = iservice
+	slf.servicename = fmt.Sprintf("%T", iservice)
 	parts := strings.Split(slf.servicename, ".")
 	if len(parts) != 2 {
 		err := fmt.Errorf("BaseService.Init: service name is error: %q", slf.servicename)
@@ -185,6 +190,8 @@ func (slf *BaseModule) AddModule(module IBaseModule) bool {
 		return false
 	}
 
+	module.SetOwnerService(slf.ownerService)
+
 	if slf.mapModule == nil {
 		slf.mapModule = make(map[uint32]IBaseModule)
 	}
@@ -212,4 +219,12 @@ func (slf *BaseModule) OnInit() error {
 
 func (slf *BaseModule) OnRun() error {
 	return fmt.Errorf("not implement OnRun moduletype %d ", slf.GetModuleType())
+}
+
+func (slf *BaseModule) GetOwnerService() IService {
+	return slf.ownerService
+}
+
+func (slf *BaseModule) SetOwnerService(iservice IService) {
+	slf.ownerService = iservice
 }

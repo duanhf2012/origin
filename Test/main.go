@@ -99,6 +99,8 @@ func (ws *CTest) OnRun() error {
 	pTmpModule := ws.GetModuleByType(1)
 	pTmpModuleTest := pTmpModule.(*CTestModule)
 	pTmpModuleTest.DoSomething()
+	pservice := testModule.GetOwnerService()
+	fmt.Printf("%T", pservice)
 	return nil
 }
 
