@@ -56,6 +56,14 @@ type CTestData struct {
 	Ddd  string
 }
 
+type CTestModule struct {
+	service.BaseModule
+}
+
+func (ws *CTestModule) DoSomething() {
+	fmt.Printf("CTestModule do some thing!")
+}
+
 func (ws *CTest) RPC_LogTicker2(args *CTestData, quo *CTestData) error {
 
 	*quo = *args
@@ -83,6 +91,14 @@ func (ws *CTest) OnRun() error {
 	fmt.Print(err, test2)
 	//}
 
+	//模块的示例
+	testModule := CTestModule{}
+	testModule.SetModuleType(1)
+	ws.AddModule(&testModule)
+
+	pTmpModule := ws.GetModuleByType(1)
+	pTmpModuleTest := pTmpModule.(*CTestModule)
+	pTmpModuleTest.DoSomething()
 	return nil
 }
 

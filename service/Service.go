@@ -18,10 +18,12 @@ type MethodInfo struct {
 }
 
 type IBaseModule interface {
-	SetModuleName(modulename string) bool
-	GetModuleName() string
+	SetModuleType(moduleType uint32)
+	GetModuleType() uint32
 	OnInit() error
 	OnRun() error
+	AddModule(module IBaseModule) bool
+	GetModuleByType(moduleType uint32) IBaseModule
 }
 
 type IService interface {
@@ -42,8 +44,6 @@ type IService interface {
 	GetServiceId() int
 	IsTimeOutTick(microSecond int64) bool
 
-	AddModule(module IBaseModule, autorun bool) bool
-	GetModule(module string) IBaseModule
 	GetStatus() int
 }
 
@@ -62,6 +62,8 @@ func InitLog() {
 }
 
 type BaseService struct {
+	BaseModule
+
 	serviceid   int
 	servicename string
 	servicetype int
@@ -69,21 +71,11 @@ type BaseService struct {
 	tickTime int64
 	statTm   int64
 	Status   int
-
-	modulelist []IBaseModule
 }
 
 type BaseModule struct {
-	modulename string
-}
-
-func (slf *BaseModule) SetModuleName(modulename string) bool {
-	slf.modulename = modulename
-	return true
-}
-
-func (slf *BaseModule) GetModuleName() string {
-	return slf.modulename
+	moduleType uint32
+	mapModule  map[uint32]IBaseModule
 }
 
 func (slf *BaseService) GetServiceId() int {
@@ -178,28 +170,46 @@ func (slf *BaseService) IsTimeOutTick(microSecond int64) bool {
 
 }
 
-func (slf *BaseService) AddModule(module IBaseModule, autorun bool) bool {
-	typename := fmt.Sprintf("%v", reflect.TypeOf(module))
-	parts := strings.Split(typename, ".")
-	if len(parts) < 2 {
+func (slf *BaseModule) SetModuleType(moduleType uint32) {
+	slf.moduleType = moduleType
+}
+
+func (slf *BaseModule) GetModuleType() uint32 {
+	return slf.moduleType
+}
+
+//OnInit() error
+//OnRun() error
+func (slf *BaseModule) AddModule(module IBaseModule) bool {
+	if module.GetModuleType() == 0 {
 		return false
 	}
-	module.SetModuleName(parts[1])
-	slf.modulelist = append(slf.modulelist, module)
-	module.OnInit()
-	if autorun == true {
-		go module.OnRun()
+
+	if slf.mapModule == nil {
+		slf.mapModule = make(map[uint32]IBaseModule)
 	}
 
+	_, ok := slf.mapModule[module.GetModuleType()]
+	if ok == true {
+		return false
+	}
+
+	slf.mapModule[module.GetModuleType()] = module
 	return true
 }
 
-func (slf *BaseService) GetModule(module string) IBaseModule {
-	for _, v := range slf.modulelist {
-		if v.GetModuleName() == module {
-			return v
-		}
+func (slf *BaseModule) GetModuleByType(moduleType uint32) IBaseModule {
+	ret, ok := slf.mapModule[moduleType]
+	if ok == false {
+		return nil
 	}
 
-	return nil
+	return ret
+}
+func (slf *BaseModule) OnInit() error {
+	return fmt.Errorf("not implement OnInit moduletype %d ", slf.GetModuleType())
+}
+
+func (slf *BaseModule) OnRun() error {
+	return fmt.Errorf("not implement OnRun moduletype %d ", slf.GetModuleType())
 }
