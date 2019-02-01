@@ -10,7 +10,7 @@ import (
 
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/network"
-	"github.com/duanhf2012/origin/server"
+	"github.com/duanhf2012/origin/originnode"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/sysservice"
 
@@ -99,6 +99,8 @@ func (ws *CTest) OnRun() error {
 	pTmpModule := ws.GetModuleByType(1)
 	pTmpModuleTest := pTmpModule.(*CTestModule)
 	pTmpModuleTest.DoSomething()
+	pservice := testModule.GetOwnerService()
+	fmt.Printf("%T", pservice)
 	return nil
 }
 
@@ -121,17 +123,23 @@ func (ws *CTest) OnDestory() error {
 }
 
 func main() {
-	server := server.NewServer()
-	if server == nil {
+	node := originnode.NewOrginNode()
+	if node == nil {
 		return
 	}
+
+	var module CTestModule
+	module.SetModuleType(1)
+	originnode.AddModule(&module)
+	ptest := originnode.GetModuleByType(1)
+	fmt.Print(ptest)
 
 	var receiver CMessageReceiver
 	wsservice := sysservice.NewWSServerService("/ws", 1314, &receiver, false)
 	test := NewCTest(0)
 	httpserver := sysservice.NewHttpServerService(9120)
-	server.SetupService(test, httpserver, wsservice)
+	node.SetupService(test, httpserver, wsservice)
 
-	server.Init()
-	server.Start()
+	node.Init()
+	node.Start()
 }

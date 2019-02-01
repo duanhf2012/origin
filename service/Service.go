@@ -17,17 +17,19 @@ type MethodInfo struct {
 	types     reflect.Type
 }
 
-type IBaseModule interface {
+type IModule interface {
 	SetModuleType(moduleType uint32)
 	GetModuleType() uint32
 	OnInit() error
 	OnRun() error
-	AddModule(module IBaseModule) bool
-	GetModuleByType(moduleType uint32) IBaseModule
+	AddModule(module IModule) bool
+	GetModuleByType(moduleType uint32) IModule
+	GetOwnerService() IService
+	SetOwnerService(iservice IService)
 }
 
 type IService interface {
-	Init(Iservice interface{}, servicetype int) error
+	Init(Iservice IService, servicetype int) error
 	Run(service IService, exit chan bool, pwaitGroup *sync.WaitGroup) error
 	OnInit() error
 	OnEndInit() error
@@ -75,7 +77,9 @@ type BaseService struct {
 
 type BaseModule struct {
 	moduleType uint32
-	mapModule  map[uint32]IBaseModule
+	mapModule  map[uint32]IModule
+
+	ownerService IService
 }
 
 func (slf *BaseService) GetServiceId() int {
@@ -115,8 +119,9 @@ func (slf *BaseService) OnRemoveService(iservice IService) {
 	return
 }
 
-func (slf *BaseService) Init(Iservice interface{}, servicetype int) error {
-	slf.servicename = fmt.Sprintf("%T", Iservice)
+func (slf *BaseService) Init(iservice IService, servicetype int) error {
+	slf.ownerService = iservice
+	slf.servicename = fmt.Sprintf("%T", iservice)
 	parts := strings.Split(slf.servicename, ".")
 	if len(parts) != 2 {
 		err := fmt.Errorf("BaseService.Init: service name is error: %q", slf.servicename)
@@ -180,13 +185,15 @@ func (slf *BaseModule) GetModuleType() uint32 {
 
 //OnInit() error
 //OnRun() error
-func (slf *BaseModule) AddModule(module IBaseModule) bool {
+func (slf *BaseModule) AddModule(module IModule) bool {
 	if module.GetModuleType() == 0 {
 		return false
 	}
 
+	module.SetOwnerService(slf.ownerService)
+
 	if slf.mapModule == nil {
-		slf.mapModule = make(map[uint32]IBaseModule)
+		slf.mapModule = make(map[uint32]IModule)
 	}
 
 	_, ok := slf.mapModule[module.GetModuleType()]
@@ -198,7 +205,7 @@ func (slf *BaseModule) AddModule(module IBaseModule) bool {
 	return true
 }
 
-func (slf *BaseModule) GetModuleByType(moduleType uint32) IBaseModule {
+func (slf *BaseModule) GetModuleByType(moduleType uint32) IModule {
 	ret, ok := slf.mapModule[moduleType]
 	if ok == false {
 		return nil
@@ -212,4 +219,12 @@ func (slf *BaseModule) OnInit() error {
 
 func (slf *BaseModule) OnRun() error {
 	return fmt.Errorf("not implement OnRun moduletype %d ", slf.GetModuleType())
+}
+
+func (slf *BaseModule) GetOwnerService() IService {
+	return slf.ownerService
+}
+
+func (slf *BaseModule) SetOwnerService(iservice IService) {
+	slf.ownerService = iservice
 }
