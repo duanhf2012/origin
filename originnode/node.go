@@ -1,4 +1,4 @@
-package server
+package originnode
 
 import (
 	"fmt"
@@ -20,13 +20,13 @@ type CExitCtl struct {
 	waitGroup *sync.WaitGroup
 }
 
-type cserver struct {
+type COriginNode struct {
 	CExitCtl
 	serviceManager service.IServiceManager
 	sigs           chan os.Signal
 }
 
-func (s *cserver) Init() {
+func (s *COriginNode) Init() {
 	service.InitLog()
 	service.InstanceServiceMgr().Init()
 
@@ -36,7 +36,7 @@ func (s *cserver) Init() {
 	signal.Notify(s.sigs, syscall.SIGINT, syscall.SIGTERM)
 }
 
-func (s *cserver) SetupService(services ...service.IService) {
+func (s *COriginNode) SetupService(services ...service.IService) {
 	for i := 0; i < len(services); i++ {
 		if cluster.InstanceClusterMgr().HasLocalService(services[i].GetServiceName()) == true {
 			service.InstanceServiceMgr().Setup(services[i])
@@ -61,7 +61,7 @@ func (s *cserver) SetupService(services ...service.IService) {
 
 }
 
-func (s *cserver) Start() {
+func (s *COriginNode) Start() {
 	go func() {
 
 		log.Println(http.ListenAndServe("localhost:6060", nil))
@@ -77,19 +77,19 @@ func (s *cserver) Start() {
 	s.Stop()
 }
 
-func (s *cserver) Stop() {
+func (s *COriginNode) Stop() {
 	close(s.exit)
 	s.waitGroup.Wait()
 }
 
-func NewServer() *cserver {
+func NewOrginNode() *COriginNode {
 	err := cluster.InstanceClusterMgr().Init()
 	if err != nil {
 		fmt.Print(err)
 		return nil
 	}
 
-	return new(cserver)
+	return new(COriginNode)
 }
 
 func HasCmdParam(param string) bool {

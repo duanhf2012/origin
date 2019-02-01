@@ -17,13 +17,13 @@ type MethodInfo struct {
 	types     reflect.Type
 }
 
-type IBaseModule interface {
+type IModule interface {
 	SetModuleType(moduleType uint32)
 	GetModuleType() uint32
 	OnInit() error
 	OnRun() error
-	AddModule(module IBaseModule) bool
-	GetModuleByType(moduleType uint32) IBaseModule
+	AddModule(module IModule) bool
+	GetModuleByType(moduleType uint32) IModule
 	GetOwnerService() IService
 	SetOwnerService(iservice IService)
 }
@@ -77,7 +77,7 @@ type BaseService struct {
 
 type BaseModule struct {
 	moduleType uint32
-	mapModule  map[uint32]IBaseModule
+	mapModule  map[uint32]IModule
 
 	ownerService IService
 }
@@ -185,7 +185,7 @@ func (slf *BaseModule) GetModuleType() uint32 {
 
 //OnInit() error
 //OnRun() error
-func (slf *BaseModule) AddModule(module IBaseModule) bool {
+func (slf *BaseModule) AddModule(module IModule) bool {
 	if module.GetModuleType() == 0 {
 		return false
 	}
@@ -193,7 +193,7 @@ func (slf *BaseModule) AddModule(module IBaseModule) bool {
 	module.SetOwnerService(slf.ownerService)
 
 	if slf.mapModule == nil {
-		slf.mapModule = make(map[uint32]IBaseModule)
+		slf.mapModule = make(map[uint32]IModule)
 	}
 
 	_, ok := slf.mapModule[module.GetModuleType()]
@@ -205,7 +205,7 @@ func (slf *BaseModule) AddModule(module IBaseModule) bool {
 	return true
 }
 
-func (slf *BaseModule) GetModuleByType(moduleType uint32) IBaseModule {
+func (slf *BaseModule) GetModuleByType(moduleType uint32) IModule {
 	ret, ok := slf.mapModule[moduleType]
 	if ok == false {
 		return nil
