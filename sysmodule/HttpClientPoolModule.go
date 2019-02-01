@@ -25,10 +25,10 @@ type HttpRespone struct {
 }
 
 type SyncHttpRespone struct {
-	resp chan *HttpRespone
+	resp chan HttpRespone
 }
 
-func (slf *SyncHttpRespone) Get(timeoutMs int) *HttpRespone {
+func (slf *SyncHttpRespone) Get(timeoutMs int) HttpRespone {
 	timerC := time.NewTicker(time.Millisecond * time.Duration(timeoutMs)).C
 	select {
 	case <-timerC:
@@ -36,7 +36,7 @@ func (slf *SyncHttpRespone) Get(timeoutMs int) *HttpRespone {
 	case rsp := <-slf.resp:
 		return rsp
 	}
-	return &HttpRespone{
+	return HttpRespone{
 		Err: fmt.Errorf("Getting the return result timeout [%d]ms", timeoutMs),
 	}
 }
@@ -57,7 +57,7 @@ func (slf *HttpClientPoolModule) Init(maxpool int) {
 
 func (slf *HttpClientPoolModule) SyncRequest(method string, url string, body []byte) SyncHttpRespone {
 	ret := SyncHttpRespone{
-		resp: make(chan *HttpRespone, 1),
+		resp: make(chan HttpRespone, 1),
 	}
 	go func() {
 		rsp := slf.Request(method, url, body)
@@ -66,11 +66,11 @@ func (slf *HttpClientPoolModule) SyncRequest(method string, url string, body []b
 	return ret
 }
 
-func (slf *HttpClientPoolModule) Request(method string, url string, body []byte) *HttpRespone {
+func (slf *HttpClientPoolModule) Request(method string, url string, body []byte) HttpRespone {
 	if slf.client == nil {
 		panic("Call the init function first")
 	}
-	ret := &HttpRespone{}
+	ret := HttpRespone{}
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		ret.Err = err
