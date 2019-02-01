@@ -10,9 +10,25 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
+const (
+	MAX_TASK_CHANNEL = 10240
+)
+
+
+type RetError struct {
+	resultType int
+	resultChan chan error
+}
+
+func (slf *RetError) Get() error {
+	return <-slf.resultChan
+}
+
+type Func func()
 type RedisModule struct {
 	service.BaseModule
 	redispool *redis.Pool
+	redisTask chan Func
 }
 
 // ConfigRedis 服务器配置
@@ -55,6 +71,25 @@ func (slf *RedisModule) Init(redisCfg *ConfigRedis) {
 			return err
 		},
 	}
+
+	slf.redisTask = make(chan Func, MAX_TASK_CHANNEL)
+	go slf.RunAnsyTask()
+}
+
+func (slf *RedisModule) RunAnsyTask() {
+	for {
+		task := <-slf.redisTask
+		task()
+	}
+}
+
+func (slf *RedisModule) GoTask(fc Func) error {
+	if len(slf.redisTask) >= MAX_TASK_CHANNEL {
+		return fmt.Errorf("chanel recover max channel.")
+	}
+
+	slf.redisTask <- fc
+	return nil
 }
 
 // GetConn ...
@@ -89,39 +124,69 @@ func (slf *RedisModule) TestPingRedis() error {
 
 //SetRedisString redis添加string类型数据 无过期时间
 //示例:SetRedisString("TestKey", "Hell World!")
-func (slf *RedisModule) SetRedisString(key, value string) (err error) {
-	err = slf.setRedisExStringByEx(key, value, "-1")
+func (slf *RedisModule) SetString(key, value string) (err error) {
+	err = slf.setStringByExpire(key, value, "-1")
 
 	return err
 }
 
+func (slf *RedisModule) GoSetString(key, value string, err *RetError) {
+	slf.GoSetStringExpire(key, value, "-1", err)
+}
+
 //SetRedisExString redis添加string类型数据 有过期时间 ex过期时间,单位秒,必须是整数
 //示例:SetRedisExString("TestKey", "Hell World!","60")
-func (slf *RedisModule) SetRedisExString(key, value, ex string) (err error) {
-	err = slf.setRedisExStringByEx(key, value, ex)
+func (slf *RedisModule) SetStringExpire(key, value, expire string) (err error) {
+	err = slf.setStringByExpire(key, value, expire)
 
 	return
+}
+
+func (slf *RedisModule) GoSetStringExpire(key, value string, expire string, err *RetError) error {
+	if err != nil {
+		err.resultChan = make(chan error, 1)
+	}
+
+	fun := func() {
+		ret := slf.setStringByExpire(key, value, expire)
+		if err != nil {
+			err.resultChan <- ret
+		}
+	}
+
+	slf.GoTask(fun)
+
+	return nil
 }
 
 //SetRedisStringJSON redis添加JSON数据 无过期时间
 //示例:SetRedisStringJSON("AAAABTEST1", eagleconfig.Cfg)
 func (slf *RedisModule) SetRedisStringJSON(key string, val interface{}) (err error) {
-	err = slf.SetRedisExStringJSON(key, val, "-1")
+	err = slf.SetStringJSONExpire(key, val, "-1")
 
 	return
 }
 
 //SetRedisExStringJSON redis添加JSON数据 有过期时间 ex过期时间,单位秒,必须是整数
 //示例:SetRedisStringJSON("AAAABTEST1", eagleconfig.Cfg,"60")
-func (slf *RedisModule) SetRedisExStringJSON(key string, val interface{}, ex string) (err error) {
+func (slf *RedisModule) SetStringJSONExpire(key string, val interface{}, expire string) (err error) {
 	if temp, err := json.Marshal(val); err == nil {
-		err = slf.setRedisExStringByEx(key, string(temp), ex)
+		err = slf.setStringByExpire(key, string(temp), expire)
 	}
 
 	return
 }
 
-func (slf *RedisModule) setRedisExStringByEx(key, value, ex string) error {
+func (slf *RedisModule) GoSetStringJSONExpire(key string, val interface{}, expire string, retErr *RetError) error {
+	temp, err := json.Marshal(val)
+	if err == nil {
+		slf.GoSetStringExpire(key, string(temp), expire, retErr)
+		return nil
+	}
+	return err
+}
+
+func (slf *RedisModule) setStringByExpire(key, value, expire string) error {
 	if key == "" {
 		return errors.New("Key Is Empty")
 	}
@@ -134,10 +199,10 @@ func (slf *RedisModule) setRedisExStringByEx(key, value, ex string) error {
 
 	var ret interface{}
 	var retErr error
-	if ex == "-1" {
+	if expire == "-1" {
 		ret, retErr = conn.Do("SET", key, value)
 	} else {
-		ret, retErr = conn.Do("SET", key, value, "EX", ex)
+		ret, retErr = conn.Do("SET", key, value, "EX", expire)
 	}
 
 	if retErr != nil {
@@ -262,6 +327,7 @@ func (slf *RedisModule) GetRedisStringJSON(key string, st interface{}) error {
 //Pipeline实现的原理是队列，而队列的原理是先进先出
 //示例:GetMuchRedisString(&[]string{"AAAABTEST1", "AAAABTEST2"})
 func (slf *RedisModule) GetMuchRedisString(keys []string) (retMap map[string]string, err error) {
+
 	if len(keys) <= 0 {
 		err = errors.New("Func[GetMuchRedisString] Keys Is Empty")
 		return
@@ -472,6 +538,7 @@ func (slf *RedisModule) GetRedisAllHashJSON(redisKey string) (map[string]string,
 
 //GetRedisHashValueByKey ...
 func (slf *RedisModule) GetRedisHashValueByKey(redisKey string, fieldKey string) (string, error) {
+
 	if redisKey == "" || fieldKey == "" {
 		return "", errors.New("Key Is Empty")
 	}
