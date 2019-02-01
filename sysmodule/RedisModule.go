@@ -58,7 +58,7 @@ func (slf *RedisModule) Init(redisCfg *ConfigRedis) {
 }
 
 // GetConn ...
-func (slf *RedisModule) GetConn() (redis.Conn, error) {
+func (slf *RedisModule) getConn() (redis.Conn, error) {
 	conn := slf.redispool.Get()
 	if conn == nil {
 		return nil, fmt.Errorf("not get connection")
@@ -73,17 +73,13 @@ func (slf *RedisModule) GetConn() (redis.Conn, error) {
 
 //TestPingRedis 测试连接Redis
 func (slf *RedisModule) TestPingRedis() error {
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("not get connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
-	err := slf.redispool.TestOnBorrow(conn, time.Now())
-
+	err = slf.redispool.TestOnBorrow(conn, time.Now())
 	if err != nil {
 		return err
 	}
@@ -96,7 +92,7 @@ func (slf *RedisModule) TestPingRedis() error {
 func (slf *RedisModule) SetRedisString(key, value string) (err error) {
 	err = slf.setRedisExStringByEx(key, value, "-1")
 
-	return
+	return err
 }
 
 //SetRedisExString redis添加string类型数据 有过期时间 ex过期时间,单位秒,必须是整数
@@ -130,14 +126,11 @@ func (slf *RedisModule) setRedisExStringByEx(key, value, ex string) error {
 		return errors.New("Key Is Empty")
 	}
 
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
 	var ret interface{}
 	var retErr error
@@ -180,14 +173,11 @@ func (slf *RedisModule) setMuchRedisStringByEx(mapInfo map[string]string, ex str
 	if len(mapInfo) <= 0 {
 		return errors.New("Save Info Is Empty")
 	}
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
 	// 开始Send数据
 	conn.Send("MULTI")
@@ -199,7 +189,7 @@ func (slf *RedisModule) setMuchRedisStringByEx(mapInfo map[string]string, ex str
 		}
 	}
 	// 执行命令
-	_, err := conn.Do("EXEC")
+	_, err = conn.Do("EXEC")
 
 	if err != nil {
 		return err
@@ -211,14 +201,11 @@ func (slf *RedisModule) setMuchRedisStringByEx(mapInfo map[string]string, ex str
 //GetRedisString redis获取string类型数据
 //示例:GetRedisString("TestKey")
 func (slf *RedisModule) GetRedisString(key string) (string, error) {
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return "", fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return "", err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return "", conn.Err()
-	}
 
 	ret, err := conn.Do("GET", key)
 	if err != nil {
@@ -242,14 +229,11 @@ func (slf *RedisModule) GetRedisString(key string) (string, error) {
 //GetRedisStringJSON redis获取string类型数据的Json
 //示例:GetRedisString("TestKey")
 func (slf *RedisModule) GetRedisStringJSON(key string, st interface{}) error {
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
 	ret, err := conn.Do("GET", key)
 	if err != nil {
@@ -282,16 +266,11 @@ func (slf *RedisModule) GetMuchRedisString(keys []string) (retMap map[string]str
 		err = errors.New("Func[GetMuchRedisString] Keys Is Empty")
 		return
 	}
-	conn := slf.redispool.Get()
-	if conn == nil {
-		err = fmt.Errorf("Redis Not Get Connection")
-		return
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		err = conn.Err()
-		return
-	}
 
 	// 开始Send数据
 	conn.Send("MULTI")
@@ -335,14 +314,11 @@ func (slf *RedisModule) GetMuchRedisStringJSON(keys map[string]interface{}) erro
 		err := errors.New("Func[GetMuchRedisStringJSON] Keys Is Empty")
 		return err
 	}
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
 	// 开始Send数据
 	conn.Send("MULTI")
@@ -381,14 +357,11 @@ func (slf *RedisModule) GetMuchRedisStringJSON(keys map[string]interface{}) erro
 //DelRedisString redis删除string类型数据
 //示例:DelRedisString("AAAABTEST1")
 func (slf *RedisModule) DelRedisString(key string) error {
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
 	ret, err := conn.Do("DEL", key)
 	if err != nil {
@@ -417,14 +390,11 @@ func (slf *RedisModule) DelMuchRedisString(keys []string) (map[string]bool, erro
 		return nil, err
 	}
 
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return nil, fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return nil, conn.Err()
-	}
 
 	// 开始Send数据
 	conn.Send("MULTI")
@@ -465,14 +435,11 @@ func (slf *RedisModule) SetRedisHash(redisKey, hashKey, value string) error {
 	if redisKey == "" || hashKey == "" {
 		return errors.New("Key Is Empty")
 	}
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
 	_, retErr := conn.Do("HSET", redisKey, hashKey, value)
 
@@ -488,15 +455,11 @@ func (slf *RedisModule) GetRedisAllHashJSON(redisKey string) (map[string]string,
 	if redisKey == "" {
 		return nil, errors.New("Key Is Empty")
 	}
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return nil, errors.New("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
 	}
-
 	defer conn.Close()
-	if conn.Err() != nil {
-		return nil, conn.Err()
-	}
 
 	value, err := redis.Values(conn.Do("HGETALL", redisKey))
 	if err != nil {
@@ -512,14 +475,11 @@ func (slf *RedisModule) GetRedisHashValueByKey(redisKey string, fieldKey string)
 	if redisKey == "" || fieldKey == "" {
 		return "", errors.New("Key Is Empty")
 	}
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return "", errors.New("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return "", err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return "", conn.Err()
-	}
 
 	value, err := conn.Do("HGET", redisKey, fieldKey)
 	if err != nil {
@@ -556,14 +516,11 @@ func (slf *RedisModule) SetMuchRedisHashJSON(redisKey string, value map[string][
 		return err
 	}
 
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
 	// 开始Send数据
 	conn.Send("MULTI")
@@ -574,7 +531,7 @@ func (slf *RedisModule) SetMuchRedisHashJSON(redisKey string, value map[string][
 		}
 	}
 	// 执行命令
-	_, err := conn.Do("EXEC")
+	_, err = conn.Do("EXEC")
 
 	if err != nil {
 		return err
@@ -597,14 +554,11 @@ func (slf *RedisModule) DelMuchRedisHash(redisKey string, hsahKey []string) erro
 	if redisKey == "" || len(hsahKey) <= 0 {
 		return errors.New("Key Is Empty")
 	}
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
 	arg := []interface{}{redisKey}
 	for _, k := range hsahKey {
@@ -628,14 +582,11 @@ func (slf *RedisModule) setRedisList(key string, value []string, setType string)
 	if setType != "LPUSH" && setType != "RPUSH" {
 		return errors.New("Redis List Push Type Error,Must Be LPUSH or RPUSH")
 	}
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return conn.Err()
-	}
 
 	arg := []interface{}{key}
 	for _, k := range value {
@@ -724,14 +675,11 @@ func (slf *RedisModule) SetMuchRedisListJSONRpush(key string, value []interface{
 
 // Lrange ...
 func (slf *RedisModule) Lrange(key string, start, end int) ([]string, error) {
-	conn := slf.redispool.Get()
-	if conn == nil {
-		return nil, fmt.Errorf("Redis Not Get Connection")
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
 	}
 	defer conn.Close()
-	if conn.Err() != nil {
-		return nil, conn.Err()
-	}
 
 	reply, err := conn.Do("lrange", key, start, end)
 	if err != nil {
