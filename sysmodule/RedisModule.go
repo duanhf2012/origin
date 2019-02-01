@@ -14,7 +14,6 @@ const (
 	MAX_TASK_CHANNEL = 10240
 )
 
-
 type RetError struct {
 	resultType int
 	resultChan chan error
@@ -220,21 +219,41 @@ func (slf *RedisModule) setStringByExpire(key, value, expire string) error {
 
 //SetMuchRedisString redis添加多条string类型数据
 //示例:SetMuchRedisString(map[string]string{"Test1": "C语言", "Test2": "Go语言", "Test3": "Python", "Test4": "C++"})
-func (slf *RedisModule) SetMuchRedisString(mapInfo map[string]string) (err error) {
-	err = slf.setMuchRedisStringByEx(mapInfo, "-1")
+func (slf *RedisModule) SetMuchString(mapInfo map[string]string) (err error) {
+	err = slf.setMuchStringByExpire(mapInfo, "-1")
 
 	return
+}
+
+func (slf *RedisModule) GoSetMuchString(mapInfo map[string]string, retErr *RetError) (err error) {
+	return slf.GoSetMuchStringExpire(mapInfo, "-1", retErr)
 }
 
 //SetMuchRedisStringSameEx redis添加多条string类型数据 具有相同的过期时间 ex过期时间 整数
 //示例:SetMuchRedisStringSameEx(map[string]string{"Test1": "C语言", "Test2": "Go语言", "Test3": "Python", "Test4": "C++"},"300")
-func (slf *RedisModule) SetMuchRedisStringSameEx(mapInfo map[string]string, ex string) (err error) {
-	err = slf.setMuchRedisStringByEx(mapInfo, ex)
-
+func (slf *RedisModule) SetMuchStringExpire(mapInfo map[string]string, ex string) (err error) {
+	err = slf.setMuchStringByExpire(mapInfo, ex)
 	return
 }
 
-func (slf *RedisModule) setMuchRedisStringByEx(mapInfo map[string]string, ex string) error {
+func (slf *RedisModule) GoSetMuchStringExpire(mapInfo map[string]string, expire string, err *RetError) error {
+
+	if err != nil {
+		err.resultChan = make(chan error, 1)
+	}
+
+	fun := func() {
+		ret := slf.setMuchStringByExpire(mapInfo, expire)
+		if err != nil {
+			err.resultChan <- ret
+		}
+	}
+
+	slf.GoTask(fun)
+	return nil
+}
+
+func (slf *RedisModule) setMuchStringByExpire(mapInfo map[string]string, expire string) error {
 	if len(mapInfo) <= 0 {
 		return errors.New("Save Info Is Empty")
 	}
@@ -247,10 +266,10 @@ func (slf *RedisModule) setMuchRedisStringByEx(mapInfo map[string]string, ex str
 	// 开始Send数据
 	conn.Send("MULTI")
 	for key, val := range mapInfo {
-		if ex == "-1" {
+		if expire == "-1" {
 			conn.Send("SET", key, val)
 		} else {
-			conn.Send("SET", key, val, "EX", ex)
+			conn.Send("SET", key, val, "EX", expire)
 		}
 	}
 	// 执行命令
