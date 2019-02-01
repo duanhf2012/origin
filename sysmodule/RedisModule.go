@@ -15,7 +15,6 @@ const (
 )
 
 type RetError struct {
-	resultType int
 	resultChan chan error
 }
 
