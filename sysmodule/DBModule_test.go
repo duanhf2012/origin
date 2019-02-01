@@ -24,9 +24,9 @@ func TestDBModule(t *testing.T) {
 		Addtime int64  `json:"addtime"`
 		Tname   string `json:"tname"`
 		Uuid    string `json:"uuid,omitempty"`
-		AAAA    string `json:"-"`
+		AAAA    string `json:"xxx"`
 	}{}
-	err := sysmodule.NewSQLDecoder(res).SetSpecificTag("json").SetStrictMode(true).UnMarshal(&out)
+	err := res.SetSpecificTag("json").SetBlurMode(false).UnMarshal(&out)
 	if err != nil {
 		t.Error(err)
 	}
