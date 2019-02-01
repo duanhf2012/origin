@@ -206,7 +206,7 @@ func (slf *DBResult) mapSlice2interface(data []map[string]string, in interface{}
 }
 
 // Connect ...
-func (slf *DBModule) Connect() error {
+func (slf *DBModule) Connect(maxConn int) error {
 	cmd := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&parseTime=true&loc=%s",
 		slf.UserName,
 		slf.Password,
@@ -225,6 +225,10 @@ func (slf *DBModule) Connect() error {
 		return err
 	}
 	slf.db = db
+	db.SetMaxOpenConns(maxConn)
+	db.SetMaxIdleConns(maxConn)
+	db.SetConnMaxLifetime(time.Second * 90)
+
 	return nil
 }
 

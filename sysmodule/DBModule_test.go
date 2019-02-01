@@ -14,7 +14,7 @@ func TestDBModule(t *testing.T) {
 		Password: "Root!!2018",
 		DBName:   "QuantFundsDB",
 	}
-	db.Connect()
+	db.Connect(100)
 
 	res := db.Query("select * from tbl_fun_heelthrow where id >= 1")
 	if res.Err != nil {
@@ -26,7 +26,7 @@ func TestDBModule(t *testing.T) {
 		Uuid    string `json:"uuid,omitempty"`
 		AAAA    string `json:"xxx"`
 	}{}
-	err := res.SetSpecificTag("json").SetBlurMode(false).UnMarshal(&out)
+	err := res.SetSpecificTag("json").SetBlurMode(true).UnMarshal(&out)
 	if err != nil {
 		t.Error(err)
 	}
