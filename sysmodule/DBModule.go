@@ -26,6 +26,9 @@ type DBResult struct {
 	LastInsertID int64
 	RowsAffected int64
 	res          *sql.Rows
+	// 解码数据相关设置
+	tag  string
+	blur bool
 }
 
 // Next ...
@@ -44,39 +47,24 @@ func (slf *DBResult) Scan(arg ...interface{}) error {
 	return slf.res.Scan(arg...)
 }
 
-// SQLDecoder ...
-type SQLDecoder struct {
-	res    DBResult
-	tag    string
-	strict bool
-}
-
-// NewSQLDecoder ...
-func NewSQLDecoder(res DBResult) *SQLDecoder {
-	return &SQLDecoder{
-		res: res,
-		tag: "col",
-	}
-}
-
 // SetSpecificTag ...
-func (slf *SQLDecoder) SetSpecificTag(tag string) *SQLDecoder {
+func (slf *DBResult) SetSpecificTag(tag string) *DBResult {
 	slf.tag = tag
 	return slf
 }
 
-// SetStrictMode ...
-func (slf *SQLDecoder) SetStrictMode(strict bool) *SQLDecoder {
-	slf.strict = strict
+// SetBlurMode ...
+func (slf *DBResult) SetBlurMode(blur bool) *DBResult {
+	slf.blur = blur
 	return slf
 }
 
 // UnMarshal ...
-func (slf *SQLDecoder) UnMarshal(out interface{}) error {
-	if slf.res.Err != nil {
-		return slf.res.Err
+func (slf *DBResult) UnMarshal(out interface{}) error {
+	if slf.Err != nil {
+		return slf.Err
 	}
-	tbm, err := dbResult2Map(slf.res.res)
+	tbm, err := dbResult2Map(slf.res)
 	if err != nil {
 		return err
 	}
@@ -123,7 +111,7 @@ func dbResult2Map(rows *sql.Rows) ([]map[string]string, error) {
 	return tableData, nil
 }
 
-func (slf *SQLDecoder) mapSingle2interface(m map[string]string, v reflect.Value) error {
+func (slf *DBResult) mapSingle2interface(m map[string]string, v reflect.Value) error {
 	t := v.Type()
 	val := v.Elem()
 	typ := t.Elem()
@@ -144,7 +132,7 @@ func (slf *SQLDecoder) mapSingle2interface(m map[string]string, v reflect.Value)
 			vtag := strings.Split(strings.ToLower(tag), ",")
 			meta, ok := m[vtag[0]]
 			if !ok {
-				if slf.strict {
+				if !slf.blur {
 					return fmt.Errorf("没有在结果集中找到对应的字段 %s", tag)
 				}
 				continue
@@ -190,7 +178,7 @@ func (slf *SQLDecoder) mapSingle2interface(m map[string]string, v reflect.Value)
 	return nil
 }
 
-func (slf *SQLDecoder) mapSlice2interface(data []map[string]string, in interface{}) error {
+func (slf *DBResult) mapSlice2interface(data []map[string]string, in interface{}) error {
 	length := len(data)
 
 	if length > 0 {
@@ -218,7 +206,7 @@ func (slf *SQLDecoder) mapSlice2interface(data []map[string]string, in interface
 }
 
 // Connect ...
-func (slf *DBModule) Connect() error {
+func (slf *DBModule) Connect(maxConn int) error {
 	cmd := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&parseTime=true&loc=%s",
 		slf.UserName,
 		slf.Password,
@@ -237,6 +225,10 @@ func (slf *DBModule) Connect() error {
 		return err
 	}
 	slf.db = db
+	db.SetMaxOpenConns(maxConn)
+	db.SetMaxIdleConns(maxConn)
+	db.SetConnMaxLifetime(time.Second * 90)
+
 	return nil
 }
 
