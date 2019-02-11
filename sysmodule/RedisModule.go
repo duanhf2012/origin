@@ -22,6 +22,19 @@ func (slf *RetError) Get() error {
 	return <-slf.resultChan
 }
 
+type ErrorMapStringBool struct {
+	resultError         error
+	resultMapStringBool map[string]bool
+}
+type RetMapString struct {
+	resultChan chan ErrorMapStringBool
+}
+
+func (slf *RetMapString) Get() (error, map[string]bool) {
+	ret := <-slf.resultChan
+	return ret.resultError, ret.resultMapStringBool
+}
+
 type Func func()
 type RedisModule struct {
 	service.BaseModule
@@ -146,9 +159,11 @@ func (slf *RedisModule) GoSetStringExpire(key, value string, expire string, err 
 	}
 
 	fun := func() {
-		ret := slf.setStringByExpire(key, value, expire)
 		if err != nil {
+			ret := slf.setStringByExpire(key, value, expire)
 			err.resultChan <- ret
+		} else {
+			slf.setStringByExpire(key, value, expire)
 		}
 	}
 
@@ -159,10 +174,14 @@ func (slf *RedisModule) GoSetStringExpire(key, value string, expire string, err 
 
 //SetRedisStringJSON redis添加JSON数据 无过期时间
 //示例:SetRedisStringJSON("AAAABTEST1", eagleconfig.Cfg)
-func (slf *RedisModule) SetRedisStringJSON(key string, val interface{}) (err error) {
+func (slf *RedisModule) SetStringJSON(key string, val interface{}) (err error) {
 	err = slf.SetStringJSONExpire(key, val, "-1")
 
 	return
+}
+
+func (slf *RedisModule) GoSetStringJSON(key string, val interface{}, err *RetError) {
+	slf.GoSetStringJSONExpire(key, val, "-1", err)
 }
 
 //SetRedisExStringJSON redis添加JSON数据 有过期时间 ex过期时间,单位秒,必须是整数
@@ -180,6 +199,8 @@ func (slf *RedisModule) GoSetStringJSONExpire(key string, val interface{}, expir
 	if err == nil {
 		slf.GoSetStringExpire(key, string(temp), expire, retErr)
 		return nil
+	} else {
+		retErr.resultChan <- err
 	}
 	return err
 }
@@ -224,8 +245,8 @@ func (slf *RedisModule) SetMuchString(mapInfo map[string]string) (err error) {
 	return
 }
 
-func (slf *RedisModule) GoSetMuchString(mapInfo map[string]string, retErr *RetError) (err error) {
-	return slf.GoSetMuchStringExpire(mapInfo, "-1", retErr)
+func (slf *RedisModule) GoSetMuchString(mapInfo map[string]string, retErr *RetError) {
+	slf.GoSetMuchStringExpire(mapInfo, "-1", retErr)
 }
 
 //SetMuchRedisStringSameEx redis添加多条string类型数据 具有相同的过期时间 ex过期时间 整数
@@ -235,21 +256,22 @@ func (slf *RedisModule) SetMuchStringExpire(mapInfo map[string]string, ex string
 	return
 }
 
-func (slf *RedisModule) GoSetMuchStringExpire(mapInfo map[string]string, expire string, err *RetError) error {
+func (slf *RedisModule) GoSetMuchStringExpire(mapInfo map[string]string, expire string, err *RetError) {
 
 	if err != nil {
 		err.resultChan = make(chan error, 1)
 	}
 
 	fun := func() {
-		ret := slf.setMuchStringByExpire(mapInfo, expire)
 		if err != nil {
+			ret := slf.setMuchStringByExpire(mapInfo, expire)
 			err.resultChan <- ret
+		} else {
+			slf.setMuchStringByExpire(mapInfo, expire)
 		}
 	}
 
 	slf.GoTask(fun)
-	return nil
 }
 
 func (slf *RedisModule) setMuchStringByExpire(mapInfo map[string]string, expire string) error {
@@ -283,7 +305,7 @@ func (slf *RedisModule) setMuchStringByExpire(mapInfo map[string]string, expire 
 
 //GetRedisString redis获取string类型数据
 //示例:GetRedisString("TestKey")
-func (slf *RedisModule) GetRedisString(key string) (string, error) {
+func (slf *RedisModule) GetString(key string) (string, error) {
 	conn, err := slf.getConn()
 	if err != nil {
 		return "", err
@@ -311,7 +333,7 @@ func (slf *RedisModule) GetRedisString(key string) (string, error) {
 
 //GetRedisStringJSON redis获取string类型数据的Json
 //示例:GetRedisString("TestKey")
-func (slf *RedisModule) GetRedisStringJSON(key string, st interface{}) error {
+func (slf *RedisModule) GetStringJSON(key string, st interface{}) error {
 	conn, err := slf.getConn()
 	if err != nil {
 		return err
@@ -344,7 +366,7 @@ func (slf *RedisModule) GetRedisStringJSON(key string, st interface{}) error {
 //GetMuchRedisString redis获取string类型数据
 //Pipeline实现的原理是队列，而队列的原理是先进先出
 //示例:GetMuchRedisString(&[]string{"AAAABTEST1", "AAAABTEST2"})
-func (slf *RedisModule) GetMuchRedisString(keys []string) (retMap map[string]string, err error) {
+func (slf *RedisModule) GetMuchString(keys []string) (retMap map[string]string, err error) {
 
 	if len(keys) <= 0 {
 		err = errors.New("Func[GetMuchRedisString] Keys Is Empty")
@@ -393,7 +415,7 @@ func (slf *RedisModule) GetMuchRedisString(keys []string) (retMap map[string]str
 //temp["AAAABTEST1"] = &eagleconfig.ServerConfig{}
 //temp["AAAABTEST2"] = &eagleconfig.ServerConfig{}
 //GetMuchRedisStringJSON(&temp)
-func (slf *RedisModule) GetMuchRedisStringJSON(keys map[string]interface{}) error {
+func (slf *RedisModule) GetMuchStringJSON(keys map[string]interface{}) error {
 	if len(keys) <= 0 {
 		err := errors.New("Func[GetMuchRedisStringJSON] Keys Is Empty")
 		return err
@@ -440,7 +462,7 @@ func (slf *RedisModule) GetMuchRedisStringJSON(keys map[string]interface{}) erro
 
 //DelRedisString redis删除string类型数据
 //示例:DelRedisString("AAAABTEST1")
-func (slf *RedisModule) DelRedisString(key string) error {
+func (slf *RedisModule) DelString(key string) error {
 	conn, err := slf.getConn()
 	if err != nil {
 		return err
@@ -466,9 +488,44 @@ func (slf *RedisModule) DelRedisString(key string) error {
 	return nil
 }
 
+func (slf *RedisModule) GoDelString(key string, err *RetError) {
+	if err != nil {
+		err.resultChan = make(chan error, 1)
+	}
+
+	fun := func() {
+		if err != nil {
+			ret := slf.DelString(key)
+			err.resultChan <- ret
+		} else {
+			slf.DelString(key)
+		}
+	}
+
+	slf.GoTask(fun)
+}
+
+func (slf *RedisModule) GoDelMuchString(keys []string, retMapString *RetMapString) {
+	if retMapString != nil {
+		retMapString.resultChan = make(chan ErrorMapStringBool, 1)
+	}
+
+	fun := func() {
+		if retMapString != nil {
+			var retchan ErrorMapStringBool
+			retchan.resultMapStringBool, retchan.resultError = slf.DelMuchString(keys)
+			retMapString.resultChan <- retchan
+		} else {
+			slf.DelMuchString(keys)
+		}
+	}
+
+	slf.GoTask(fun)
+}
+
 //DelMuchRedisString redis删除string类型数据
 //示例:DelMuchRedisString([]string{"AAAABTEST1",""AAAABTEST2})
-func (slf *RedisModule) DelMuchRedisString(keys []string) (map[string]bool, error) {
+func (slf *RedisModule) DelMuchString(keys []string) (map[string]bool, error) {
 	if len(keys) <= 0 {
 		err := errors.New("Func[DelMuchRedisString] Keys Is Empty")
 		return nil, err
@@ -515,7 +572,7 @@ func (slf *RedisModule) DelMuchRedisString(keys []string) (map[string]bool, erro
 //SetRedisHash ...
 //如果 hsahKey 是哈希表中的一个新建域，并且值设置成功，返回 1
 //如果哈希表中域 hsahKey 已经存在且旧值已被新值覆盖，返回 0
-func (slf *RedisModule) SetRedisHash(redisKey, hashKey, value string) error {
+func (slf *RedisModule) SetHash(redisKey, hashKey, value string) error {
 	if redisKey == "" || hashKey == "" {
 		return errors.New("Key Is Empty")
 	}
@@ -534,8 +591,23 @@ func (slf *RedisModule) SetRedisHash(redisKey, hashKey, value string) error {
 	return nil
 }
 
+func (slf *RedisModule) GoSetHash(redisKey, hashKey, value string, err *RetError) {
+	if err != nil {
+		err.resultChan = make(chan error, 1)
+	}
+	fun := func() {
+		if err != nil {
+			err.resultChan <- slf.SetHash(redisKey, hashKey, value)
+		} else {
+			slf.SetHash(redisKey, hashKey, value)
+		}
+	}
+
+	slf.GoTask(fun)
+}
+
 //GetRedisAllHashJSON ...
-func (slf *RedisModule) GetRedisAllHashJSON(redisKey string) (map[string]string, error) {
+func (slf *RedisModule) GetAllHashJSON(redisKey string) (map[string]string, error) {
 	if redisKey == "" {
 		return nil, errors.New("Key Is Empty")
 	}
@@ -555,7 +627,7 @@ func (slf *RedisModule) GetRedisAllHashJSON(redisKey string) (map[string]string,
 }
 
 //GetRedisHashValueByKey ...
-func (slf *RedisModule) GetRedisHashValueByKey(redisKey string, fieldKey string) (string, error) {
+func (slf *RedisModule) GetHashValueByKey(redisKey string, fieldKey string) (string, error) {
 
 	if redisKey == "" || fieldKey == "" {
 		return "", errors.New("Key Is Empty")
@@ -585,17 +657,29 @@ func (slf *RedisModule) GetRedisHashValueByKey(redisKey string, fieldKey string)
 }
 
 //SetRedisHashJSON ...
-func (slf *RedisModule) SetRedisHashJSON(redisKey, hsahKey string, value interface{}) error {
+func (slf *RedisModule) SetHashJSON(redisKey, hsahKey string, value interface{}) error {
 	temp, err := json.Marshal(value)
 	if err == nil {
-		err = slf.SetRedisHash(redisKey, hsahKey, string(temp))
+		err = slf.SetHash(redisKey, hsahKey, string(temp))
 	}
 
 	return err
 }
 
+func (slf *RedisModule) GoSetHashJSON(redisKey, hsahKey string, value interface{}, err *RetError) {
+	temp, retErr := json.Marshal(value)
+	if retErr == nil {
+		slf.GoSetHash(redisKey, hsahKey, string(temp), err)
+	} else {
+		if err != nil {
+			err.resultChan = make(chan error, 1)
+			err.resultChan <- retErr
+		}
+	}
+}
+
 //SetMuchRedisHashJSON ... value : hashkey -> value
-func (slf *RedisModule) SetMuchRedisHashJSON(redisKey string, value map[string][]interface{}) error {
+func (slf *RedisModule) SetMuchHashJSON(redisKey string, value map[string][]interface{}) error {
 	if len(value) <= 0 {
 		err := errors.New("Func[SetMuchRedisHashJSON] value Is Empty")
 		return err
@@ -625,17 +709,56 @@ func (slf *RedisModule) SetMuchRedisHashJSON(redisKey string, value map[string][
 	return nil
 }
 
+func (slf *RedisModule) GoSetMuchHashJSON(redisKey string, value map[string][]interface{}, err *RetError) {
+	if err != nil {
+		err.resultChan = make(chan error, 1)
+	}
+
+	fun := func() {
+		if err != nil {
+			err.resultChan <- slf.SetMuchHashJSON(redisKey, value)
+		} else {
+			slf.SetMuchHashJSON(redisKey, value)
+		}
+	}
+
+	slf.GoTask(fun)
+}
+
+//GoDelRedisHash
+func (slf *RedisModule) GoDelHash(redisKey string, hsahKey string, err *RetError) {
+	tempHashKey := []string{hsahKey}
+	slf.GoDelMuchHash(redisKey, tempHashKey, err)
+}
+
 //DelRedisHash ...
-func (slf *RedisModule) DelRedisHash(redisKey string, hsahKey string) error {
+func (slf *RedisModule) DelHash(redisKey string, hsahKey string) error {
 	tempHashKey := []string{hsahKey}
 
-	err := slf.DelMuchRedisHash(redisKey, tempHashKey)
+	err := slf.DelMuchHash(redisKey, tempHashKey)
 
 	return err
 }
 
+//GoDelMuchRedisHash
+func (slf *RedisModule) GoDelMuchHash(redisKey string, hsahKey []string, err *RetError) {
+	if err != nil {
+		err.resultChan = make(chan error, 1)
+	}
+
+	fun := func() {
+		if err != nil {
+			err.resultChan <- slf.DelMuchHash(redisKey, hsahKey)
+		} else {
+			slf.DelMuchHash(redisKey, hsahKey)
+		}
+	}
+
+	slf.GoTask(fun)
+}
+
 //DelMuchRedisHash ...
-func (slf *RedisModule) DelMuchRedisHash(redisKey string, hsahKey []string) error {
+func (slf *RedisModule) DelMuchHash(redisKey string, hsahKey []string) error {
 	if redisKey == "" || len(hsahKey) <= 0 {
 		return errors.New("Key Is Empty")
 	}
@@ -659,8 +782,25 @@ func (slf *RedisModule) DelMuchRedisHash(redisKey string, hsahKey []string) erro
 	return nil
 }
 
+//gosetRedisList
+func (slf *RedisModule) gosetList(key string, value []string, setType string, err *RetError) {
+	if err != nil {
+		err.resultChan = make(chan error, 1)
+	}
+
+	fun := func() {
+		if err != nil {
+			err.resultChan <- slf.setList(key, value, setType)
+		} else {
+			slf.setList(key, value, setType)
+		}
+	}
+
+	slf.GoTask(fun)
+}
+
 //LPUSH和RPUSH
-func (slf *RedisModule) setRedisList(key string, value []string, setType string) error {
+func (slf *RedisModule) setList(key string, value []string, setType string) error {
 	if key == "" {
 		return errors.New("Key Is Empty")
 	}
@@ -687,31 +827,56 @@ func (slf *RedisModule) setRedisList(key string, value []string, setType string)
 }
 
 //SetRedisListLpush ...
-func (slf *RedisModule) SetRedisListLpush(key, value string) error {
+func (slf *RedisModule) SetListLpush(key, value string) error {
 	tempVal := []string{value}
-	err := slf.setRedisList(key, tempVal, "LPUSH")
+	err := slf.setList(key, tempVal, "LPUSH")
 
 	return err
 }
 
+//GoSetRedisListLpush...
+func (slf *RedisModule) GoSetListLpush(key, value string, err *RetError) {
+	tempVal := []string{value}
+	slf.gosetList(key, tempVal, "LPUSH", err)
+}
+
 //SetMuchRedisListLpush ...
-func (slf *RedisModule) SetMuchRedisListLpush(key string, value []string) error {
-	return slf.setRedisList(key, value, "LPUSH")
+func (slf *RedisModule) SetMuchListLpush(key string, value []string) error {
+	return slf.setList(key, value, "LPUSH")
+}
+
+//GoSetMuchListLpush ...
+func (slf *RedisModule) GoSetMuchListLpush(key string, value []string, err *RetError) {
+	slf.gosetList(key, value, "LPUSH", err)
 }
 
 //SetRedisListJSONLpush ...
-func (slf *RedisModule) SetRedisListJSONLpush(key string, value interface{}) error {
+func (slf *RedisModule) SetListJSONLpush(key string, value interface{}) error {
 	temp, err := json.Marshal(value)
 	if err == nil {
 		tempVal := []string{string(temp)}
-		err = slf.setRedisList(key, tempVal, "LPUSH")
+		err = slf.setList(key, tempVal, "LPUSH")
 	}
 
 	return err
 }
 
-//SetMuchRedisListJSONLpush ...
-func (slf *RedisModule) SetMuchRedisListJSONLpush(key string, value []interface{}) error {
+//GoSetRedisListJSONLpush ...
+func (slf *RedisModule) GoSetListJSONLpush(key string, value interface{}, retErr *RetError) {
+	temp, err := json.Marshal(value)
+	if err == nil {
+		tempVal := []string{string(temp)}
+		slf.gosetList(key, tempVal, "LPUSH", retErr)
+	} else {
+		if err != nil {
+			retErr.resultChan = make(chan error, 1)
+			retErr.resultChan <- err
+		}
+	}
+}
+
+//GoSetMuchListJSONLpush ...
+func (slf *RedisModule) GoSetMuchListJSONLpush(key string, value []interface{}, retErr *RetError) {
 	tempVal := []string{}
 	for _, val := range value {
 		if temp, err := json.Marshal(val); err == nil {
@@ -719,35 +884,72 @@ func (slf *RedisModule) SetMuchRedisListJSONLpush(key string, value []interface{
 		}
 	}
 
-	return slf.setRedisList(key, tempVal, "LPUSH")
+	slf.gosetList(key, tempVal, "LPUSH", retErr)
 }
 
-//SetRedisListRpush ...
-func (slf *RedisModule) SetRedisListRpush(key, value string) error {
+//SetMuchListJSONLpush ...
+func (slf *RedisModule) SetMuchListJSONLpush(key string, value []interface{}) error {
+	tempVal := []string{}
+	for _, val := range value {
+		if temp, err := json.Marshal(val); err == nil {
+			tempVal = append(tempVal, string(temp))
+		}
+	}
+
+	return slf.setList(key, tempVal, "LPUSH")
+}
+
+//GoSetListRpush ...
+func (slf *RedisModule) GoSetListRpush(key, value string, retErr *RetError) {
 	tempVal := []string{value}
-	err := slf.setRedisList(key, tempVal, "RPUSH")
+	slf.gosetList(key, tempVal, "RPUSH", retErr)
+}
+
+//SetListRpush ...
+func (slf *RedisModule) SetListRpush(key, value string) error {
+	tempVal := []string{value}
+	err := slf.setList(key, tempVal, "RPUSH")
 
 	return err
 }
 
 //SetMuchRedisListRpush ...
-func (slf *RedisModule) SetMuchRedisListRpush(key string, value []string) error {
-	return slf.setRedisList(key, value, "RPUSH")
+func (slf *RedisModule) SetMuchListRpush(key string, value []string) error {
+	return slf.setList(key, value, "RPUSH")
+}
+
+//GoSetMuchRedisListRpush ...
+func (slf *RedisModule) GoSetMuchListRpush(key string, value []string, retErr *RetError) {
+	slf.gosetList(key, value, "RPUSH", retErr)
 }
 
 //SetRedisListJSONRpush ...
-func (slf *RedisModule) SetRedisListJSONRpush(key string, value interface{}) error {
+func (slf *RedisModule) SetListJSONRpush(key string, value interface{}) error {
 	temp, err := json.Marshal(value)
 	if err == nil {
 		tempVal := []string{string(temp)}
-		err = slf.setRedisList(key, tempVal, "RPUSH")
+		err = slf.setList(key, tempVal, "RPUSH")
 	}
 
 	return err
 }
 
+//GoSetRedisListJSONRpush ...
+func (slf *RedisModule) GoSetListJSONRpush(key string, value interface{}, retErr *RetError) {
+	temp, err := json.Marshal(value)
+	if err == nil {
+		tempVal := []string{string(temp)}
+		slf.gosetList(key, tempVal, "RPUSH", retErr)
+	} else {
+		if err != nil {
+			retErr.resultChan = make(chan error, 1)
+			retErr.resultChan <- err
+		}
+	}
+}
+
 //SetMuchRedisListJSONRpush ...
-func (slf *RedisModule) SetMuchRedisListJSONRpush(key string, value []interface{}) error {
+func (slf *RedisModule) SetMuchListJSONRpush(key string, value []interface{}) error {
 	tempVal := []string{}
 	for _, val := range value {
 		if temp, err := json.Marshal(val); err == nil {
@@ -755,7 +957,19 @@ func (slf *RedisModule) SetMuchRedisListJSONRpush(key string, value []interface{
 		}
 	}
 
-	return slf.setRedisList(key, tempVal, "RPUSH")
+	return slf.setList(key, tempVal, "RPUSH")
+}
+
+//GoSetMuchRedisListJSONRpush ...
+func (slf *RedisModule) GoSetMuchListJSONRpush(key string, value []interface{}, retErr *RetError) {
+	tempVal := []string{}
+	for _, val := range value {
+		if temp, err := json.Marshal(val); err == nil {
+			tempVal = append(tempVal, string(temp))
+		}
+	}
+
+	slf.gosetList(key, tempVal, "RPUSH", retErr)
 }
 
 // Lrange ...
