@@ -51,10 +51,10 @@ func (slf *HttpServerService) initRouterHandler() http.Handler {
 	return cors.Handler(r)
 }
 
-func (slf *HttpServerService) OnRun() error {
+func (slf *HttpServerService) OnRun() bool {
 
 	slf.httpserver.Start()
-	return nil
+	return false
 }
 
 func NewHttpServerService(port uint16) *HttpServerService {

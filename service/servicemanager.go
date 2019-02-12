@@ -14,7 +14,6 @@ type IServiceManager interface {
 }
 
 type CServiceManager struct {
-	//serviceList            []IService
 	genserviceid    int
 	localserviceMap map[string]IService
 }
@@ -47,9 +46,7 @@ func (slf *CServiceManager) FetchService(s FetchService) IService {
 func (slf *CServiceManager) Init() bool {
 
 	for _, s := range slf.localserviceMap {
-		if s.OnInit() != nil {
-			return false
-		}
+		(s.(IModule)).InitModule(s.(IModule))
 	}
 
 	// 初始化结束
@@ -64,8 +61,7 @@ func (slf *CServiceManager) Init() bool {
 
 func (slf *CServiceManager) Start(exit chan bool, pwaitGroup *sync.WaitGroup) bool {
 	for _, s := range slf.localserviceMap {
-		pwaitGroup.Add(1)
-		go s.Run(s, exit, pwaitGroup)
+		(s.(IModule)).RunModule(s.(IModule), exit, pwaitGroup)
 	}
 
 	pwaitGroup.Add(1)

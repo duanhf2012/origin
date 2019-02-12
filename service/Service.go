@@ -20,8 +20,10 @@ type MethodInfo struct {
 type IModule interface {
 	SetModuleType(moduleType uint32)
 	GetModuleType() uint32
+	RunModule(module IModule, exit chan bool, pwaitGroup *sync.WaitGroup) error
+	InitModule(module IModule) error
 	OnInit() error
-	OnRun() error
+	OnRun() bool
 	AddModule(module IModule) bool
 	GetModuleByType(moduleType uint32) IModule
 	GetOwnerService() IService
@@ -30,11 +32,9 @@ type IModule interface {
 
 type IService interface {
 	Init(Iservice IService, servicetype int) error
-	Run(service IService, exit chan bool, pwaitGroup *sync.WaitGroup) error
 	OnInit() error
 	OnEndInit() error
-	OnRun() error
-	OnRunLoop() error
+	OnRun() bool
 	OnDestory() error
 	OnFetchService(iservice IService) error
 	OnSetupService(iservice IService)  //其他服务被安装
@@ -70,9 +70,7 @@ type BaseService struct {
 	servicename string
 	servicetype int
 
-	tickTime int64
-	statTm   int64
-	Status   int
+	Status int
 }
 
 type BaseModule struct {
@@ -80,6 +78,7 @@ type BaseModule struct {
 	mapModule  map[uint32]IModule
 
 	ownerService IService
+	tickTime     int64
 }
 
 func (slf *BaseService) GetServiceId() int {
@@ -131,30 +130,6 @@ func (slf *BaseService) Init(iservice IService, servicetype int) error {
 	slf.servicename = parts[1]
 	slf.servicetype = servicetype
 	slf.serviceid = InstanceServiceMgr().GenServiceID()
-
-	return nil
-}
-
-func (slf *BaseService) OnRunLoop() error {
-	return fmt.Errorf("None Loop")
-}
-
-func (slf *BaseService) Run(service IService, exit chan bool, pwaitGroup *sync.WaitGroup) error {
-	defer pwaitGroup.Done()
-	service.OnRun()
-	for {
-		select {
-		case <-exit:
-			fmt.Println("stopping...")
-			return nil
-		default:
-		}
-		slf.tickTime = time.Now().UnixNano() / 1e6
-		if service.OnRunLoop() != nil {
-			break
-		}
-		slf.tickTime = time.Now().UnixNano() / 1e6
-	}
 
 	return nil
 }
@@ -213,12 +188,13 @@ func (slf *BaseModule) GetModuleByType(moduleType uint32) IModule {
 
 	return ret
 }
+
 func (slf *BaseModule) OnInit() error {
 	return fmt.Errorf("not implement OnInit moduletype %d ", slf.GetModuleType())
 }
 
-func (slf *BaseModule) OnRun() error {
-	return fmt.Errorf("not implement OnRun moduletype %d ", slf.GetModuleType())
+func (slf *BaseModule) OnRun() bool {
+	return false
 }
 
 func (slf *BaseModule) GetOwnerService() IService {
@@ -227,4 +203,37 @@ func (slf *BaseModule) GetOwnerService() IService {
 
 func (slf *BaseModule) SetOwnerService(iservice IService) {
 	slf.ownerService = iservice
+}
+
+func (slf *BaseModule) InitModule(module IModule) error {
+	module.OnInit()
+	for _, subModule := range slf.mapModule {
+		go subModule.OnInit()
+	}
+
+	return nil
+}
+
+func (slf *BaseModule) RunModule(module IModule, exit chan bool, pwaitGroup *sync.WaitGroup) error {
+	//运行所有子模块
+	for _, subModule := range slf.mapModule {
+		go subModule.RunModule(subModule, exit, pwaitGroup)
+	}
+
+	pwaitGroup.Add(1)
+	defer pwaitGroup.Done()
+	for {
+		select {
+		case <-exit:
+			fmt.Println("stopping module %s...", fmt.Sprintf("%T", slf))
+			return nil
+		default:
+		}
+		if module.OnRun() == false {
+			break
+		}
+		slf.tickTime = time.Now().UnixNano() / 1e6
+	}
+
+	return nil
 }

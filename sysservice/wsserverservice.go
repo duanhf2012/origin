@@ -21,10 +21,10 @@ func (ws *WSServerService) OnInit() error {
 	return nil
 }
 
-func (ws *WSServerService) OnRun() error {
+func (ws *WSServerService) OnRun() bool {
 	ws.wsserver.Start()
 
-	return nil
+	return false
 }
 
 func NewWSServerService(pattern string, port uint16, messageReciver network.IMessageReceiver, bEnableCompression bool) *WSServerService {
