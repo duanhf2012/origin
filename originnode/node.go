@@ -13,6 +13,7 @@ import (
 
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysmodule"
 )
 
 type CExitCtl struct {
@@ -24,9 +25,13 @@ type COriginNode struct {
 	CExitCtl
 	serviceManager service.IServiceManager
 	sigs           chan os.Signal
+	debugCheck     bool
 }
 
 func (s *COriginNode) Init() {
+
+	//初始化全局模块
+	InitGlobalModule()
 	service.InitLog()
 	service.InstanceServiceMgr().Init()
 
@@ -34,6 +39,10 @@ func (s *COriginNode) Init() {
 	s.waitGroup = &sync.WaitGroup{}
 	s.sigs = make(chan os.Signal, 1)
 	signal.Notify(s.sigs, syscall.SIGINT, syscall.SIGTERM)
+}
+
+func (s *COriginNode) OpenDebugCheck() {
+	s.debugCheck = true
 }
 
 func (s *COriginNode) SetupService(services ...service.IService) {
@@ -62,11 +71,15 @@ func (s *COriginNode) SetupService(services ...service.IService) {
 }
 
 func (s *COriginNode) Start() {
-	go func() {
+	if s.debugCheck == true {
+		go func() {
 
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
+	}
+
 	cluster.InstanceClusterMgr().Start()
+	RunGlobalModule(s.exit, s.waitGroup)
 	service.InstanceServiceMgr().Start(s.exit, s.waitGroup)
 
 	select {
@@ -83,6 +96,11 @@ func (s *COriginNode) Stop() {
 }
 
 func NewOrginNode() *COriginNode {
+	var syslogmodule sysmodule.LogModule
+	syslogmodule.Init("system", sysmodule.LEVER_INFO)
+	syslogmodule.SetModuleType(sysmodule.SYS_LOG)
+	AddModule(&syslogmodule)
+
 	err := cluster.InstanceClusterMgr().Init()
 	if err != nil {
 		fmt.Print(err)

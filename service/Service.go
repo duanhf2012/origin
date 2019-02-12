@@ -53,14 +53,14 @@ var Log *log.Logger
 var logFile *os.File
 
 func InitLog() {
-	fileName := "log.log"
+	fileName := "system-" + time.Now().Format("2006-01-02") + ".log"
 	var err error
 	logFile, err = os.Create(fileName)
 
 	if err != nil {
 		log.Fatalln("open file error")
 	}
-	Log = log.New(logFile, "", log.LstdFlags)
+	Log = log.New(logFile, "", log.Lshortfile|log.LstdFlags)
 }
 
 type BaseService struct {
@@ -158,8 +158,6 @@ func (slf *BaseModule) GetModuleType() uint32 {
 	return slf.moduleType
 }
 
-//OnInit() error
-//OnRun() error
 func (slf *BaseModule) AddModule(module IModule) bool {
 	if module.GetModuleType() == 0 {
 		return false

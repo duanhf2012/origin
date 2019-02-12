@@ -1,0 +1,92 @@
+package sysmodule
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	"github.com/duanhf2012/origin/service"
+)
+
+//等级从低到高
+const (
+	LEVER_UNKNOW = 0
+	LEVER_DEBUG  = 1
+	LEVER_INFO   = 2
+	LEVER_WARN   = 3
+	LEVER_ERROR  = 4
+	LEVER_FATAL  = 5
+	LEVEL_MAX    = 6
+)
+
+var LogPrefix = [LEVEL_MAX]string{"[UNKNOW]", "[DEBUG]", "[INFO]", "[WARN]", "[ERROR]", "[FATAL]"}
+
+type ILogger interface {
+	Printf(level uint, format string, v ...interface{})
+	Print(level uint, v ...interface{})
+}
+
+type LogModule struct {
+	service.BaseModule
+	currentDay  int
+	logfilename string
+	logger      [LEVEL_MAX]*log.Logger
+	logFile     *os.File
+	openLevel   uint
+}
+
+func (slf *LogModule) GetCurrentFileName() string {
+	return slf.logfilename + "-" + time.Now().Format("2006-01-02") + ".log"
+}
+
+func (slf *LogModule) CheckAndGenFile() {
+	if time.Now().Day() != slf.currentDay {
+		slf.currentDay = time.Now().Day()
+		if slf.logFile != nil {
+			slf.logFile.Close()
+		}
+
+		var err error
+		slf.logFile, err = os.Create(slf.GetCurrentFileName())
+		if err != nil {
+			fmt.Print("create log file %s error!", slf.GetCurrentFileName())
+			return
+		}
+
+		for level := 0; level < LEVEL_MAX; level++ {
+			slf.logger[level] = log.New(slf.logFile, LogPrefix[level], log.Lshortfile|log.LstdFlags)
+		}
+	}
+}
+
+func (slf *LogModule) Init(logfilename string, openLevel uint) {
+	slf.currentDay = 0
+	slf.logfilename = logfilename
+	slf.openLevel = openLevel
+}
+
+func (slf *LogModule) GetLoggerByLevel(level uint) *log.Logger {
+	if level >= LEVEL_MAX {
+		level = 0
+	}
+	return slf.logger[level]
+}
+
+func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
+	if level < slf.openLevel {
+		return
+	}
+
+	slf.CheckAndGenFile()
+	slf.GetLoggerByLevel(level).Printf(format, v...)
+}
+
+func (slf *LogModule) Print(level uint, v ...interface{}) {
+	if level < slf.openLevel {
+		return
+	}
+
+	slf.CheckAndGenFile()
+	slf.GetLoggerByLevel(level).Print(v...)
+}
