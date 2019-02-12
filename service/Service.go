@@ -24,6 +24,7 @@ type IModule interface {
 	InitModule(module IModule) error
 	OnInit() error
 	OnRun() bool
+	OnEndRun()
 	AddModule(module IModule) bool
 	GetModuleByType(moduleType uint32) IModule
 	GetOwnerService() IService
@@ -35,7 +36,6 @@ type IService interface {
 	OnInit() error
 	OnEndInit() error
 	OnRun() bool
-	OnDestory() error
 	OnFetchService(iservice IService) error
 	OnSetupService(iservice IService)  //其他服务被安装
 	OnRemoveService(iservice IService) //其他服务被安装
@@ -197,6 +197,10 @@ func (slf *BaseModule) OnRun() bool {
 	return false
 }
 
+func (slf *BaseModule) OnEndRun() {
+
+}
+
 func (slf *BaseModule) GetOwnerService() IService {
 	return slf.ownerService
 }
@@ -235,5 +239,6 @@ func (slf *BaseModule) RunModule(module IModule, exit chan bool, pwaitGroup *syn
 		slf.tickTime = time.Now().UnixNano() / 1e6
 	}
 
+	module.OnEndRun()
 	return nil
 }
