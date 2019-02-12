@@ -61,7 +61,7 @@ func (slf *CServiceManager) Init() bool {
 
 func (slf *CServiceManager) Start(exit chan bool, pwaitGroup *sync.WaitGroup) bool {
 	for _, s := range slf.localserviceMap {
-		(s.(IModule)).RunModule(s.(IModule), exit, pwaitGroup)
+		go (s.(IModule)).RunModule(s.(IModule), exit, pwaitGroup)
 	}
 
 	pwaitGroup.Add(1)
