@@ -8,7 +8,7 @@ import (
 
 type IServiceManager interface {
 	Setup(s IService) bool
-	Init() bool
+	Init(logger ILogger) bool
 	Start() bool
 	CreateServiceID() int
 }
@@ -16,6 +16,7 @@ type IServiceManager interface {
 type CServiceManager struct {
 	genserviceid    int
 	localserviceMap map[string]IService
+	logger          ILogger
 }
 
 func (slf *CServiceManager) Setup(s IService) bool {
@@ -43,8 +44,9 @@ func (slf *CServiceManager) FetchService(s FetchService) IService {
 	return nil
 }
 
-func (slf *CServiceManager) Init() bool {
+func (slf *CServiceManager) Init(logger ILogger) bool {
 
+	slf.logger = logger
 	for _, s := range slf.localserviceMap {
 		(s.(IModule)).InitModule(s.(IModule))
 	}
@@ -103,6 +105,10 @@ func (slf *CServiceManager) Get() bool {
 	return true
 }
 
+func (slf *CServiceManager) GetLogger() ILogger {
+	return slf.logger
+}
+
 var _self *CServiceManager
 
 func InstanceServiceMgr() *CServiceManager {
@@ -112,4 +118,8 @@ func InstanceServiceMgr() *CServiceManager {
 		return _self
 	}
 	return _self
+}
+
+func GetLogger() ILogger {
+	return InstanceServiceMgr().GetLogger()
 }

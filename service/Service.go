@@ -123,6 +123,7 @@ func (slf *BaseService) Init(iservice IService, servicetype int) error {
 	slf.servicename = fmt.Sprintf("%T", iservice)
 	parts := strings.Split(slf.servicename, ".")
 	if len(parts) != 2 {
+		GetLogger().Printf(LEVER_ERROR, "BaseService.Init: service name is error: %q", slf.servicename)
 		err := fmt.Errorf("BaseService.Init: service name is error: %q", slf.servicename)
 		return err
 	}
@@ -137,7 +138,7 @@ func (slf *BaseService) Init(iservice IService, servicetype int) error {
 func (slf *BaseService) RPC_CheckServiceTickTimeOut(microSecond int64) error {
 
 	if slf.IsTimeOutTick(microSecond) == true {
-		Log.Printf("service:%s is timeout,state:%d", slf.GetServiceName(), slf.GetStatus())
+		//	Log.Printf("service:%s is timeout,state:%d", slf.GetServiceName(), slf.GetStatus())
 	}
 
 	return nil
@@ -227,6 +228,7 @@ func (slf *BaseModule) RunModule(module IModule, exit chan bool, pwaitGroup *syn
 	for {
 		select {
 		case <-exit:
+			GetLogger().Printf(LEVER_WARN, "stopping module %s...", fmt.Sprintf("%T", slf))
 			fmt.Println("stopping module %s...", fmt.Sprintf("%T", slf))
 			return nil
 		default:

@@ -29,11 +29,11 @@ type COriginNode struct {
 }
 
 func (s *COriginNode) Init() {
-
 	//初始化全局模块
 	InitGlobalModule()
 	service.InitLog()
-	service.InstanceServiceMgr().Init()
+	imodule := g_module.GetModuleByType(sysmodule.SYS_LOG)
+	service.InstanceServiceMgr().Init(imodule.(service.ILogger))
 
 	s.exit = make(chan bool)
 	s.waitGroup = &sync.WaitGroup{}
