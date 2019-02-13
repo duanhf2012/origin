@@ -35,8 +35,8 @@ type DBResult struct {
 }
 
 //OnInit ...
-func (slf *DBModule) Init() {
-	slf.Connect(100)
+func (slf *DBModule) OnInit() error {
+	return slf.Connect(100)
 }
 
 // Next ...
