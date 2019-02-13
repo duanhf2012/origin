@@ -9,10 +9,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/duanhf2012/origin/service"
 )
 
 // DBModule ...
 type DBModule struct {
+	service.BaseModule
 	db       *sql.DB
 	URL      string
 	UserName string
@@ -29,6 +32,11 @@ type DBResult struct {
 	// 解码数据相关设置
 	tag  string
 	blur bool
+}
+
+//OnInit ...
+func (slf *DBModule) Init() {
+	slf.Connect(100)
 }
 
 // Next ...
