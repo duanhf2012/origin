@@ -67,7 +67,7 @@ func (slf *CServiceManager) Start(exit chan bool, pwaitGroup *sync.WaitGroup) bo
 	}
 
 	pwaitGroup.Add(1)
-	go slf.CheckServiceTimeTimeout(exit, pwaitGroup)
+	//go slf.CheckServiceTimeTimeout(exit, pwaitGroup)
 	return true
 }
 

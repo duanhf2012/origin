@@ -48,7 +48,7 @@ func (slf *LogModule) CheckAndGenFile() {
 		}
 
 		var err error
-		slf.logFile, err = os.Create(slf.GetCurrentFileName())
+		slf.logFile, err = os.OpenFile(slf.GetCurrentFileName(), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0766)
 		if err != nil {
 			fmt.Printf("create log file %+v error!", slf.GetCurrentFileName())
 			return
