@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/service"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // DBModule ...
