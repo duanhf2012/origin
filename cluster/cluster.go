@@ -229,23 +229,20 @@ func (slf *CCluster) Start() error {
 func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply interface{}) error {
 	var callServiceName string
 	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName)
-	if len(nodeidList) > 1 {
+	if len(nodeidList) > 1 || len(nodeidList) < 1 {
 		return fmt.Errorf("Call: %s find %d nodes.", NodeServiceMethod, len(nodeidList))
 	}
 
-	for _, nodeid := range nodeidList {
-		if nodeid == slf.GetCurrentNodeId() {
-			return slf.LocalRpcClient.Call(callServiceName, args, reply)
-		} else {
-
-			pclient := slf.GetClusterClient(nodeid)
-
-			if pclient == nil {
-				return fmt.Errorf("Call: NodeId %d is not find.", nodeid)
-			}
-			err := pclient.Call(callServiceName, args, reply)
-			return err
+	nodeid := nodeidList[0]
+	if nodeid == slf.GetCurrentNodeId() {
+		return slf.LocalRpcClient.Call(callServiceName, args, reply)
+	} else {
+		pclient := slf.GetClusterClient(nodeid)
+		if pclient == nil {
+			return fmt.Errorf("Call: NodeId %d is not find.", nodeid)
 		}
+		err := pclient.Call(callServiceName, args, reply)
+		return err
 	}
 
 	return fmt.Errorf("Call: %s fail.", NodeServiceMethod)
@@ -285,31 +282,34 @@ func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *stri
 	return nodeidList
 }
 
-func (slf *CCluster) Go(NodeServiceMethod string, args interface{}) error {
+func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) error {
 	var callServiceName string
 	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName)
-	if len(nodeidList) > 1 {
+	if len(nodeidList) < 1 {
 		return fmt.Errorf("Call: %s find %d nodes.", NodeServiceMethod, len(nodeidList))
+	}
+
+	if bCast == false && len(nodeidList) > 1 {
+		return fmt.Errorf("Call: %s find more nodes %d.", NodeServiceMethod, len(nodeidList))
 	}
 
 	for _, nodeid := range nodeidList {
 		if nodeid == slf.GetCurrentNodeId() {
 			slf.LocalRpcClient.Go(callServiceName, args, nil, nil)
-			return nil
+			//return nil
 		} else {
-
 			pclient := slf.GetClusterClient(nodeid)
-
 			if pclient == nil {
 				return fmt.Errorf("Call: NodeId %d is not find.", nodeid)
 			}
 			pclient.Go(callServiceName, args, nil, nil)
-			return nil
+			//return nil
 		}
 	}
 
-	return fmt.Errorf("Call: %s fail.", NodeServiceMethod)
+	return nil
 }
+
 func (slf *CCluster) CallNode(nodeid int, servicemethod string, args interface{}, reply interface{}) error {
 	pclient := slf.GetClusterClient(nodeid)
 	if pclient == nil {
@@ -351,7 +351,7 @@ func Call(NodeServiceMethod string, args interface{}, reply interface{}) error {
 }
 
 func Go(NodeServiceMethod string, args interface{}) error {
-	return InstanceClusterMgr().Go(NodeServiceMethod, args)
+	return InstanceClusterMgr().Go(false, NodeServiceMethod, args)
 }
 
 func CallNode(NodeId int, servicemethod string, args interface{}, reply interface{}) error {
@@ -362,8 +362,8 @@ func GoNode(NodeId int, servicemethod string, args interface{}) error {
 	return InstanceClusterMgr().GoNode(NodeId, args, servicemethod)
 }
 
-func CastCall(NodeServiceMethod string, args interface{}, reply []interface{}) error {
-	return InstanceClusterMgr().Call(NodeServiceMethod, args, reply)
+func CastGo(NodeServiceMethod string, args interface{}) error {
+	return InstanceClusterMgr().Go(true, NodeServiceMethod, args)
 }
 
 var _self *CCluster

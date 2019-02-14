@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 )
 
@@ -31,7 +32,7 @@ type ClusterConfig struct {
 	//map[nodename][ {CNode} ]
 	mapClusterNodeService map[string][]CNode //map[nodename] []CNode
 	mapClusterServiceNode map[string][]CNode //map[servicename] []CNode
-	mapLocalService       map[string]bool    //map[servicename] bool
+	//mapLocalService       map[string]bool    //map[servicename] bool
 
 	currentNode CNode
 }
@@ -42,18 +43,21 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 
 	d, err := ioutil.ReadFile(path)
 	if err != nil {
+		fmt.Printf("Read File %s Error!", path)
 		return nil, err
 	}
+
 	err = json.Unmarshal(d, c)
 	if err != nil {
+		fmt.Printf("Read File %s ,%s Error!", path, err)
 		return nil, err
 	}
 
 	c.mapIdNode = make(map[int]CNode, 1)
 	c.mapClusterNodeService = make(map[string][]CNode, 1)
-	c.mapLocalService = make(map[string]bool)
 	c.mapClusterServiceNode = make(map[string][]CNode, 1)
 
+	var custerNodeName []string
 	//组装mapIdNode
 	for _, v := range c.NodeList {
 		mapservice := make(map[string]bool, 1)
@@ -61,26 +65,32 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 			mapservice[s] = true
 		}
 
-		c.mapIdNode[v.NodeID] = CNode{v.NodeID, v.NodeName, v.ServerAddr, mapservice}
+		node := CNode{v.NodeID, v.NodeName, v.ServerAddr, mapservice}
+		c.mapIdNode[v.NodeID] = node
+
+		if v.NodeID == nodeid {
+			//保存当前结点
+			c.currentNode = node
+			custerNodeName = v.ClusterNode
+		}
 	}
 
 	//组装mapClusterNodeService
-	for _, n := range c.mapIdNode {
-		c.mapClusterNodeService[n.NodeName] = append(c.mapClusterNodeService[n.NodeName], n)
-
-		//组装mapClusterServiceNode
-		for s := range n.ServiceList {
-			c.mapClusterServiceNode[s] = append(c.mapClusterServiceNode[s], n)
-
-			if n.NodeID == nodeid {
-				c.mapLocalService[s] = true
+	for _, cn := range custerNodeName {
+		for _, n := range c.mapIdNode {
+			if n.NodeName == cn {
+				c.mapClusterNodeService[n.NodeName] = append(c.mapClusterNodeService[n.NodeName], n)
 			}
 		}
+	}
 
-		if n.NodeID == nodeid {
-			c.currentNode = n
+	//组装mapClusterServiceNode
+	for _, nodelist := range c.mapClusterNodeService { //[]Node
+		for _, node := range nodelist { //Node
+			for s := range node.ServiceList {
+				c.mapClusterServiceNode[s] = append(c.mapClusterServiceNode[s], node)
+			}
 		}
-
 	}
 
 	return c, nil
@@ -124,6 +134,8 @@ func (slf *ClusterConfig) GetIdByNodeService(NodeName string, serviceName string
 }
 
 func (slf *ClusterConfig) HasLocalService(serviceName string) bool {
-	_, ok := slf.mapLocalService[serviceName]
+	_, ok := slf.currentNode.ServiceList[serviceName]
+
+	//_, ok := slf.mapLocalService[serviceName]
 	return ok == true
 }
