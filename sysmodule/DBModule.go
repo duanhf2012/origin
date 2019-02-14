@@ -283,6 +283,11 @@ func (slf *DBModule) SyncQuery(query string, args ...interface{}) SyncDBResult {
 // Exec ...
 func (slf *DBModule) Exec(query string, args ...interface{}) DBResult {
 	ret := DBResult{}
+	if slf.db == nil {
+		ret.Err = fmt.Errorf("cannot connect database!")
+		return ret
+	}
+
 	res, err := slf.db.Exec(query, args...)
 	ret.Err = err
 	ret.LastInsertID, _ = res.LastInsertId()
