@@ -17,9 +17,10 @@ type IWebsocketServer interface {
 }
 
 type IMessageReceiver interface {
-	OnConnected(webServer IWebsocketServer, clientid uint64)
-	OnDisconnect(webServer IWebsocketServer, clientid uint64, err error)
-	OnRecvMsg(webServer IWebsocketServer, clientid uint64, msgtype int, data []byte)
+	OnListen(webServer IWebsocketServer)
+	OnConnected(clientid uint64)
+	OnDisconnect(clientid uint64, err error)
+	OnRecvMsg(clientid uint64, msgtype int, data []byte)
 }
 
 type WSClient struct {
@@ -56,7 +57,8 @@ func (slf *WebsocketServer) wsHandler(w http.ResponseWriter, r *http.Request) {
 	slf.maxClientid++
 	pclient := &WSClient{slf.maxClientid, conn, make(chan WSMessage, 1024)}
 	slf.mapClient[pclient.clientid] = pclient
-	slf.messageReciver.OnConnected(slf, pclient.clientid)
+
+	slf.messageReciver.OnConnected(pclient.clientid)
 	go pclient.startSendMsg()
 	go slf.OnConnected(pclient)
 }
@@ -69,11 +71,11 @@ func (slf *WebsocketServer) OnConnected(pclient *WSClient) {
 			slf.locker.Lock()
 			defer slf.locker.Unlock()
 			delete(slf.mapClient, pclient.clientid)
-			slf.messageReciver.OnDisconnect(slf, pclient.clientid, err)
+			slf.messageReciver.OnDisconnect(pclient.clientid, err)
 			return
 		}
 
-		slf.messageReciver.OnRecvMsg(slf, pclient.clientid, msgtype, message)
+		slf.messageReciver.OnRecvMsg(pclient.clientid, msgtype, message)
 	}
 }
 
@@ -99,11 +101,13 @@ func (slf *WebsocketServer) startListen() {
 		MaxHeaderBytes: 1 << 20,
 	}
 
+	slf.messageReciver.OnListen(slf)
 	err := slf.httpserver.ListenAndServe()
 	if err != nil {
 		fmt.Printf("http.ListenAndServe(%d, nil) error\n", slf.port)
 		os.Exit(1)
 	}
+
 }
 
 func (slf *WSClient) startSendMsg() {
