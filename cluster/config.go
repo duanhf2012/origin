@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 )
 
@@ -30,9 +29,9 @@ type ClusterConfig struct {
 	mapIdNode map[int]CNode
 
 	//map[nodename][ {CNode} ]
-	mapClusterNodeService map[string][]CNode
-	mapClusterServiceNode map[string][]CNode
-	mapLocalService       map[string]bool
+	mapClusterNodeService map[string][]CNode //map[nodename] []CNode
+	mapClusterServiceNode map[string][]CNode //map[servicename] []CNode
+	mapLocalService       map[string]bool    //map[servicename] bool
 
 	currentNode CNode
 }
@@ -56,48 +55,34 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 	c.mapClusterServiceNode = make(map[string][]CNode, 1)
 
 	//组装mapIdNode
-	var clusterNode []string
 	for _, v := range c.NodeList {
-
-		//1.取所有结点
 		mapservice := make(map[string]bool, 1)
-		c.mapIdNode[v.NodeID] = CNode{v.NodeID, v.NodeName, v.ServerAddr, mapservice}
-
-		if nodeid == v.NodeID {
-			c.currentNode = c.mapIdNode[v.NodeID]
-
-			//2.mapServiceNode map[string][]string
-			for _, s := range v.ServiceList {
-				mapservice[s] = true
-				c.mapLocalService[s] = true
-			}
-
-			for _, c := range v.ClusterNode {
-				clusterNode = append(clusterNode, c)
-			}
+		for _, s := range v.ServiceList {
+			mapservice[s] = true
 		}
+
+		c.mapIdNode[v.NodeID] = CNode{v.NodeID, v.NodeName, v.ServerAddr, mapservice}
 	}
 
 	//组装mapClusterNodeService
-	for _, kc := range clusterNode {
-		for _, v := range c.NodeList {
-			if kc == v.NodeName {
-				//将自有连接的结点取详细信息
-				mapservice := make(map[string]bool, 1)
-				curNode := CNode{v.NodeID, v.NodeName, v.ServerAddr, mapservice}
-				for _, s := range v.ServiceList {
-					mapservice[s] = true
-					c.mapClusterServiceNode[s] = append(c.mapClusterServiceNode[s], curNode)
-				}
-				c.mapClusterNodeService[v.NodeName] = append(c.mapClusterNodeService[v.NodeName], curNode)
-			}
+	for _, n := range c.mapIdNode {
+		c.mapClusterNodeService[n.NodeName] = append(c.mapClusterNodeService[n.NodeName], n)
 
+		//组装mapClusterServiceNode
+		for s := range n.ServiceList {
+			c.mapClusterServiceNode[s] = append(c.mapClusterServiceNode[s], n)
+
+			if n.NodeID == nodeid {
+				c.mapLocalService[s] = true
+			}
 		}
+
+		if n.NodeID == nodeid {
+			c.currentNode = n
+		}
+
 	}
 
-	fmt.Println(c.mapIdNode)
-	fmt.Println(c.mapClusterNodeService)
-	fmt.Println(c.mapClusterServiceNode)
 	return c, nil
 }
 
