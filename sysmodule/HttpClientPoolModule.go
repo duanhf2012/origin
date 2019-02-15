@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/duanhf2012/origin/service"
@@ -41,7 +42,15 @@ func (slf *SyncHttpRespone) Get(timeoutMs int) HttpRespone {
 	}
 }
 
-func (slf *HttpClientPoolModule) Init(maxpool int) {
+func (slf *HttpClientPoolModule) Init(maxpool int, proxyUrl string) {
+	type ProxyFun func(_ *http.Request) (*url.URL, error)
+	var proxyfun ProxyFun
+	if proxyUrl != "" {
+		proxyfun = func(_ *http.Request) (*url.URL, error) {
+			return url.Parse(proxyUrl)
+		}
+	}
+
 	slf.client = &http.Client{
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
@@ -51,22 +60,23 @@ func (slf *HttpClientPoolModule) Init(maxpool int) {
 			MaxIdleConns:        maxpool,
 			MaxIdleConnsPerHost: maxpool,
 			IdleConnTimeout:     60 * time.Second,
+			Proxy:               proxyfun,
 		},
 	}
 }
 
-func (slf *HttpClientPoolModule) SyncRequest(method string, url string, body []byte) SyncHttpRespone {
+func (slf *HttpClientPoolModule) SyncRequest(method string, url string, body []byte, header http.Header) SyncHttpRespone {
 	ret := SyncHttpRespone{
 		resp: make(chan HttpRespone, 1),
 	}
 	go func() {
-		rsp := slf.Request(method, url, body)
+		rsp := slf.Request(method, url, body, header)
 		ret.resp <- rsp
 	}()
 	return ret
 }
 
-func (slf *HttpClientPoolModule) Request(method string, url string, body []byte) HttpRespone {
+func (slf *HttpClientPoolModule) Request(method string, url string, body []byte, header http.Header) HttpRespone {
 	if slf.client == nil {
 		panic("Call the init function first")
 	}
@@ -75,6 +85,9 @@ func (slf *HttpClientPoolModule) Request(method string, url string, body []byte)
 	if err != nil {
 		ret.Err = err
 		return ret
+	}
+	if header != nil {
+		req.Header = header
 	}
 	rsp, err := slf.client.Do(req)
 	if err != nil {
