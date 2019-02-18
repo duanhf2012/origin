@@ -81,8 +81,8 @@ type BaseModule struct {
 	ownerService IService
 	tickTime     int64
 
-	exit       chan bool
-	pwaitGroup *sync.WaitGroup
+	ExitChan  chan bool
+	WaitGroup *sync.WaitGroup
 }
 
 func (slf *BaseService) GetServiceId() int {
@@ -223,12 +223,12 @@ func (slf *BaseModule) InitModule(module IModule) error {
 
 func (slf *BaseModule) DynamicRun(module IModule) {
 	module.InitModule(module)
-	module.RunModule(module, slf.exit, slf.pwaitGroup)
+	module.RunModule(module, slf.ExitChan, slf.WaitGroup)
 }
 
 func (slf *BaseModule) RunModule(module IModule, exit chan bool, pwaitGroup *sync.WaitGroup) error {
-	slf.exit = exit
-	slf.pwaitGroup = pwaitGroup
+	slf.ExitChan = exit
+	slf.WaitGroup = pwaitGroup
 	//运行所有子模块
 	for _, subModule := range slf.mapModule {
 		go subModule.RunModule(subModule, exit, pwaitGroup)
