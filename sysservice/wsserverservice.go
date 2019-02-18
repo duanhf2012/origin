@@ -17,7 +17,7 @@ type WSServerService struct {
 
 func (ws *WSServerService) OnInit() error {
 
-	ws.wsserver.Init(ws.pattern, ws.port, ws.messageReciver, ws.bEnableCompression)
+	ws.wsserver.Init(ws.port)
 	return nil
 }
 
@@ -27,12 +27,10 @@ func (ws *WSServerService) OnRun() bool {
 	return false
 }
 
-func NewWSServerService(pattern string, port uint16, messageReciver network.IMessageReceiver, bEnableCompression bool) *WSServerService {
+func NewWSServerService(port uint16) *WSServerService {
 	wss := new(WSServerService)
-	wss.pattern = pattern
+
 	wss.port = port
-	wss.messageReciver = messageReciver
-	wss.bEnableCompression = bEnableCompression
 
 	wss.Init(wss, 0)
 	return wss
@@ -40,4 +38,7 @@ func NewWSServerService(pattern string, port uint16, messageReciver network.IMes
 
 func (ws *WSServerService) OnDestory() error {
 	return nil
+}
+func (ws *WSServerService) SetupReciver(pattern string, messageReciver network.IMessageReceiver, bEnableCompression bool) {
+	ws.wsserver.SetupReciver(pattern, messageReciver, bEnableCompression)
 }
