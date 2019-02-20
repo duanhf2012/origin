@@ -50,6 +50,13 @@ func (slf *DBModule) OnInit() error {
 	return slf.Connect(10)
 }
 
+//Close ...
+func (slf *DBResult) Close() {
+	if slf.res != nil {
+		slf.res.Close()
+	}
+}
+
 // Next ...
 func (slf *DBResult) Next() bool {
 	if slf.Err != nil {
