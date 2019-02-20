@@ -75,6 +75,9 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 		}
 	}
 
+	//存入当前Node服务名
+	c.mapClusterNodeService[c.currentNode.NodeName] = append(c.mapClusterNodeService[c.currentNode.NodeName], c.currentNode)
+
 	//组装mapClusterNodeService
 	for _, cn := range custerNodeName {
 		for _, n := range c.mapIdNode {
