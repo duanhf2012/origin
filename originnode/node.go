@@ -29,14 +29,15 @@ type COriginNode struct {
 }
 
 func (s *COriginNode) Init() {
-	//初始化全局模块
-	InitGlobalModule()
-	service.InitLog()
-	imodule := g_module.GetModuleByType(sysmodule.SYS_LOG)
-	service.InstanceServiceMgr().Init(imodule.(service.ILogger))
+	//s.exit = make(chan bool)
+	//s.waitGroup = &sync.WaitGroup{}
 
-	s.exit = make(chan bool)
-	s.waitGroup = &sync.WaitGroup{}
+	//初始化全局模块
+
+	service.InitLog()
+	imodule := g_module.GetModuleById(sysmodule.SYS_LOG)
+	service.InstanceServiceMgr().Init(imodule.(service.ILogger), s.exit, s.waitGroup)
+
 	s.sigs = make(chan os.Signal, 1)
 	signal.Notify(s.sigs, syscall.SIGINT, syscall.SIGTERM)
 }
@@ -79,8 +80,8 @@ func (s *COriginNode) Start() {
 	}
 
 	cluster.InstanceClusterMgr().Start()
-	RunGlobalModule(s.exit, s.waitGroup)
-	service.InstanceServiceMgr().Start(s.exit, s.waitGroup)
+	RunGlobalModule()
+	service.InstanceServiceMgr().Start()
 
 	select {
 	case <-s.sigs:
@@ -96,9 +97,13 @@ func (s *COriginNode) Stop() {
 }
 
 func NewOrginNode() *COriginNode {
+	node := new(COriginNode)
+	node.exit = make(chan bool)
+	node.waitGroup = &sync.WaitGroup{}
+	InitGlobalModule(node.exit, node.waitGroup)
 	var syslogmodule sysmodule.LogModule
 	syslogmodule.Init("system", sysmodule.LEVER_INFO)
-	syslogmodule.SetModuleType(sysmodule.SYS_LOG)
+	syslogmodule.SetModuleId(sysmodule.SYS_LOG)
 	AddModule(&syslogmodule)
 
 	err := cluster.InstanceClusterMgr().Init()
@@ -107,7 +112,7 @@ func NewOrginNode() *COriginNode {
 		return nil
 	}
 
-	return new(COriginNode)
+	return node
 }
 
 func HasCmdParam(param string) bool {

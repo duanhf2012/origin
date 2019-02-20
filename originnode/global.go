@@ -15,20 +15,16 @@ type GlobalModule struct {
 
 var g_module GlobalModule
 
-func AddModule(module service.IModule) bool {
-	if module.GetModuleType() == 0 {
-		return false
-	}
-
+func AddModule(module service.IModule) uint32 {
 	return g_module.AddModule(module)
 }
 
-func GetModuleByType(moduleType uint32) service.IModule {
-	return g_module.GetModuleByType(moduleType)
+func GetModuleById(moduleId uint32) service.IModule {
+	return g_module.GetModuleById(moduleId)
 }
 
 func GetLog(logmodule uint32) sysmodule.ILogger {
-	module := g_module.GetModuleByType(logmodule)
+	module := g_module.GetModuleById(logmodule)
 	if nil == module {
 		return nil
 	}
@@ -36,10 +32,10 @@ func GetLog(logmodule uint32) sysmodule.ILogger {
 	return module.(sysmodule.ILogger)
 }
 
-func InitGlobalModule() {
-	g_module.InitModule(&g_module)
+func InitGlobalModule(exit chan bool, pwaitGroup *sync.WaitGroup) {
+	g_module.InitModule(exit, pwaitGroup)
 }
 
-func RunGlobalModule(exit chan bool, pwaitGroup *sync.WaitGroup) {
-	g_module.RunModule(&g_module, exit, pwaitGroup)
+func RunGlobalModule() {
+	g_module.RunModule(&g_module)
 }

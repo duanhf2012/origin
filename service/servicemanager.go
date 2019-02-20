@@ -44,30 +44,22 @@ func (slf *CServiceManager) FetchService(s FetchService) IService {
 	return nil
 }
 
-func (slf *CServiceManager) Init(logger ILogger) bool {
+func (slf *CServiceManager) Init(logger ILogger, exit chan bool, pwaitGroup *sync.WaitGroup) bool {
 
 	slf.logger = logger
 	for _, s := range slf.localserviceMap {
-		(s.(IModule)).InitModule(s.(IModule))
-	}
-
-	// 初始化结束
-	for _, s := range slf.localserviceMap {
-		if s.OnEndInit() != nil {
-			return false
-		}
+		(s.(IModule)).InitModule(exit, pwaitGroup)
+		//(s.(IModule)).OnInit()
 	}
 
 	return true
 }
 
-func (slf *CServiceManager) Start(exit chan bool, pwaitGroup *sync.WaitGroup) bool {
+func (slf *CServiceManager) Start() bool {
 	for _, s := range slf.localserviceMap {
-		go (s.(IModule)).RunModule(s.(IModule), exit, pwaitGroup)
+		go (s.(IModule)).RunModule(s.(IModule))
 	}
 
-	pwaitGroup.Add(1)
-	//go slf.CheckServiceTimeTimeout(exit, pwaitGroup)
 	return true
 }
 

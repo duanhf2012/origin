@@ -18,16 +18,17 @@ type MethodInfo struct {
 }
 
 type IModule interface {
-	SetModuleType(moduleType uint32)
-	GetModuleType() uint32
-	DynamicRun(module IModule)
-	RunModule(module IModule, exit chan bool, pwaitGroup *sync.WaitGroup) error
-	InitModule(module IModule) error
+	SetModuleId(moduleId uint32) bool
+	GetModuleId() uint32
+	GetModuleById(moduleId uint32) IModule
+	AddModule(module IModule) uint32
+	//DynamicAddModule(module IModule) uint32
+
+	RunModule(module IModule) error
+	InitModule(exit chan bool, pwaitGroup *sync.WaitGroup) error
 	OnInit() error
 	OnRun() bool
-	OnEndRun()
-	AddModule(module IModule) bool
-	GetModuleByType(moduleType uint32) IModule
+
 	GetOwnerService() IService
 	SetOwnerService(iservice IService)
 }
@@ -35,7 +36,6 @@ type IModule interface {
 type IService interface {
 	Init(Iservice IService, servicetype int) error
 	OnInit() error
-	OnEndInit() error
 	OnRun() bool
 	OnFetchService(iservice IService) error
 	OnSetupService(iservice IService)  //其他服务被安装
@@ -70,19 +70,20 @@ type BaseService struct {
 	serviceid   int
 	servicename string
 	servicetype int
-
-	Status int
+	Status      int
 }
 
 type BaseModule struct {
-	moduleType uint32
-	mapModule  map[uint32]IModule
+	moduleId  uint32
+	mapModule map[uint32]IModule
 
 	ownerService IService
 	tickTime     int64
 
 	ExitChan  chan bool
 	WaitGroup *sync.WaitGroup
+
+	CurrMaxModuleId uint32
 }
 
 func (slf *BaseService) GetServiceId() int {
@@ -104,10 +105,6 @@ func (slf *BaseService) SetServiceName(serviceName string) bool {
 
 func (slf *BaseService) GetStatus() int {
 	return slf.Status
-}
-
-func (slf *BaseService) OnEndInit() error {
-	return nil
 }
 
 func (slf *BaseService) OnFetchService(iservice IService) error {
@@ -152,39 +149,20 @@ func (slf *BaseService) IsTimeOutTick(microSecond int64) bool {
 
 	nowtm := time.Now().UnixNano() / 1e6
 	return nowtm-slf.tickTime >= microSecond
-
 }
 
-func (slf *BaseModule) SetModuleType(moduleType uint32) {
-	slf.moduleType = moduleType
-}
+func (slf *BaseModule) SetModuleId(moduleId uint32) bool {
 
-func (slf *BaseModule) GetModuleType() uint32 {
-	return slf.moduleType
-}
-
-func (slf *BaseModule) AddModule(module IModule) bool {
-	if module.GetModuleType() == 0 {
-		return false
-	}
-
-	module.SetOwnerService(slf.ownerService)
-
-	if slf.mapModule == nil {
-		slf.mapModule = make(map[uint32]IModule)
-	}
-
-	_, ok := slf.mapModule[module.GetModuleType()]
-	if ok == true {
-		return false
-	}
-
-	slf.mapModule[module.GetModuleType()] = module
+	slf.moduleId = moduleId
 	return true
 }
 
-func (slf *BaseModule) GetModuleByType(moduleType uint32) IModule {
-	ret, ok := slf.mapModule[moduleType]
+func (slf *BaseModule) GetModuleId() uint32 {
+	return slf.moduleId
+}
+
+func (slf *BaseModule) GetModuleById(moduleId uint32) IModule {
+	ret, ok := slf.mapModule[moduleId]
 	if ok == false {
 		return nil
 	}
@@ -192,16 +170,48 @@ func (slf *BaseModule) GetModuleByType(moduleType uint32) IModule {
 	return ret
 }
 
+func (slf *BaseModule) genModuleId() uint32 {
+	slf.CurrMaxModuleId++
+	return slf.CurrMaxModuleId
+}
+
+func (slf *BaseModule) AddModule(module IModule) uint32 {
+	if slf.WaitGroup == nil {
+		GetLogger().Printf(LEVER_FATAL, "AddModule error %s...", fmt.Sprintf("%T", module))
+	}
+
+	if module.GetModuleId() > 100000000 {
+		return 0
+	}
+
+	if module.GetModuleId() == 0 {
+		module.SetModuleId(slf.genModuleId())
+	}
+
+	module.SetOwnerService(slf.ownerService)
+	module.InitModule(slf.ExitChan, slf.WaitGroup)
+
+	if slf.mapModule == nil {
+		slf.mapModule = make(map[uint32]IModule)
+	}
+
+	_, ok := slf.mapModule[module.GetModuleId()]
+	if ok == true {
+		return 0
+	}
+
+	slf.mapModule[module.GetModuleId()] = module
+
+	go module.RunModule(module)
+	return module.GetModuleId()
+}
+
 func (slf *BaseModule) OnInit() error {
-	return fmt.Errorf("not implement OnInit moduletype %d ", slf.GetModuleType())
+	return fmt.Errorf("not implement OnInit moduletype %d ", slf.GetModuleId())
 }
 
 func (slf *BaseModule) OnRun() bool {
 	return false
-}
-
-func (slf *BaseModule) OnEndRun() {
-
 }
 
 func (slf *BaseModule) GetOwnerService() IService {
@@ -212,33 +222,27 @@ func (slf *BaseModule) SetOwnerService(iservice IService) {
 	slf.ownerService = iservice
 }
 
-func (slf *BaseModule) InitModule(module IModule) error {
-	module.OnInit()
-	for _, subModule := range slf.mapModule {
-		go subModule.OnInit()
-	}
-
+func (slf *BaseModule) InitModule(exit chan bool, pwaitGroup *sync.WaitGroup) error {
+	slf.CurrMaxModuleId = 100000
+	slf.WaitGroup = pwaitGroup
+	slf.ExitChan = exit
 	return nil
 }
 
-func (slf *BaseModule) DynamicRun(module IModule) {
-	module.InitModule(module)
-	module.RunModule(module, slf.ExitChan, slf.WaitGroup)
-}
+func (slf *BaseModule) RunModule(module IModule) error {
 
-func (slf *BaseModule) RunModule(module IModule, exit chan bool, pwaitGroup *sync.WaitGroup) error {
-	slf.ExitChan = exit
-	slf.WaitGroup = pwaitGroup
+	module.OnInit()
+
 	//运行所有子模块
 	for _, subModule := range slf.mapModule {
-		go subModule.RunModule(subModule, exit, pwaitGroup)
+		go subModule.RunModule(subModule)
 	}
 
-	pwaitGroup.Add(1)
-	defer pwaitGroup.Done()
+	slf.WaitGroup.Add(1)
+	defer slf.WaitGroup.Done()
 	for {
 		select {
-		case <-exit:
+		case <-slf.ExitChan:
 			GetLogger().Printf(LEVER_WARN, "stopping module %s...", fmt.Sprintf("%T", slf))
 			fmt.Println("stopping module %s...", fmt.Sprintf("%T", slf))
 			return nil
@@ -250,6 +254,5 @@ func (slf *BaseModule) RunModule(module IModule, exit chan bool, pwaitGroup *syn
 		slf.tickTime = time.Now().UnixNano() / 1e6
 	}
 
-	module.OnEndRun()
 	return nil
 }
