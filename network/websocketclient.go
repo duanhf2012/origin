@@ -118,10 +118,12 @@ func (ws *WebsocketClient) StartConnect() error {
 
 //Start ...
 func (ws *WebsocketClient) Start() error {
-	ws.bRun = true
-	ws.state = 0
-	go ws.OnRun()
-	go ws.writeMsg()
+	if ws.bRun == false {
+		ws.bRun = true
+		ws.state = 0
+		go ws.OnRun()
+		go ws.writeMsg()
+	}
 	return nil
 }
 
