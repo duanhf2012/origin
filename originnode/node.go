@@ -29,11 +29,7 @@ type COriginNode struct {
 }
 
 func (s *COriginNode) Init() {
-	//s.exit = make(chan bool)
-	//s.waitGroup = &sync.WaitGroup{}
-
 	//初始化全局模块
-
 	service.InitLog()
 	imodule := g_module.GetModuleById(sysmodule.SYS_LOG)
 	service.InstanceServiceMgr().Init(imodule.(service.ILogger), s.exit, s.waitGroup)
@@ -66,7 +62,10 @@ func (s *COriginNode) SetupService(services ...service.IService) {
 			}
 
 			services[i].OnSetupService(services[j])
+
 		}
+		services[i].(service.IModule).SetOwnerService(services[i])
+		services[i].(service.IModule).SetOwner(services[i].(service.IModule))
 	}
 
 }

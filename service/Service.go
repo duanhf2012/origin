@@ -31,6 +31,11 @@ type IModule interface {
 
 	GetOwnerService() IService
 	SetOwnerService(iservice IService)
+
+	SetOwner(module IModule)
+	GetOwner() IModule
+
+	getBaseModule() *BaseModule
 }
 
 type IService interface {
@@ -74,8 +79,7 @@ type BaseService struct {
 }
 
 type BaseModule struct {
-	moduleId  uint32
-	mapModule map[uint32]IModule
+	moduleId uint32
 
 	ownerService IService
 	tickTime     int64
@@ -83,7 +87,12 @@ type BaseModule struct {
 	ExitChan  chan bool
 	WaitGroup *sync.WaitGroup
 
+	mapModule       map[uint32]IModule
 	CurrMaxModuleId uint32
+	rwModuleLocker  sync.RWMutex
+
+	selfModule  IModule
+	ownerModule IModule
 }
 
 func (slf *BaseService) GetServiceId() int {
@@ -112,6 +121,7 @@ func (slf *BaseService) OnFetchService(iservice IService) error {
 }
 
 func (slf *BaseService) OnSetupService(iservice IService) {
+
 	return
 }
 
@@ -162,17 +172,44 @@ func (slf *BaseModule) GetModuleId() uint32 {
 }
 
 func (slf *BaseModule) GetModuleById(moduleId uint32) IModule {
+	slf.rwModuleLocker.RLock()
 	ret, ok := slf.mapModule[moduleId]
 	if ok == false {
+		slf.rwModuleLocker.RUnlock()
 		return nil
 	}
 
+	slf.rwModuleLocker.RUnlock()
 	return ret
 }
 
 func (slf *BaseModule) genModuleId() uint32 {
+
+	slf.rwModuleLocker.Lock()
 	slf.CurrMaxModuleId++
-	return slf.CurrMaxModuleId
+	moduleId := slf.CurrMaxModuleId
+	slf.rwModuleLocker.Unlock()
+
+	return moduleId
+}
+
+func (slf *BaseModule) RemoveModule(moduleId uint32) bool {
+	slf.rwModuleLocker.Lock()
+	_, ok := slf.mapModule[moduleId]
+	if ok == false {
+		GetLogger().Printf(LEVER_WARN, "RemoveModule fail %d...", moduleId)
+		slf.rwModuleLocker.Unlock()
+		return false
+	}
+
+	delete(slf.mapModule, moduleId)
+	slf.rwModuleLocker.Unlock()
+
+	return true
+}
+
+func (slf *BaseModule) IsRoot() bool {
+	return slf.GetOwner().GetModuleById(slf.GetModuleId()) == nil
 }
 
 func (slf *BaseModule) AddModule(module IModule) uint32 {
@@ -188,8 +225,18 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 		module.SetModuleId(slf.genModuleId())
 	}
 
-	module.SetOwnerService(slf.ownerService)
+	if slf.GetOwner() != nil {
+		if slf.IsRoot() {
+			module.SetOwner(slf.GetOwner())
+		} else {
+			module.SetOwner(slf.GetOwner().GetModuleById(slf.GetModuleId()))
+		}
+
+	}
+
 	module.InitModule(slf.ExitChan, slf.WaitGroup)
+
+	slf.rwModuleLocker.Lock()
 
 	if slf.mapModule == nil {
 		slf.mapModule = make(map[uint32]IModule)
@@ -197,10 +244,12 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 
 	_, ok := slf.mapModule[module.GetModuleId()]
 	if ok == true {
+		slf.rwModuleLocker.Unlock()
 		return 0
 	}
 
 	slf.mapModule[module.GetModuleId()] = module
+	slf.rwModuleLocker.Unlock()
 
 	go module.RunModule(module)
 	return module.GetModuleId()
@@ -212,6 +261,15 @@ func (slf *BaseModule) OnInit() error {
 
 func (slf *BaseModule) OnRun() bool {
 	return false
+}
+
+func (slf *BaseModule) SetOwner(ownerModule IModule) {
+	slf.ownerModule = ownerModule
+}
+
+func (slf *BaseModule) GetOwner() IModule {
+
+	return slf.ownerModule
 }
 
 func (slf *BaseModule) GetOwnerService() IService {
@@ -229,14 +287,22 @@ func (slf *BaseModule) InitModule(exit chan bool, pwaitGroup *sync.WaitGroup) er
 	return nil
 }
 
+func (slf *BaseModule) getBaseModule() *BaseModule {
+	return slf
+}
+
 func (slf *BaseModule) RunModule(module IModule) error {
 
 	module.OnInit()
 
 	//运行所有子模块
-	for _, subModule := range slf.mapModule {
-		go subModule.RunModule(subModule)
-	}
+	slf.rwModuleLocker.RLock()
+
+	/*
+		for _, subModule := range slf.mapModule {
+			go subModule.RunModule(subModule)
+		}*/
+	slf.rwModuleLocker.RUnlock()
 
 	slf.WaitGroup.Add(1)
 	defer slf.WaitGroup.Done()
