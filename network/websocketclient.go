@@ -11,32 +11,38 @@ import (
 	"time"
 )
 
+//IWebsocketClient ...
 type IWebsocketClient interface {
-	Init(slf IWebsocketClient, strurl string, bproxy bool, timeoutsec time.Duration) error
+	Init(slf IWebsocketClient, strurl, strPath string, bproxy bool, timeoutsec time.Duration) error
 	Start() error
 	WriteMessage(msg []byte) error
 	OnDisconnect() error
 	OnConnected() error
 	OnReadMessage(msg []byte) error
+	ReConnect()
 }
 
+//WebsocketClient ...
 type WebsocketClient struct {
 	WsDailer   *websocket.Dialer
 	conn       *websocket.Conn
 	url        string
-	state      int //0未连接状态   1连接状态
+	state      int //0未连接状态   1正在重连   2连接状态
 	bwritemsg  chan []byte
 	slf        IWebsocketClient
 	timeoutsec time.Duration
+
+	bRun bool
 }
 
-func (ws *WebsocketClient) Init(slf IWebsocketClient, strurl string, bproxy bool, timeoutsec time.Duration) error {
+//Init ...
+func (ws *WebsocketClient) Init(slf IWebsocketClient, strurl, strPath string, bproxy bool, timeoutsec time.Duration) error {
 
 	ws.timeoutsec = timeoutsec
 	ws.slf = slf
 	if bproxy == true {
 		proxy := func(_ *http.Request) (*url.URL, error) {
-			return url.Parse("http://127.0.0.1:1080")
+			return url.Parse(strPath)
 		}
 
 		if timeoutsec > 0 {
@@ -60,12 +66,22 @@ func (ws *WebsocketClient) Init(slf IWebsocketClient, strurl string, bproxy bool
 	return nil
 }
 
+//OnRun ...
 func (ws *WebsocketClient) OnRun() error {
 	for {
+		if ws.bRun == false {
+			break
+		}
+
 		if ws.state == 0 {
 			time.Sleep(1 * time.Second)
 			ws.StartConnect()
-		} else {
+		} else if ws.state == 1 {
+			log.Println("需要进行重连")
+			ws.conn.Close()
+			ws.state = 0
+			ws.slf.OnDisconnect()
+		} else if ws.state == 2 {
 			ws.conn.SetReadDeadline(time.Now().Add(ws.timeoutsec * time.Second))
 			_, message, err := ws.conn.ReadMessage()
 
@@ -84,6 +100,7 @@ func (ws *WebsocketClient) OnRun() error {
 	return nil
 }
 
+//StartConnect ...
 func (ws *WebsocketClient) StartConnect() error {
 
 	var err error
@@ -93,13 +110,15 @@ func (ws *WebsocketClient) StartConnect() error {
 		return err
 	}
 
-	ws.state = 1
+	ws.state = 2
 	ws.slf.OnConnected()
 
 	return nil
 }
 
+//Start ...
 func (ws *WebsocketClient) Start() error {
+	ws.bRun = true
 	ws.state = 0
 	go ws.OnRun()
 	go ws.writeMsg()
@@ -110,17 +129,21 @@ func (ws *WebsocketClient) Start() error {
 func (ws *WebsocketClient) writeMsg() error {
 	timerC := time.NewTicker(time.Second * 5).C
 	for {
+		if ws.bRun == false {
+			break
+		}
+
 		if ws.state == 0 {
 			time.Sleep(1 * time.Second)
 			continue
 		}
 		select {
 		case <-timerC:
-			if ws.state == 1 {
+			if ws.state == 2 {
 				ws.WriteMessage([]byte(`ping`))
 			}
 		case msg := <-ws.bwritemsg:
-			if ws.state == 1 {
+			if ws.state == 2 {
 				ws.conn.SetWriteDeadline(time.Now().Add(ws.timeoutsec * time.Second))
 				err := ws.conn.WriteMessage(websocket.TextMessage, msg)
 
@@ -137,23 +160,36 @@ func (ws *WebsocketClient) writeMsg() error {
 	return nil
 }
 
+//ReConnect ...
+func (ws *WebsocketClient) ReConnect() {
+	ws.state = 1
+}
+
+//WriteMessage ...
 func (ws *WebsocketClient) WriteMessage(msg []byte) error {
 	ws.bwritemsg <- msg
 	return nil
 }
 
+//OnDisconnect ...
 func (ws *WebsocketClient) OnDisconnect() error {
 
 	return nil
 }
 
+//OnConnected ...
 func (ws *WebsocketClient) OnConnected() error {
 
 	return nil
 }
 
-//触发
+//OnReadMessage 触发
 func (ws *WebsocketClient) OnReadMessage(msg []byte) error {
 
 	return nil
+}
+
+//Stop ...
+func (ws *WebsocketClient) Stop() {
+	ws.bRun = false
 }
