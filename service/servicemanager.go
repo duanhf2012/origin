@@ -70,7 +70,6 @@ func (slf *CServiceManager) CheckServiceTimeTimeout(exit chan bool, pwaitGroup *
 		case <-exit:
 			fmt.Println("CheckServiceTimeTimeout stopping...")
 			return
-		default:
 		}
 
 		for _, s := range slf.localserviceMap {

@@ -305,7 +305,6 @@ func (slf *BaseModule) RunModule(module IModule) error {
 			GetLogger().Printf(LEVER_WARN, "stopping module %s...", fmt.Sprintf("%T", slf))
 			fmt.Println("stopping module %s...", fmt.Sprintf("%T", slf))
 			return nil
-		default:
 		}
 		if module.OnRun() == false {
 			break

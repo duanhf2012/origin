@@ -360,7 +360,6 @@ func (slf *DBModule) RunExecuteDBCoroutine() {
 			return
 		case fun := <-slf.syncExecuteFun:
 			fun()
-		default:
 		}
 	}
 

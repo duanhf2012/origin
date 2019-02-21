@@ -23,9 +23,9 @@ type CExitCtl struct {
 
 type COriginNode struct {
 	CExitCtl
-	serviceManager service.IServiceManager
-	sigs           chan os.Signal
-	debugCheck     bool
+	serviceManager     service.IServiceManager
+	sigs               chan os.Signal
+	debugListenAddress string
 }
 
 func (s *COriginNode) Init() {
@@ -38,8 +38,9 @@ func (s *COriginNode) Init() {
 	signal.Notify(s.sigs, syscall.SIGINT, syscall.SIGTERM)
 }
 
-func (s *COriginNode) OpenDebugCheck() {
-	s.debugCheck = true
+// OpenDebugCheck ("localhost:6060")...http://localhost:6060/
+func (s *COriginNode) OpenDebugCheck(listenAddress string) {
+	s.debugListenAddress = listenAddress
 }
 
 func (s *COriginNode) SetupService(services ...service.IService) {
@@ -71,10 +72,10 @@ func (s *COriginNode) SetupService(services ...service.IService) {
 }
 
 func (s *COriginNode) Start() {
-	if s.debugCheck == true {
+	if s.debugListenAddress != "" {
 		go func() {
 
-			log.Println(http.ListenAndServe("localhost:6060", nil))
+			log.Println(http.ListenAndServe(s.debugListenAddress, nil))
 		}()
 	}
 
