@@ -13,6 +13,7 @@ type GlobalModule struct {
 	service.BaseModule
 }
 
+// 全局模块定义
 var g_module GlobalModule
 
 func AddModule(module service.IModule) uint32 {

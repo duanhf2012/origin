@@ -2,20 +2,18 @@ package cluster
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/duanhf2012/origin/sysmodule"
+
 	"github.com/duanhf2012/origin/service"
 
 	"github.com/duanhf2012/origin/rpc"
 )
-
-//https://github.com/rocket049/rpc2d/blob/master/rpcnode.go
-//http://daizuozhuo.github.io/golang-rpc-practice/
 
 type RpcClient struct {
 	nodeid     int
@@ -36,9 +34,7 @@ type CCluster struct {
 }
 
 func (slf *CCluster) ReadNodeInfo(nodeid int) error {
-	//连接Server结点
 	var err error
-
 	slf.cfg, err = ReadCfg("./config/cluster.json", nodeid)
 	if err != nil {
 		fmt.Printf("%v", err)
@@ -57,39 +53,17 @@ func (slf *CCluster) GetClusterClient(id int) *rpc.Client {
 	return v.pclient
 }
 
-func (slf *CCluster) GetClusterNode(strNodeName string) *CNodeCfg {
-	for _, value := range slf.cfg.NodeList {
-		if value.NodeName == strNodeName {
-			return &value
-		}
-	}
-
-	return nil
-}
-
-func (slf *CCluster) GetBindUrl() (string, error) {
-	return slf.cfg.currentNode.ServerAddr, nil
-}
-
-type CTestData struct {
-	Bbbb int64
-	Cccc int
-	Ddd  string
+func (slf *CCluster) GetBindUrl() string {
+	return slf.cfg.currentNode.ServerAddr
 }
 
 func (slf *CCluster) AcceptRpc(tpcListen *net.TCPListener) error {
-	/*slf.reader, slf.writer = net.Pipe()
-	go rpc.ServeConn(slf.reader)
-	slf.LocalRpcClient = rpc.NewClient(slf.writer)
-	*/
 	for {
 		conn, err := tpcListen.Accept()
 		if err != nil {
-			fmt.Print(err)
+			service.GetLogger().Printf(sysmodule.LEVER_ERROR, "tpcListen.Accept error:%v", err)
 			return err
 		}
-
-		//使用goroutine单独处理rpc连接请求
 		go rpc.ServeConn(conn)
 	}
 
@@ -98,19 +72,17 @@ func (slf *CCluster) AcceptRpc(tpcListen *net.TCPListener) error {
 
 func (slf *CCluster) ListenService() error {
 
-	bindStr, err := slf.GetBindUrl()
-	if err != nil {
-		return err
-	}
-
+	bindStr := slf.GetBindUrl()
 	tcpaddr, err := net.ResolveTCPAddr("tcp4", bindStr)
 	if err != nil {
+		service.GetLogger().Printf(sysmodule.LEVER_FATAL, "ResolveTCPAddr error:%v", err)
 		os.Exit(1)
 		return err
 	}
 
 	tcplisten, err2 := net.ListenTCP("tcp", tcpaddr)
 	if err2 != nil {
+		service.GetLogger().Printf(sysmodule.LEVER_FATAL, "ListenTCP error:%v", err)
 		os.Exit(1)
 		return err2
 	}
@@ -139,7 +111,7 @@ func (slf *CPing) Ping(ping *CPing, pong *CPong) error {
 func (slf *CCluster) ConnService() error {
 	ping := CPing{0}
 	pong := CPong{0}
-	fmt.Println(rpc.RegisterName("CPing", "", &ping))
+	rpc.RegisterName("CPing", "", &ping)
 
 	//连接集群服务器
 	for _, nodeList := range slf.cfg.mapClusterNodeService {
@@ -151,7 +123,7 @@ func (slf *CCluster) ConnService() error {
 	for {
 		for _, rpcClient := range slf.nodeclient {
 
-			//
+			//连接状态发送ping
 			if rpcClient.isConnect == true {
 				ping.TimeStamp = 0
 				err := rpcClient.pclient.Call("CPing.Ping", &ping, &pong)
@@ -164,6 +136,7 @@ func (slf *CCluster) ConnService() error {
 				continue
 			}
 
+			//非连接状态重新连接
 			if rpcClient.pclient != nil {
 				rpcClient.pclient.Close()
 				rpcClient.pclient = nil
@@ -171,9 +144,10 @@ func (slf *CCluster) ConnService() error {
 
 			client, err := rpc.Dial("tcp", rpcClient.serverAddr)
 			if err != nil {
-				log.Println(err)
+				service.GetLogger().Printf(sysmodule.LEVER_WARN, "Connect nodeid:%d,address:%s fail", rpcClient.nodeid, rpcClient.serverAddr)
 				continue
 			}
+			service.GetLogger().Printf(sysmodule.LEVER_INFO, "Connect nodeid:%d,address:%s succ", rpcClient.nodeid, rpcClient.serverAddr)
 
 			v, _ := slf.nodeclient[rpcClient.nodeid]
 			v.pclient = client
@@ -188,14 +162,17 @@ func (slf *CCluster) ConnService() error {
 
 func (slf *CCluster) Init() error {
 	if len(os.Args) < 2 {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Init error,param not find NodeId=number")
 		return fmt.Errorf("param error not find NodeId=number")
 	}
 
 	parts := strings.Split(os.Args[1], "=")
 	if len(parts) < 2 {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Init error,param not find NodeId=number")
 		return fmt.Errorf("param error not find NodeId=number")
 	}
 	if parts[0] != "NodeId" {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Init error,param error not find NodeId=number")
 		return fmt.Errorf("param error not find NodeId=number")
 	}
 
@@ -204,6 +181,7 @@ func (slf *CCluster) Init() error {
 	//读取配置
 	ret, err := strconv.Atoi(parts[1])
 	if err != nil {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Init parts[1] error,%v", err)
 		return err
 	}
 
@@ -211,7 +189,6 @@ func (slf *CCluster) Init() error {
 }
 
 func (slf *CCluster) Start() error {
-
 	service.InstanceServiceMgr().FetchService(slf.OnFetchService)
 
 	//监听服务
@@ -230,7 +207,8 @@ func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply inte
 	var callServiceName string
 	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName)
 	if len(nodeidList) > 1 || len(nodeidList) < 1 {
-		return fmt.Errorf("Call: %s find %d nodes.", NodeServiceMethod, len(nodeidList))
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s) not find nodes.", NodeServiceMethod)
+		return fmt.Errorf("CCluster.Call(%s) not find nodes.", NodeServiceMethod)
 	}
 
 	nodeid := nodeidList[0]
@@ -239,13 +217,18 @@ func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply inte
 	} else {
 		pclient := slf.GetClusterClient(nodeid)
 		if pclient == nil {
-			return fmt.Errorf("Call: NodeId %d is not find.", nodeid)
+			service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s): NodeId %d is not find.", NodeServiceMethod, nodeid)
+			return fmt.Errorf("CCluster.Call(%s): NodeId %d is not find.", NodeServiceMethod, nodeid)
 		}
 		err := pclient.Call(callServiceName, args, reply)
+		if err != nil {
+			service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s) is fail:%v.", callServiceName, err)
+		}
 		return err
 	}
 
-	return fmt.Errorf("Call: %s fail.", NodeServiceMethod)
+	service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s) fail.", NodeServiceMethod)
+	return fmt.Errorf("CCluster.Call(%s) fail.", NodeServiceMethod)
 }
 
 func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *string) []int {
@@ -286,24 +269,32 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) 
 	var callServiceName string
 	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName)
 	if len(nodeidList) < 1 {
-		return fmt.Errorf("Call: %s find %d nodes.", NodeServiceMethod, len(nodeidList))
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) not find nodes.", NodeServiceMethod)
+		return fmt.Errorf("CCluster.Go(%s) not find nodes.", NodeServiceMethod)
 	}
 
 	if bCast == false && len(nodeidList) > 1 {
-		return fmt.Errorf("Call: %s find more nodes %d.", NodeServiceMethod, len(nodeidList))
+		return fmt.Errorf("CCluster.Go(%s) find more nodes", NodeServiceMethod)
 	}
 
 	for _, nodeid := range nodeidList {
 		if nodeid == slf.GetCurrentNodeId() {
-			slf.LocalRpcClient.Go(callServiceName, args, nil, nil)
-			//return nil
+			replyCall := slf.LocalRpcClient.Go(callServiceName, args, nil, nil)
+			if replyCall.Error != nil {
+				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
+			}
+			return replyCall.Error
 		} else {
 			pclient := slf.GetClusterClient(nodeid)
 			if pclient == nil {
-				return fmt.Errorf("Call: NodeId %d is not find.", nodeid)
+				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) NodeId %d not find client", NodeServiceMethod, nodeid)
+				return fmt.Errorf("CCluster.Go(%s) NodeId %d not find client", NodeServiceMethod, nodeid)
 			}
-			pclient.Go(callServiceName, args, nil, nil)
-			//return nil
+			replyCall := pclient.Go(callServiceName, args, nil, nil)
+			if replyCall.Error != nil {
+				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
+			}
+			return replyCall.Error
 		}
 	}
 
@@ -313,28 +304,31 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) 
 func (slf *CCluster) CallNode(nodeid int, servicemethod string, args interface{}, reply interface{}) error {
 	pclient := slf.GetClusterClient(nodeid)
 	if pclient == nil {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.CallNode(%d,%s) NodeId not find client", nodeid, servicemethod)
 		return fmt.Errorf("Call: NodeId %d is not find.", nodeid)
 	}
 
 	err := pclient.Call(servicemethod, args, reply)
-	return err
+	if err != nil {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.CallNode(%d,%s) fail:%v", nodeid, servicemethod, err)
+	}
 
+	return err
 }
 
 func (slf *CCluster) GoNode(nodeid int, args interface{}, servicemethod string) error {
 	pclient := slf.GetClusterClient(nodeid)
 	if pclient == nil {
-		return fmt.Errorf("Call: NodeId %d is not find.", nodeid)
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.GoNode(%d,%s) NodeId not find client", nodeid, servicemethod)
+		return fmt.Errorf("CCluster.GoNode(%d,%s) NodeId not find client", nodeid, servicemethod)
 	}
 
 	replyCall := pclient.Go(servicemethod, args, nil, nil)
-	//ret := <-replyCall.Done
 	if replyCall.Error != nil {
-		fmt.Print(replyCall.Error)
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.GoNode(%d,%s) fail:%v", nodeid, servicemethod, replyCall.Error)
 	}
 
-	//fmt.Print(ret)
-	return nil
+	return replyCall.Error
 
 }
 

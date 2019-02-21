@@ -17,7 +17,7 @@ import (
 )
 
 type CExitCtl struct {
-	exit      chan bool
+	exitChan  chan bool
 	waitGroup *sync.WaitGroup
 }
 
@@ -32,7 +32,7 @@ func (s *COriginNode) Init() {
 	//初始化全局模块
 	service.InitLog()
 	imodule := g_module.GetModuleById(sysmodule.SYS_LOG)
-	service.InstanceServiceMgr().Init(imodule.(service.ILogger), s.exit, s.waitGroup)
+	service.InstanceServiceMgr().Init(imodule.(service.ILogger), s.exitChan, s.waitGroup)
 
 	s.sigs = make(chan os.Signal, 1)
 	signal.Notify(s.sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -74,38 +74,50 @@ func (s *COriginNode) SetupService(services ...service.IService) {
 func (s *COriginNode) Start() {
 	if s.debugListenAddress != "" {
 		go func() {
-
 			log.Println(http.ListenAndServe(s.debugListenAddress, nil))
 		}()
 	}
 
+	//开始运行集群
 	cluster.InstanceClusterMgr().Start()
+
+	//运行全局模块
 	RunGlobalModule()
+
+	//开启所有服务
 	service.InstanceServiceMgr().Start()
 
+	//监听退出信号
 	select {
 	case <-s.sigs:
-		fmt.Println("收到信号推出程序")
+		service.GetLogger().Printf(sysmodule.LEVER_WARN, "Recv stop sig")
+		fmt.Printf("Recv stop sig")
 	}
 
+	//停止运行程序
 	s.Stop()
 }
 
 func (s *COriginNode) Stop() {
-	close(s.exit)
+	close(s.exitChan)
 	s.waitGroup.Wait()
 }
 
 func NewOrginNode() *COriginNode {
+
+	//创建模块
 	node := new(COriginNode)
-	node.exit = make(chan bool)
+	node.exitChan = make(chan bool)
 	node.waitGroup = &sync.WaitGroup{}
-	InitGlobalModule(node.exit, node.waitGroup)
+
+	//初始化全局模块
+	InitGlobalModule(node.exitChan, node.waitGroup)
 	var syslogmodule sysmodule.LogModule
 	syslogmodule.Init("system", sysmodule.LEVER_INFO)
 	syslogmodule.SetModuleId(sysmodule.SYS_LOG)
 	AddModule(&syslogmodule)
 
+	//初始化集群对象
 	err := cluster.InstanceClusterMgr().Init()
 	if err != nil {
 		fmt.Print(err)
@@ -113,14 +125,4 @@ func NewOrginNode() *COriginNode {
 	}
 
 	return node
-}
-
-func HasCmdParam(param string) bool {
-	for i := 0; i < len(os.Args); i++ {
-		if os.Args[i] == param {
-			return true
-		}
-	}
-
-	return false
 }

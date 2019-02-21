@@ -1,9 +1,7 @@
 package service
 
 import (
-	"fmt"
 	"sync"
-	"time"
 )
 
 type IServiceManager interface {
@@ -49,7 +47,6 @@ func (slf *CServiceManager) Init(logger ILogger, exit chan bool, pwaitGroup *syn
 	slf.logger = logger
 	for _, s := range slf.localserviceMap {
 		(s.(IModule)).InitModule(exit, pwaitGroup)
-		//(s.(IModule)).OnInit()
 	}
 
 	return true
@@ -63,52 +60,25 @@ func (slf *CServiceManager) Start() bool {
 	return true
 }
 
-func (slf *CServiceManager) CheckServiceTimeTimeout(exit chan bool, pwaitGroup *sync.WaitGroup) {
-	defer pwaitGroup.Done()
-	for {
-		select {
-		case <-exit:
-			fmt.Println("CheckServiceTimeTimeout stopping...")
-			return
-		}
-
-		for _, s := range slf.localserviceMap {
-
-			if s.IsTimeOutTick(20000) == true {
-				Log.Printf("service:%s is timeout,state:%d", s.GetServiceName(), s.GetStatus())
-			}
-		}
-		time.Sleep(2 * time.Second)
-	}
-
-}
-
 func (slf *CServiceManager) GenServiceID() int {
 	slf.genserviceid += 1
 	return slf.genserviceid
-}
-
-func (slf *CServiceManager) Get() bool {
-	for _, s := range slf.localserviceMap {
-		go s.OnRun()
-	}
-
-	return true
 }
 
 func (slf *CServiceManager) GetLogger() ILogger {
 	return slf.logger
 }
 
-var _self *CServiceManager
+var self *CServiceManager
 
 func InstanceServiceMgr() *CServiceManager {
-	if _self == nil {
-		_self = new(CServiceManager)
-		_self.localserviceMap = make(map[string]IService)
-		return _self
+	if self == nil {
+		self = new(CServiceManager)
+		self.localserviceMap = make(map[string]IService)
+		return self
 	}
-	return _self
+
+	return self
 }
 
 func GetLogger() ILogger {

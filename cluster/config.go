@@ -7,40 +7,33 @@ import (
 )
 
 type CNodeCfg struct {
-	NodeID   int
-	NodeName string
-
+	NodeID      int
+	NodeName    string
 	ServerAddr  string
 	ServiceList []string
 	ClusterNode []string
 }
 
 type CNode struct {
-	NodeID   int
-	NodeName string
-
+	NodeID      int
+	NodeName    string
 	ServerAddr  string
 	ServiceList map[string]bool
 }
 
 type ClusterConfig struct {
-	NodeList []CNodeCfg
+	NodeList    []CNodeCfg //配置列表
+	currentNode CNode      //当前node
 
-	//通过id获取结点
-	mapIdNode map[int]CNode
-
-	//map[nodename][ {CNode} ]
+	mapIdNode             map[int]CNode      //map[nodeid] CNode
 	mapClusterNodeService map[string][]CNode //map[nodename] []CNode
 	mapClusterServiceNode map[string][]CNode //map[servicename] []CNode
-	//mapLocalService       map[string]bool    //map[servicename] bool
-
-	currentNode CNode
 }
 
-// ReadCfg ...
 func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 	c := &ClusterConfig{}
 
+	//1.加载解析配置
 	d, err := ioutil.ReadFile(path)
 	if err != nil {
 		fmt.Printf("Read File %s Error!", path)
@@ -57,8 +50,8 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 	c.mapClusterNodeService = make(map[string][]CNode, 1)
 	c.mapClusterServiceNode = make(map[string][]CNode, 1)
 
+	//2.组装mapIdNode
 	var custerNodeName []string
-	//组装mapIdNode
 	for _, v := range c.NodeList {
 		mapservice := make(map[string]bool, 1)
 		for _, s := range v.ServiceList {
@@ -75,10 +68,10 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 		}
 	}
 
-	//存入当前Node服务名
+	//3.存入当前Node服务名
 	c.mapClusterNodeService[c.currentNode.NodeName] = append(c.mapClusterNodeService[c.currentNode.NodeName], c.currentNode)
 
-	//组装mapClusterNodeService
+	//4.组装mapClusterNodeService
 	for _, cn := range custerNodeName {
 		for _, n := range c.mapIdNode {
 			if n.NodeName == cn {
@@ -87,7 +80,7 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 		}
 	}
 
-	//组装mapClusterServiceNode
+	//5.组装mapClusterServiceNode
 	for _, nodelist := range c.mapClusterNodeService { //[]Node
 		for _, node := range nodelist { //Node
 			for s := range node.ServiceList {
@@ -138,7 +131,5 @@ func (slf *ClusterConfig) GetIdByNodeService(NodeName string, serviceName string
 
 func (slf *ClusterConfig) HasLocalService(serviceName string) bool {
 	_, ok := slf.currentNode.ServiceList[serviceName]
-
-	//_, ok := slf.mapLocalService[serviceName]
 	return ok == true
 }
