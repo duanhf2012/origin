@@ -32,7 +32,7 @@ func NewWSServerService(port uint16) *WSServerService {
 
 	wss.port = port
 
-	wss.Init(wss, 0)
+	wss.Init(wss)
 	return wss
 }
 

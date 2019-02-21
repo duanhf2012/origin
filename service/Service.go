@@ -39,14 +39,13 @@ type IModule interface {
 }
 
 type IService interface {
-	Init(Iservice IService, servicetype int) error
+	Init(Iservice IService) error
 	OnInit() error
 	OnRun() bool
 	OnFetchService(iservice IService) error
 	OnSetupService(iservice IService)  //其他服务被安装
 	OnRemoveService(iservice IService) //其他服务被安装
 
-	GetServiceType() int
 	GetServiceName() string
 	SetServiceName(serviceName string) bool
 	GetServiceId() int
@@ -74,7 +73,6 @@ type BaseService struct {
 
 	serviceid   int
 	servicename string
-	servicetype int
 	Status      int
 }
 
@@ -97,10 +95,6 @@ type BaseModule struct {
 
 func (slf *BaseService) GetServiceId() int {
 	return slf.serviceid
-}
-
-func (slf *BaseService) GetServiceType() int {
-	return slf.servicetype
 }
 
 func (slf *BaseService) GetServiceName() string {
@@ -129,7 +123,7 @@ func (slf *BaseService) OnRemoveService(iservice IService) {
 	return
 }
 
-func (slf *BaseService) Init(iservice IService, servicetype int) error {
+func (slf *BaseService) Init(iservice IService) error {
 	slf.ownerService = iservice
 	slf.servicename = fmt.Sprintf("%T", iservice)
 	parts := strings.Split(slf.servicename, ".")
@@ -140,7 +134,6 @@ func (slf *BaseService) Init(iservice IService, servicetype int) error {
 	}
 
 	slf.servicename = parts[1]
-	slf.servicetype = servicetype
 	slf.serviceid = InstanceServiceMgr().GenServiceID()
 
 	return nil
