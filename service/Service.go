@@ -2,12 +2,9 @@ package service
 
 import (
 	"fmt"
-	"log"
 
-	"os"
 	"reflect"
 	"strings"
-	"time"
 )
 
 type MethodInfo struct {
@@ -27,23 +24,8 @@ type IService interface {
 	GetServiceName() string
 	SetServiceName(serviceName string) bool
 	GetServiceId() int
-	IsTimeOutTick(microSecond int64) bool
 
 	GetStatus() int
-}
-
-var Log *log.Logger
-var logFile *os.File
-
-func InitLog() {
-	fileName := "system-" + time.Now().Format("2006-01-02") + ".log"
-	var err error
-	logFile, err = os.Create(fileName)
-
-	if err != nil {
-		log.Fatalln("open file error")
-	}
-	Log = log.New(logFile, "", log.Lshortfile|log.LstdFlags)
 }
 
 type BaseService struct {
@@ -76,12 +58,9 @@ func (slf *BaseService) OnFetchService(iservice IService) error {
 }
 
 func (slf *BaseService) OnSetupService(iservice IService) {
-
-	return
 }
 
 func (slf *BaseService) OnRemoveService(iservice IService) {
-	return
 }
 
 func (slf *BaseService) Init(iservice IService) error {
@@ -98,10 +77,4 @@ func (slf *BaseService) Init(iservice IService) error {
 	slf.serviceid = InstanceServiceMgr().GenServiceID()
 
 	return nil
-}
-
-func (slf *BaseService) IsTimeOutTick(microSecond int64) bool {
-
-	nowtm := time.Now().UnixNano() / 1e6
-	return nowtm-slf.tickTime >= microSecond
 }

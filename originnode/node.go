@@ -30,7 +30,6 @@ type COriginNode struct {
 
 func (s *COriginNode) Init() {
 	//初始化全局模块
-	service.InitLog()
 	imodule := g_module.GetModuleById(sysmodule.SYS_LOG)
 	service.InstanceServiceMgr().Init(imodule.(service.ILogger), s.exitChan, s.waitGroup)
 

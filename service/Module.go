@@ -7,37 +7,37 @@ import (
 	"sync"
 )
 
+const (
+	//ModuleNone ...
+	MAX_ALLOW_SET_MODULE_ID = iota + 100000000
+	INIT_AUTO_INCREMENT
+)
+
 type IModule interface {
-	SetModuleId(moduleId uint32) bool
-	GetModuleId() uint32
-	GetModuleById(moduleId uint32) IModule
-	AddModule(module IModule) uint32
-	RunModule(module IModule)
-	InitModule(exit chan bool, pwaitGroup *sync.WaitGroup) error
+	OnInit() error //Module初始化时调用
+	OnRun() bool   //Module运行时调用
 
-	OnInit() error
-	OnRun() bool
+	SetModuleId(moduleId uint32)           //手动设置ModuleId
+	GetModuleId() uint32                   //获取ModuleId
+	GetModuleById(moduleId uint32) IModule //通过ModuleId获取Module
+	AddModule(module IModule) uint32       //添加Module
+	ReleaseModule(moduleId uint32) bool    //释放Module
 
-	GetOwnerService() IService
-	SetOwnerService(iservice IService)
+	SetSelf(module IModule)            //设置保存自己interface
+	GetSelf() IModule                  //获取自己interface
+	SetOwner(module IModule)           //设置父Module
+	GetOwner() IModule                 //获取父Module
+	SetOwnerService(iservice IService) //设置拥有者服务
+	GetOwnerService() IService         //获取拥有者服务
+	GetRoot() IModule                  //获取Root根Module
 
-	SetOwner(module IModule)
-	GetOwner() IModule
-	SetSelf(module IModule)
-	GetSelf() IModule
-	getBaseModule() *BaseModule
-	GetRoot() IModule
-
-	ReleaseModule(moduleId uint32) bool
+	RunModule(module IModule)                                    //手动运行Module
+	InitModule(exit chan bool, pwaitGroup *sync.WaitGroup) error //手动初始化Module
+	getBaseModule() *BaseModule                                  //获取BaseModule指针
 }
 
 type BaseModule struct {
 	moduleId uint32
-
-	tickTime int64
-
-	ExitChan  chan bool
-	WaitGroup *sync.WaitGroup
 
 	ownerService IService
 	mapModule    map[uint32]IModule
@@ -45,9 +45,11 @@ type BaseModule struct {
 	selfModule   IModule
 
 	CurrMaxModuleId uint32
-	rwModuleLocker  *sync.RWMutex
+	corouterstatus  int32 //0表示运行状态 //1释放消亡状态
 
-	corouterstatus int32 //0表示运行状态   //1释放消亡状态
+	rwModuleLocker *sync.RWMutex
+	ExitChan       chan bool
+	WaitGroup      *sync.WaitGroup
 }
 
 func (slf *BaseModule) GetRoot() IModule {
@@ -66,10 +68,8 @@ func (slf *BaseModule) getLocker() *sync.RWMutex {
 	return slf.rwModuleLocker
 }
 
-func (slf *BaseModule) SetModuleId(moduleId uint32) bool {
-
+func (slf *BaseModule) SetModuleId(moduleId uint32) {
 	slf.moduleId = moduleId
-	return true
 }
 
 func (slf *BaseModule) GetModuleId() uint32 {
@@ -79,22 +79,21 @@ func (slf *BaseModule) GetModuleId() uint32 {
 func (slf *BaseModule) GetModuleById(moduleId uint32) IModule {
 	locker := slf.GetRoot().getBaseModule().getLocker()
 	locker.Lock()
-	defer locker.Unlock()
 
 	ret, ok := slf.mapModule[moduleId]
 	if ok == false {
 
+		locker.Unlock()
 		return nil
 	}
 
+	locker.Unlock()
 	return ret
 }
 
 func (slf *BaseModule) genModuleId() uint32 {
-	//slf.rwModuleLocker.Lock()
 	slf.CurrMaxModuleId++
 	moduleId := slf.CurrMaxModuleId
-	//slf.rwModuleLocker.Unlock()
 
 	return moduleId
 }
@@ -105,14 +104,13 @@ func (slf *BaseModule) deleteModule(moduleId uint32) bool {
 		GetLogger().Printf(LEVER_WARN, "RemoveModule fail %d...", moduleId)
 		return false
 	}
+
 	//协程退出
 	atomic.AddInt32(&module.getBaseModule().corouterstatus, 1)
 	module.getBaseModule().ownerService = nil
 	module.getBaseModule().mapModule = nil
 	module.getBaseModule().ownerModule = nil
 	module.getBaseModule().selfModule = nil
-	//module.getBaseModule().ExitChan = nil
-	//module.getBaseModule().WaitGroup = nil
 
 	delete(slf.mapModule, moduleId)
 
@@ -138,24 +136,14 @@ func (slf *BaseModule) releaseModule(moduleId uint32) bool {
 func (slf *BaseModule) ReleaseModule(moduleId uint32) bool {
 	locker := slf.GetRoot().getBaseModule().getLocker()
 	locker.Lock()
-	defer locker.Unlock()
-
 	slf.releaseModule(moduleId)
-
+	locker.Unlock()
 	return true
 }
 
 func (slf *BaseModule) IsRoot() bool {
 	return slf.GetOwner() == slf.GetSelf()
-
-	//	return slf.GetOwner().GetModuleById(slf.GetModuleId()) == nil
 }
-
-const (
-	//ModuleNone ...
-	MAX_ALLOW_SET_MODULE_ID = iota + 100000000
-	INIT_AUTO_INCREMENT
-)
 
 func (slf *BaseModule) GetSelf() IModule {
 	if slf.selfModule == nil {
@@ -168,11 +156,13 @@ func (slf *BaseModule) GetSelf() IModule {
 func (slf *BaseModule) AddModule(module IModule) uint32 {
 	//消亡状态不允许加入模块
 	if atomic.LoadInt32(&slf.corouterstatus) != 0 {
+		GetLogger().Printf(LEVER_ERROR, "%T Cannot AddModule %T", slf.GetSelf(), module.GetSelf())
 		return 0
 	}
 
 	//用户设置的id不允许大于MAX_ALLOW_SET_MODULE_ID
 	if module.GetModuleId() > MAX_ALLOW_SET_MODULE_ID {
+		GetLogger().Printf(LEVER_ERROR, "Module Id %d is error  %T", module.GetModuleId(), module.GetSelf())
 		return 0
 	}
 
@@ -270,12 +260,13 @@ func (slf *BaseModule) RunModule(module IModule) {
 	defer slf.WaitGroup.Done()
 	for {
 		if atomic.LoadInt32(&slf.corouterstatus) != 0 {
+			GetLogger().Printf(LEVER_INFO, "Stopping module %T id is %d...", slf.GetSelf(), module.GetModuleId())
 			break
 		}
 
 		select {
 		case <-slf.ExitChan:
-			GetLogger().Printf(LEVER_WARN, "Stopping module %T...", slf.GetSelf())
+			GetLogger().Printf(LEVER_INFO, "Stopping module %T...", slf.GetSelf())
 			fmt.Println("Stopping module %T...", slf.GetSelf())
 			return
 		default:
@@ -284,6 +275,5 @@ func (slf *BaseModule) RunModule(module IModule) {
 		if module.OnRun() == false {
 			return
 		}
-		//slf.tickTime = time.Now().UnixNano() / 1e6
 	}
 }
