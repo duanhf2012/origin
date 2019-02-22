@@ -38,5 +38,5 @@ func InitGlobalModule(exit chan bool, pwaitGroup *sync.WaitGroup) {
 }
 
 func RunGlobalModule() {
-	g_module.RunModule(&g_module)
+	go g_module.RunModule(&g_module)
 }

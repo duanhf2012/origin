@@ -67,6 +67,7 @@ func (s *COriginNode) SetupService(services ...service.IService) {
 		}
 		services[i].(service.IModule).SetOwnerService(services[i])
 		services[i].(service.IModule).SetOwner(services[i].(service.IModule))
+		services[i].(service.IModule).SetSelf(services[i].(service.IModule))
 	}
 
 }
