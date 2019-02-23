@@ -20,7 +20,7 @@ const (
 	LEVEL_MAX    = 6
 )
 
-var LogPrefix = [LEVEL_MAX]string{"[UNKNOW]", "[DEBUG]", "[INFO]", "[WARN]", "[ERROR]", "[FATAL]"}
+var LogPrefix = [LEVEL_MAX]string{"[UNKNOW]", "[DEBUG]", "[INFO ]", "[WARN ]", "[ERROR]", "[FATAL]"}
 
 type ILogger interface {
 	Printf(level uint, format string, v ...interface{})
@@ -79,7 +79,7 @@ func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
 	}
 
 	slf.CheckAndGenFile()
-	slf.GetLoggerByLevel(level).Printf(format, v...)
+	slf.GetLoggerByLevel(level).Output(3, fmt.Sprintf(format, v...))
 }
 
 func (slf *LogModule) Print(level uint, v ...interface{}) {
@@ -88,5 +88,5 @@ func (slf *LogModule) Print(level uint, v ...interface{}) {
 	}
 
 	slf.CheckAndGenFile()
-	slf.GetLoggerByLevel(level).Print(v...)
+	slf.GetLoggerByLevel(level).Output(3, fmt.Sprint(v...))
 }
