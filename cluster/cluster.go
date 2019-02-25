@@ -212,7 +212,7 @@ func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply inte
 	}
 
 	nodeid := nodeidList[0]
-	if nodeid == slf.GetCurrentNodeId() {
+	if nodeid == GetNodeId() {
 		return slf.LocalRpcClient.Call(callServiceName, args, reply)
 	} else {
 		pclient := slf.GetClusterClient(nodeid)
@@ -253,7 +253,7 @@ func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *stri
 		nodeidList = make([]int, 0)
 		if servicename[:1] == "_" {
 			servicename = servicename[1:]
-			nodeidList = append(nodeidList, slf.GetCurrentNodeId())
+			nodeidList = append(nodeidList, GetNodeId())
 		} else {
 			nodeidList = slf.cfg.GetIdByService(servicename)
 		}
@@ -278,7 +278,7 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) 
 	}
 
 	for _, nodeid := range nodeidList {
-		if nodeid == slf.GetCurrentNodeId() {
+		if nodeid == GetNodeId() {
 			replyCall := slf.LocalRpcClient.Go(callServiceName, args, nil, nil)
 			if replyCall.Error != nil {
 				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
