@@ -378,6 +378,6 @@ func (slf *CCluster) HasLocalService(serviceName string) bool {
 	return slf.cfg.HasLocalService(serviceName)
 }
 
-func (slf *CCluster) GetCurrentNodeId() int {
-	return slf.cfg.currentNode.NodeID
+func GetNodeId() int {
+	return _self.cfg.currentNode.NodeID
 }
