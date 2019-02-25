@@ -94,7 +94,7 @@ func (slf *DBResult) UnMarshal(out interface{}) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(tbm)
+	//fmt.Println(tbm)
 	v := reflect.ValueOf(out)
 	if v.Kind() != reflect.Ptr {
 		return errors.New("interface must be a pointer")
