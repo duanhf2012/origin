@@ -10,6 +10,7 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
+//最大redis信道任务量
 const (
 	MAX_TASK_CHANNEL = 10240
 )
@@ -67,7 +68,7 @@ func (slf *RedisModule) Init(redisCfg *ConfigRedis) {
 			}
 			c, err := redis.Dial("tcp", redisServer, opt...)
 			if err != nil {
-				fmt.Println(err)
+				service.GetLogger().Printf(service.LEVER_ERROR, "Connect redis fail reason:%v", err)
 				return nil, err
 			}
 
@@ -79,6 +80,10 @@ func (slf *RedisModule) Init(redisCfg *ConfigRedis) {
 				return nil
 			}
 			_, err := c.Do("PING")
+			if err != nil {
+				service.GetLogger().Printf(service.LEVER_WARN, "Do PING fail reason:%v", err)
+				return err
+			}
 			return err
 		},
 	}
@@ -96,7 +101,8 @@ func (slf *RedisModule) RunAnsyTask() {
 
 func (slf *RedisModule) GoTask(fc Func) error {
 	if len(slf.redisTask) >= MAX_TASK_CHANNEL {
-		return fmt.Errorf("chanel recover max channel.")
+		service.GetLogger().Printf(service.LEVER_ERROR, "Redis task channel recover max.")
+		return fmt.Errorf("Redis task channel recover max.")
 	}
 
 	slf.redisTask <- fc
@@ -107,12 +113,17 @@ func (slf *RedisModule) GoTask(fc Func) error {
 func (slf *RedisModule) getConn() (redis.Conn, error) {
 	conn := slf.redispool.Get()
 	if conn == nil {
-		return nil, fmt.Errorf("not get connection")
+		service.GetLogger().Printf(service.LEVER_ERROR, "Cannot get connection")
+		return nil, fmt.Errorf("Cannot get connection")
 	}
 
 	if conn.Err() != nil {
-		defer conn.Close()
-		return nil, conn.Err()
+		err := conn.Err()
+		if err != nil {
+			service.GetLogger().Printf(service.LEVER_WARN, "Get Conn have error,reason:%v", err)
+		}
+		conn.Close()
+		return nil, err
 	}
 	return conn, nil
 }
@@ -127,6 +138,7 @@ func (slf *RedisModule) TestPingRedis() error {
 
 	err = slf.redispool.TestOnBorrow(conn, time.Now())
 	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "TestOnBorrow fail,reason:%v", err)
 		return err
 	}
 
@@ -150,7 +162,7 @@ func (slf *RedisModule) GoSetString(key, value string, err *RetError) {
 func (slf *RedisModule) SetStringExpire(key, value, expire string) (err error) {
 	err = slf.setStringByExpire(key, value, expire)
 
-	return
+	return err
 }
 
 func (slf *RedisModule) GoSetStringExpire(key, value string, expire string, err *RetError) error {
@@ -177,7 +189,7 @@ func (slf *RedisModule) GoSetStringExpire(key, value string, expire string, err 
 func (slf *RedisModule) SetStringJSON(key string, val interface{}) (err error) {
 	err = slf.SetStringJSONExpire(key, val, "-1")
 
-	return
+	return err
 }
 
 func (slf *RedisModule) GoSetStringJSON(key string, val interface{}, err *RetError) {
@@ -191,7 +203,7 @@ func (slf *RedisModule) SetStringJSONExpire(key string, val interface{}, expire 
 		err = slf.setStringByExpire(key, string(temp), expire)
 	}
 
-	return
+	return err
 }
 
 func (slf *RedisModule) GoSetStringJSONExpire(key string, val interface{}, expire string, retErr *RetError) error {
@@ -200,6 +212,7 @@ func (slf *RedisModule) GoSetStringJSONExpire(key string, val interface{}, expir
 		slf.GoSetStringExpire(key, string(temp), expire, retErr)
 		return nil
 	} else {
+		service.GetLogger().Printf(service.LEVER_ERROR, "GoSetStringJSONExpire fail,reason:%v", err)
 		retErr.resultChan <- err
 	}
 	return err
@@ -225,12 +238,14 @@ func (slf *RedisModule) setStringByExpire(key, value, expire string) error {
 	}
 
 	if retErr != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "setStringByExpire fail,reason:%v", retErr)
 		return retErr
 	}
 
 	_, ok := ret.(string)
 	if !ok {
-		retErr = errors.New("Func[SetRedisString] Redis Data Error")
+		retErr = errors.New("setStringByExpire redis data is error")
+		service.GetLogger().Printf(service.LEVER_ERROR, "setStringByExpire redis data is error")
 		return retErr
 	}
 
@@ -276,8 +291,10 @@ func (slf *RedisModule) GoSetMuchStringExpire(mapInfo map[string]string, expire 
 
 func (slf *RedisModule) setMuchStringByExpire(mapInfo map[string]string, expire string) error {
 	if len(mapInfo) <= 0 {
-		return errors.New("Save Info Is Empty")
+		service.GetLogger().Printf(service.LEVER_ERROR, "setMuchStringByExpire  Info Is Empty")
+		return errors.New("setMuchStringByExpire  Info Is Empty")
 	}
+
 	conn, err := slf.getConn()
 	if err != nil {
 		return err
@@ -297,10 +314,10 @@ func (slf *RedisModule) setMuchStringByExpire(mapInfo map[string]string, expire 
 	_, err = conn.Do("EXEC")
 
 	if err != nil {
-		return err
+		service.GetLogger().Printf(service.LEVER_ERROR, "setMuchStringByExpire fail,reason:%v", err)
 	}
 
-	return nil
+	return err
 }
 
 //GetRedisString redis获取string类型数据
@@ -314,17 +331,19 @@ func (slf *RedisModule) GetString(key string) (string, error) {
 
 	ret, err := conn.Do("GET", key)
 	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetString fail,reason:%v", err)
 		return "", err
 	}
 
 	if ret == nil {
-		err = errors.New("Func[GetRedisString] Key Is Not Exist")
+		err = errors.New("GetString key is not exist!")
 		return "", err
 	}
 
 	str, ok := ret.([]byte)
 	if !ok {
-		err = errors.New("Func[GetRedisString] Redis Data Error")
+		err = errors.New("GetString redis data is error")
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetString redis data is error")
 		return "", err
 	}
 
@@ -342,21 +361,24 @@ func (slf *RedisModule) GetStringJSON(key string, st interface{}) error {
 
 	ret, err := conn.Do("GET", key)
 	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetStringJSON fail,reason:%v", err)
 		return err
 	}
 
 	if ret == nil {
-		err = errors.New("Func[GetRedisString] Key Is Not Exist")
+		err = errors.New("GetStringJSON Key is not exist")
 		return err
 	}
 
 	str, ok := ret.([]byte)
 	if !ok {
-		err = errors.New("Func[GetRedisString] Redis Data Error")
+		err = errors.New("GetStringJSON redis data is error!")
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetStringJSON redis data is error!")
 		return err
 	}
 
 	if err = json.Unmarshal(str, st); err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetStringJSON fail json.Unmarshal is error,reason:%v", err)
 		return err
 	}
 
@@ -379,7 +401,11 @@ func (slf *RedisModule) GetMuchString(keys []string) (retMap map[string]string, 
 	defer conn.Close()
 
 	// 开始Send数据
-	conn.Send("MULTI")
+	err = conn.Send("MULTI")
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetMuchString fail %v", err)
+		return nil, err
+	}
 	for _, val := range keys {
 		conn.Send("GET", val)
 	}
@@ -387,6 +413,7 @@ func (slf *RedisModule) GetMuchString(keys []string) (retMap map[string]string, 
 	ret, err := conn.Do("EXEC")
 
 	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetMuchString fail %v", err)
 		return
 	}
 
@@ -417,7 +444,8 @@ func (slf *RedisModule) GetMuchString(keys []string) (retMap map[string]string, 
 //GetMuchRedisStringJSON(&temp)
 func (slf *RedisModule) GetMuchStringJSON(keys map[string]interface{}) error {
 	if len(keys) <= 0 {
-		err := errors.New("Func[GetMuchRedisStringJSON] Keys Is Empty")
+		err := errors.New("GetMuchStringJSON fail key is empty")
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetMuchStringJSON fail key is empty")
 		return err
 	}
 	conn, err := slf.getConn()
@@ -428,6 +456,7 @@ func (slf *RedisModule) GetMuchStringJSON(keys map[string]interface{}) error {
 
 	// 开始Send数据
 	conn.Send("MULTI")
+
 	var tempKeys []string
 	for key := range keys {
 		tempKeys = append(tempKeys, key)
@@ -437,6 +466,7 @@ func (slf *RedisModule) GetMuchStringJSON(keys map[string]interface{}) error {
 	ret, err := conn.Do("EXEC")
 
 	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetMuchStringJSON fail, reason:%v", err)
 		return err
 	}
 
@@ -454,7 +484,11 @@ func (slf *RedisModule) GetMuchStringJSON(keys map[string]interface{}) error {
 			continue
 		}
 
-		json.Unmarshal(strVal, keys[tempKeys[index]])
+		err = json.Unmarshal(strVal, keys[tempKeys[index]])
+		if err != nil {
+			service.GetLogger().Printf(service.LEVER_ERROR, "GetMuchStringJSON Unmarshal fail, reason:%v", err)
+			return err
+		}
 	}
 
 	return nil
@@ -471,6 +505,7 @@ func (slf *RedisModule) DelString(key string) error {
 
 	ret, err := conn.Do("DEL", key)
 	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "DelString fail, reason:%v", err)
 		return err
 	}
 
@@ -546,6 +581,7 @@ func (slf *RedisModule) DelMuchString(keys []string) (map[string]bool, error) {
 	ret, err := conn.Do("EXEC")
 
 	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "DelMuchString fail,reason:%v", err)
 		return nil, err
 	}
 
@@ -583,12 +619,11 @@ func (slf *RedisModule) SetHash(redisKey, hashKey, value string) error {
 	defer conn.Close()
 
 	_, retErr := conn.Do("HSET", redisKey, hashKey, value)
-
 	if retErr != nil {
-		return retErr
+		service.GetLogger().Printf(service.LEVER_ERROR, "SetHash fail,reason:%v", retErr)
 	}
 
-	return nil
+	return retErr
 }
 
 func (slf *RedisModule) GoSetHash(redisKey, hashKey, value string, err *RetError) {
@@ -619,7 +654,7 @@ func (slf *RedisModule) GetAllHashJSON(redisKey string) (map[string]string, erro
 
 	value, err := redis.Values(conn.Do("HGETALL", redisKey))
 	if err != nil {
-		fmt.Println(err)
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetAllHashJSON fail,reason:%v", err)
 		return nil, err
 	}
 
@@ -630,6 +665,7 @@ func (slf *RedisModule) GetAllHashJSON(redisKey string) (map[string]string, erro
 func (slf *RedisModule) GetHashValueByKey(redisKey string, fieldKey string) (string, error) {
 
 	if redisKey == "" || fieldKey == "" {
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetHashValueByKey key is empty!")
 		return "", errors.New("Key Is Empty")
 	}
 	conn, err := slf.getConn()
@@ -640,7 +676,7 @@ func (slf *RedisModule) GetHashValueByKey(redisKey string, fieldKey string) (str
 
 	value, err := conn.Do("HGET", redisKey, fieldKey)
 	if err != nil {
-		fmt.Println(err)
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetHashValueByKey fail,reason:%v", err)
 		return "", err
 	}
 	if value == nil {
@@ -701,12 +737,10 @@ func (slf *RedisModule) SetMuchHashJSON(redisKey string, value map[string][]inte
 	}
 	// 执行命令
 	_, err = conn.Do("EXEC")
-
 	if err != nil {
-		return err
+		service.GetLogger().Printf(service.LEVER_ERROR, "SetMuchHashJSON fail,reason:%v", err)
 	}
-
-	return nil
+	return err
 }
 
 func (slf *RedisModule) GoSetMuchHashJSON(redisKey string, value map[string][]interface{}, err *RetError) {
@@ -774,12 +808,10 @@ func (slf *RedisModule) DelMuchHash(redisKey string, hsahKey []string) error {
 	}
 
 	_, retErr := conn.Do("HDEL", arg...)
-
 	if retErr != nil {
-		return retErr
+		service.GetLogger().Printf(service.LEVER_ERROR, "DelMuchHash fail,reason:%v", retErr)
 	}
-
-	return nil
+	return retErr
 }
 
 //gosetRedisList
@@ -818,19 +850,16 @@ func (slf *RedisModule) setList(key string, value []string, setType string) erro
 		arg = append(arg, k)
 	}
 	_, retErr := conn.Do(setType, arg...)
-
 	if retErr != nil {
-		return retErr
+		service.GetLogger().Printf(service.LEVER_ERROR, "setList fail,reason:%v", retErr)
 	}
-
-	return nil
+	return retErr
 }
 
 //SetRedisListLpush ...
 func (slf *RedisModule) SetListLpush(key, value string) error {
 	tempVal := []string{value}
 	err := slf.setList(key, tempVal, "LPUSH")
-
 	return err
 }
 
@@ -856,8 +885,9 @@ func (slf *RedisModule) SetListJSONLpush(key string, value interface{}) error {
 	if err == nil {
 		tempVal := []string{string(temp)}
 		err = slf.setList(key, tempVal, "LPUSH")
+	} else {
+		service.GetLogger().Printf(service.LEVER_ERROR, "SetListJSONLpush fail,reason:%v", err)
 	}
-
 	return err
 }
 
@@ -891,7 +921,13 @@ func (slf *RedisModule) GoSetMuchListJSONLpush(key string, value []interface{}, 
 func (slf *RedisModule) SetMuchListJSONLpush(key string, value []interface{}) error {
 	tempVal := []string{}
 	for _, val := range value {
-		if temp, err := json.Marshal(val); err == nil {
+		temp, err := json.Marshal(val)
+		if err != nil {
+			service.GetLogger().Printf(service.LEVER_ERROR, "SetMuchListJSONLpush fail,reason:%v", err)
+			return err
+		}
+
+		if err == nil {
 			tempVal = append(tempVal, string(temp))
 		}
 	}
@@ -929,6 +965,8 @@ func (slf *RedisModule) SetListJSONRpush(key string, value interface{}) error {
 	if err == nil {
 		tempVal := []string{string(temp)}
 		err = slf.setList(key, tempVal, "RPUSH")
+	} else {
+		service.GetLogger().Printf(service.LEVER_ERROR, "SetListJSONRpush fail,reason:%v", err)
 	}
 
 	return err
@@ -982,6 +1020,7 @@ func (slf *RedisModule) Lrange(key string, start, end int) ([]string, error) {
 
 	reply, err := conn.Do("lrange", key, start, end)
 	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "SetListJSONRpush fail,reason:%v", err)
 		return nil, err
 	}
 
