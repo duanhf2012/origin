@@ -44,6 +44,8 @@ func (s *COriginNode) OpenDebugCheck(listenAddress string) {
 
 func (s *COriginNode) SetupService(services ...service.IService) {
 	for i := 0; i < len(services); i++ {
+		services[i].Init(services[i])
+
 		if cluster.InstanceClusterMgr().HasLocalService(services[i].GetServiceName()) == true {
 			service.InstanceServiceMgr().Setup(services[i])
 		}
