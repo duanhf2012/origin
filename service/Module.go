@@ -16,7 +16,7 @@ const (
 type IModule interface {
 	OnInit() error //Module初始化时调用
 	OnRun() bool   //Module运行时调用
-
+	OnEndRun()
 	SetModuleId(moduleId uint32)           //手动设置ModuleId
 	GetModuleId() uint32                   //获取ModuleId
 	GetModuleById(moduleId uint32) IModule //通过ModuleId获取Module
@@ -217,6 +217,9 @@ func (slf *BaseModule) OnRun() bool {
 	return false
 }
 
+func (slf *BaseModule) OnEndRun() {
+}
+
 func (slf *BaseModule) SetOwner(ownerModule IModule) {
 	slf.ownerModule = ownerModule
 }
@@ -260,12 +263,14 @@ func (slf *BaseModule) RunModule(module IModule) {
 	defer slf.WaitGroup.Done()
 	for {
 		if atomic.LoadInt32(&slf.corouterstatus) != 0 {
+			slf.OnEndRun()
 			GetLogger().Printf(LEVER_INFO, "Stopping module %T id is %d...", slf.GetSelf(), module.GetModuleId())
 			break
 		}
 
 		select {
 		case <-slf.ExitChan:
+			slf.OnEndRun()
 			GetLogger().Printf(LEVER_INFO, "Stopping module %T...", slf.GetSelf())
 			fmt.Println("Stopping module %T...", slf.GetSelf())
 			return
@@ -273,6 +278,7 @@ func (slf *BaseModule) RunModule(module IModule) {
 		}
 
 		if module.OnRun() == false {
+			slf.OnEndRun()
 			return
 		}
 	}
