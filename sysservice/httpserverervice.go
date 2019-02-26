@@ -61,7 +61,6 @@ func NewHttpServerService(port uint16) *HttpServerService {
 	http := new(HttpServerService)
 
 	http.port = port
-	http.Init(http)
 	return http
 }
 
