@@ -24,10 +24,11 @@ const (
 type DBModule struct {
 	service.BaseModule
 	db       *sql.DB
-	URL      string
-	UserName string
-	Password string
-	DBName   string
+	url      string
+	username string
+	password string
+	dbname   string
+	maxconn  int
 
 	syncExecuteFun   chan SyncFun
 	syncCoroutineNum int
@@ -44,10 +45,23 @@ type DBResult struct {
 	blur bool
 }
 
-//OnInit ...
-func (slf *DBModule) OnInit() error {
+func (slf *DBModule) Init(maxConn int, url string, userName string, password string, dbname string) error {
+	slf.url = url
+	slf.maxconn = maxConn
+	slf.username = userName
+	slf.password = password
+	slf.dbname = dbname
 	slf.syncExecuteFun = make(chan SyncFun, MAX_EXECUTE_FUN)
-	return slf.Connect(10)
+
+	return slf.Connect(slf.maxconn)
+}
+
+func (slf *DBModule) OnInit() error {
+	for i := 0; i < slf.syncCoroutineNum; i++ {
+		go slf.RunExecuteDBCoroutine()
+	}
+
+	return nil
 }
 
 //Close ...
@@ -234,10 +248,10 @@ func (slf *DBResult) mapSlice2interface(data []map[string]string, in interface{}
 // Connect ...
 func (slf *DBModule) Connect(maxConn int) error {
 	cmd := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&parseTime=true&loc=%s",
-		slf.UserName,
-		slf.Password,
-		slf.URL,
-		slf.DBName,
+		slf.username,
+		slf.password,
+		slf.url,
+		slf.dbname,
 		url.QueryEscape(time.Local.String()))
 
 	db, err := sql.Open("mysql", cmd)
@@ -256,9 +270,7 @@ func (slf *DBModule) Connect(maxConn int) error {
 	db.SetConnMaxLifetime(time.Second * 90)
 
 	slf.syncCoroutineNum = maxConn
-	for i := 0; i < slf.syncCoroutineNum; i++ {
-		go slf.RunExecuteDBCoroutine()
-	}
+
 	return nil
 }
 
@@ -356,7 +368,6 @@ func (slf *DBModule) RunExecuteDBCoroutine() {
 		select {
 		case <-slf.ExitChan:
 			service.GetLogger().Printf(LEVER_WARN, "stopping module %s...", fmt.Sprintf("%T", slf))
-			fmt.Println("stopping module %s...", fmt.Sprintf("%T", slf))
 			return
 		case fun := <-slf.syncExecuteFun:
 			fun()

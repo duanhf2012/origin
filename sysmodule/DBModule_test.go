@@ -1,6 +1,7 @@
 package sysmodule_test
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/duanhf2012/origin/sysmodule"
@@ -8,14 +9,12 @@ import (
 )
 
 func TestDBModule(t *testing.T) {
-	db := sysmodule.DBModule{
-		URL:      "192.168.0.5:3306",
-		UserName: "root",
-		Password: "Root!!2018",
-		DBName:   "QuantFundsDB",
-	}
-	db.Connect(100)
+	db := sysmodule.DBModule{}
+	db.ExitChan = make(chan bool)
+	db.WaitGroup = new(sync.WaitGroup)
 
+	db.Init(100, "192.168.0.5:3306", "root", "Root!!2018", "QuantFundsDB")
+	db.OnInit()
 	res := db.Query("select * from tbl_fun_heelthrow where id >= 1")
 	if res.Err != nil {
 		t.Error(res.Err)

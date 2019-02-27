@@ -10,7 +10,7 @@ import (
 
 func TestHttpClientPoolModule(t *testing.T) {
 	c := sysmodule.HttpClientPoolModule{}
-	c.Init(10)
+	c.Init(10, "")
 
 	rsp := c.Request(http.MethodGet, "https://www.baidu.com/", nil, nil)
 	fmt.Println(rsp.Err)
