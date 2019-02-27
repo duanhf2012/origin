@@ -1,10 +1,11 @@
 package service
 
 import (
-	"fmt"
 	"sync/atomic"
 
 	"sync"
+
+	"github.com/duanhf2012/origin/util"
 )
 
 const (
@@ -260,31 +261,37 @@ func (slf *BaseModule) RunModule(module IModule) {
 	if err != nil {
 		GetLogger().Printf(LEVER_ERROR, "Start module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
 	} else {
-		GetLogger().Printf(LEVER_INFO, "Start module %T id is %d...", module, module.GetModuleId())
+		GetLogger().Printf(LEVER_INFO, "Start module %T ...", module)
 	}
 
 	//运行所有子模块
+	timer := util.Timer{}
+	timer.SetupTimer(1000)
 	slf.WaitGroup.Add(1)
 	defer slf.WaitGroup.Done()
 	for {
-		if atomic.LoadInt32(&slf.corouterstatus) != 0 {
-			module.OnEndRun()
-			GetLogger().Printf(LEVER_INFO, "Stopping module %T id is %d...", module, module.GetModuleId())
-			break
-		}
+		//每500ms检查退出
+		if timer.CheckTimeOut() {
+			if atomic.LoadInt32(&slf.corouterstatus) != 0 {
+				module.OnEndRun()
+				GetLogger().Printf(LEVER_INFO, "OnEndRun module %T ...", module)
+				break
+			}
 
-		select {
-		case <-slf.ExitChan:
-			module.OnEndRun()
-			GetLogger().Printf(LEVER_INFO, "Stopping module %T...", module)
-			fmt.Printf("Stopping module %T...\n", module)
-			return
-		default:
+			select {
+			case <-slf.ExitChan:
+				module.OnEndRun()
+				GetLogger().Printf(LEVER_INFO, "OnEndRun module %T...", module)
+				return
+			default:
+			}
 		}
 
 		if module.OnRun() == false {
 			module.OnEndRun()
+			GetLogger().Printf(LEVER_INFO, "OnEndRun module %T...", module)
 			return
 		}
 	}
+
 }
