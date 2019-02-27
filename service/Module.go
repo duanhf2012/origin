@@ -256,29 +256,34 @@ func (slf *BaseModule) getBaseModule() *BaseModule {
 }
 
 func (slf *BaseModule) RunModule(module IModule) {
-	module.OnInit()
+	err := module.OnInit()
+	if err != nil {
+		GetLogger().Printf(LEVER_ERROR, "Start module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
+	} else {
+		GetLogger().Printf(LEVER_INFO, "Start module %T id is %d...", module, module.GetModuleId())
+	}
 
 	//运行所有子模块
 	slf.WaitGroup.Add(1)
 	defer slf.WaitGroup.Done()
 	for {
 		if atomic.LoadInt32(&slf.corouterstatus) != 0 {
-			slf.OnEndRun()
-			GetLogger().Printf(LEVER_INFO, "Stopping module %T id is %d...", slf.GetSelf(), module.GetModuleId())
+			module.OnEndRun()
+			GetLogger().Printf(LEVER_INFO, "Stopping module %T id is %d...", module, module.GetModuleId())
 			break
 		}
 
 		select {
 		case <-slf.ExitChan:
-			slf.OnEndRun()
-			GetLogger().Printf(LEVER_INFO, "Stopping module %T...", slf.GetSelf())
-			fmt.Println("Stopping module %T...", slf.GetSelf())
+			module.OnEndRun()
+			GetLogger().Printf(LEVER_INFO, "Stopping module %T...", module)
+			fmt.Printf("Stopping module %T...\n", module)
 			return
 		default:
 		}
 
 		if module.OnRun() == false {
-			slf.OnEndRun()
+			module.OnEndRun()
 			return
 		}
 	}

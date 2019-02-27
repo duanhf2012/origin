@@ -2,13 +2,9 @@ package originnode
 
 import (
 	_ "net/http/pprof"
-	"sync"
-
-	"github.com/duanhf2012/origin/sysmodule"
-
-	"github.com/duanhf2012/origin/service"
 )
 
+/*
 type GlobalModule struct {
 	service.BaseModule
 }
@@ -40,3 +36,4 @@ func InitGlobalModule(exit chan bool, pwaitGroup *sync.WaitGroup) {
 func RunGlobalModule() {
 	go g_module.RunModule(&g_module)
 }
+*/

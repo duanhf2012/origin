@@ -14,6 +14,7 @@ import (
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/sysmodule"
+	"github.com/duanhf2012/origin/sysservice"
 )
 
 type CExitCtl struct {
@@ -30,8 +31,8 @@ type COriginNode struct {
 
 func (s *COriginNode) Init() {
 	//初始化全局模块
-	imodule := g_module.GetModuleById(sysmodule.SYS_LOG)
-	service.InstanceServiceMgr().Init(imodule.(service.ILogger), s.exitChan, s.waitGroup)
+	logger := service.InstanceServiceMgr().FindService("syslog").(service.ILogger)
+	service.InstanceServiceMgr().Init(logger, s.exitChan, s.waitGroup)
 
 	s.sigs = make(chan os.Signal, 1)
 	signal.Notify(s.sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -83,9 +84,6 @@ func (s *COriginNode) Start() {
 	//开始运行集群
 	cluster.InstanceClusterMgr().Start()
 
-	//运行全局模块
-	RunGlobalModule()
-
 	//开启所有服务
 	service.InstanceServiceMgr().Start()
 
@@ -112,12 +110,10 @@ func NewOrginNode() *COriginNode {
 	node.exitChan = make(chan bool)
 	node.waitGroup = &sync.WaitGroup{}
 
-	//初始化全局模块
-	InitGlobalModule(node.exitChan, node.waitGroup)
-	var syslogmodule sysmodule.LogModule
-	syslogmodule.Init("system", sysmodule.LEVER_INFO)
-	syslogmodule.SetModuleId(sysmodule.SYS_LOG)
-	AddModule(&syslogmodule)
+	//安装系统服务
+	syslogservice := &sysservice.LogService{}
+	syslogservice.InitLog("syslog", sysmodule.LEVER_INFO)
+	service.InstanceServiceMgr().Setup(syslogservice)
 
 	//初始化集群对象
 	err := cluster.InstanceClusterMgr().Init()

@@ -18,7 +18,6 @@ type CServiceManager struct {
 }
 
 func (slf *CServiceManager) Setup(s IService) bool {
-
 	slf.localserviceMap[s.GetServiceName()] = s
 	return true
 }
@@ -43,7 +42,6 @@ func (slf *CServiceManager) FetchService(s FetchService) IService {
 }
 
 func (slf *CServiceManager) Init(logger ILogger, exit chan bool, pwaitGroup *sync.WaitGroup) bool {
-
 	slf.logger = logger
 	for _, s := range slf.localserviceMap {
 		(s.(IModule)).InitModule(exit, pwaitGroup)

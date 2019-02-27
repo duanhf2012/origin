@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/duanhf2012/origin/service"
@@ -34,6 +35,7 @@ type LogModule struct {
 	logger      [LEVEL_MAX]*log.Logger
 	logFile     *os.File
 	openLevel   uint
+	locker      sync.Mutex
 }
 
 func (slf *LogModule) GetCurrentFileName() string {
@@ -41,7 +43,15 @@ func (slf *LogModule) GetCurrentFileName() string {
 }
 
 func (slf *LogModule) CheckAndGenFile() {
+
+	slf.locker.Lock()
 	if time.Now().Day() != slf.currentDay {
+
+		if time.Now().Day() == slf.currentDay {
+			slf.locker.Unlock()
+			return
+		}
+
 		slf.currentDay = time.Now().Day()
 		if slf.logFile != nil {
 			slf.logFile.Close()
@@ -51,13 +61,16 @@ func (slf *LogModule) CheckAndGenFile() {
 		slf.logFile, err = os.OpenFile(slf.GetCurrentFileName(), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0766)
 		if err != nil {
 			fmt.Printf("create log file %+v error!", slf.GetCurrentFileName())
+			slf.locker.Unlock()
 			return
 		}
 
 		for level := 0; level < LEVEL_MAX; level++ {
 			slf.logger[level] = log.New(slf.logFile, LogPrefix[level], log.Lshortfile|log.LstdFlags)
 		}
+
 	}
+	slf.locker.Unlock()
 }
 
 func (slf *LogModule) Init(logfilename string, openLevel uint) {

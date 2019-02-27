@@ -65,16 +65,19 @@ func (slf *BaseService) OnRemoveService(iservice IService) {
 
 func (slf *BaseService) Init(iservice IService) error {
 	slf.ownerService = iservice
-	slf.servicename = fmt.Sprintf("%T", iservice)
-	parts := strings.Split(slf.servicename, ".")
-	if len(parts) != 2 {
-		GetLogger().Printf(LEVER_ERROR, "BaseService.Init: service name is error: %q", slf.servicename)
-		err := fmt.Errorf("BaseService.Init: service name is error: %q", slf.servicename)
-		return err
+
+	if iservice.GetServiceName() == "" {
+		slf.servicename = fmt.Sprintf("%T", iservice)
+		parts := strings.Split(slf.servicename, ".")
+		if len(parts) != 2 {
+			GetLogger().Printf(LEVER_ERROR, "BaseService.Init: service name is error: %q", slf.servicename)
+			err := fmt.Errorf("BaseService.Init: service name is error: %q", slf.servicename)
+			return err
+		}
+
+		slf.servicename = parts[1]
 	}
 
-	slf.servicename = parts[1]
 	slf.serviceid = InstanceServiceMgr().GenServiceID()
-
 	return nil
 }

@@ -1,12 +1,13 @@
 {
-"NodeList":[
+"PublicServiceList":["logiclog"],
 
+"NodeList":[
 {
 	"NodeID":1,
 	"NodeName":"N_Node1",
 	"ServerAddr":"127.0.0.1:8080",
 	
-	"ServiceList":["WSServerService","CTest","HttpServerService"],
+	"ServiceList":["CTest"],
 	"ClusterNode":["N_Node2"]
 },
 

@@ -22,8 +22,9 @@ type CNode struct {
 }
 
 type ClusterConfig struct {
-	NodeList    []CNodeCfg //配置列表
-	currentNode CNode      //当前node
+	PublicServiceList []string
+	NodeList          []CNodeCfg //配置列表
+	currentNode       CNode      //当前node
 
 	mapIdNode             map[int]CNode      //map[nodeid] CNode
 	mapClusterNodeService map[string][]CNode //map[nodename] []CNode
@@ -89,6 +90,10 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 		}
 	}
 
+	//向c.currentNode中加入公共服务
+	for _, servicename := range c.PublicServiceList {
+		c.currentNode.ServiceList[servicename] = true
+	}
 	return c, nil
 }
 
