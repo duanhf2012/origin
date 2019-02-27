@@ -71,6 +71,7 @@ func (slf *DBResult) Close() {
 	}
 }
 
+/*
 // Next ...
 func (slf *DBResult) Next() bool {
 	if slf.Err != nil {
@@ -86,7 +87,7 @@ func (slf *DBResult) Scan(arg ...interface{}) error {
 	}
 	return slf.res.Scan(arg...)
 }
-
+*/
 // SetSpecificTag ...
 func (slf *DBResult) SetSpecificTag(tag string) *DBResult {
 	slf.tag = tag
@@ -297,8 +298,10 @@ func (slf *SyncDBResult) Get(timeoutMs int) DBResult {
 func (slf *DBModule) Query(query string, args ...interface{}) DBResult {
 	rows, err := slf.db.Query(query, args...)
 	return DBResult{
-		Err: err,
-		res: rows,
+		Err:  err,
+		res:  rows,
+		tag:  "json",
+		blur: true,
 	}
 }
 

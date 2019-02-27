@@ -25,14 +25,26 @@ func TestDBModule(t *testing.T) {
 		Uuid    string `json:"uuid,omitempty"`
 		AAAA    string `json:"xxx"`
 	}{}
-	err := res.SetSpecificTag("json").SetBlurMode(true).UnMarshal(&out)
+	err := res.UnMarshal(&out)
 	if err != nil {
 		t.Error(err)
 	}
 
 	sres := db.SyncQuery("select * from tbl_fun_heelthrow where id >= 1")
-	res = sres.Get(1000)
+	res = sres.Get(2000)
 	if res.Err != nil {
 		t.Error(res.Err)
+	}
+
+	out2 := []struct {
+		Addtime int64  `json:"addtime"`
+		Tname   string `json:"tname"`
+		Uuid    string `json:"uuid,omitempty"`
+		AAAA    string `json:"xxx"`
+	}{}
+
+	err = res.UnMarshal(&out2)
+	if err != nil {
+		t.Error(err)
 	}
 }
