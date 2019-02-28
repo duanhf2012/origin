@@ -45,6 +45,10 @@ func (slf *CCluster) ReadNodeInfo(nodeid int) error {
 }
 
 func (slf *CCluster) GetClusterClient(id int) *rpc.Client {
+	if id == GetNodeId() {
+		return slf.LocalRpcClient
+	}
+
 	v, ok := slf.nodeclient[id]
 	if ok == false {
 		return nil
@@ -130,12 +134,14 @@ func (slf *CCluster) ConnService() error {
 			if rpcClient.isConnect == true {
 				ping.TimeStamp = 0
 				err := rpcClient.pclient.Call("CPing.Ping", &ping, &pong)
+
 				if err != nil {
 					rpcClient.pclient.Close()
 					rpcClient.pclient = nil
 					rpcClient.isConnect = false
 					continue
 				}
+
 				continue
 			}
 
