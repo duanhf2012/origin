@@ -23,3 +23,7 @@ func (slf *Timer) CheckTimeOut() bool {
 
 	return false
 }
+
+func (slf *Timer) Reset() {
+	slf.lasttime = time.Now().UnixNano()
+}
