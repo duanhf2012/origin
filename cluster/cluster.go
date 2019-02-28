@@ -116,6 +116,9 @@ func (slf *CCluster) ConnService() error {
 	//连接集群服务器
 	for _, nodeList := range slf.cfg.mapClusterNodeService {
 		for _, node := range nodeList {
+			if node.NodeID == slf.cfg.currentNode.NodeID {
+				continue
+			}
 			slf.nodeclient[node.NodeID] = &RpcClient{node.NodeID, nil, node.ServerAddr, false}
 		}
 	}
