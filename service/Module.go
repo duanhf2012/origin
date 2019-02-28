@@ -270,13 +270,14 @@ func (slf *BaseModule) RunModule(module IModule) {
 	slf.WaitGroup.Add(1)
 	defer slf.WaitGroup.Done()
 	for {
+		if atomic.LoadInt32(&slf.corouterstatus) != 0 {
+			module.OnEndRun()
+			GetLogger().Printf(LEVER_INFO, "OnEndRun module %T ...", module)
+			break
+		}
+
 		//每500ms检查退出
 		if timer.CheckTimeOut() {
-			if atomic.LoadInt32(&slf.corouterstatus) != 0 {
-				module.OnEndRun()
-				GetLogger().Printf(LEVER_INFO, "OnEndRun module %T ...", module)
-				break
-			}
 
 			select {
 			case <-slf.ExitChan:
