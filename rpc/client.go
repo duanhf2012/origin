@@ -8,11 +8,13 @@ import (
 	"bufio"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // ServerError represents an error that has been returned from
@@ -326,6 +328,12 @@ func (client *Client) Go(serviceMethod string, args interface{}, reply interface
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
 func (client *Client) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
-	return call.Error
+	select {
+	case call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done:
+		return call.Error
+	case <-time.After(10 * time.Second):
+	}
+
+	//call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
+	return errors.New(fmt.Sprintf("Call RPC %s is time out 10s", serviceMethod))
 }
