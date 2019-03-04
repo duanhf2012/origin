@@ -7,7 +7,7 @@
 	"NodeName":"N_Node1",
 	"ServerAddr":"127.0.0.1:8080",
 	
-	"ServiceList":["CTest"],
+	"ServiceList":["CTestService1","CTestService2","HttpServerService","WSServerService","CWebSockService"],
 	"ClusterNode":["N_Node2"]
 },
 

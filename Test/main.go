@@ -1,109 +1,82 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/duanhf2012/origin/sysmodule"
+	"github.com/duanhf2012/origin/cluster"
+
+	"github.com/duanhf2012/origin/sysservice"
 
 	"github.com/duanhf2012/origin/originnode"
 	"github.com/duanhf2012/origin/service"
-	"github.com/duanhf2012/origin/sysservice"
 )
 
-//子模块
-type CTestModule struct {
-	service.BaseModule
-}
-
-func (ws *CTestModule) DoSomething() {
-	fmt.Printf("CTestModule do some thing!\n")
-}
-
-func (ws *CTestModule) OnInit() error {
-	fmt.Printf("CTestModule.OnInit\n")
-	return nil
-}
-
-func (ws *CTestModule) OnRun() bool {
-	time.Sleep(2 * time.Second)
-	fmt.Printf("CTestModule.OnRun\n")
-	return true
-}
-
-func (ws *CTestModule) OnEndRun() {
-	fmt.Printf("CTestModule.OnEndRun\n")
-}
-
-//CTest服务定义
-type CTest struct {
+type CTestService1 struct {
 	service.BaseService
-	tmp int
 }
 
-func (ws *CTest) OnInit() error {
-	fmt.Printf("CTest.OnInit\n")
-
-	testModule := CTestModule{}
-	moduleId := ws.AddModule(&testModule)
-	pTmpModule := ws.GetModuleById(moduleId)
-	pTmpModuleTest := pTmpModule.(*CTestModule)
-	pTmpModuleTest.DoSomething()
-
+func (slf *CTestService1) OnInit() error {
+	fmt.Println("CTestService1.OnInit")
 	return nil
 }
 
-func (ws *CTest) OnRun() bool {
+//RPC回调函数
+type InputData struct {
+	A1 int
+	A2 int
+}
 
-	ws.tmp = ws.tmp + 1
-	time.Sleep(1 * time.Second)
-	logic := service.InstanceServiceMgr().FindService("logiclog")
-	logic.(sysmodule.ILogger).Printf(sysmodule.LEVER_DEBUG, "CTest.OnRun\n")
-	fmt.Printf("CTest.OnRun\n")
-	/*
-		//if ws.tmp%10 == 0 {
-		var test CTestData
-		test.Bbbb = 1111
-		test.Cccc = 111
-		test.Ddd = "1111"
-		var test2 CTestData
-		err := cluster.Call("_CTest.RPC_LogTicker2\n", &test, &test2)
-		fmt.Print(err, test2)
-		//}
+func (slf *CTestService1) OnRun() bool {
+	fmt.Println("CTestService1.OnRun")
+	var ret int
+	input := InputData{100, 11}
+	err := cluster.Call("CTestService2.RPC_Add", &input, &ret)
+	fmt.Print(err, "\n", ret, "\n")
 
-		//模块的示例
-		testModule := CTestModule{}
-		moduleId := ws.AddModule(&testModule)
-		pTmpModule := ws.GetModuleById(moduleId)
-		pTmpModuleTest := pTmpModule.(*CTestModule)
-		pTmpModuleTest.DoSomething()
-		pservice := testModule.GetOwnerService()
-		fmt.Printf("%T", pservice)
-	*/
+	return false
+}
+
+func (slf *CTestService1) OnEndRun() {
+	fmt.Println("CTestService1.OnEndRun")
+}
+
+//所有的服务，如果想对外提供HTTP服务，接口规范必需为以下格式，
+//HTTP_MethodName(request *sysservice.HttpRequest, resp *sysservice.HttpRespone) error
+//访问方式：http://127.0.0.1:9120/ServiceName/MethodName
+//则以下接口访问方式：https://proxy.atbc.com:9120/CTestService1/GetInfo
+func (slf *CTestService1) HTTP_GetInfo(request *sysservice.HttpRequest, resp *sysservice.HttpRespone) error {
+	strRet := "{a:\"hello,world!\"}"
+	resp.Respone = []byte(strRet)
+	return nil
+}
+
+type CTestService2 struct {
+	service.BaseService
+}
+
+func (slf *CTestService2) OnInit() error {
+	fmt.Println("CTestService2.OnInit")
+	return nil
+}
+
+func (slf *CTestService2) OnRun() bool {
+	fmt.Println("CTestService2.OnRun")
+	time.Sleep(time.Second * 5)
 	return true
 }
 
-func (ws *CTest) OnEndRun() {
-	fmt.Printf("CTest.OnEndRun\n")
+func (slf *CTestService2) OnEndRun() {
+	fmt.Println("CTestService2.OnEndRun")
 }
 
-func (ws *CTest) RPC_LogTicker2(args *CTestData, quo *CTestData) error {
+//服务要对外的接口规划如下：
+//RPC_MethodName(arg *DataType1, ret *DataType2) error
+//如果不符合规范，在加载服务时，该函数将不会被映射，其他服务将不允能调用。
+func (slf *CTestService2) RPC_Add(arg *InputData, ret *int) error {
 
-	*quo = *args
-	return nil
-}
+	*ret = arg.A1 + arg.A2
 
-type CTestData struct {
-	Bbbb int64
-	Cccc int
-	Ddd  string
-}
-
-func (ws *CTest) HTTP_LogTicker2(request *sysservice.HttpRequest, resp *sysservice.HttpRespone) error {
-
-	data := CTestData{111, 333, "34444"}
-	resp.Respone, _ = json.Marshal(&data)
 	return nil
 }
 
@@ -113,12 +86,27 @@ func main() {
 		return
 	}
 
-	test := CTest{}
-	logiclogservice := &sysservice.LogService{}
-	logiclogservice.InitLog("logiclog", sysmodule.LEVER_DEBUG)
+	//1.新增http服务
+	//该服务比较特殊，安装加载完成后，会将所有的service符合规范的HTTP_接口映射
+	//将能被外部调用
+	httpserver := sysservice.NewHttpServerService(9120)
 
-	node.SetupService(logiclogservice, &test)
+	//2.新建websocket服务
 
+	//新建websocket消息回调服务，网络i/o发生事件时回调OnConnected,OnDisconnect,OnRecvMsg接口。
+	wss := NewWebSockService()
+
+	//新建websocket监听服务
+	pWS := sysservice.NewWSServerService(9121)
+	//设置以下证书文件，支持https
+	//pWS.SetWSS("/root/1884337_proxy.atbc.com.pem", "/root/1884337_proxy.atbc.com.key")
+
+	//将回调服务安装到websocket监听服务中
+	pWS.SetupReciver("/wss", wss, false)
+
+	//设置以下证书，支持wss
+	//httpserver.SetHttps("/root/1884337_proxy.atbc.com.pem", "/root/1884337_proxy.atbc.com.key")
+	node.SetupService(&CTestService1{}, &CTestService2{}, httpserver, wss, pWS)
 	node.Init()
 	node.Start()
 }
