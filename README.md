@@ -265,6 +265,7 @@ func (slf *CCluster) CallNode(nodeid int, servicemethod string, args interface{}
 func (slf *CCluster) GoNode(nodeid int, args interface{}, servicemethod string) error
 ```
 在实际使用时，注意抽象service，只有合理的划分service，orgin是以service为最小集群单元放到不同的node中，以达到动态移动service功能到不同的node进程中。
+
 orgin中Module使用:
 ---------------
 module在orgin引擎中是最小的对象单元，service本质上也是一个复杂的module。它同样有着以下方法:
