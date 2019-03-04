@@ -15,6 +15,10 @@ type HttpServer struct {
 	writetimeout time.Duration
 
 	httpserver *http.Server
+	certfile   string
+	keyfile    string
+
+	ishttps bool
 }
 
 func (slf *HttpServer) Init(port uint16, handler http.Handler, readtimeout time.Duration, writetimeout time.Duration) {
@@ -34,7 +38,6 @@ func (slf *HttpServer) Start() {
 
 func (slf *HttpServer) startListen() error {
 	listenPort := fmt.Sprintf(":%d", slf.port)
-
 	slf.httpserver = &http.Server{
 		Addr:           listenPort,
 		Handler:        slf.handler,
@@ -43,11 +46,24 @@ func (slf *HttpServer) startListen() error {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	err := slf.httpserver.ListenAndServe()
+	var err error
+	if slf.ishttps == true {
+		err = slf.httpserver.ListenAndServeTLS(slf.certfile, slf.keyfile)
+	} else {
+		err = slf.httpserver.ListenAndServe()
+	}
+
 	if err != nil {
-		fmt.Printf("http.ListenAndServe(%d, nil) error\n", slf.port)
+		fmt.Printf("http.ListenAndServe(%d, %v) error\n", slf.port, err)
 		os.Exit(1)
 	}
 
 	return nil
+}
+
+func (slf *HttpServer) SetHttps(certfile string, keyfile string) bool {
+	slf.certfile = certfile
+	slf.keyfile = keyfile
+	slf.ishttps = true
+	return true
 }

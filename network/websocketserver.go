@@ -58,13 +58,16 @@ type WebsocketServer struct {
 
 	httpserver *http.Server
 	reciver    map[string]Reciver
+
+	certfile string
+	keyfile  string
+	iswss    bool
 }
 
 func (slf *WebsocketServer) Init(port uint16) {
 
 	slf.port = port
 	slf.mapClient = make(map[uint64]*WSClient)
-
 }
 
 func (slf *WebsocketServer) CreateClient(conn *websocket.Conn) *WSClient {
@@ -105,7 +108,13 @@ func (slf *WebsocketServer) startListen() {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	err := slf.httpserver.ListenAndServe()
+	var err error
+	if slf.iswss == true {
+		err = slf.httpserver.ListenAndServeTLS(slf.certfile, slf.keyfile)
+	} else {
+		err = slf.httpserver.ListenAndServe()
+	}
+
 	if err != nil {
 		fmt.Printf("http.ListenAndServe(%d, nil) error\n", slf.port)
 		os.Exit(1)
@@ -188,4 +197,11 @@ func (slf *WebsocketServer) initRouterHandler() http.Handler {
 
 	cors := cors.AllowAll()
 	return cors.Handler(r)
+}
+
+func (slf *WebsocketServer) SetWSS(certfile string, keyfile string) bool {
+	slf.certfile = certfile
+	slf.keyfile = keyfile
+	slf.iswss = true
+	return true
 }

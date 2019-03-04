@@ -33,10 +33,17 @@ type HttpServerService struct {
 	port       uint16
 
 	controllerMaps ControllerMapsType
+	certfile       string
+	keyfile        string
+	ishttps        bool
 }
 
 func (slf *HttpServerService) OnInit() error {
 	slf.httpserver.Init(slf.port, slf.initRouterHandler(), 10*time.Second, 10*time.Second)
+	if slf.ishttps == true {
+		slf.httpserver.SetHttps(slf.certfile, slf.keyfile)
+	}
+
 	return nil
 }
 
@@ -120,4 +127,16 @@ func (slf *HttpServerService) GetMethod(strCallPath string) (*reflect.Value, err
 	}
 
 	return &value, nil
+}
+
+func (slf *HttpServerService) SetHttps(certfile string, keyfile string) bool {
+	if certfile == "" || keyfile == "" {
+		return false
+	}
+
+	slf.ishttps = true
+	slf.certfile = certfile
+	slf.keyfile = keyfile
+
+	return true
 }

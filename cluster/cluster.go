@@ -86,7 +86,7 @@ func (slf *CCluster) ListenService() error {
 
 	tcplisten, err2 := net.ListenTCP("tcp", tcpaddr)
 	if err2 != nil {
-		service.GetLogger().Printf(sysmodule.LEVER_FATAL, "ListenTCP error:%v", err)
+		service.GetLogger().Printf(sysmodule.LEVER_FATAL, "ListenTCP error:%v", err2)
 		os.Exit(1)
 		return err2
 	}

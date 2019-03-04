@@ -40,3 +40,8 @@ func (ws *WSServerService) OnDestory() error {
 func (ws *WSServerService) SetupReciver(pattern string, messageReciver network.IMessageReceiver, bEnableCompression bool) {
 	ws.wsserver.SetupReciver(pattern, messageReciver, bEnableCompression)
 }
+
+func (slf *WSServerService) SetWSS(certfile string, keyfile string) bool {
+	slf.wsserver.SetWSS(certfile, keyfile)
+	return true
+}
