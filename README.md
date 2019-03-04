@@ -13,7 +13,7 @@ orgin 解决的问题：
 
 Hello world!
 ---------------
-下面我们来一步步的建立orgin服务器,先下载[orgin引擎](),或者使用如下命令：
+下面我们来一步步的建立orgin服务器,先下载[orgin引擎](https://github.com/duanhf2012/origin "orgin引擎"),或者使用如下命令：
 ```go
 go get -v -u  github.com/duanhf2012/origin
 ```
