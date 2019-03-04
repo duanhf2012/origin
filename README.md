@@ -186,6 +186,190 @@ CTestService2.OnRun
 CTestService2.OnRun
 ```
 通过日志可以确认，在Node启动时分别驱动Service的OnInit,OnRun,OnEndRun，上面的日志中CTestService2.OnRun会被循环调用，
-因为在OnRun的返回是true，否则只会进入一次。如果你不需要OnRun可以不定义OnRun函数。
+因为在OnRun的返回是true，否则只会进入一次。如果你不需要OnRun可以不定义OnRun函数。我们已经成功的调用了两个服务了。
+
+orgin服务间通信:
+---------------
+orgin是通过rpc的方式互相调用，当前结点只能访问cluster.json中有配置ClusterNode的结点或本地结点中所有的服务接口,下面我们来用实际例子来说明，如下代码所示：
+```
+package main
+
+import (
+	"Server/service/websockservice"
+	"fmt"
+	"time"
+
+	"github.com/duanhf2012/origin/cluster"
+
+	"github.com/duanhf2012/origin/sysservice"
+
+	"github.com/duanhf2012/origin/originnode"
+	"github.com/duanhf2012/origin/service"
+)
+
+type CTestService1 struct {
+	service.BaseService
+}
+
+//输入参数，注意变量名首字母大写
+type InputData struct {
+	A1 int
+	A2 int
+}
+
+func (slf *CTestService1) OnRun() bool {
+	var ret int
+	input := InputData{100, 11}
+	
+	//调用服务名.接口名称，传入传出参数必需为地址，符合RPC_Add接口规范
+	//以下可以采用其他，注意如果在服务名前加入下划线"_"表示访问本node中的服务
+	//_servicename.methodname
+	//servicename.methodname
+	err := cluster.Call("CTestService2.RPC_Add", &input, &ret)
+	fmt.Print(err, "\n", ret)
+
+	return false
+}
+
+type CTestService2 struct {
+	service.BaseService
+}
+
+//注意格式一定要RPC_开头，函数第一个参数为输入参数，第二个为输出参数，只允许指针类型
+//返回值必需为error，如果不满足格式，装载服务时将被会忽略。
+func (slf *CTestService2) RPC_Add(arg *InputData, ret *int) error {
+	*ret = arg.A1 + arg.A2
+	return nil
+}
+
+func main() {
+	node := originnode.NewOrginNode()
+	if node == nil {
+		return
+	}
+	node.SetupService(&CTestService1{}, &CTestService2{})
+	node.Init()
+	node.Start()
+}
+
+```
+输入结果为：
+```
+<nil>
+111
+```
+cluster.Call只允许调用一个结点中的服务，如果服务在多个结点中，是不允许的。注意，Call方式是阻塞模式，只有当被调服务响应时才返回，或者超过最大超时时间。如果不想阻塞，可以采用Go方式调用。例如：cluster.Go(true,"CTestService2.RPC_Send", &input)
+第一个参数代码是否广播，如果调用的服务接口在多个Node中存在，都将被调用。还可以向指定的NodeId调用，例如：
+```
+func (slf *CCluster) CallNode(nodeid int, servicemethod string, args interface{}, reply interface{}) error
+func (slf *CCluster) GoNode(nodeid int, args interface{}, servicemethod string) error
+```
+在实际使用时，注意抽象service，只有合理的划分service，orgin是以service为最小集群单元放到不同的node中，以达到动态移动service功能到不同的node进程中。
+orgin中Module使用:
+---------------
+module在orgin引擎中是最小的对象单元，service本质上也是一个复杂的module。它同样有着以下方法:
+```
+OnInit() error //Module初始化时调用
+OnRun() bool   //Module运行时调用
+OnEndRun()
+```
+在使用规则上和service是一样的，因为本质上是一样的对象。看以下简单示例：
+```
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/duanhf2012/origin/originnode"
+	"github.com/duanhf2012/origin/service"
+)
+
+type CTestService1 struct {
+	service.BaseService
+}
+
+type CTestModule1 struct {
+	service.BaseModule
+}
+
+func (slf *CTestModule1) OnInit() error {
+	fmt.Printf("CTestModule1::OnInit\n")
+	return nil
+}
+
+func (slf *CTestModule1) OnRun() bool {
+	fmt.Printf("CTestModule1::OnRun\n")
+	time.Sleep(time.Second * 1)
+	return true
+}
+
+func (slf *CTestModule1) OnEndRun() {
+	fmt.Printf("CTestModule1::OnEndRun\n")
+}
+
+func (slf *CTestModule1) Add(a int, b int) int {
+	return a + b
+}
+
+func (slf *CTestService1) OnRun() bool {
+	testmodule := CTestModule1{}
+
+	//可以设置自定义id
+	//testmodule.SetModuleId(PLAYERID)
+
+	//添加module到slf对象中
+	moduleId := slf.AddModule(&testmodule)
+
+	//获取module对象
+	pModule := slf.GetModuleById(moduleId)
+	//转换为CTestModule1类型
+	ret := pModule.(*CTestModule1).Add(3, 4)
+	fmt.Printf("ret is %d\n", ret)
+
+	time.Sleep(time.Second * 4)
+	//释放module
+	slf.ReleaseModule(moduleId)
+
+	return false
+}
+
+func main() {
+	node := originnode.NewOrginNode()
+	if node == nil {
+		return
+	}
+	node.SetupService(&CTestService1{})
+	node.Init()
+	node.Start()
+}
+```
+执行结果如下：
+```
+ret is 7
+CTestModule1::OnInit
+CTestModule1::OnRun
+CTestModule1::OnRun
+CTestModule1::OnRun
+CTestModule1::OnRun
+CTestModule1::OnEndRun
+```
+以上创建新的Module加入到当前服务对象中，可以获取释放动作。同样CTestModule1模块也可以加入子模块，使用方法一样。以上日志每秒钟CTestModule1::OnRun打印一次，4秒后ReleaseModule，对象被释放，执行CTestModule1::OnEndRun。
+
+orgin中其他重要服务:
+---------------
+* github.com\duanhf2012\origin\sysservice集成了系统常用的服务
+	* httpserverervice:提供对外的http服务
+	* wsserverservice :websocket服务
+	* logservice      :日志服务
+	
+以上服务请参照github.com\duanhf2012\origin\Test目录使用方法
+* github.com\duanhf2012\origin\sysmodule集成了系统常用的Module
+	* DBModule: mysql数据库操作模块，支持异步调用
+	* RedisModule: Redis操作模块，支持异步调用
+	* LogModule: 日志模块，支持区分日志等级
+	* HttpClientPoolModule:http客户端模块
+
+
 
 
