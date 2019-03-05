@@ -209,7 +209,6 @@ func (slf *CCluster) Start() error {
 	return nil
 }
 
-//Node.servicename.methodname
 //servicename.methodname
 //_servicename.methodname
 func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply interface{}) error {

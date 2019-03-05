@@ -94,3 +94,9 @@ func (q *SyncQueue) IsClose() (v bool) {
 	q.lock.Unlock()
 	return
 }
+
+func (q *SyncQueue) Get(i int) interface{} {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	return q.buffer.Get(i)
+}
