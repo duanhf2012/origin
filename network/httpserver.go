@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysmodule"
 )
 
 type HttpServer struct {
@@ -54,6 +57,7 @@ func (slf *HttpServer) startListen() error {
 	}
 
 	if err != nil {
+		service.GetLogger().Printf(sysmodule.LEVER_FATAL, "http.ListenAndServe(%d, nil) error:%v\n", listenPort, err)
 		fmt.Printf("http.ListenAndServe(%d, %v) error\n", slf.port, err)
 		os.Exit(1)
 	}

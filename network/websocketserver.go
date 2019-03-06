@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysmodule"
+
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/gotoxu/cors"
@@ -15,6 +18,7 @@ import (
 type IWebsocketServer interface {
 	SendMsg(clientid uint64, messageType int, msg []byte) bool
 	CreateClient(conn *websocket.Conn) *WSClient
+	Disconnect(clientid uint64)
 	ReleaseClient(pclient *WSClient)
 }
 
@@ -116,6 +120,7 @@ func (slf *WebsocketServer) startListen() {
 	}
 
 	if err != nil {
+		service.GetLogger().Printf(sysmodule.LEVER_FATAL, "http.ListenAndServe(%d, nil) error:%v\n", slf.port, err)
 		fmt.Printf("http.ListenAndServe(%d, nil) error\n", slf.port)
 		os.Exit(1)
 	}
@@ -143,6 +148,18 @@ func (slf *WebsocketServer) SendMsg(clientid uint64, messageType int, msg []byte
 
 	value.bwritemsg <- WSMessage{messageType, msg}
 	return true
+}
+
+func (slf *WebsocketServer) Disconnect(clientid uint64) {
+	slf.locker.Lock()
+	defer slf.locker.Unlock()
+	value, ok := slf.mapClient[clientid]
+	if ok == false {
+		return
+	}
+
+	value.conn.Close()
+	//slf.ReleaseClient(value)
 }
 
 func (slf *WebsocketServer) Stop() {
