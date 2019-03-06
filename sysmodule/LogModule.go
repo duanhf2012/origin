@@ -36,6 +36,7 @@ type LogModule struct {
 	logFile     *os.File
 	openLevel   uint
 	locker      sync.Mutex
+	calldepth   int
 }
 
 func (slf *LogModule) GetCurrentFileName() string {
@@ -77,6 +78,7 @@ func (slf *LogModule) Init(logfilename string, openLevel uint) {
 	slf.currentDay = 0
 	slf.logfilename = logfilename
 	slf.openLevel = openLevel
+	slf.calldepth = 3
 }
 
 func (slf *LogModule) GetLoggerByLevel(level uint) *log.Logger {
@@ -92,7 +94,7 @@ func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
 	}
 
 	slf.CheckAndGenFile()
-	slf.GetLoggerByLevel(level).Output(3, fmt.Sprintf(format, v...))
+	slf.GetLoggerByLevel(level).Output(slf.calldepth, fmt.Sprintf(format, v...))
 }
 
 func (slf *LogModule) Print(level uint, v ...interface{}) {
@@ -101,5 +103,9 @@ func (slf *LogModule) Print(level uint, v ...interface{}) {
 	}
 
 	slf.CheckAndGenFile()
-	slf.GetLoggerByLevel(level).Output(3, fmt.Sprint(v...))
+	slf.GetLoggerByLevel(level).Output(slf.calldepth, fmt.Sprint(v...))
+}
+
+func (slf *LogModule) AppendCallDepth(calldepth int) {
+	slf.calldepth += calldepth
 }

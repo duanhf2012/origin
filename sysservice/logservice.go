@@ -23,3 +23,7 @@ func (slf *LogService) Printf(level uint, format string, v ...interface{}) {
 func (slf *LogService) Print(level uint, v ...interface{}) {
 	slf.logmodule.Print(level, v...)
 }
+
+func (slf *LogService) AppendCallDepth(calldepth int) {
+	slf.logmodule.AppendCallDepth(calldepth)
+}
