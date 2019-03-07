@@ -347,11 +347,12 @@ func (slf *DBModule) Exec(query string, args ...interface{}) DBResult {
 	}
 
 	res, err := slf.db.Exec(query, args...)
+	ret.Err = err
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "Exec:%s(%v)", query, err)
+		return ret
 	}
 
-	ret.Err = err
 	ret.LastInsertID, _ = res.LastInsertId()
 	ret.RowsAffected, _ = res.RowsAffected()
 	return ret
