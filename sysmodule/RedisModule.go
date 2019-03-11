@@ -111,6 +111,10 @@ func (slf *RedisModule) GoTask(fc Func) error {
 
 // GetConn ...
 func (slf *RedisModule) getConn() (redis.Conn, error) {
+	if slf.redispool == nil {
+		service.GetLogger().Printf(service.LEVER_FATAL, "Not Init RedisModule")
+		return nil, fmt.Errorf("Not Init RedisModule")
+	}
 	conn := slf.redispool.Get()
 	if conn == nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "Cannot get connection")

@@ -193,13 +193,13 @@ func (slf *DBResult) mapSingle2interface(m map[string]string, v reflect.Value) e
 					return err
 				}
 				value.SetFloat(f)
-			case reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			case reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int:
 				integer64, err := strconv.ParseInt(meta, 10, 64)
 				if err != nil {
 					return err
 				}
 				value.SetInt(integer64)
-			case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint:
 				integer64, err := strconv.ParseUint(meta, 10, 64)
 				if err != nil {
 					return err
