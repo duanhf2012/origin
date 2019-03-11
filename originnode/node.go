@@ -96,6 +96,7 @@ func (s *COriginNode) Start() {
 
 	//停止运行程序
 	s.Stop()
+	service.GetLogger().Printf(sysmodule.LEVER_INFO, "Node stop run...")
 }
 
 func (s *COriginNode) Stop() {
@@ -113,6 +114,7 @@ func NewOrginNode() *COriginNode {
 	//安装系统服务
 	syslogservice := &sysservice.LogService{}
 	syslogservice.InitLog("syslog", sysmodule.LEVER_INFO)
+
 	service.InstanceServiceMgr().Setup(syslogservice)
 
 	//初始化集群对象

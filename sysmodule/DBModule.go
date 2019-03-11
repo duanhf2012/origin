@@ -296,7 +296,17 @@ func (slf *SyncDBResult) Get(timeoutMs int) DBResult {
 
 // Query ...
 func (slf *DBModule) Query(query string, args ...interface{}) DBResult {
+	if slf.db == nil {
+		ret := DBResult{}
+		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
+		ret.Err = fmt.Errorf("cannot connect database!")
+		return ret
+	}
 	rows, err := slf.db.Query(query, args...)
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%v)", query, err)
+	}
+
 	return DBResult{
 		Err:  err,
 		res:  rows,
@@ -331,12 +341,18 @@ func (slf *DBModule) SyncQuery(query string, args ...interface{}) SyncDBResult {
 func (slf *DBModule) Exec(query string, args ...interface{}) DBResult {
 	ret := DBResult{}
 	if slf.db == nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
 		ret.Err = fmt.Errorf("cannot connect database!")
 		return ret
 	}
 
 	res, err := slf.db.Exec(query, args...)
 	ret.Err = err
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "Exec:%s(%v)", query, err)
+		return ret
+	}
+
 	ret.LastInsertID, _ = res.LastInsertId()
 	ret.RowsAffected, _ = res.RowsAffected()
 	return ret

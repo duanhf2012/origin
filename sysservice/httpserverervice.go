@@ -18,7 +18,8 @@ import (
 )
 
 type HttpRequest struct {
-	Body string
+	Header http.Header
+	Body   string
 }
 
 type HttpRespone struct {
@@ -111,7 +112,7 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 	}
 	strCallPath := "_" + vstr[1] + ".HTTP_" + vstr[2]
 
-	request := HttpRequest{string(msg)}
+	request := HttpRequest{r.Header, string(msg)}
 	var resp HttpRespone
 
 	cluster.InstanceClusterMgr().Call(strCallPath, &request, &resp)
