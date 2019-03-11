@@ -148,7 +148,7 @@ func (slf *HttpServerService) SetHttps(certfile string, keyfile string) bool {
 //序列化后写入Respone
 func (slf *HttpRespone) WriteRespne(v interface{}) error {
 	StrRet, retErr := json.Marshal(v)
-	if retErr == nil {
+	if retErr != nil {
 		slf.Respone = []byte(`{"Code": 2,"Message":"service error"}`)
 		common.LogPrintf(sysmodule.LEVER_ERROR, "Json Marshal Error")
 	} else {
