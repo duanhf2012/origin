@@ -1,7 +1,10 @@
 package sysservice
 
 import (
+	"Server/common"
+	"encoding/json"
 	"fmt"
+	"github.com/duanhf2012/origin/sysmodule"
 	"io/ioutil"
 	"net/http"
 	"reflect"
@@ -140,4 +143,17 @@ func (slf *HttpServerService) SetHttps(certfile string, keyfile string) bool {
 	slf.keyfile = keyfile
 
 	return true
+}
+
+//序列化后写入Respone
+func (slf *HttpRespone) WriteRespne(v interface{}) error {
+	StrRet, retErr := json.Marshal(v)
+	if retErr != nil {
+		slf.Respone = []byte(`{"Code": 2,"Message":"service error"}`)
+		common.LogPrintf(sysmodule.LEVER_ERROR, "Json Marshal Error")
+	} else {
+		slf.Respone = StrRet
+	}
+
+	return retErr
 }
