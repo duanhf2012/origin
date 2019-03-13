@@ -77,6 +77,14 @@ func (slf *CCluster) AcceptRpc(tpcListen *net.TCPListener) error {
 func (slf *CCluster) ListenService() error {
 
 	bindStr := slf.GetBindUrl()
+	parts := strings.Split(bindStr, ":")
+	if len(parts) < 2 {
+		service.GetLogger().Printf(sysmodule.LEVER_FATAL, "ListenService address %s is error.", bindStr)
+		os.Exit(1)
+	}
+	bindStr = "0.0.0.0:" + parts[1]
+
+	//
 	tcpaddr, err := net.ResolveTCPAddr("tcp4", bindStr)
 	if err != nil {
 		service.GetLogger().Printf(sysmodule.LEVER_FATAL, "ResolveTCPAddr error:%v", err)
