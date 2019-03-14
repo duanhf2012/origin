@@ -1,15 +1,15 @@
 package sysservice
 
 import (
-	"Server/common"
 	"encoding/json"
 	"fmt"
-	"github.com/duanhf2012/origin/sysmodule"
 	"io/ioutil"
 	"net/http"
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/duanhf2012/origin/sysmodule"
 
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/gorilla/mux"
@@ -150,7 +150,7 @@ func (slf *HttpRespone) WriteRespne(v interface{}) error {
 	StrRet, retErr := json.Marshal(v)
 	if retErr != nil {
 		slf.Respone = []byte(`{"Code": 2,"Message":"service error"}`)
-		common.LogPrintf(sysmodule.LEVER_ERROR, "Json Marshal Error")
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "Json Marshal Error:%v\n", retErr)
 	} else {
 		slf.Respone = StrRet
 	}
