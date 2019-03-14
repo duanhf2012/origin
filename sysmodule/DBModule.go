@@ -71,6 +71,14 @@ func (slf *DBResult) Close() {
 	}
 }
 
+//NextResult ...
+func (slf *DBResult) NextResult() bool {
+	if slf.Err != nil || slf.res == nil {
+		return false
+	}
+	return slf.res.NextResultSet()
+}
+
 /*
 // Next ...
 func (slf *DBResult) Next() bool {
