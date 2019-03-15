@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package util
+package uuid
 
 import (
 	crand "crypto/rand"
@@ -37,6 +37,16 @@ type UUID [16]byte
 func (this UUID) Hex() string {
 	x := [16]byte(this)
 	return fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+		x[0], x[1], x[2], x[3], x[4],
+		x[5], x[6],
+		x[7], x[8],
+		x[9], x[10], x[11], x[12], x[13], x[14], x[15])
+
+}
+
+func (this UUID) HexEx() string {
+	x := [16]byte(this)
+	return fmt.Sprintf("%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
 		x[0], x[1], x[2], x[3], x[4],
 		x[5], x[6],
 		x[7], x[8],

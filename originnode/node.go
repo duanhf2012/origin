@@ -32,7 +32,10 @@ type COriginNode struct {
 func (s *COriginNode) Init() {
 	//初始化全局模块
 	logger := service.InstanceServiceMgr().FindService("syslog").(service.ILogger)
-	service.InstanceServiceMgr().Init(logger, s.exitChan, s.waitGroup)
+	ret := service.InstanceServiceMgr().Init(logger, s.exitChan, s.waitGroup)
+	if ret == false {
+		os.Exit(-1)
+	}
 
 	s.sigs = make(chan os.Signal, 1)
 	signal.Notify(s.sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -121,6 +124,7 @@ func NewOrginNode() *COriginNode {
 	err := cluster.InstanceClusterMgr().Init()
 	if err != nil {
 		fmt.Print(err)
+		os.Exit(-1)
 		return nil
 	}
 

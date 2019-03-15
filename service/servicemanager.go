@@ -2,6 +2,7 @@ package service
 
 import (
 	"sync"
+
 )
 
 type IServiceManager interface {
@@ -44,7 +45,11 @@ func (slf *CServiceManager) FetchService(s FetchService) IService {
 func (slf *CServiceManager) Init(logger ILogger, exit chan bool, pwaitGroup *sync.WaitGroup) bool {
 	slf.logger = logger
 	for _, s := range slf.localserviceMap {
-		(s.(IModule)).InitModule(exit, pwaitGroup)
+		err := (s.(IModule)).InitModule(exit, pwaitGroup)
+		if err != nil {
+			slf.logger.Print(LEVER_FATAL, err)
+			return false
+		}
 	}
 
 	return true
