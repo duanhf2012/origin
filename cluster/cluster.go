@@ -37,8 +37,7 @@ func (slf *CCluster) ReadNodeInfo(nodeid int) error {
 	var err error
 	slf.cfg, err = ReadCfg("./config/cluster.json", nodeid)
 	if err != nil {
-		fmt.Printf("%v", err)
-		return nil
+		return err
 	}
 
 	return nil
@@ -179,18 +178,18 @@ func (slf *CCluster) ConnService() error {
 
 func (slf *CCluster) Init() error {
 	if len(os.Args) < 2 {
-		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Init error,param not find NodeId=number")
-		return fmt.Errorf("param error not find NodeId=number")
+
+		return fmt.Errorf("Param error not find NodeId=number")
 	}
 
 	parts := strings.Split(os.Args[1], "=")
 	if len(parts) < 2 {
-		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Init error,param not find NodeId=number")
-		return fmt.Errorf("param error not find NodeId=number")
+		return fmt.Errorf("Param error not find NodeId=number")
 	}
+
 	if parts[0] != "NodeId" {
-		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Init error,param error not find NodeId=number")
-		return fmt.Errorf("param error not find NodeId=number")
+
+		return fmt.Errorf("Param error not find NodeId=number")
 	}
 
 	slf.nodeclient = make(map[int]*RpcClient)
@@ -198,7 +197,6 @@ func (slf *CCluster) Init() error {
 	//读取配置
 	ret, err := strconv.Atoi(parts[1])
 	if err != nil {
-		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Init parts[1] error,%v", err)
 		return err
 	}
 
