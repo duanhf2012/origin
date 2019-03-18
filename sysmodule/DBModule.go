@@ -45,6 +45,23 @@ type DBResult struct {
 	blur bool
 }
 
+// DBResult ...
+type DBResultEx struct {
+	Err          error
+	LastInsertID int64
+	RowsAffected int64
+
+	rowNum  int
+	RowInfo map[string][]interface{} //map[fieldname][row]sql.NullString
+}
+
+type DataSetList struct {
+	dataSetList       []DBResultEx
+	currentDataSetIdx int32
+	tag               string
+	blur              bool
+}
+
 func (slf *DBModule) Init(maxConn int, url string, userName string, password string, dbname string) error {
 	slf.url = url
 	slf.maxconn = maxConn
@@ -79,23 +96,6 @@ func (slf *DBResult) NextResult() bool {
 	return slf.res.NextResultSet()
 }
 
-/*
-// Next ...
-func (slf *DBResult) Next() bool {
-	if slf.Err != nil {
-		return false
-	}
-	return slf.res.Next()
-}
-
-// Scan ...
-func (slf *DBResult) Scan(arg ...interface{}) error {
-	if slf.Err != nil {
-		return slf.Err
-	}
-	return slf.res.Scan(arg...)
-}
-*/
 // SetSpecificTag ...
 func (slf *DBResult) SetSpecificTag(tag string) *DBResult {
 	slf.tag = tag
@@ -323,6 +323,60 @@ func (slf *DBModule) Query(query string, args ...interface{}) DBResult {
 	}
 }
 
+func (slf *DBModule) QueryEx(query string, args ...interface{}) (DataSetList, error) {
+	datasetList := DataSetList{}
+	if slf.db == nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
+		return datasetList, fmt.Errorf("cannot connect database!")
+	}
+	rows, err := slf.db.Query(query, args...)
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%v)", query, err)
+		if rows != nil {
+			rows.Close()
+		}
+		return datasetList, err
+	}
+	defer rows.Close()
+
+	for {
+		dbResult := DBResultEx{}
+		//取出当前结果集所有行
+		for rows.Next() {
+			if dbResult.RowInfo == nil {
+				dbResult.RowInfo = make(map[string][]interface{})
+			}
+			//RowInfo map[string][][]sql.NullString //map[fieldname][row][column]sql.NullString
+			colField, err := rows.Columns()
+			if err != nil {
+				return datasetList, err
+			}
+			count := len(colField)
+			valuePtrs := make([]interface{}, count)
+			for i := 0; i < count; i++ {
+				valuePtrs[i] = &sql.NullString{}
+			}
+			rows.Scan(valuePtrs...)
+
+			for idx, fieldname := range colField {
+				fieldRowData := dbResult.RowInfo[strings.ToLower(fieldname)]
+				fieldRowData = append(fieldRowData, valuePtrs[idx])
+				dbResult.RowInfo[strings.ToLower(fieldname)] = fieldRowData
+			}
+			dbResult.rowNum += 1
+		}
+
+		datasetList.dataSetList = append(datasetList.dataSetList, dbResult)
+		//取下一个结果集
+		hasRet := rows.NextResultSet()
+		if hasRet == false {
+			break
+		}
+	}
+
+	return datasetList, nil
+}
+
 // SyncQuery ...
 func (slf *DBModule) SyncQuery(query string, args ...interface{}) SyncDBResult {
 	ret := SyncDBResult{
@@ -401,4 +455,155 @@ func (slf *DBModule) RunExecuteDBCoroutine() {
 		}
 	}
 
+}
+
+func (slf *DataSetList) UnMarshal(args ...interface{}) error {
+	if len(slf.dataSetList) != len(args) {
+		return errors.New("Data set len(%d) is not equal to args!")
+	}
+
+	for _, out := range args {
+		v := reflect.ValueOf(out)
+		fmt.Print(v.Kind())
+		if v.Kind() != reflect.Ptr {
+			return errors.New("interface must be a pointer")
+		}
+
+		fmt.Print(v.Kind())
+		fmt.Print(v.Elem().Kind())
+		if v.Kind() != reflect.Ptr {
+			return errors.New("interface must be a pointer")
+		}
+
+		if v.Elem().Kind() == reflect.Struct {
+			err := slf.RowData2interface(0, slf.dataSetList[slf.currentDataSetIdx].RowInfo, v)
+			if err != nil {
+				return err
+			}
+		}
+		if v.Elem().Kind() == reflect.Slice {
+			err := slf.Slice2interface(out)
+			if err != nil {
+				return err
+			}
+		}
+
+		slf.currentDataSetIdx = slf.currentDataSetIdx + 1
+	}
+
+	return nil
+}
+
+func (slf *DataSetList) Slice2interface(in interface{}) error {
+	length := slf.dataSetList[slf.currentDataSetIdx].rowNum
+	if length == 0 {
+		return nil
+	}
+
+	v := reflect.ValueOf(in).Elem()
+	newv := reflect.MakeSlice(v.Type(), 0, length)
+	v.Set(newv)
+	v.SetLen(length)
+
+	for i := 0; i < length; i++ {
+		idxv := v.Index(i)
+		if idxv.Kind() == reflect.Ptr {
+			newObj := reflect.New(idxv.Type().Elem())
+			v.Index(i).Set(newObj)
+			idxv = newObj
+		} else {
+			idxv = idxv.Addr()
+		}
+
+		err := slf.RowData2interface(i, slf.dataSetList[slf.currentDataSetIdx].RowInfo, idxv)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (slf *DataSetList) RowData2interface(rowIdx int, m map[string][]interface{}, v reflect.Value) error {
+	t := v.Type()
+	val := v.Elem()
+	typ := t.Elem()
+
+	if !val.IsValid() {
+		return errors.New("数据类型不正确")
+	}
+
+	for i := 0; i < val.NumField(); i++ {
+		value := val.Field(i)
+		kind := value.Kind()
+		tag := typ.Field(i).Tag.Get(slf.tag)
+		if tag == "" {
+			tag = typ.Field(i).Name
+		}
+
+		if tag != "" && tag != "-" {
+			vtag := strings.ToLower(tag)
+			columnData, ok := m[vtag]
+			if ok == false {
+				if !slf.blur {
+					return fmt.Errorf("Cannot find filed name %s", vtag[0])
+				}
+				continue
+			}
+			if len(columnData) <= rowIdx {
+				return fmt.Errorf("datasource column is error %s", tag)
+			}
+			meta := columnData[rowIdx].(*sql.NullString)
+			if !ok {
+				if !slf.blur {
+					return fmt.Errorf("没有在结果集中找到对应的字段 %s", tag)
+				}
+				continue
+			}
+			if !value.CanSet() {
+				return errors.New("结构体字段没有读写权限")
+			}
+			if meta.Valid == false {
+				if !slf.blur {
+					return fmt.Errorf("field data is valid %s", tag)
+				}
+			}
+
+			if len(meta.String) == 0 {
+				continue
+			}
+
+			switch kind {
+			case reflect.String:
+				value.SetString(meta.String)
+			case reflect.Float32, reflect.Float64:
+				f, err := strconv.ParseFloat(meta.String, 64)
+				if err != nil {
+					return err
+				}
+				value.SetFloat(f)
+			case reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int:
+				integer64, err := strconv.ParseInt(meta.String, 10, 64)
+				if err != nil {
+					return err
+				}
+				value.SetInt(integer64)
+			case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint:
+				integer64, err := strconv.ParseUint(meta.String, 10, 64)
+				if err != nil {
+					return err
+				}
+				value.SetUint(integer64)
+			case reflect.Bool:
+				b, err := strconv.ParseBool(meta.String)
+				if err != nil {
+					return err
+				}
+				value.SetBool(b)
+			default:
+				return errors.New("数据库映射存在不识别的数据类型")
+			}
+		}
+	}
+	return nil
 }
