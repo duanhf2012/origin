@@ -47,7 +47,6 @@ type DBResult struct {
 
 // DBResult ...
 type DBResultEx struct {
-	Err          error
 	LastInsertID int64
 	RowsAffected int64
 
@@ -60,6 +59,21 @@ type DataSetList struct {
 	currentDataSetIdx int32
 	tag               string
 	blur              bool
+}
+
+// SyncDBResult ...
+type SyncDBResult struct {
+	sres chan DBResult
+}
+
+type SyncQueryDBResultEx struct {
+	sres chan *DataSetList
+	err  chan error
+}
+
+type SyncExecuteDBResult struct {
+	sres chan *DBResultEx
+	err  chan error
 }
 
 func (slf *DBModule) Init(maxConn int, url string, userName string, password string, dbname string) error {
@@ -283,11 +297,6 @@ func (slf *DBModule) Connect(maxConn int) error {
 	return nil
 }
 
-// SyncDBResult ...
-type SyncDBResult struct {
-	sres chan DBResult
-}
-
 // Get ...
 func (slf *SyncDBResult) Get(timeoutMs int) DBResult {
 	timerC := time.NewTicker(time.Millisecond * time.Duration(timeoutMs)).C
@@ -300,6 +309,19 @@ func (slf *SyncDBResult) Get(timeoutMs int) DBResult {
 	return DBResult{
 		Err: fmt.Errorf("Getting the return result timeout [%d]ms", timeoutMs),
 	}
+}
+
+func (slf *SyncQueryDBResultEx) Get(timeoutMs int) (*DataSetList, error) {
+	timerC := time.NewTicker(time.Millisecond * time.Duration(timeoutMs)).C
+	select {
+	case <-timerC:
+		break
+	case err := <-slf.err:
+		dataset := <-slf.sres
+		return dataset, err
+	}
+
+	return nil, fmt.Errorf("Getting the return result timeout [%d]ms", timeoutMs)
 }
 
 // Query ...
@@ -323,11 +345,11 @@ func (slf *DBModule) Query(query string, args ...interface{}) DBResult {
 	}
 }
 
-func (slf *DBModule) QueryEx(query string, args ...interface{}) (DataSetList, error) {
+func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, error) {
 	datasetList := DataSetList{}
 	if slf.db == nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
-		return datasetList, fmt.Errorf("cannot connect database!")
+		return &datasetList, fmt.Errorf("cannot connect database!")
 	}
 	rows, err := slf.db.Query(query, args...)
 	if err != nil {
@@ -335,7 +357,7 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (DataSetList, er
 		if rows != nil {
 			rows.Close()
 		}
-		return datasetList, err
+		return &datasetList, err
 	}
 	defer rows.Close()
 
@@ -349,7 +371,7 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (DataSetList, er
 			//RowInfo map[string][][]sql.NullString //map[fieldname][row][column]sql.NullString
 			colField, err := rows.Columns()
 			if err != nil {
-				return datasetList, err
+				return &datasetList, err
 			}
 			count := len(colField)
 			valuePtrs := make([]interface{}, count)
@@ -374,25 +396,27 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (DataSetList, er
 		}
 	}
 
-	return datasetList, nil
+	return &datasetList, nil
 }
 
 // SyncQuery ...
-func (slf *DBModule) SyncQuery(query string, args ...interface{}) SyncDBResult {
-	ret := SyncDBResult{
-		sres: make(chan DBResult, 1),
+func (slf *DBModule) SyncQuery(query string, args ...interface{}) SyncQueryDBResultEx {
+	ret := SyncQueryDBResultEx{
+		sres: make(chan *DataSetList, 1),
+		err:  make(chan error, 1),
 	}
 
 	if len(slf.syncExecuteFun) >= MAX_EXECUTE_FUN {
-		dbret := DBResult{}
-		dbret.Err = fmt.Errorf("chan is full,sql:%s", query)
-		ret.sres <- dbret
+		dbret := DataSetList{}
+		ret.err <- fmt.Errorf("chan is full,sql:%s", query)
+		ret.sres <- &dbret
 
 		return ret
 	}
 
 	slf.syncExecuteFun <- func() {
-		rsp := slf.Query(query, args...)
+		rsp, err := slf.QueryEx(query, args...)
+		ret.err <- err
 		ret.sres <- rsp
 	}
 
@@ -400,43 +424,46 @@ func (slf *DBModule) SyncQuery(query string, args ...interface{}) SyncDBResult {
 }
 
 // Exec ...
-func (slf *DBModule) Exec(query string, args ...interface{}) DBResult {
-	ret := DBResult{}
+func (slf *DBModule) Exec(query string, args ...interface{}) (*DBResultEx, error) {
+	ret := &DBResultEx{}
 	if slf.db == nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
-		ret.Err = fmt.Errorf("cannot connect database!")
-		return ret
+		return ret, fmt.Errorf("cannot connect database!")
 	}
 
 	res, err := slf.db.Exec(query, args...)
-	ret.Err = err
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "Exec:%s(%v)", query, err)
-		return ret
+		return nil, err
 	}
 
 	ret.LastInsertID, _ = res.LastInsertId()
 	ret.RowsAffected, _ = res.RowsAffected()
-	return ret
+
+	return ret, nil
 }
 
 // SyncExec ...
-func (slf *DBModule) SyncExec(query string, args ...interface{}) SyncDBResult {
-	ret := SyncDBResult{
-		sres: make(chan DBResult, 1),
+func (slf *DBModule) SyncExec(query string, args ...interface{}) *SyncExecuteDBResult {
+	ret := &SyncExecuteDBResult{
+		sres: make(chan *DBResultEx, 1),
+		err:  make(chan error, 1),
 	}
 
 	if len(slf.syncExecuteFun) >= MAX_EXECUTE_FUN {
-		dbret := DBResult{}
-		dbret.Err = fmt.Errorf("chan is full,sql:%s", query)
-		ret.sres <- dbret
-
+		ret.err <- fmt.Errorf("chan is full,sql:%s", query)
 		return ret
 	}
 
 	slf.syncExecuteFun <- func() {
-		rsp := slf.Exec(query, args...)
+		rsp, err := slf.Exec(query, args...)
+		if err != nil {
+			ret.err <- err
+			return
+		}
+
 		ret.sres <- rsp
+		return
 	}
 
 	return ret
