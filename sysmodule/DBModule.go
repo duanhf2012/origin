@@ -503,13 +503,13 @@ func (slf *DataSetList) UnMarshal(args ...interface{}) error {
 		}
 
 		if v.Elem().Kind() == reflect.Struct {
-			err := slf.RowData2interface(0, slf.dataSetList[slf.currentDataSetIdx].RowInfo, v)
+			err := slf.rowData2interface(0, slf.dataSetList[slf.currentDataSetIdx].RowInfo, v)
 			if err != nil {
 				return err
 			}
 		}
 		if v.Elem().Kind() == reflect.Slice {
-			err := slf.Slice2interface(out)
+			err := slf.slice2interface(out)
 			if err != nil {
 				return err
 			}
@@ -521,7 +521,7 @@ func (slf *DataSetList) UnMarshal(args ...interface{}) error {
 	return nil
 }
 
-func (slf *DataSetList) Slice2interface(in interface{}) error {
+func (slf *DataSetList) slice2interface(in interface{}) error {
 	length := slf.dataSetList[slf.currentDataSetIdx].rowNum
 	if length == 0 {
 		return nil
@@ -542,7 +542,7 @@ func (slf *DataSetList) Slice2interface(in interface{}) error {
 			idxv = idxv.Addr()
 		}
 
-		err := slf.RowData2interface(i, slf.dataSetList[slf.currentDataSetIdx].RowInfo, idxv)
+		err := slf.rowData2interface(i, slf.dataSetList[slf.currentDataSetIdx].RowInfo, idxv)
 		if err != nil {
 			return err
 		}
@@ -551,7 +551,7 @@ func (slf *DataSetList) Slice2interface(in interface{}) error {
 	return nil
 }
 
-func (slf *DataSetList) RowData2interface(rowIdx int, m map[string][]interface{}, v reflect.Value) error {
+func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}, v reflect.Value) error {
 	t := v.Type()
 	val := v.Elem()
 	typ := t.Elem()
@@ -573,7 +573,7 @@ func (slf *DataSetList) RowData2interface(rowIdx int, m map[string][]interface{}
 			columnData, ok := m[vtag]
 			if ok == false {
 				if !slf.blur {
-					return fmt.Errorf("Cannot find filed name %s", vtag[0])
+					return fmt.Errorf("Cannot find filed name %s", vtag)
 				}
 				continue
 			}

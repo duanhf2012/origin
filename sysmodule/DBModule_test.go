@@ -15,9 +15,9 @@ func TestDBModule(t *testing.T) {
 
 	db.Init(100, "192.168.0.5:3306", "root", "Root!!2018", "QuantFundsDB")
 	db.OnInit()
-	res := db.Query("select * from tbl_fun_heelthrow where id >= 1")
-	if res.Err != nil {
-		t.Error(res.Err)
+	res, err := db.QueryEx("select * from tbl_fun_heelthrow where id >= 1")
+	if err != nil {
+		t.Error(err)
 	}
 	out := []struct {
 		Addtime int64  `json:"addtime"`
@@ -25,15 +25,15 @@ func TestDBModule(t *testing.T) {
 		Uuid    string `json:"uuid,omitempty"`
 		AAAA    string `json:"xxx"`
 	}{}
-	err := res.UnMarshal(&out)
+	err = res.UnMarshal(&out)
 	if err != nil {
 		t.Error(err)
 	}
 
 	sres := db.SyncQuery("select * from tbl_fun_heelthrow where id >= 1")
-	res = sres.Get(2000)
-	if res.Err != nil {
-		t.Error(res.Err)
+	res, err = sres.Get(2000)
+	if err != nil {
+		t.Error(err)
 	}
 
 	out2 := []struct {
