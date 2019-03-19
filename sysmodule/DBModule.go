@@ -590,10 +590,9 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 			if !value.CanSet() {
 				return errors.New("结构体字段没有读写权限")
 			}
+
 			if meta.Valid == false {
-				if !slf.blur {
-					return fmt.Errorf("field data is valid %s", tag)
-				}
+				continue
 			}
 
 			if len(meta.String) == 0 {
