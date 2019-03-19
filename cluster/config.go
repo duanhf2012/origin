@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 )
@@ -67,6 +68,10 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 			c.currentNode = node
 			custerNodeName = v.ClusterNode
 		}
+	}
+
+	if c.currentNode.NodeID == 0 {
+		return nil, errors.New(fmt.Sprintf("Cannot find NodeId %d in cluster.json!", nodeid))
 	}
 
 	//3.存入当前Node服务名
