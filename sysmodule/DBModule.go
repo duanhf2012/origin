@@ -347,6 +347,9 @@ func (slf *DBModule) Query(query string, args ...interface{}) DBResult {
 
 func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, error) {
 	datasetList := DataSetList{}
+	datasetList.tag = "json"
+	datasetList.blur = true
+
 	if slf.db == nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
 		return &datasetList, fmt.Errorf("cannot connect database!")
