@@ -13,4 +13,5 @@ const (
 type ILogger interface {
 	Printf(level uint, format string, v ...interface{})
 	Print(level uint, v ...interface{})
+	SetLogLevel(level uint)
 }

@@ -27,3 +27,7 @@ func (slf *LogService) Print(level uint, v ...interface{}) {
 func (slf *LogService) AppendCallDepth(calldepth int) {
 	slf.logmodule.AppendCallDepth(calldepth)
 }
+
+func (slf *LogService) SetLogLevel(level uint) {
+	slf.logmodule.SetLogLevel(level)
+}

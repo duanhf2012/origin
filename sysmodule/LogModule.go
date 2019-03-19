@@ -26,6 +26,7 @@ var LogPrefix = [LEVEL_MAX]string{"[UNKNOW]", "[DEBUG]", "[INFO ]", "[WARN ]", "
 type ILogger interface {
 	Printf(level uint, format string, v ...interface{})
 	Print(level uint, v ...interface{})
+	SetLogLevel(level uint)
 }
 
 type LogModule struct {
@@ -93,6 +94,10 @@ func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
 		return
 	}
 
+	if slf.openLevel == LEVER_DEBUG {
+		fmt.Println(LogPrefix[level], fmt.Sprintf(format, v...))
+	}
+
 	slf.CheckAndGenFile()
 	slf.GetLoggerByLevel(level).Output(slf.calldepth, fmt.Sprintf(format, v...))
 }
@@ -102,10 +107,18 @@ func (slf *LogModule) Print(level uint, v ...interface{}) {
 		return
 	}
 
+	if slf.openLevel == LEVER_DEBUG {
+		fmt.Println(LogPrefix[level], fmt.Sprint(v...))
+	}
+
 	slf.CheckAndGenFile()
 	slf.GetLoggerByLevel(level).Output(slf.calldepth, fmt.Sprint(v...))
 }
 
 func (slf *LogModule) AppendCallDepth(calldepth int) {
 	slf.calldepth += calldepth
+}
+
+func (slf *LogModule) SetLogLevel(level uint) {
+	slf.openLevel = level
 }
