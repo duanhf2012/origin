@@ -81,7 +81,10 @@ func ReadCfg(path string, nodeid int) (*ClusterConfig, error) {
 	for _, cn := range custerNodeName {
 		for _, n := range c.mapIdNode {
 			if n.NodeName == cn {
-				c.mapClusterNodeService[n.NodeName] = append(c.mapClusterNodeService[n.NodeName], n)
+				nodeList := c.mapClusterNodeService[n.NodeName]
+				if IsExistsNode(nodeList, &n) == false {
+					c.mapClusterNodeService[n.NodeName] = append(c.mapClusterNodeService[n.NodeName], n)
+				}
 			}
 		}
 	}
@@ -142,4 +145,14 @@ func (slf *ClusterConfig) GetIdByNodeService(NodeName string, serviceName string
 func (slf *ClusterConfig) HasLocalService(serviceName string) bool {
 	_, ok := slf.currentNode.ServiceList[serviceName]
 	return ok == true
+}
+
+func IsExistsNode(nodelist []CNode, pNode *CNode) bool {
+	for _, node := range nodelist {
+		if node.NodeID == pNode.NodeID {
+			return true
+		}
+	}
+
+	return false
 }

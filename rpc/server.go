@@ -312,7 +312,7 @@ func suitableMethods(prefix string, typ reflect.Type, reportErr bool) map[string
 		// Method needs three ins: receiver, *args, *reply.
 		if mtype.NumIn() != 3 {
 			if reportErr {
-				//log.Printf("rpc.Register: method %q has %d input parameters; needs exactly three\n", mname, mtype.NumIn())
+				log.Printf("rpc.Register: method %q has %d input parameters; needs exactly three\n", mname, mtype.NumIn())
 			}
 			continue
 		}
@@ -320,7 +320,7 @@ func suitableMethods(prefix string, typ reflect.Type, reportErr bool) map[string
 		argType := mtype.In(1)
 		if !isExportedOrBuiltinType(argType) {
 			if reportErr {
-				//log.Printf("rpc.Register: argument type of method %q is not exported: %q\n", mname, argType)
+				log.Printf("rpc.Register: argument type of method %q is not exported: %q\n", mname, argType)
 			}
 			continue
 		}
@@ -328,28 +328,28 @@ func suitableMethods(prefix string, typ reflect.Type, reportErr bool) map[string
 		replyType := mtype.In(2)
 		if replyType.Kind() != reflect.Ptr {
 			if reportErr {
-				//log.Printf("rpc.Register: reply type of method %q is not a pointer: %q\n", mname, replyType)
+				log.Printf("rpc.Register: reply type of method %q is not a pointer: %q\n", mname, replyType)
 			}
 			continue
 		}
 		// Reply type must be exported.
 		if !isExportedOrBuiltinType(replyType) {
 			if reportErr {
-				//log.Printf("rpc.Register: reply type of method %q is not exported: %q\n", mname, replyType)
+				log.Printf("rpc.Register: reply type of method %q is not exported: %q\n", mname, replyType)
 			}
 			continue
 		}
 		// Method needs one out.
 		if mtype.NumOut() != 1 {
 			if reportErr {
-				//log.Printf("rpc.Register: method %q has %d output parameters; needs exactly one\n", mname, mtype.NumOut())
+				log.Printf("rpc.Register: method %q has %d output parameters; needs exactly one\n", mname, mtype.NumOut())
 			}
 			continue
 		}
 		// The return type of the method must be error.
 		if returnType := mtype.Out(0); returnType != typeOfError {
 			if reportErr {
-				//log.Printf("rpc.Register: return type of method %q is %q, must be error\n", mname, returnType)
+				log.Printf("rpc.Register: return type of method %q is %q, must be error\n", mname, returnType)
 			}
 			continue
 		}

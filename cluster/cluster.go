@@ -221,8 +221,8 @@ func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply inte
 	var callServiceName string
 	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName)
 	if len(nodeidList) > 1 || len(nodeidList) < 1 {
-		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s) not find nodes.", NodeServiceMethod)
-		return fmt.Errorf("CCluster.Call(%s) not find nodes.", NodeServiceMethod)
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s) find nodes count %d is error.", NodeServiceMethod, len(nodeidList))
+		return fmt.Errorf("CCluster.Call(%s) find nodes count %d is error.", NodeServiceMethod, len(nodeidList))
 	}
 
 	nodeid := nodeidList[0]
