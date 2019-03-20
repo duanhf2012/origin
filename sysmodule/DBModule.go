@@ -494,13 +494,10 @@ func (slf *DataSetList) UnMarshal(args ...interface{}) error {
 
 	for _, out := range args {
 		v := reflect.ValueOf(out)
-		fmt.Print(v.Kind())
 		if v.Kind() != reflect.Ptr {
 			return errors.New("interface must be a pointer")
 		}
 
-		fmt.Print(v.Kind())
-		fmt.Print(v.Elem().Kind())
 		if v.Kind() != reflect.Ptr {
 			return errors.New("interface must be a pointer")
 		}
