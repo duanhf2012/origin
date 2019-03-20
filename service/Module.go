@@ -1,6 +1,7 @@
 package service
 
 import (
+	"os"
 	"sync/atomic"
 
 	"sync"
@@ -260,8 +261,8 @@ func (slf *BaseModule) RunModule(module IModule) {
 	err := module.OnInit()
 	if err != nil {
 		GetLogger().Printf(LEVER_ERROR, "Start module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
+		os.Exit(-1)
 	} else {
-
 		GetLogger().Printf(LEVER_INFO, "Start module %T ...", module)
 	}
 
