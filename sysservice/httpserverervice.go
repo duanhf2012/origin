@@ -118,8 +118,11 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 	request := HttpRequest{r.Header, string(msg)}
 	var resp HttpRespone
 
-	cluster.InstanceClusterMgr().Call(strCallPath, &request, &resp)
+	err = cluster.InstanceClusterMgr().Call(strCallPath, &request, &resp)
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
+	if err != nil {
+		resp.Respone = []byte(fmt.Sprint(err))
+	}
 	w.Write([]byte(resp.Respone))
 }
 

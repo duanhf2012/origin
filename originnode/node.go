@@ -63,6 +63,10 @@ func (s *COriginNode) SetupService(services ...service.IService) {
 				continue
 			}
 
+			if cluster.InstanceClusterMgr().HasLocalService(services[j].GetServiceName()) == false {
+				continue
+			}
+
 			if services[i].GetServiceName() == services[j].GetServiceName() {
 				continue
 			}
