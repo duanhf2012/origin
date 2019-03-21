@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysmodule"
+
 	"github.com/gorilla/websocket"
 
 	"time"
@@ -105,7 +108,7 @@ func (ws *WebsocketClient) StartConnect() error {
 
 	var err error
 	ws.conn, _, err = ws.WsDailer.Dial(ws.url, nil)
-	fmt.Printf("connecting %s, %+v\n", ws.url, err)
+	service.GetLogger().Printf(sysmodule.LEVER_INFO, "connecting %s, %+v\n", ws.url, err)
 	if err != nil {
 		return err
 	}
