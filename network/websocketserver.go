@@ -197,6 +197,7 @@ func (slf *BaseMessageReciver) OnHandleHttp(w http.ResponseWriter, r *http.Reque
 	conn, err := websocket.Upgrade(w, r, w.Header(), 1024, 1024)
 	if err != nil {
 		http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
+		return
 	}
 
 	pclient := slf.WsServer.CreateClient(conn)
