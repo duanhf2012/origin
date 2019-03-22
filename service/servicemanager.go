@@ -13,13 +13,15 @@ type IServiceManager interface {
 }
 
 type CServiceManager struct {
-	genserviceid    int
-	localserviceMap map[string]IService
-	logger          ILogger
+	genserviceid      int
+	localserviceMap   map[string]IService
+	logger            ILogger
+	orderLocalService []string
 }
 
 func (slf *CServiceManager) Setup(s IService) bool {
 	slf.localserviceMap[s.GetServiceName()] = s
+	slf.orderLocalService = append(slf.orderLocalService, s.GetServiceName())
 	return true
 }
 
@@ -56,8 +58,8 @@ func (slf *CServiceManager) Init(logger ILogger, exit chan bool, pwaitGroup *syn
 }
 
 func (slf *CServiceManager) Start() bool {
-
-	for _, s := range slf.localserviceMap {
+	for _, sname := range slf.orderLocalService {
+		s := slf.FindService(sname)
 		err := s.(IModule).OnInit()
 		if err != nil {
 			GetLogger().Printf(LEVER_ERROR, "Init module %T id is %d is fail,reason:%v...", s.(IModule), s.(IModule).GetModuleId(), err)
@@ -66,7 +68,8 @@ func (slf *CServiceManager) Start() bool {
 		s.(IModule).getBaseModule().OnInit()
 	}
 
-	for _, s := range slf.localserviceMap {
+	for _, sname := range slf.orderLocalService {
+		s := slf.FindService(sname)
 		go (s.(IModule)).RunModule(s.(IModule))
 	}
 
