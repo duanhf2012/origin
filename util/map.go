@@ -15,6 +15,12 @@ func (m *Map) init() {
 	}
 }
 
+func (m *Map) ClearMap() {
+	m.Lock()
+	defer m.Unlock()
+	m.m = make(map[interface{}]interface{})
+}
+
 func (m *Map) UnsafeGet(key interface{}) interface{} {
 	if m.m == nil {
 		return nil
