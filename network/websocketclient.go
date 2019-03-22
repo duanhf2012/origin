@@ -16,7 +16,7 @@ import (
 
 //IWebsocketClient ...
 type IWebsocketClient interface {
-	Init(slf IWebsocketClient, strurl, strPath string, bproxy bool, timeoutsec time.Duration) error
+	Init(slf IWebsocketClient, strurl, strProxyPath string, timeoutsec time.Duration) error
 	Start() error
 	WriteMessage(msg []byte) error
 	OnDisconnect() error
@@ -36,16 +36,17 @@ type WebsocketClient struct {
 	timeoutsec time.Duration
 
 	bRun bool
+	ping string
 }
 
 //Init ...
-func (ws *WebsocketClient) Init(slf IWebsocketClient, strurl, strPath string, bproxy bool, timeoutsec time.Duration) error {
+func (ws *WebsocketClient) Init(slf IWebsocketClient, strurl, strProxyPath string, timeoutsec time.Duration) error {
 
 	ws.timeoutsec = timeoutsec
 	ws.slf = slf
-	if bproxy == true {
+	if strProxyPath != "" {
 		proxy := func(_ *http.Request) (*url.URL, error) {
-			return url.Parse(strPath)
+			return url.Parse(strProxyPath)
 		}
 
 		if timeoutsec > 0 {
@@ -65,8 +66,12 @@ func (ws *WebsocketClient) Init(slf IWebsocketClient, strurl, strPath string, bp
 
 	ws.url = strurl
 	ws.bwritemsg = make(chan []byte, 1000)
-
+	ws.ping = `ping`
 	return nil
+}
+
+func (ws *WebsocketClient) SetPing(ping string) {
+	ws.ping = ping
 }
 
 //OnRun ...
@@ -145,7 +150,7 @@ func (ws *WebsocketClient) writeMsg() error {
 		select {
 		case <-timerC:
 			if ws.state == 2 {
-				ws.WriteMessage([]byte(`ping`))
+				ws.WriteMessage([]byte(ws.ping))
 			}
 		case msg := <-ws.bwritemsg:
 			if ws.state == 2 {

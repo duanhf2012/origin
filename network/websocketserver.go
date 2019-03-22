@@ -121,7 +121,6 @@ func (slf *WebsocketServer) startListen() {
 
 	if err != nil {
 		service.GetLogger().Printf(sysmodule.LEVER_FATAL, "http.ListenAndServe(%d, nil) error:%v\n", slf.port, err)
-		fmt.Printf("http.ListenAndServe(%d, nil) error\n", slf.port)
 		os.Exit(1)
 	}
 }
@@ -159,7 +158,6 @@ func (slf *WebsocketServer) Disconnect(clientid uint64) {
 	}
 
 	value.conn.Close()
-	//slf.ReleaseClient(value)
 }
 
 func (slf *WebsocketServer) Stop() {
