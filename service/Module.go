@@ -175,6 +175,12 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 		slf.rwModuleLocker = &sync.RWMutex{}
 	}
 
+	pModule := slf.GetModuleById(module.GetModuleId())
+	if pModule != nil {
+		GetLogger().Printf(LEVER_ERROR, "%T Cannot AddModule %T,moduleid %d is  repeat!", slf.GetSelf(), module.GetSelf(), module.GetModuleId())
+		return 0
+	}
+
 	locker := slf.GetRoot().getBaseModule().getLocker()
 	locker.Lock()
 	defer locker.Unlock()
