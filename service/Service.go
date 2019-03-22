@@ -26,6 +26,7 @@ type IService interface {
 	GetServiceId() int
 
 	GetStatus() int
+	IsInit() bool
 }
 
 type BaseService struct {

@@ -36,6 +36,7 @@ type IModule interface {
 	RunModule(module IModule)                                    //手动运行Module
 	InitModule(exit chan bool, pwaitGroup *sync.WaitGroup) error //手动初始化Module
 	getBaseModule() *BaseModule                                  //获取BaseModule指针
+	IsInit() bool
 }
 
 type BaseModule struct {
@@ -52,6 +53,7 @@ type BaseModule struct {
 	rwModuleLocker *sync.RWMutex
 	ExitChan       chan bool
 	WaitGroup      *sync.WaitGroup
+	bInit          bool
 }
 
 func (slf *BaseModule) GetRoot() IModule {
@@ -257,14 +259,19 @@ func (slf *BaseModule) getBaseModule() *BaseModule {
 	return slf
 }
 
+func (slf *BaseModule) IsInit() bool {
+	return slf.bInit
+}
+
 func (slf *BaseModule) RunModule(module IModule) {
 	err := module.OnInit()
 	if err != nil {
 		GetLogger().Printf(LEVER_ERROR, "Start module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
 		os.Exit(-1)
-	} else {
-		GetLogger().Printf(LEVER_INFO, "Start module %T ...", module)
 	}
+	GetLogger().Printf(LEVER_INFO, "Start module %T ...", module)
+
+	slf.bInit = true
 
 	//运行所有子模块
 	timer := util.Timer{}

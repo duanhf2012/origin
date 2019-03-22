@@ -39,7 +39,7 @@ type SyncCacheData struct {
 func (slf *CSyncCacheService) OnInit() error {
 	slf.syncQueue = util.NewSyncQueue()
 	var callServiceName string
-	slf.nodeIdList = cluster.InstanceClusterMgr().GetNodeList("CSyncCacheService.RPC_SyncString", &callServiceName)
+	slf.nodeIdList = cluster.InstanceClusterMgr().GetNodeList("CSyncCacheService.RPC_SyncString", &callServiceName, nil)
 	for _, nodeId := range slf.nodeIdList {
 		syncCacheData := make(chan *SyncCacheData, MAX_SYNC_DATA_CHAN_NUM)
 		slf.syncDataChanList = append(slf.syncDataChanList, syncCacheData)

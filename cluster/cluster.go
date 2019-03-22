@@ -219,7 +219,8 @@ func (slf *CCluster) Start() error {
 //_servicename.methodname
 func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply interface{}) error {
 	var callServiceName string
-	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName)
+	var serviceName string
+	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName, &serviceName)
 	if len(nodeidList) > 1 || len(nodeidList) < 1 {
 		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s) find nodes count %d is error.", NodeServiceMethod, len(nodeidList))
 		return fmt.Errorf("CCluster.Call(%s) find nodes count %d is error.", NodeServiceMethod, len(nodeidList))
@@ -227,6 +228,12 @@ func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply inte
 
 	nodeid := nodeidList[0]
 	if nodeid == GetNodeId() {
+		//判断服务是否已经完成初始化
+		iService := service.InstanceServiceMgr().FindService(serviceName)
+		if iService.IsInit() == false {
+			service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
+			return fmt.Errorf("CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
+		}
 		return slf.LocalRpcClient.Call(callServiceName, args, reply)
 	} else {
 		pclient := slf.GetClusterClient(nodeid)
@@ -245,7 +252,7 @@ func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply inte
 	return fmt.Errorf("CCluster.Call(%s) fail.", NodeServiceMethod)
 }
 
-func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *string) []int {
+func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *string, rpcServiceName *string) []int {
 	var nodename string
 	var servicename string
 	var methodname string
@@ -275,13 +282,21 @@ func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *stri
 		nodeidList = slf.GetIdByNodeService(nodename, servicename)
 	}
 
-	*rpcServerMethod = servicename + "." + methodname
+	if rpcServiceName != nil {
+		*rpcServiceName = servicename
+	}
+
+	if rpcServerMethod != nil {
+		*rpcServerMethod = servicename + "." + methodname
+	}
+
 	return nodeidList
 }
 
 func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) error {
 	var callServiceName string
-	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName)
+	var serviceName string
+	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName, &serviceName)
 	if len(nodeidList) < 1 {
 		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) not find nodes.", NodeServiceMethod)
 		return fmt.Errorf("CCluster.Go(%s) not find nodes.", NodeServiceMethod)
@@ -293,6 +308,12 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) 
 
 	for _, nodeid := range nodeidList {
 		if nodeid == GetNodeId() {
+			iService := service.InstanceServiceMgr().FindService(serviceName)
+			if iService.IsInit() == false {
+				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
+				return fmt.Errorf("CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
+			}
+
 			replyCall := slf.LocalRpcClient.Go(callServiceName, args, nil, nil)
 			if replyCall.Error != nil {
 				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
@@ -389,6 +410,10 @@ func (slf *CCluster) GetIdByNodeService(NodeName string, serviceName string) []i
 }
 
 func (slf *CCluster) HasLocalService(serviceName string) bool {
+	return slf.cfg.HasLocalService(serviceName)
+}
+
+func (slf *CCluster) HasInit(serviceName string) bool {
 	return slf.cfg.HasLocalService(serviceName)
 }
 
