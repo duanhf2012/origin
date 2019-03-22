@@ -1,8 +1,8 @@
 package service
 
 import (
+	"os"
 	"sync"
-
 )
 
 type IServiceManager interface {
@@ -56,6 +56,16 @@ func (slf *CServiceManager) Init(logger ILogger, exit chan bool, pwaitGroup *syn
 }
 
 func (slf *CServiceManager) Start() bool {
+
+	for _, s := range slf.localserviceMap {
+		err := s.(IModule).OnInit()
+		if err != nil {
+			GetLogger().Printf(LEVER_ERROR, "Init module %T id is %d is fail,reason:%v...", s.(IModule), s.(IModule).GetModuleId(), err)
+			os.Exit(-1)
+		}
+		s.(IModule).getBaseModule().OnInit()
+	}
+
 	for _, s := range slf.localserviceMap {
 		go (s.(IModule)).RunModule(s.(IModule))
 	}

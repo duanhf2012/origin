@@ -209,11 +209,19 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 	slf.mapModule[module.GetModuleId()] = module
 
 	//运行模块
+	err := module.OnInit()
+	if err != nil {
+		GetLogger().Printf(LEVER_ERROR, "Init module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
+		os.Exit(-1)
+	}
+	module.getBaseModule().OnInit()
+
 	go module.RunModule(module)
 	return module.GetModuleId()
 }
 
 func (slf *BaseModule) OnInit() error {
+	slf.bInit = true
 	return nil
 }
 
@@ -264,14 +272,12 @@ func (slf *BaseModule) IsInit() bool {
 }
 
 func (slf *BaseModule) RunModule(module IModule) {
-	err := module.OnInit()
+	/*err := module.OnInit()
 	if err != nil {
 		GetLogger().Printf(LEVER_ERROR, "Start module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
 		os.Exit(-1)
-	}
-	GetLogger().Printf(LEVER_INFO, "Start module %T ...", module)
-
-	slf.bInit = true
+	}*/
+	GetLogger().Printf(LEVER_INFO, "Start Run module %T ...", module)
 
 	//运行所有子模块
 	timer := util.Timer{}
