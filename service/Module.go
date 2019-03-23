@@ -288,11 +288,11 @@ func (slf *BaseModule) RunModule(module IModule) {
 			var coreInfo string
 			str, ok := r.(string)
 			if ok {
-				coreInfo += str + "\n" + string(debug.Stack())
+				coreInfo = string(debug.Stack())
 			} else {
 				coreInfo = "Panic!"
 			}
-			coreInfo += "\n" + fmt.Sprintf("Core module is %T, try count %d.\n", module, slf.recoverCount)
+			coreInfo += "\n" + fmt.Sprintf("Core module is %T, try count %d. core information is %s\n", module, slf.recoverCount, str)
 			GetLogger().Printf(LEVER_FATAL, coreInfo)
 			slf.recoverCount += 1
 			//重试3次
