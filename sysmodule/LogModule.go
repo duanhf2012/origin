@@ -29,6 +29,8 @@ type ILogger interface {
 	SetLogLevel(level uint)
 }
 
+type FunListenLog func(uint, string)
+
 type LogModule struct {
 	service.BaseModule
 	currentDay  int
@@ -38,6 +40,7 @@ type LogModule struct {
 	openLevel   uint
 	locker      sync.Mutex
 	calldepth   int
+	listenFun   FunListenLog
 }
 
 func (slf *LogModule) GetCurrentFileName() string {
@@ -82,6 +85,10 @@ func (slf *LogModule) Init(logfilename string, openLevel uint) {
 	slf.calldepth = 3
 }
 
+func (slf *LogModule) SetListenLogFunc(listenFun FunListenLog) {
+	slf.listenFun = listenFun
+}
+
 func (slf *LogModule) GetLoggerByLevel(level uint) *log.Logger {
 	if level >= LEVEL_MAX {
 		level = 0
@@ -94,8 +101,15 @@ func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
 		return
 	}
 
-	if slf.openLevel == LEVER_DEBUG {
-		fmt.Println(LogPrefix[level], fmt.Sprintf(format, v...))
+	if slf.openLevel == LEVER_DEBUG || slf.listenFun != nil {
+		strlog := fmt.Sprintf(format, v...)
+		if slf.openLevel == LEVER_DEBUG {
+			fmt.Println(LogPrefix[level], strlog)
+		}
+
+		if slf.listenFun != nil {
+			slf.listenFun(level, fmt.Sprintf(format, v...))
+		}
 	}
 
 	slf.CheckAndGenFile()
@@ -107,8 +121,15 @@ func (slf *LogModule) Print(level uint, v ...interface{}) {
 		return
 	}
 
-	if slf.openLevel == LEVER_DEBUG {
-		fmt.Println(LogPrefix[level], fmt.Sprint(v...))
+	if slf.openLevel == LEVER_DEBUG || slf.listenFun != nil {
+		strlog := fmt.Sprint(v...)
+		if slf.openLevel == LEVER_DEBUG {
+			fmt.Println(LogPrefix[level], strlog)
+		}
+
+		if slf.listenFun != nil {
+			slf.listenFun(level, fmt.Sprint(v...))
+		}
 	}
 
 	slf.CheckAndGenFile()

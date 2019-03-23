@@ -135,13 +135,13 @@ func NewOrginNode() *COriginNode {
 	return node
 }
 
-func (s *COriginNode) SetLogLevel(level uint) {
+func (s *COriginNode) GetSysLog() *sysservice.LogService {
 	logService := service.InstanceServiceMgr().FindService("syslog")
 	if logService == nil {
 		fmt.Printf("Cannot find syslog service!")
 		os.Exit(-1)
-		return
+		return nil
 	}
-	logService.(*sysservice.LogService).SetLogLevel(level)
 
+	return logService.(*sysservice.LogService)
 }

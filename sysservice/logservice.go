@@ -31,3 +31,7 @@ func (slf *LogService) AppendCallDepth(calldepth int) {
 func (slf *LogService) SetLogLevel(level uint) {
 	slf.logmodule.SetLogLevel(level)
 }
+
+func (slf *LogService) SetListenLogFunc(listenFun sysmodule.FunListenLog) {
+	slf.logmodule.SetListenLogFunc(listenFun)
+}
