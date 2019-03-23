@@ -139,6 +139,10 @@ import (
 	"sync"
 	"unicode"
 	"unicode/utf8"
+
+	runtimedebug "runtime/debug"
+
+	orginservice "github.com/duanhf2012/origin/service"
 )
 
 const (
@@ -389,9 +393,25 @@ func (m *methodType) NumCalls() (n uint) {
 }
 
 func (s *service) call(server *Server, sending *sync.Mutex, wg *sync.WaitGroup, mtype *methodType, req *Request, argv, replyv reflect.Value, codec ServerCodec) {
+	defer func() {
+		if r := recover(); r != nil {
+			var coreInfo string
+			str, ok := r.(string)
+			if ok {
+				coreInfo += str + "\n" + string(runtimedebug.Stack())
+			} else {
+				coreInfo = "Panic!"
+			}
+
+			coreInfo += "\nCore Request RPC Name:" + req.ServiceMethod
+			orginservice.GetLogger().Printf(orginservice.LEVER_FATAL, coreInfo)
+		}
+	}()
+
 	if wg != nil {
 		defer wg.Done()
 	}
+
 	mtype.Lock()
 	mtype.numCalls++
 	mtype.Unlock()

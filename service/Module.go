@@ -1,10 +1,11 @@
 package service
 
 import (
+	"fmt"
 	"os"
-	"sync/atomic"
-
+	"runtime/debug"
 	"sync"
+	"sync/atomic"
 
 	"github.com/duanhf2012/origin/util"
 )
@@ -54,6 +55,8 @@ type BaseModule struct {
 	ExitChan       chan bool
 	WaitGroup      *sync.WaitGroup
 	bInit          bool
+
+	recoverCount int8
 }
 
 func (slf *BaseModule) GetRoot() IModule {
@@ -278,12 +281,28 @@ func (slf *BaseModule) IsInit() bool {
 }
 
 func (slf *BaseModule) RunModule(module IModule) {
-	/*err := module.OnInit()
-	if err != nil {
-		GetLogger().Printf(LEVER_ERROR, "Start module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
-		os.Exit(-1)
-	}*/
 	GetLogger().Printf(LEVER_INFO, "Start Run module %T ...", module)
+
+	defer func() {
+		if r := recover(); r != nil {
+			var coreInfo string
+			str, ok := r.(string)
+			if ok {
+				coreInfo += str + "\n" + string(debug.Stack())
+			} else {
+				coreInfo = "Panic!"
+			}
+			coreInfo += "\n" + fmt.Sprintf("Core module is %T, try count %d.\n", module, slf.recoverCount)
+			GetLogger().Printf(LEVER_FATAL, coreInfo)
+			slf.recoverCount += 1
+			//重试3次
+			if slf.recoverCount < 4 {
+				go slf.RunModule(slf.GetSelf())
+			} else {
+				GetLogger().Printf(LEVER_FATAL, "Routine %T.OnRun has exited!", module)
+			}
+		}
+	}()
 
 	//运行所有子模块
 	timer := util.Timer{}
@@ -291,6 +310,7 @@ func (slf *BaseModule) RunModule(module IModule) {
 	slf.WaitGroup.Add(1)
 	defer slf.WaitGroup.Done()
 	for {
+
 		if atomic.LoadInt32(&slf.corouterstatus) != 0 {
 			module.OnEndRun()
 			GetLogger().Printf(LEVER_INFO, "OnEndRun module %T ...", module)
