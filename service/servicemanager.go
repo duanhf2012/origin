@@ -60,12 +60,15 @@ func (slf *CServiceManager) Init(logger ILogger, exit chan bool, pwaitGroup *syn
 func (slf *CServiceManager) Start() bool {
 	for _, sname := range slf.orderLocalService {
 		s := slf.FindService(sname)
+
+		GetLogger().Printf(LEVER_INFO, "Start Init module %T.", s.(IModule))
 		err := s.(IModule).OnInit()
 		if err != nil {
 			GetLogger().Printf(LEVER_ERROR, "Init module %T id is %d is fail,reason:%v...", s.(IModule), s.(IModule).GetModuleId(), err)
 			os.Exit(-1)
 		}
 		s.(IModule).getBaseModule().OnInit()
+		GetLogger().Printf(LEVER_INFO, "End Init module %T.", s.(IModule))
 	}
 
 	for _, sname := range slf.orderLocalService {

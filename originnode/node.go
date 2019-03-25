@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/duanhf2012/origin/util"
+
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -37,6 +39,7 @@ func (s *COriginNode) Init() {
 		os.Exit(-1)
 	}
 
+	util.Log = logger.Printf
 	s.sigs = make(chan os.Signal, 1)
 	signal.Notify(s.sigs, syscall.SIGINT, syscall.SIGTERM)
 }

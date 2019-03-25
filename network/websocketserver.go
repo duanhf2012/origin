@@ -180,16 +180,10 @@ func (slf *BaseMessageReciver) startReadMsg(pclient *WSClient) {
 	defer func() {
 		if r := recover(); r != nil {
 			var coreInfo string
-			str, ok := r.(string)
-			if ok {
-				coreInfo = string(debug.Stack())
-			} else {
-				coreInfo = "Panic!"
-			}
-
-			coreInfo += "\n" + fmt.Sprintf("core information is %s\n", str)
+			coreInfo = string(debug.Stack())
+			coreInfo += "\n" + fmt.Sprintf("Core information is %v\n", r)
 			service.GetLogger().Printf(service.LEVER_FATAL, coreInfo)
-			slf.messageReciver.OnDisconnect(pclient.clientid, errors.New("core dump"))
+			slf.messageReciver.OnDisconnect(pclient.clientid, errors.New("Core dump"))
 			slf.WsServer.ReleaseClient(pclient)
 		}
 	}()

@@ -218,12 +218,14 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 	slf.mapModule[module.GetModuleId()] = module
 
 	//运行模块
+	GetLogger().Printf(LEVER_INFO, "Start Init module %T.", module)
 	err := module.OnInit()
 	if err != nil {
-		GetLogger().Printf(LEVER_ERROR, "Init module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
+		GetLogger().Printf(LEVER_ERROR, "End Init module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
 		os.Exit(-1)
 	}
 	module.getBaseModule().OnInit()
+	GetLogger().Printf(LEVER_INFO, "End Init module %T.", module)
 
 	go module.RunModule(module)
 	return module.GetModuleId()
@@ -286,15 +288,12 @@ func (slf *BaseModule) RunModule(module IModule) {
 	defer func() {
 		if r := recover(); r != nil {
 			var coreInfo string
-			str, ok := r.(string)
-			if ok {
-				coreInfo = string(debug.Stack())
-			} else {
-				coreInfo = "Panic!"
-			}
-			coreInfo += "\n" + fmt.Sprintf("Core module is %T, try count %d. core information is %s\n", module, slf.recoverCount, str)
+			coreInfo = string(debug.Stack())
+
+			coreInfo += "\n" + fmt.Sprintf("Core module is %T, try count %d. core information is %v\n", module, slf.recoverCount, r)
 			GetLogger().Printf(LEVER_FATAL, coreInfo)
 			slf.recoverCount += 1
+
 			//重试3次
 			if slf.recoverCount < 4 {
 				go slf.RunModule(slf.GetSelf())

@@ -130,6 +130,7 @@ import (
 	"bufio"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -396,14 +397,10 @@ func (s *service) call(server *Server, sending *sync.Mutex, wg *sync.WaitGroup, 
 	defer func() {
 		if r := recover(); r != nil {
 			var coreInfo string
-			str, ok := r.(string)
-			if ok {
-				coreInfo += str + "\n" + string(runtimedebug.Stack())
-			} else {
-				coreInfo = "Panic!"
-			}
 
+			coreInfo = string(runtimedebug.Stack())
 			coreInfo += "\nCore Request RPC Name:" + req.ServiceMethod
+			coreInfo += "\n" + fmt.Sprintf("Core information is %v\n", r)
 			orginservice.GetLogger().Printf(orginservice.LEVER_FATAL, coreInfo)
 		}
 	}()
