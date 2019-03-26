@@ -78,7 +78,7 @@ func (q *Queue) Get(i int) interface{} {
 		i += q.count
 	}
 	if i < 0 || i >= q.count {
-		panic("queue: Get() called with index out of range")
+		return nil
 	}
 	// bitwise modulus
 	return q.buf[(q.head+i)&(len(q.buf)-1)]

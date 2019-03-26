@@ -43,6 +43,15 @@ func (q *SyncQueue) Pop() interface{} {
 	return q.que.Pop()
 }
 
+func (q *SyncQueue) RLockRange(f func(interface{})) {
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
+
+	for i := 0; i < q.que.Length(); i++ {
+		f(q.Get(i))
+	}
+}
+
 func NewSyncQueue() *SyncQueue {
 	syncQueue := SyncQueue{}
 	syncQueue.que = NewQueue()
