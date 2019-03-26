@@ -2,9 +2,9 @@ package network
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/sysmodule"
@@ -76,6 +76,15 @@ func (ws *WebsocketClient) SetPing(ping string) {
 
 //OnRun ...
 func (ws *WebsocketClient) OnRun() error {
+	defer func() {
+		if r := recover(); r != nil {
+			coreInfo := string(debug.Stack())
+			coreInfo += "\n" + fmt.Sprintf("Core WebsocketClient url is %s. Core information is %v\n", ws.url, r)
+			service.GetLogger().Printf(service.LEVER_FATAL, coreInfo)
+			go ws.OnRun()
+		}
+	}()
+
 	for {
 		if ws.bRun == false {
 			break
@@ -85,7 +94,6 @@ func (ws *WebsocketClient) OnRun() error {
 			time.Sleep(1 * time.Second)
 			ws.StartConnect()
 		} else if ws.state == 1 {
-			log.Println("需要进行重连")
 			ws.conn.Close()
 			ws.state = 0
 			ws.slf.OnDisconnect()
@@ -94,7 +102,7 @@ func (ws *WebsocketClient) OnRun() error {
 			_, message, err := ws.conn.ReadMessage()
 
 			if err != nil {
-				log.Printf("到服务器的连接断开 %+v\n", err)
+				service.GetLogger().Printf(service.LEVER_WARN, "websocket client is disconnect [%s],information is %v", ws.url, err)
 				ws.conn.Close()
 				ws.state = 0
 				ws.slf.OnDisconnect()
@@ -126,6 +134,7 @@ func (ws *WebsocketClient) StartConnect() error {
 
 //Start ...
 func (ws *WebsocketClient) Start() error {
+
 	if ws.bRun == false {
 		ws.bRun = true
 		ws.state = 0
@@ -137,6 +146,16 @@ func (ws *WebsocketClient) Start() error {
 
 //触发
 func (ws *WebsocketClient) writeMsg() error {
+	//dump处理
+	defer func() {
+		if r := recover(); r != nil {
+			coreInfo := string(debug.Stack())
+			coreInfo += "\n" + fmt.Sprintf("Core WebsocketClient url is %s. Core information is %v\n", ws.url, r)
+			service.GetLogger().Printf(service.LEVER_FATAL, coreInfo)
+			go ws.writeMsg()
+		}
+	}()
+
 	timerC := time.NewTicker(time.Second * 5).C
 	for {
 		if ws.bRun == false {
@@ -150,15 +169,20 @@ func (ws *WebsocketClient) writeMsg() error {
 		select {
 		case <-timerC:
 			if ws.state == 2 {
-				ws.WriteMessage([]byte(ws.ping))
+				err := ws.WriteMessage([]byte(ws.ping))
+				if err != nil {
+					service.GetLogger().Printf(service.LEVER_WARN, "websocket client is disconnect [%s],information is %v", ws.url, err)
+					ws.state = 0
+					ws.conn.Close()
+					ws.slf.OnDisconnect()
+				}
 			}
 		case msg := <-ws.bwritemsg:
 			if ws.state == 2 {
 				ws.conn.SetWriteDeadline(time.Now().Add(ws.timeoutsec * time.Second))
 				err := ws.conn.WriteMessage(websocket.TextMessage, msg)
-
 				if err != nil {
-					fmt.Print(err)
+					service.GetLogger().Printf(service.LEVER_WARN, "websocket client is disconnect [%s],information is %v", ws.url, err)
 					ws.state = 0
 					ws.conn.Close()
 					ws.slf.OnDisconnect()
