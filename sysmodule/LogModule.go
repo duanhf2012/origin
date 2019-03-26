@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -108,6 +110,20 @@ func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
 		}
 
 		if slf.listenFun != nil {
+			var file string
+			var line int
+			var ok bool
+			_, file, line, ok = runtime.Caller(1)
+			if !ok {
+				file = "???"
+				line = 0
+			}
+			parts := strings.Split(file, "/")
+			if len(parts) > 0 {
+				file = parts[len(parts)-1]
+			}
+
+			format = LogPrefix[level] + time.Now().Format("2006/1/2 15:04:05") + fmt.Sprintf(" %s:%d:", file, line) + format
 			slf.listenFun(level, fmt.Sprintf(format, v...))
 		}
 	}

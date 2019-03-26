@@ -295,7 +295,7 @@ func (slf *BaseModule) RunModule(module IModule) {
 			slf.recoverCount += 1
 
 			//重试3次
-			if slf.recoverCount < 4 {
+			if slf.recoverCount < 10 {
 				go slf.RunModule(slf.GetSelf())
 			} else {
 				GetLogger().Printf(LEVER_FATAL, "Routine %T.OnRun has exited!", module)
@@ -333,6 +333,7 @@ func (slf *BaseModule) RunModule(module IModule) {
 			GetLogger().Printf(LEVER_INFO, "OnEndRun module %T...", module)
 			return
 		}
+
 	}
 
 }

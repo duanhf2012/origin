@@ -60,7 +60,6 @@ func (slf *CServiceManager) Init(logger ILogger, exit chan bool, pwaitGroup *syn
 func (slf *CServiceManager) Start() bool {
 	for _, sname := range slf.orderLocalService {
 		s := slf.FindService(sname)
-
 		GetLogger().Printf(LEVER_INFO, "Start Init module %T.", s.(IModule))
 		err := s.(IModule).OnInit()
 		if err != nil {
@@ -102,4 +101,14 @@ func InstanceServiceMgr() *CServiceManager {
 
 func GetLogger() ILogger {
 	return InstanceServiceMgr().GetLogger()
+}
+
+func (slf *CServiceManager) IsFinishInit() bool {
+	for _, val := range slf.localserviceMap {
+		if val.IsInit() == false {
+			return false
+		}
+	}
+
+	return true
 }

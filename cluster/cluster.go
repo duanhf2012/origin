@@ -310,7 +310,7 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) 
 		if nodeid == GetNodeId() {
 			iService := service.InstanceServiceMgr().FindService(serviceName)
 			if iService.IsInit() == false {
-				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
+				service.GetLogger().Printf(sysmodule.LEVER_WARN, "CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
 				return fmt.Errorf("CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
 			}
 
