@@ -91,7 +91,7 @@ func (ws *WebsocketClient) OnRun() error {
 		}
 
 		if ws.state == 0 {
-			time.Sleep(1 * time.Second)
+			time.Sleep(2 * time.Second)
 			ws.StartConnect()
 		} else if ws.state == 1 {
 			ws.conn.Close()
