@@ -113,7 +113,7 @@ func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
 			var file string
 			var line int
 			var ok bool
-			_, file, line, ok = runtime.Caller(3)
+			_, file, line, ok = runtime.Caller(slf.calldepth - 1)
 			if !ok {
 				file = "???"
 				line = 0
