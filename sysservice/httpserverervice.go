@@ -36,10 +36,11 @@ type HttpServerService struct {
 	httpserver network.HttpServer
 	port       uint16
 
-	controllerMaps ControllerMapsType
-	certfile       string
-	keyfile        string
-	ishttps        bool
+	controllerMaps   ControllerMapsType
+	certfile         string
+	keyfile          string
+	ishttps          bool
+	httpfiltrateList []HttpFiltrate
 }
 
 func (slf *HttpServerService) OnInit() error {
@@ -60,6 +61,14 @@ func (slf *HttpServerService) initRouterHandler() http.Handler {
 	cors := cors.AllowAll()
 	//return cors.Handler(gziphandler.GzipHandler(r))
 	return cors.Handler(r)
+}
+
+type HttpFiltrate func(path string, w http.ResponseWriter, r *http.Request) error
+
+func (slf *HttpServerService) AppendHttpFiltrate(fun HttpFiltrate) bool {
+	slf.httpfiltrateList = append(slf.httpfiltrateList, fun)
+
+	return false
 }
 
 func (slf *HttpServerService) OnRun() bool {
@@ -106,6 +115,21 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// 在这儿处理例外路由接口
+	var errRet error
+	for _, filter := range slf.httpfiltrateList {
+		ret := filter(r.URL.Path, w, r)
+		if ret == nil {
+			errRet = nil
+			break
+		} else {
+			errRet = ret
+		}
+	}
+
+	if errRet != nil {
+		writeError(http.StatusBadRequest, errRet.Error())
+		return
+	}
 
 	// 拼接得到rpc服务的名称
 	vstr := strings.Split(r.URL.Path, "/")
