@@ -98,6 +98,14 @@ func (slf *BaseModule) GetModuleById(moduleId uint32) IModule {
 	return ret
 }
 
+func (slf *BaseModule) GetModuleCount() int {
+	locker := slf.GetRoot().getBaseModule().getLocker()
+	locker.Lock()
+	defer locker.Unlock()
+
+	return len(slf.mapModule)
+}
+
 func (slf *BaseModule) genModuleId() uint32 {
 	slf.CurrMaxModuleId++
 	moduleId := slf.CurrMaxModuleId
