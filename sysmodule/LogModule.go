@@ -106,7 +106,7 @@ func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
 	if slf.openLevel == LEVER_DEBUG || slf.listenFun != nil {
 		strlog := fmt.Sprintf(format, v...)
 		if slf.openLevel == LEVER_DEBUG {
-			fmt.Println(LogPrefix[level], strlog)
+			fmt.Println(LogPrefix[level], time.Now().Format("2006/1/2 15:04:05"), strlog)
 		}
 
 		if slf.listenFun != nil {
