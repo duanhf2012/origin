@@ -123,8 +123,8 @@ func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
 				file = parts[len(parts)-1]
 			}
 
-			format = LogPrefix[level] + time.Now().Format("2006/1/2 15:04:05") + fmt.Sprintf(" %s:%d:", file, line) + format
-			slf.listenFun(level, fmt.Sprintf(format, v...))
+			ft := LogPrefix[level] + time.Now().Format("2006/1/2 15:04:05") + fmt.Sprintf(" %s:%d:", file, line) + format
+			slf.listenFun(level, fmt.Sprintf(ft, v...))
 		}
 	}
 
