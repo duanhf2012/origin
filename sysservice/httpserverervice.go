@@ -127,7 +127,7 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if errRet != nil {
-		writeError(http.StatusBadRequest, errRet.Error())
+		w.Write([]byte(errRet.Error()))
 		return
 	}
 
