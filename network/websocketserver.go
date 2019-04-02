@@ -135,7 +135,7 @@ func (slf *WSClient) startSendMsg() {
 		if ok == false {
 			break
 		}
-
+		slf.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
 		err := slf.conn.WriteMessage(msgbuf.msgtype, msgbuf.bwritemsg)
 		if err != nil {
 			service.GetLogger().Printf(sysmodule.LEVER_INFO, "write client id %d is error :%v\n", slf.clientid, err)
@@ -189,6 +189,7 @@ func (slf *BaseMessageReciver) startReadMsg(pclient *WSClient) {
 	}()
 
 	for {
+		pclient.conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 		msgtype, message, err := pclient.conn.ReadMessage()
 		if err != nil {
 			slf.messageReciver.OnDisconnect(pclient.clientid, err)
