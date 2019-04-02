@@ -33,9 +33,9 @@ type ControllerMapsType map[string]reflect.Value
 
 type HttpServerService struct {
 	service.BaseService
-	httpserver network.HttpServer
-	port       uint16
-
+	httpserver       network.HttpServer
+	port             uint16
+	PrintRequestTime bool
 	controllerMaps   ControllerMapsType
 	certfile         string
 	keyfile          string
@@ -48,7 +48,6 @@ func (slf *HttpServerService) OnInit() error {
 	if slf.ishttps == true {
 		slf.httpserver.SetHttps(slf.certfile, slf.keyfile)
 	}
-
 	return nil
 }
 
@@ -89,12 +88,24 @@ func (slf *HttpServerService) OnDestory() error {
 }
 
 func (slf *HttpServerService) OnSetupService(iservice service.IService) {
-	//
 	rpc.RegisterName(iservice.GetServiceName(), "HTTP_", iservice)
 }
 
 func (slf *HttpServerService) OnRemoveService(iservice service.IService) {
 	return
+}
+
+
+func (slf *HttpServerService) IsPrintRequestTime() bool {
+	if slf.PrintRequestTime == true {
+		return  true
+	}
+	return false
+
+}
+
+func (slf *HttpServerService) SetPrintRequestTime(isPrint bool) {
+	slf.PrintRequestTime = isPrint
 }
 
 func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +153,14 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 	request := HttpRequest{r.Header, string(msg)}
 	var resp HttpRespone
 
+	TimeFuncStart := time.Now()
 	err = cluster.InstanceClusterMgr().Call(strCallPath, &request, &resp)
+
+	TimeFuncPass := time.Since(TimeFuncStart)
+	if slf.IsPrintRequestTime() {
+		service.GetLogger().Printf(service.LEVER_INFO, "HttpServer Time : %s IP : %S url : %s", TimeFuncPass, strCallPath)
+	}
+
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
 	if err != nil {
 		resp.Respone = []byte(fmt.Sprint(err))
