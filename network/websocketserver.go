@@ -71,7 +71,7 @@ type WebsocketServer struct {
 }
 
 const (
-	MAX_MSG_COUNT = 4096
+	MAX_MSG_COUNT = 20480
 )
 
 func (slf *WebsocketServer) Init(port uint16) {
