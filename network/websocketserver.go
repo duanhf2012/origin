@@ -70,6 +70,10 @@ type WebsocketServer struct {
 	iswss    bool
 }
 
+const (
+	MAX_MSG_COUNT = 4096
+)
+
 func (slf *WebsocketServer) Init(port uint16) {
 
 	slf.port = port
@@ -80,10 +84,11 @@ func (slf *WebsocketServer) CreateClient(conn *websocket.Conn) *WSClient {
 	slf.locker.Lock()
 	slf.maxClientid++
 	clientid := slf.maxClientid
-	pclient := &WSClient{clientid, conn, make(chan WSMessage, 1024)}
+	pclient := &WSClient{clientid, conn, make(chan WSMessage, MAX_MSG_COUNT)}
 	slf.mapClient[pclient.clientid] = pclient
 	slf.locker.Unlock()
 
+	service.GetLogger().Printf(sysmodule.LEVER_INFO, "Client id %d is connected.", clientid)
 	return pclient
 }
 
@@ -94,6 +99,7 @@ func (slf *WebsocketServer) ReleaseClient(pclient *WSClient) {
 	slf.locker.Unlock()
 	//关闭写管道
 	close(pclient.bwritemsg)
+	service.GetLogger().Printf(sysmodule.LEVER_INFO, "Client id %d is disconnected.", pclient.clientid)
 }
 
 func (slf *WebsocketServer) SetupReciver(pattern string, messageReciver IMessageReceiver, bEnableCompression bool) {
@@ -154,6 +160,11 @@ func (slf *WebsocketServer) SendMsg(clientid uint64, messageType int, msg []byte
 	defer slf.locker.Unlock()
 	value, ok := slf.mapClient[clientid]
 	if ok == false {
+		return false
+	}
+
+	if len(value.bwritemsg) >= MAX_MSG_COUNT {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "message chan is full :%d\n", len(value.bwritemsg))
 		return false
 	}
 
