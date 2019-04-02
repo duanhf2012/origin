@@ -29,7 +29,7 @@ type DBModule struct {
 	password string
 	dbname   string
 	maxconn  int
-
+	PrintTime time.Duration
 	syncExecuteFun   chan SyncFun
 	syncCoroutineNum int
 }
@@ -241,6 +241,19 @@ func (slf *DBResult) mapSingle2interface(m map[string]string, v reflect.Value) e
 	return nil
 }
 
+
+func (slf *DBModule) SetQuerySlowTime(Time time.Duration){
+	slf.PrintTime = Time
+}
+
+
+func (slf *DBModule) IsPrintTimeLog(Time time.Duration)bool{
+	if slf.PrintTime != 0 && Time >= slf.PrintTime{
+		return true
+	}
+	return false
+}
+
 func (slf *DBResult) mapSlice2interface(data []map[string]string, in interface{}) error {
 	length := len(data)
 
@@ -354,7 +367,14 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, e
 		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
 		return &datasetList, fmt.Errorf("cannot connect database!")
 	}
+
+	TimeFuncStart := time.Now()
 	rows, err := slf.db.Query(query, args...)
+	TimeFuncPass := time.Since(TimeFuncStart)
+
+	if	slf.IsPrintTimeLog(TimeFuncPass) {
+		service.GetLogger().Printf(service.LEVER_INFO, "DBModule QueryEx Time %s , Query :%s , args :%+v",TimeFuncPass,query,args)
+	}
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%v)", query, err)
 		if rows != nil {
@@ -434,7 +454,12 @@ func (slf *DBModule) Exec(query string, args ...interface{}) (*DBResultEx, error
 		return ret, fmt.Errorf("cannot connect database!")
 	}
 
+	TimeFuncStart := time.Now()
 	res, err := slf.db.Exec(query, args...)
+	TimeFuncPass := time.Since(TimeFuncStart)
+	if slf.IsPrintTimeLog(TimeFuncPass) {
+		service.GetLogger().Printf(service.LEVER_INFO, "DBModule QueryEx Time %s , Query :%s , args :%+v",TimeFuncPass,query,args)
+	}
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "Exec:%s(%v)", query, err)
 		return nil, err
