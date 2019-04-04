@@ -230,6 +230,10 @@ func (slf *CCluster) Call(NodeServiceMethod string, args interface{}, reply inte
 	if nodeid == GetNodeId() {
 		//判断服务是否已经完成初始化
 		iService := service.InstanceServiceMgr().FindService(serviceName)
+		if iService == nil {
+			service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s): NodeId %d cannot find.", NodeServiceMethod, nodeid)
+			return fmt.Errorf("CCluster.Call(%s): NodeId %d cannot find..", NodeServiceMethod, nodeid)
+		}
 		if iService.IsInit() == false {
 			service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
 			return fmt.Errorf("CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
