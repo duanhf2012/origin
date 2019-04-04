@@ -51,7 +51,7 @@ type BaseModule struct {
 	CurrMaxModuleId uint32
 	corouterstatus  int32 //0表示运行状态 //1释放消亡状态
 
-	rwModuleLocker *sync.RWMutex
+	rwModuleLocker *sync.Mutex
 	ExitChan       chan bool
 	WaitGroup      *sync.WaitGroup
 	bInit          bool
@@ -71,7 +71,7 @@ func (slf *BaseModule) GetRoot() IModule {
 	}
 }
 
-func (slf *BaseModule) getLocker() *sync.RWMutex {
+func (slf *BaseModule) getLocker() *sync.Mutex {
 	return slf.rwModuleLocker
 }
 
@@ -179,11 +179,6 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 	if module.GetModuleId() > MAX_ALLOW_SET_MODULE_ID {
 		GetLogger().Printf(LEVER_ERROR, "Module Id %d is error  %T", module.GetModuleId(), module.GetSelf())
 		return 0
-	}
-
-	if slf.IsRoot() {
-		//构建Root结点
-		slf.rwModuleLocker = &sync.RWMutex{}
 	}
 
 	pModule := slf.GetModuleById(module.GetModuleId())
