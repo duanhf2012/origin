@@ -70,7 +70,7 @@ type ClientCodec interface {
 	Close() error
 }
 
-func (client *Client) send(call *Call) {
+func (client *Client) send(call *Call, queueMode bool) {
 	client.reqMutex.Lock()
 	defer client.reqMutex.Unlock()
 
@@ -90,6 +90,7 @@ func (client *Client) send(call *Call) {
 	// Encode and send the request.
 	client.request.Seq = seq
 	client.request.ServiceMethod = call.ServiceMethod
+	client.request.QueueMode = queueMode
 	err := client.codec.WriteRequest(&client.request, call.Args)
 	if err != nil {
 		client.mutex.Lock()
@@ -305,7 +306,7 @@ func (client *Client) Close() error {
 // the invocation. The done channel will signal when the call is complete by returning
 // the same Call object. If done is nil, Go will allocate a new channel.
 // If non-nil, done must be buffered or Go will deliberately crash.
-func (client *Client) Go(serviceMethod string, args interface{}, reply interface{}, done chan *Call) *Call {
+func (client *Client) Go(serviceMethod string, args interface{}, reply interface{}, done chan *Call, queueMode bool) *Call {
 	call := new(Call)
 	call.ServiceMethod = serviceMethod
 	call.Args = args
@@ -322,16 +323,16 @@ func (client *Client) Go(serviceMethod string, args interface{}, reply interface
 		}
 	}
 	call.Done = done
-	client.send(call)
+	client.send(call, queueMode)
 	return call
 }
 
 // Call invokes the named function, waits for it to complete, and returns its error status.
 func (client *Client) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	select {
-	case call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done:
+	case call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1), false).Done:
 		return call.Error
-	case <-time.After(10 * time.Second):
+	case <-time.After(15 * time.Second):
 	}
 
 	//call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done

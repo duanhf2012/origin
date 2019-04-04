@@ -50,6 +50,9 @@ func (s *COriginNode) OpenDebugCheck(listenAddress string) {
 }
 
 func (s *COriginNode) SetupService(services ...service.IService) {
+	ppService := &sysservice.PProfService{}
+	services = append(services, ppService)
+	cluster.InstanceClusterMgr().AddLocalService(ppService)
 	for i := 0; i < len(services); i++ {
 		services[i].Init(services[i])
 

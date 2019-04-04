@@ -144,6 +144,7 @@ import (
 	runtimedebug "runtime/debug"
 
 	orginservice "github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/util"
 )
 
 const (
@@ -178,6 +179,7 @@ type Request struct {
 	ServiceMethod string   // format: "Service.Method"
 	Seq           uint64   // sequence number chosen by client
 	next          *Request // for free list in Server
+	QueueMode     bool
 }
 
 // Response is a header written before every RPC return. It is used internally
@@ -190,6 +192,10 @@ type Response struct {
 	next          *Response // for free list in Server
 }
 
+const (
+	MAX_RPCDATA_QUEUE_COUNT = 10240
+)
+
 // Server represents an RPC Server.
 type Server struct {
 	serviceMap sync.Map   // map[string]*service
@@ -197,11 +203,28 @@ type Server struct {
 	freeReq    *Request
 	respLock   sync.Mutex // protects freeResp
 	freeResp   *Response
+
+	mapCallQueue map[string]chan *CQueueRpcData
+}
+
+type CQueueRpcData struct {
+	server  *Server
+	sending *sync.Mutex
+	wg      *sync.WaitGroup
+	mtype   *methodType
+	req     *Request
+	argv    reflect.Value
+	replyv  reflect.Value
+	codec   ServerCodec
+	service *service
 }
 
 // NewServer returns a new Server.
 func NewServer() *Server {
-	return &Server{}
+	server := &Server{}
+	server.mapCallQueue = make(map[string]chan *CQueueRpcData)
+
+	return server
 }
 
 // DefaultServer is the default instance of *Server.
@@ -243,11 +266,30 @@ func (server *Server) RegisterName(name string, prefix string, rcvr interface{})
 	return server.register(rcvr, name, prefix, true)
 }
 
+func (server *Server) ProcessQueue(name string) {
+	chanRpc, ok := server.mapCallQueue[name]
+	if ok == false {
+		orginservice.GetLogger().Printf(orginservice.LEVER_FATAL, "cannot find queue")
+		return
+	}
+
+	for {
+		rpcData := <-chanRpc
+		rpcData.service.call(rpcData.server, rpcData.sending, rpcData.wg, rpcData.mtype, rpcData.req, rpcData.argv, rpcData.replyv, rpcData.codec)
+	}
+}
+
 func (server *Server) register(rcvr interface{}, name string, prefix string, useName bool) error {
 	s := new(service)
 	s.typ = reflect.TypeOf(rcvr)
 	s.rcvr = reflect.ValueOf(rcvr)
 	sname := reflect.Indirect(s.rcvr).Type().Name()
+
+	_, ok := server.mapCallQueue[sname]
+	if ok == false {
+		server.mapCallQueue[sname] = make(chan *CQueueRpcData, 10240)
+		util.Go(server.ProcessQueue, sname)
+	}
 	if useName {
 		sname = name
 	}
@@ -495,9 +537,10 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
 	for {
-		service, mtype, req, argv, replyv, keepReading, err := server.readRequest(codec)
+		service, mtype, req, argv, replyv, keepReading, queueMode, err := server.readRequest(codec)
 		if err != nil {
 			if debugLog && err != io.EOF {
+				orginservice.GetLogger().Printf(orginservice.LEVER_FATAL, "rpc: %v", err)
 				log.Println("rpc:", err)
 			}
 			if !keepReading {
@@ -510,7 +553,28 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 			}
 			continue
 		}
+
+		rpcData := &CQueueRpcData{server, sending, wg, mtype, req, argv, replyv, codec, service}
+
+		if queueMode == true {
+			rpcChan, ok := server.mapCallQueue[service.name]
+			if ok == true {
+				if len(rpcChan) >= MAX_RPCDATA_QUEUE_COUNT {
+					orginservice.GetLogger().Printf(orginservice.LEVER_FATAL, "Rpc Service Name %s chan overload %d", service.name, MAX_RPCDATA_QUEUE_COUNT)
+
+					continue
+				}
+				wg.Add(1)
+				rpcChan <- rpcData
+				continue
+			} else {
+				orginservice.GetLogger().Printf(orginservice.LEVER_FATAL, "Rpc Service Name %s call not find coroutines", service.name)
+			}
+		}
+
 		wg.Add(1)
+		//queueMode
+		//fmt.Print(queueMode)
 		go service.call(server, sending, wg, mtype, req, argv, replyv, codec)
 	}
 	// We've seen that there are no more requests.
@@ -523,7 +587,7 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 // It does not close the codec upon completion.
 func (server *Server) ServeRequest(codec ServerCodec) error {
 	sending := new(sync.Mutex)
-	service, mtype, req, argv, replyv, keepReading, err := server.readRequest(codec)
+	service, mtype, req, argv, replyv, keepReading, _, err := server.readRequest(codec)
 	if err != nil {
 		if !keepReading {
 			return err
@@ -579,13 +643,13 @@ func (server *Server) freeResponse(resp *Response) {
 	server.respLock.Unlock()
 }
 
-func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *methodType, req *Request, argv, replyv reflect.Value, keepReading bool, err error) {
-	service, mtype, req, keepReading, err = server.readRequestHeader(codec)
+func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *methodType, req *Request, argv, replyv reflect.Value, keepReading bool, queueMode bool, err error) {
+	service, mtype, req, keepReading, queueMode, err = server.readRequestHeader(codec)
 	if err != nil {
 		if !keepReading {
 			return
-		}
-		// discard body
+		} // discard body
+
 		codec.ReadRequestBody(nil)
 		return
 	}
@@ -617,7 +681,7 @@ func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *m
 	return
 }
 
-func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype *methodType, req *Request, keepReading bool, err error) {
+func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype *methodType, req *Request, keepReading bool, queueMode bool, err error) {
 	// Grab the request header.
 	req = server.getRequest()
 	err = codec.ReadRequestHeader(req)
@@ -653,6 +717,7 @@ func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype 
 	if mtype == nil {
 		err = errors.New("rpc: can't find method " + req.ServiceMethod)
 	}
+	queueMode = req.QueueMode
 	return
 }
 

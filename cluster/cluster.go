@@ -30,7 +30,8 @@ type CCluster struct {
 	reader net.Conn
 	writer net.Conn
 
-	LocalRpcClient *rpc.Client
+	LocalRpcClient        *rpc.Client
+	innerLocalServiceList map[string]bool
 }
 
 func (slf *CCluster) ReadNodeInfo(nodeid int) error {
@@ -297,7 +298,7 @@ func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *stri
 	return nodeidList
 }
 
-func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) error {
+func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}, queueModle bool) error {
 	var callServiceName string
 	var serviceName string
 	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName, &serviceName)
@@ -318,7 +319,7 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) 
 				return fmt.Errorf("CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
 			}
 
-			replyCall := slf.LocalRpcClient.Go(callServiceName, args, nil, nil)
+			replyCall := slf.LocalRpcClient.Go(callServiceName, args, nil, nil, queueModle)
 			if replyCall.Error != nil {
 				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
 			}
@@ -329,7 +330,7 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}) 
 				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) NodeId %d not find client", NodeServiceMethod, nodeid)
 				return fmt.Errorf("CCluster.Go(%s) NodeId %d not find client", NodeServiceMethod, nodeid)
 			}
-			replyCall := pclient.Go(callServiceName, args, nil, nil)
+			replyCall := pclient.Go(callServiceName, args, nil, nil, queueModle)
 			if replyCall.Error != nil {
 				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
 			}
@@ -355,14 +356,14 @@ func (slf *CCluster) CallNode(nodeid int, servicemethod string, args interface{}
 	return err
 }
 
-func (slf *CCluster) GoNode(nodeid int, args interface{}, servicemethod string) error {
+func (slf *CCluster) GoNode(nodeid int, args interface{}, servicemethod string, queueModle bool) error {
 	pclient := slf.GetClusterClient(nodeid)
 	if pclient == nil {
 		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.GoNode(%d,%s) NodeId not find client", nodeid, servicemethod)
 		return fmt.Errorf("CCluster.GoNode(%d,%s) NodeId not find client", nodeid, servicemethod)
 	}
 
-	replyCall := pclient.Go(servicemethod, args, nil, nil)
+	replyCall := pclient.Go(servicemethod, args, nil, nil, queueModle)
 	if replyCall.Error != nil {
 		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.GoNode(%d,%s) fail:%v", nodeid, servicemethod, replyCall.Error)
 	}
@@ -383,20 +384,32 @@ func Call(NodeServiceMethod string, args interface{}, reply interface{}) error {
 	return InstanceClusterMgr().Call(NodeServiceMethod, args, reply)
 }
 
-func Go(NodeServiceMethod string, args interface{}) error {
-	return InstanceClusterMgr().Go(false, NodeServiceMethod, args)
-}
-
 func CallNode(NodeId int, servicemethod string, args interface{}, reply interface{}) error {
 	return InstanceClusterMgr().CallNode(NodeId, servicemethod, args, reply)
 }
 
 func GoNode(NodeId int, servicemethod string, args interface{}) error {
-	return InstanceClusterMgr().GoNode(NodeId, args, servicemethod)
+	return InstanceClusterMgr().GoNode(NodeId, args, servicemethod, false)
+}
+
+func Go(NodeServiceMethod string, args interface{}) error {
+	return InstanceClusterMgr().Go(false, NodeServiceMethod, args, false)
 }
 
 func CastGo(NodeServiceMethod string, args interface{}) error {
-	return InstanceClusterMgr().Go(true, NodeServiceMethod, args)
+	return InstanceClusterMgr().Go(true, NodeServiceMethod, args, false)
+}
+
+func GoNodeQueue(NodeId int, servicemethod string, args interface{}) error {
+	return InstanceClusterMgr().GoNode(NodeId, args, servicemethod, true)
+}
+
+func GoQueue(NodeServiceMethod string, args interface{}) error {
+	return InstanceClusterMgr().Go(false, NodeServiceMethod, args, true)
+}
+
+func CastGoQueue(NodeServiceMethod string, args interface{}) error {
+	return InstanceClusterMgr().Go(true, NodeServiceMethod, args, true)
 }
 
 var _self *CCluster
@@ -404,6 +417,7 @@ var _self *CCluster
 func InstanceClusterMgr() *CCluster {
 	if _self == nil {
 		_self = new(CCluster)
+		_self.innerLocalServiceList = make(map[string]bool)
 		return _self
 	}
 	return _self
@@ -414,7 +428,8 @@ func (slf *CCluster) GetIdByNodeService(NodeName string, serviceName string) []i
 }
 
 func (slf *CCluster) HasLocalService(serviceName string) bool {
-	return slf.cfg.HasLocalService(serviceName)
+	_, ok := slf.innerLocalServiceList[serviceName]
+	return slf.cfg.HasLocalService(serviceName) || ok
 }
 
 func (slf *CCluster) HasInit(serviceName string) bool {
@@ -423,4 +438,15 @@ func (slf *CCluster) HasInit(serviceName string) bool {
 
 func GetNodeId() int {
 	return _self.cfg.currentNode.NodeID
+}
+
+func (slf *CCluster) AddLocalService(iservice service.IService) {
+	servicename := fmt.Sprintf("%T", iservice)
+	parts := strings.Split(servicename, ".")
+	if len(parts) != 2 {
+		service.GetLogger().Printf(service.LEVER_ERROR, "BaseService.Init: service name is error: %q", servicename)
+	}
+
+	servicename = parts[1]
+	slf.innerLocalServiceList[servicename] = true
 }
