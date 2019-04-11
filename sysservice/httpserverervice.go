@@ -158,7 +158,7 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 
 	TimeFuncPass := time.Since(TimeFuncStart)
 	if slf.IsPrintRequestTime() {
-		service.GetLogger().Printf(service.LEVER_INFO, "HttpServer Time : %s IP : %S url : %s", TimeFuncPass, strCallPath)
+		service.GetLogger().Printf(service.LEVER_INFO, "HttpServer Time : %s url : %s", TimeFuncPass, strCallPath)
 	}
 
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
