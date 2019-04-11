@@ -323,7 +323,6 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}, 
 			if replyCall.Error != nil {
 				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
 			}
-			return replyCall.Error
 		} else {
 			pclient := slf.GetClusterClient(nodeid)
 			if pclient == nil {
@@ -334,7 +333,6 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}, 
 			if replyCall.Error != nil {
 				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
 			}
-			return replyCall.Error
 		}
 	}
 

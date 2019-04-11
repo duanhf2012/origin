@@ -1,6 +1,7 @@
 package network
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -31,6 +32,7 @@ type IMessageReceiver interface {
 	OnDisconnect(clientid uint64, err error)
 	OnRecvMsg(clientid uint64, msgtype int, data []byte)
 	OnHandleHttp(w http.ResponseWriter, r *http.Request)
+	IsInit() bool
 }
 
 type Reciver struct {
@@ -65,9 +67,9 @@ type WebsocketServer struct {
 	httpserver *http.Server
 	reciver    map[string]Reciver
 
-	certfile string
-	keyfile  string
-	iswss    bool
+	caList []CA
+
+	iswss bool
 }
 
 const (
@@ -114,17 +116,34 @@ func (slf *WebsocketServer) SetupReciver(pattern string, messageReciver IMessage
 func (slf *WebsocketServer) startListen() {
 	listenPort := fmt.Sprintf(":%d", slf.port)
 
+	var tlscatList []tls.Certificate
+	var tlsConfig *tls.Config
+	for _, cadata := range slf.caList {
+		cer, err := tls.LoadX509KeyPair(cadata.certfile, cadata.keyfile)
+		if err != nil {
+			service.GetLogger().Printf(sysmodule.LEVER_FATAL, "load CA  %s-%s file is error :%s", cadata.certfile, cadata.keyfile, err.Error())
+			os.Exit(1)
+			return
+		}
+		tlscatList = append(tlscatList, cer)
+	}
+
+	if len(tlscatList) > 0 {
+		tlsConfig = &tls.Config{Certificates: tlscatList}
+	}
+
 	slf.httpserver = &http.Server{
 		Addr:           listenPort,
 		Handler:        slf.initRouterHandler(),
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 20,
+		TLSConfig:      tlsConfig,
 	}
 
 	var err error
 	if slf.iswss == true {
-		err = slf.httpserver.ListenAndServeTLS(slf.certfile, slf.keyfile)
+		err = slf.httpserver.ListenAndServeTLS("", "")
 	} else {
 		err = slf.httpserver.ListenAndServe()
 	}
@@ -244,7 +263,9 @@ func (slf *WebsocketServer) initRouterHandler() http.Handler {
 	r := mux.NewRouter()
 
 	for pattern, reciver := range slf.reciver {
-		r.HandleFunc(pattern, reciver.messageReciver.OnHandleHttp)
+		if reciver.messageReciver.IsInit() == true {
+			r.HandleFunc(pattern, reciver.messageReciver.OnHandleHttp)
+		}
 	}
 
 	cors := cors.AllowAll()
@@ -252,8 +273,10 @@ func (slf *WebsocketServer) initRouterHandler() http.Handler {
 }
 
 func (slf *WebsocketServer) SetWSS(certfile string, keyfile string) bool {
-	slf.certfile = certfile
-	slf.keyfile = keyfile
+	if certfile == "" || keyfile == "" {
+		return false
+	}
+	slf.caList = append(slf.caList, CA{certfile, keyfile})
 	slf.iswss = true
 	return true
 }

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,11 @@ import (
 	"github.com/duanhf2012/origin/sysmodule"
 )
 
+type CA struct {
+	certfile string
+	keyfile  string
+}
+
 type HttpServer struct {
 	port uint16
 
@@ -18,8 +24,7 @@ type HttpServer struct {
 	writetimeout time.Duration
 
 	httpserver *http.Server
-	certfile   string
-	keyfile    string
+	caList     []CA
 
 	ishttps bool
 }
@@ -41,17 +46,35 @@ func (slf *HttpServer) Start() {
 
 func (slf *HttpServer) startListen() error {
 	listenPort := fmt.Sprintf(":%d", slf.port)
+
+	var tlscatList []tls.Certificate
+	var tlsConfig *tls.Config
+	for _, cadata := range slf.caList {
+		cer, err := tls.LoadX509KeyPair(cadata.certfile, cadata.keyfile)
+		if err != nil {
+			service.GetLogger().Printf(sysmodule.LEVER_FATAL, "load CA  [%s]-[%s] file is error :%s", cadata.certfile, cadata.keyfile, err.Error())
+			os.Exit(1)
+			return nil
+		}
+		tlscatList = append(tlscatList, cer)
+	}
+
+	if len(tlscatList) > 0 {
+		tlsConfig = &tls.Config{Certificates: tlscatList}
+	}
+
 	slf.httpserver = &http.Server{
 		Addr:           listenPort,
 		Handler:        slf.handler,
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 20,
+		TLSConfig:      tlsConfig,
 	}
 
 	var err error
 	if slf.ishttps == true {
-		err = slf.httpserver.ListenAndServeTLS(slf.certfile, slf.keyfile)
+		err = slf.httpserver.ListenAndServeTLS("", "")
 	} else {
 		err = slf.httpserver.ListenAndServe()
 	}
@@ -66,8 +89,10 @@ func (slf *HttpServer) startListen() error {
 }
 
 func (slf *HttpServer) SetHttps(certfile string, keyfile string) bool {
-	slf.certfile = certfile
-	slf.keyfile = keyfile
+	if certfile == "" || keyfile == "" {
+		return false
+	}
+	slf.caList = append(slf.caList, CA{certfile, keyfile})
 	slf.ishttps = true
 	return true
 }
