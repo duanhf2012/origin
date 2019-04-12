@@ -1,6 +1,7 @@
 package network
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -32,12 +33,17 @@ type WebsocketClient struct {
 	url        string
 	state      int //0未连接状态   1正在重连   2连接状态
 	bwritemsg  chan []byte
+	closer     chan bool
 	slf        IWebsocketClient
 	timeoutsec time.Duration
 
 	bRun bool
 	ping string
 }
+
+const (
+	MAX_WRITE_MSG = 10240
+)
 
 //Init ...
 func (ws *WebsocketClient) Init(slf IWebsocketClient, strurl, strProxyPath string, timeoutsec time.Duration) error {
@@ -65,7 +71,6 @@ func (ws *WebsocketClient) Init(slf IWebsocketClient, strurl, strProxyPath strin
 	}
 
 	ws.url = strurl
-	ws.bwritemsg = make(chan []byte, 1000)
 	ws.ping = `ping`
 	return nil
 }
@@ -94,8 +99,9 @@ func (ws *WebsocketClient) OnRun() error {
 			time.Sleep(2 * time.Second)
 			ws.StartConnect()
 		} else if ws.state == 1 {
-			ws.conn.Close()
 			ws.state = 0
+			close(ws.closer)
+			ws.conn.Close()
 			ws.slf.OnDisconnect()
 		} else if ws.state == 2 {
 			ws.conn.SetReadDeadline(time.Now().Add(ws.timeoutsec * time.Second))
@@ -105,6 +111,7 @@ func (ws *WebsocketClient) OnRun() error {
 				service.GetLogger().Printf(service.LEVER_WARN, "websocket client is disconnect [%s],information is %v", ws.url, err)
 				ws.conn.Close()
 				ws.state = 0
+				close(ws.closer)
 				ws.slf.OnDisconnect()
 				continue
 			}
@@ -125,7 +132,8 @@ func (ws *WebsocketClient) StartConnect() error {
 	if err != nil {
 		return err
 	}
-
+	ws.closer = make(chan bool)
+	ws.bwritemsg = make(chan []byte, MAX_WRITE_MSG)
 	ws.state = 2
 	ws.slf.OnConnected()
 
@@ -167,6 +175,11 @@ func (ws *WebsocketClient) writeMsg() error {
 			continue
 		}
 		select {
+		case _, ok := <-ws.closer:
+			if ok == false {
+				break
+			}
+
 		case <-timerC:
 			if ws.state == 2 {
 				err := ws.WriteMessage([]byte(ws.ping))
@@ -177,8 +190,8 @@ func (ws *WebsocketClient) writeMsg() error {
 					ws.slf.OnDisconnect()
 				}
 			}
-		case msg := <-ws.bwritemsg:
-			if ws.state == 2 {
+		case msg, ok := <-ws.bwritemsg:
+			if ok == true && ws.state == 2 {
 				ws.conn.SetWriteDeadline(time.Now().Add(ws.timeoutsec * time.Second))
 				err := ws.conn.WriteMessage(websocket.TextMessage, msg)
 				if err != nil {
@@ -201,7 +214,24 @@ func (ws *WebsocketClient) ReConnect() {
 
 //WriteMessage ...
 func (ws *WebsocketClient) WriteMessage(msg []byte) error {
-	ws.bwritemsg <- msg
+	if ws.closer == nil || ws.bwritemsg == nil {
+		service.GetLogger().Printf(service.LEVER_WARN, "WriteMessage data fail,websocket client is disconnect.")
+		return errors.New("riteMessage data fail,websocket client is disconnect.")
+	}
+	select {
+	case <-ws.closer:
+		service.GetLogger().Printf(service.LEVER_WARN, "WriteMessage data fail,websocket client is disconnect.")
+		return errors.New("riteMessage data fail,websocket client is disconnect.")
+	default:
+		if len(ws.bwritemsg) < MAX_WRITE_MSG {
+			ws.bwritemsg <- msg
+		} else {
+			service.GetLogger().Printf(service.LEVER_ERROR, "WriteMessage data fail,bwriteMsg is overload.")
+			return errors.New("WriteMessage data fail,bwriteMsg is overload.")
+		}
+
+	}
+
 	return nil
 }
 
