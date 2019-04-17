@@ -298,6 +298,27 @@ func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *stri
 	return nodeidList
 }
 
+//GetNodeIdByServiceName 根据服务名查找nodeid servicename服务名 bOnline是否需要查找在线服务
+func (slf *CCluster) GetNodeIdByServiceName(servicename string, bOnline bool) []int {
+	nodeIDList := slf.cfg.GetIdByService(servicename)
+
+	if bOnline {
+		ret := make([]int, 0, len(nodeIDList))
+		for _, nodeid := range nodeIDList {
+			if slf.CheckNodeIsOnlineByID(nodeid) {
+				ret = append(ret, nodeid)
+			}
+		}
+		return ret
+	}
+
+	return slf.cfg.GetIdByService(servicename)
+}
+
+func (slf *CCluster) CheckNodeIsOnlineByID(nodeid int) bool {
+	return true
+}
+
 func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}, queueModle bool) error {
 	var callServiceName string
 	var serviceName string
@@ -408,6 +429,11 @@ func GoQueue(NodeServiceMethod string, args interface{}) error {
 
 func CastGoQueue(NodeServiceMethod string, args interface{}) error {
 	return InstanceClusterMgr().Go(true, NodeServiceMethod, args, true)
+}
+
+//GetNodeIdByServiceName 根据服务名查找nodeid serviceName服务名 bOnline是否需要查找在线服务
+func GetNodeIdByServiceName(serviceName string, bOnline bool) []int {
+	return InstanceClusterMgr().GetNodeIdByServiceName(serviceName, bOnline)
 }
 
 var _self *CCluster
