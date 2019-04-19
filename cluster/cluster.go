@@ -312,7 +312,7 @@ func (slf *CCluster) GetNodeIdByServiceName(servicename string, bOnline bool) []
 		return ret
 	}
 
-	return slf.cfg.GetIdByService(servicename)
+	return nodeIDList
 }
 
 func (slf *CCluster) CheckNodeIsOnlineByID(nodeid int) bool {
