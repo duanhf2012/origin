@@ -317,6 +317,10 @@ func (slf *CCluster) GetNodeIdByServiceName(servicename string, bOnline bool) []
 }
 
 func (slf *CCluster) CheckNodeIsConnectedByID(nodeid int) bool {
+	if nodeid == GetNodeId() {
+		return true
+	}
+
 	pclient := slf.GetRpcClientByNodeId(nodeid)
 	if pclient == nil {
 		return false
@@ -326,6 +330,7 @@ func (slf *CCluster) CheckNodeIsConnectedByID(nodeid int) bool {
 }
 
 func (slf *CCluster) GetRpcClientByNodeId(nodeid int) *RpcClient {
+
 	pclient, ok := slf.nodeclient[nodeid]
 	if ok == false {
 		return nil
