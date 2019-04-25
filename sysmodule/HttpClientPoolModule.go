@@ -2,6 +2,7 @@ package sysmodule
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -61,6 +62,7 @@ func (slf *HttpClientPoolModule) Init(maxpool int, proxyUrl string) {
 			MaxIdleConnsPerHost: maxpool,
 			IdleConnTimeout:     60 * time.Second,
 			Proxy:               proxyfun,
+			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		},
 	}
 }
