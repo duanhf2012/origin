@@ -31,6 +31,19 @@ func (slf *Timer) CheckTimeOut() bool {
 	return false
 }
 
+func (slf *Timer) CheckTimeOutHour() bool {
+	now := time.Now().UnixNano()
+	if now-slf.lasttime > slf.timeinterval {
+		timeNow := time.Now()
+		nt := timeNow.Truncate(time.Hour * 1)
+		slf.lasttime = nt.UnixNano()
+
+		return true
+	}
+
+	return false
+}
+
 func (slf *Timer) Reset() {
 	slf.lasttime = time.Now().UnixNano()
 }
