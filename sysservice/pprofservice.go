@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime/pprof"
+	"time"
 
 	"github.com/duanhf2012/origin/service"
 )
 
 type PProfService struct {
 	service.BaseService
+	fisttime int
 }
 
 type ProfileData struct {
@@ -18,11 +20,19 @@ type ProfileData struct {
 }
 
 type Profilestruct struct {
+	Fisttime    int
 	ProfileList []ProfileData
+}
+
+func (slf *PProfService) OnInit() error {
+	slf.fisttime = (int)(time.Now().UnixNano())
+	return nil
 }
 
 func (slf *PProfService) GetPprof() ([]byte, error) {
 	var pfiles Profilestruct
+	pfiles.Fisttime = slf.fisttime
+
 	for _, p := range pprof.Profiles() {
 		pfiles.ProfileList = append(pfiles.ProfileList, ProfileData{
 			Name:  p.Name(),
