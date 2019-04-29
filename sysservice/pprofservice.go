@@ -54,6 +54,7 @@ func (slf *PProfService) HTTP_DebugPProf(request *HttpRequest, resp *HttpRespone
 
 func (slf *PProfService) RPC_DebugPProf(arg *string, ret *Profilestruct) error {
 
+	ret.Fisttime = slf.fisttime
 	for _, p := range pprof.Profiles() {
 		ret.ProfileList = append(ret.ProfileList, ProfileData{
 			Name:  p.Name(),

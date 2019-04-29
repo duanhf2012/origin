@@ -156,3 +156,12 @@ func IsExistsNode(nodelist []CNode, pNode *CNode) bool {
 
 	return false
 }
+
+func (slf *ClusterConfig) GetNodeNameByNodeId(nodeid int) string {
+	node, ok := slf.mapIdNode[nodeid]
+	if ok == false {
+		return ""
+	}
+
+	return node.NodeName
+}
