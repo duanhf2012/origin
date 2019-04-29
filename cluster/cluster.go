@@ -494,3 +494,8 @@ func (slf *CCluster) AddLocalService(iservice service.IService) {
 	servicename = parts[1]
 	slf.innerLocalServiceList[servicename] = true
 }
+
+func GetNodeName(nodeid int) string {
+	//
+	return _self.cfg.GetNodeNameByNodeId(nodeid)
+}
