@@ -496,12 +496,10 @@ func (slf *CCluster) AddLocalService(iservice service.IService) {
 }
 
 func GetNodeName(nodeid int) string {
-	//
 	return _self.cfg.GetNodeNameByNodeId(nodeid)
 }
 
 func DynamicCall(address string, serviceMethod string, args interface{}, reply interface{}) error {
-	//conn, err := rpc.DialHTTP("tcp", "127.0.0.1:8095")
 	rpcClient, err := rpc.Dial("tcp", address)
 	if err != nil {
 		return err
