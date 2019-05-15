@@ -500,7 +500,7 @@ func GetNodeName(nodeid int) string {
 }
 
 func DynamicCall(address string, serviceMethod string, args interface{}, reply interface{}) error {
-	rpcClient, err := rpc.Dial("tcp", address)
+	rpcClient, err := rpc.DialTimeOut("tcp", address, time.Second*1)
 	if err != nil {
 		return err
 	}

@@ -291,7 +291,16 @@ func Dial(network, address string) (*Client, error) {
 	}
 	tcpconn, _ := conn.(*net.TCPConn)
 	tcpconn.SetNoDelay(true)
+	return NewClient(conn), nil
+}
 
+func DialTimeOut(network, address string, timeout time.Duration) (*Client, error) {
+	conn, err := net.DialTimeout(network, address, timeout)
+	if err != nil {
+		return nil, err
+	}
+	tcpconn, _ := conn.(*net.TCPConn)
+	tcpconn.SetNoDelay(true)
 	return NewClient(conn), nil
 }
 
