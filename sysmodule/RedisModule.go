@@ -45,18 +45,20 @@ type RedisModule struct {
 
 // ConfigRedis 服务器配置
 type ConfigRedis struct {
-	IP          string
-	Port        string
-	Password    string
-	DbIndex     int
-	MaxIdle     int //最大的空闲连接数，表示即使没有redis连接时依然可以保持N个空闲的连接，而不被清除，随时处于待命状态。
-	MaxActive   int //最大的激活连接数，表示同时最多有N个连接
-	IdleTimeout int //最大的空闲连接等待时间，超过此时间后，空闲连接将被关闭
+	IP            string
+	Port          string
+	Password      string
+	DbIndex       int
+	MaxIdle       int //最大的空闲连接数，表示即使没有redis连接时依然可以保持N个空闲的连接，而不被清除，随时处于待命状态。
+	MaxActive     int //最大的激活连接数，表示同时最多有N个连接
+	IdleTimeout   int //最大的空闲连接等待时间，超过此时间后，空闲连接将被关闭
+	SyncRouterNum int //异步执行Router数量
 }
 
 func (slf *RedisModule) Init(redisCfg *ConfigRedis) {
 	redisServer := redisCfg.IP + ":" + redisCfg.Port
 	slf.redispool = &redis.Pool{
+		Wait:        true,
 		MaxIdle:     redisCfg.MaxIdle,
 		MaxActive:   redisCfg.MaxActive,
 		IdleTimeout: time.Duration(redisCfg.IdleTimeout) * time.Second,
@@ -89,7 +91,10 @@ func (slf *RedisModule) Init(redisCfg *ConfigRedis) {
 	}
 
 	slf.redisTask = make(chan Func, MAX_TASK_CHANNEL)
-	go slf.RunAnsyTask()
+	for i := 0; i < redisCfg.SyncRouterNum; i++ {
+		go slf.RunAnsyTask()
+	}
+
 }
 
 func (slf *RedisModule) RunAnsyTask() {
