@@ -1,11 +1,11 @@
-orgin 游戏服务器引擎简介
+origin 游戏服务器引擎简介
 ==================
 
 
-orgin 是一个由 Go 语言（golang）编写的分布式开源游戏服务器引擎。orgin适用于各类游戏服务器的开发，包括 H5（HTML5）游戏服务器。
+origin 是一个由 Go 语言（golang）编写的分布式开源游戏服务器引擎。origin适用于各类游戏服务器的开发，包括 H5（HTML5）游戏服务器。
 
-orgin 解决的问题：
-* orgin总体设计如go语言设计一样，总是尽可能的提供简洁和易用的模式，快速开发。
+origin 解决的问题：
+* origin总体设计如go语言设计一样，总是尽可能的提供简洁和易用的模式，快速开发。
 * 能够根据业务需求快速并灵活的制定服务器架构。
 * 利用多核优势，将不同的service配置到不同的node，并能高效的协同工作。
 * 将整个引擎抽象三大对象，node,service,module。通过统一的组合模式管理游戏中各功能模块的关系。
@@ -13,7 +13,7 @@ orgin 解决的问题：
 
 Hello world!
 ---------------
-下面我们来一步步的建立orgin服务器,先下载[orgin引擎](https://github.com/duanhf2012/origin "orgin引擎"),或者使用如下命令：
+下面我们来一步步的建立origin服务器,先下载[origin引擎](https://github.com/duanhf2012/origin "origin引擎"),或者使用如下命令：
 ```go
 go get -v -u  github.com/duanhf2012/origin
 ```
@@ -26,7 +26,7 @@ import (
 )
 
 func main() {
-	node := originnode.NewOrginNode()
+	node := originnode.NewOriginNode()
 	if node == nil {
 		return
 	}
@@ -35,15 +35,15 @@ func main() {
 	node.Start()
 }
 ```
-一个orgin服务器需要创建一个node对象，然后必需有Init和Start的流程。
+一个origin服务器需要创建一个node对象，然后必需有Init和Start的流程。
 
-orgin引擎三大对象关系
+origin引擎三大对象关系
 ---------------
-* Node:   可以认为每一个Node代表着一个orgin进程
+* Node:   可以认为每一个Node代表着一个origin进程
 * Service:一个独立的服务可以认为是一个大的功能模块，他是Node的子集，创建完成并安装Node对象中。服务可以支持外部RPC和HTTP接口对外功能。
-* Module: 这是orgin最小对象单元，非常建议所有的业务模块都划分成各个小的Module组合。Module可以建立树状关系。Service也是Module的类型。
+* Module: 这是origin最小对象单元，非常建议所有的业务模块都划分成各个小的Module组合。Module可以建立树状关系。Service也是Module的类型。
 
-orgin集群核心配置文件config/cluser.json如下:
+origin集群核心配置文件config/cluser.json如下:
 ---------------
 ```
 {
@@ -71,7 +71,7 @@ orgin集群核心配置文件config/cluser.json如下:
 ]
 }
 ```
-orgin所有的结点与服务通过配置进行关联，配置文件分为两大配置结点：
+origin所有的结点与服务通过配置进行关联，配置文件分为两大配置结点：
 * PublicServiceList：用于公共服务配置，所有的结点默认会加载该服务列表。
 * NodeList：Node所有的列表
     * NodeId:     Node编号，用于标识唯一的进程id
@@ -80,7 +80,7 @@ orgin所有的结点与服务通过配置进行关联，配置文件分为两大
 	* ServiceList:结点中允许开启的服务列表
 	* ClusterNode:将与列表中的Node产生集群关系。允许访问这些结点中所有的服务。
 
-orgin第一个服务:
+origin第一个服务:
 ---------------
 我们准备的NodeId为1的结点下新建两个服务，分别是CTestService1与CTestService2。
 * config/cluster.json内容如下
@@ -157,8 +157,8 @@ func (slf *CTestService2) OnEndRun() {
 }
 
 func main() {
-	//新建一个orgin node对象
-	node := originnode.NewOrginNode()
+	//新建一个origin node对象
+	node := originnode.NewOriginNode()
 	if node == nil {
 		return
 	}
@@ -188,9 +188,9 @@ CTestService2.OnRun
 通过日志可以确认，在Node启动时分别驱动Service的OnInit,OnRun,OnEndRun，上面的日志中CTestService2.OnRun会被循环调用，
 因为在OnRun的返回是true，否则只会进入一次。如果你不需要OnRun可以不定义OnRun函数。我们已经成功的调用了两个服务了。
 
-orgin服务间通信:
+origin服务间通信:
 ---------------
-orgin是通过rpc的方式互相调用，当前结点只能访问cluster.json中有配置ClusterNode的结点或本地结点中所有的服务接口,下面我们来用实际例子来说明，如下代码所示：
+origin是通过rpc的方式互相调用，当前结点只能访问cluster.json中有配置ClusterNode的结点或本地结点中所有的服务接口,下面我们来用实际例子来说明，如下代码所示：
 ```
 package main
 
@@ -243,7 +243,7 @@ func (slf *CTestService2) RPC_Add(arg *InputData, ret *int) error {
 }
 
 func main() {
-	node := originnode.NewOrginNode()
+	node := originnode.NewOriginNode()
 	if node == nil {
 		return
 	}
@@ -264,11 +264,11 @@ cluster.Call只允许调用一个结点中的服务，如果服务在多个结�
 func (slf *CCluster) CallNode(nodeid int, servicemethod string, args interface{}, reply interface{}) error
 func (slf *CCluster) GoNode(nodeid int, args interface{}, servicemethod string) error
 ```
-在实际使用时，注意抽象service，只有合理的划分service，orgin是以service为最小集群单元放到不同的node中，以达到动态移动service功能到不同的node进程中。
+在实际使用时，注意抽象service，只有合理的划分service，origin是以service为最小集群单元放到不同的node中，以达到动态移动service功能到不同的node进程中。
 
-orgin中Module使用:
+origin中Module使用:
 ---------------
-module在orgin引擎中是最小的对象单元，service本质上也是一个复杂的module。它同样有着以下方法:
+module在origin引擎中是最小的对象单元，service本质上也是一个复杂的module。它同样有着以下方法:
 ```
 OnInit() error //Module初始化时调用
 OnRun() bool   //Module运行时调用
@@ -336,7 +336,7 @@ func (slf *CTestService1) OnRun() bool {
 }
 
 func main() {
-	node := originnode.NewOrginNode()
+	node := originnode.NewOriginNode()
 	if node == nil {
 		return
 	}
@@ -357,7 +357,7 @@ CTestModule1::OnEndRun
 ```
 以上创建新的Module加入到当前服务对象中，可以获取释放动作。同样CTestModule1模块也可以加入子模块，使用方法一样。以上日志每秒钟CTestModule1::OnRun打印一次，4秒后ReleaseModule，对象被释放，执行CTestModule1::OnEndRun。
 
-orgin中其他重要服务:
+origin中其他重要服务:
 ---------------
 * github.com\duanhf2012\origin\sysservice集成了系统常用的服务
 	* httpserverervice:提供对外的http服务

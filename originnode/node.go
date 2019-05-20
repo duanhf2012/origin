@@ -117,7 +117,7 @@ func (s *COriginNode) Stop() {
 	s.waitGroup.Wait()
 }
 
-func NewOrginNode() *COriginNode {
+func NewOriginNode() *COriginNode {
 
 	//创建模块
 	node := new(COriginNode)
