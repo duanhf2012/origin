@@ -101,13 +101,15 @@ func (slf *CCluster) ListenService() error {
 		os.Exit(1)
 		return err2
 	}
+	go slf.AcceptRpc(tcplisten)
+	slf.ReSetLocalRpcClient()
+	return nil
+}
 
+func (slf *CCluster) ReSetLocalRpcClient() {
 	slf.reader, slf.writer = net.Pipe()
 	go rpc.ServeConn(slf.reader)
 	slf.LocalRpcClient = rpc.NewClient(slf.writer)
-
-	go slf.AcceptRpc(tcplisten)
-	return nil
 }
 
 type CPing struct {
@@ -172,6 +174,9 @@ func (slf *CCluster) ConnService() error {
 			v.pclient = client
 		}
 
+		if slf.LocalRpcClient.IsClosed() {
+			slf.ReSetLocalRpcClient()
+		}
 		time.Sleep(time.Second * 4)
 	}
 
