@@ -9,9 +9,23 @@ type Timer struct {
 	setupZeroDBase time.Duration //0表示普通模式 1表示切换分钟模式
 }
 
+func (slf *Timer) GetTimerinterval() int64 {
+	return slf.timeinterval
+}
+
 func (slf *Timer) SetupTimer(ms int32) {
 	slf.lasttime = time.Now().UnixNano()
 	slf.timeinterval = int64(ms) * 1e6
+}
+
+func (slf *Timer) SetupTimerDouble() {
+	slf.lasttime = time.Now().UnixNano()
+	slf.timeinterval *= 2
+}
+
+func (slf *Timer) SetTimerHalf() {
+	slf.lasttime = time.Now().UnixNano()
+	slf.timeinterval /= 2
 }
 
 //检查整点分钟数触发
