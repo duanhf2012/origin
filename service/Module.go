@@ -12,8 +12,7 @@ import (
 
 const (
 	//ModuleNone ...
-	MAX_ALLOW_SET_MODULE_ID = iota + 100000000
-	INIT_AUTO_INCREMENT
+	INIT_AUTO_INCREMENT = 0
 )
 
 type IModule interface {
@@ -38,6 +37,8 @@ type IModule interface {
 	InitModule(exit chan bool, pwaitGroup *sync.WaitGroup) error //手动初始化Module
 	getBaseModule() *BaseModule                                  //获取BaseModule指针
 	IsInit() bool
+	SetUnOnRun()
+	getUnOnRun() bool
 }
 
 type BaseModule struct {
@@ -57,6 +58,7 @@ type BaseModule struct {
 	bInit          bool
 
 	recoverCount int8
+	bUnOnRun     bool
 }
 
 func (slf *BaseModule) GetRoot() IModule {
@@ -168,16 +170,18 @@ func (slf *BaseModule) GetSelf() IModule {
 	return slf.selfModule
 }
 
+func (slf *BaseModule) SetUnOnRun() {
+	slf.bUnOnRun = true
+}
+
+func (slf *BaseModule) getUnOnRun() bool {
+	return slf.bUnOnRun
+}
+
 func (slf *BaseModule) AddModule(module IModule) uint32 {
 	//消亡状态不允许加入模块
 	if atomic.LoadInt32(&slf.corouterstatus) != 0 {
 		GetLogger().Printf(LEVER_ERROR, "%T Cannot AddModule %T", slf.GetSelf(), module.GetSelf())
-		return 0
-	}
-
-	//用户设置的id不允许大于MAX_ALLOW_SET_MODULE_ID
-	if module.GetModuleId() > MAX_ALLOW_SET_MODULE_ID {
-		GetLogger().Printf(LEVER_ERROR, "Module Id %d is error  %T", module.GetModuleId(), module.GetSelf())
 		return 0
 	}
 
@@ -230,7 +234,10 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 	module.getBaseModule().OnInit()
 	GetLogger().Printf(LEVER_INFO, "End Init module %T.", module)
 
-	go module.RunModule(module)
+	if module.getUnOnRun() == false {
+		go module.RunModule(module)
+	}
+
 	return module.GetModuleId()
 }
 
