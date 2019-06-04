@@ -2,91 +2,34 @@ package util_test
 
 import (
 	"fmt"
-	"github.com/name5566/leaf/util"
+	"testing"
+
+	"github.com/duanhf2012/origin/util"
 )
 
-func ExampleMap() {
-	m := new(util.Map)
-
-	fmt.Println(m.Get("key"))
-	m.Set("key", "value")
-	fmt.Println(m.Get("key"))
-	m.Del("key")
-	fmt.Println(m.Get("key"))
-
-	m.Set(1, "1")
-	m.Set(2, 2)
-	m.Set("3", 3)
-
-	fmt.Println(m.Len())
-
-	// Output:
-	// <nil>
-	// value
-	// <nil>
-	// 3
-}
-
-func ExampleRandGroup() {
-	i := util.RandGroup(0, 0, 50, 50)
-	switch i {
-	case 2, 3:
-		fmt.Println("ok")
+func ExampleMap(t *testing.T) {
+	maps := util.NewMapEx()
+	for i := 0; i < 10000; i++ {
+		maps.Set(i, i)
 	}
 
-	// Output:
-	// ok
-}
-
-func ExampleRandInterval() {
-	v := util.RandInterval(-1, 1)
-	switch v {
-	case -1, 0, 1:
-		fmt.Println("ok")
+	for i := 0; i < 10000; i++ {
+		ret := maps.Get(i)
+		if ret.(int) != i {
+			fmt.Printf("cannot find i:%d\n", i)
+		}
 	}
 
-	// Output:
-	// ok
-}
-
-func ExampleRandIntervalN() {
-	r := util.RandIntervalN(-1, 0, 2)
-	if r[0] == -1 && r[1] == 0 ||
-		r[0] == 0 && r[1] == -1 {
-		fmt.Println("ok")
+	for i := 0; i < 10000; i++ {
+		maps.LockSet(i, func(key interface{}, val interface{}) interface{} {
+			return val.(int) + 1
+		})
 	}
 
-	// Output:
-	// ok
-}
-
-func ExampleDeepCopy() {
-	src := []int{1, 2, 3}
-
-	var dst []int
-	util.DeepCopy(&dst, &src)
-
-	for _, v := range dst {
-		fmt.Println(v)
+	for i := 0; i < 10000; i++ {
+		ret := maps.Get(i)
+		if ret.(int) != i {
+			fmt.Printf("cannot find i:%d\n", i)
+		}
 	}
-
-	// Output:
-	// 1
-	// 2
-	// 3
-}
-
-func ExampleDeepClone() {
-	src := []int{1, 2, 3}
-
-	dst := util.DeepClone(src).([]int)
-
-	for _, v := range dst {
-		fmt.Println(v)
-	}
-
-	// Output:
-	// 1
-	// 2
-	// 3
 }

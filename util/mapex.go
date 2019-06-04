@@ -2,92 +2,202 @@ package util
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/duanhf2012/origin/util/hash"
 )
 
 const (
-	DEFAULT_MAX_HASH_NUM = 100
+	DEFAULT_SAFE_MAP_MAX_HASH_NUM = 10
 )
 
 type MapEx struct {
-	m          []Map
-	hashMapNum uint
+	sync.RWMutex
+	m          []map[interface{}]interface{}
+	l          []sync.RWMutex
+	hashMapNum int
+}
+
+func (m *MapEx) Init(hashMapNum int) {
+	m.hashMapNum = hashMapNum
+
+	m.m = []map[interface{}]interface{}{}
+	m.l = []sync.RWMutex{}
+
+	for i := 0; i < hashMapNum; i++ {
+		m.m = append(m.m, make(map[interface{}]interface{}))
+		m.l = append(m.l, sync.RWMutex{})
+	}
 }
 
 func NewMapEx() *MapEx {
 	mapEx := MapEx{}
-	mapEx.Init(DEFAULT_MAX_HASH_NUM)
+	mapEx.Init(DEFAULT_SAFE_MAP_MAX_HASH_NUM)
 	return &mapEx
 }
 
-func (m *MapEx) Init(hashMapNum uint) {
-	var i uint
-	for i = 0; i < hashMapNum; i++ {
-		m.m = append(m.m, Map{})
-	}
-
-	m.hashMapNum = hashMapNum
-}
-
 func (m *MapEx) ClearMap() {
-	var i uint
-	for i = 0; i < m.hashMapNum; i++ {
-		m.m[i].ClearMap()
+	for i := 0; i < DEFAULT_SAFE_MAP_MAX_HASH_NUM; i++ {
+		m.l[i].Lock()
+		m.m[i] = map[interface{}]interface{}{}
+		m.l[i].Unlock()
 	}
 }
 
-func (m *MapEx) GetHashCode(key interface{}) uint {
-	return hash.HashNumber(fmt.Sprint(key))
+func (m *MapEx) GetHashCode(key interface{}) int {
+	return int(hash.HashNumber(fmt.Sprint(key)))
 }
 
-func (m *MapEx) GetMapByKey(key interface{}) *Map {
+func (m *MapEx) GetArrayIdByKey(key interface{}) int {
 	idx := m.GetHashCode(key) % m.hashMapNum
+	if idx > m.hashMapNum {
+		return -1
+	}
+
+	return idx
+}
+
+func (m *MapEx) GetMapByKey(key interface{}) map[interface{}]interface{} {
+	idx := m.GetArrayIdByKey(key)
 	if idx < 0 || idx > m.hashMapNum {
 		return nil
 	}
 
-	return &m.m[idx]
+	return m.m[idx]
 }
 
-func (m *MapEx) Get(key interface{}) interface{} {
+func (m *MapEx) UnsafeGet(key interface{}) interface{} {
+
 	mapData := m.GetMapByKey(key)
 	if mapData == nil {
 		return nil
 	}
-	return mapData.Get(key)
+
+	val, ok := mapData[key]
+	if ok == false {
+		return nil
+	}
+
+	return val
+}
+
+func (m *MapEx) Get(key interface{}) interface{} {
+	idx := m.GetArrayIdByKey(key)
+	if idx < 0 || idx > m.hashMapNum {
+		return nil
+	}
+
+	m.l[idx].RLock()
+	defer m.l[idx].RUnlock()
+
+	val := m.m[idx]
+	ret, ok := val[key]
+	if ok == false {
+		return nil
+	}
+	return ret
 }
 
 func (m *MapEx) Set(key interface{}, value interface{}) {
+	idx := m.GetArrayIdByKey(key)
+	if idx < 0 || idx > m.hashMapNum {
+		return
+	}
+
+	m.l[idx].Lock()
+	defer m.l[idx].Unlock()
+
+	val := m.m[idx]
+	val[key] = value
+}
+
+func (m *MapEx) UnsafeDel(key interface{}) {
 	mapData := m.GetMapByKey(key)
 	if mapData == nil {
 		return
 	}
 
-	mapData.Set(key, value)
+	delete(mapData, key)
 }
 
 func (m *MapEx) Del(key interface{}) {
-
-	mapData := m.GetMapByKey(key)
-	if mapData == nil {
+	idx := m.GetArrayIdByKey(key)
+	if idx < 0 || idx > m.hashMapNum {
 		return
 	}
 
-	mapData.Del(key)
+	m.l[idx].Lock()
+	defer m.l[idx].Unlock()
+
+	val := m.m[idx]
+	delete(val, key)
+}
+
+func (m *MapEx) Len() int {
+	lens := 0
+	for i := 0; i < m.hashMapNum; i++ {
+		m.l[i].RLock()
+		lens += len(m.m[i])
+		m.l[i].RUnlock()
+	}
+
+	return lens
 }
 
 func (m *MapEx) RLockRange(f func(key interface{}, value interface{})) {
-	var i uint
-	for i = 0; i < m.hashMapNum; i++ {
-		m.m[i].RLockRange(f)
+	for i := 0; i < m.hashMapNum; i++ {
+		m.l[i].RLock()
+		for key, val := range m.m[i] {
+			f(key, val)
+		}
+		m.l[i].RUnlock()
 	}
-
 }
 
 func (m *MapEx) LockRange(f func(key interface{}, value interface{})) {
-	var i uint
-	for i = 0; i < m.hashMapNum; i++ {
-		m.m[i].LockRange(f)
+	for i := 0; i < m.hashMapNum; i++ {
+		m.l[i].Lock()
+		for key, val := range m.m[i] {
+			f(key, val)
+		}
+		m.l[i].Unlock()
 	}
+}
+
+func (m *MapEx) LockGet(key interface{}, f func(value interface{})) {
+	idx := m.GetArrayIdByKey(key)
+	if idx < 0 || idx > m.hashMapNum {
+		f(nil)
+		return
+	}
+
+	m.l[idx].Lock()
+	val := m.m[idx]
+	ret, ok := val[key]
+	if ok == false {
+		f(nil)
+	} else {
+		f(ret)
+	}
+	m.l[idx].Unlock()
+}
+
+func (m *MapEx) LockSet(key interface{}, f func(value interface{}) interface{}) {
+	idx := m.GetArrayIdByKey(key)
+	if idx < 0 || idx > m.hashMapNum {
+		f(nil)
+		return
+	}
+
+	m.l[idx].Lock()
+	val := m.m[idx]
+	ret, ok := val[key]
+
+	if ok == false {
+		val[key] = f(nil)
+	} else {
+		val[key] = f(ret)
+	}
+
+	m.l[idx].Unlock()
 }
