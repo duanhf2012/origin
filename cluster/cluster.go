@@ -360,6 +360,9 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}, 
 	for _, nodeid := range nodeidList {
 		if nodeid == GetNodeId() {
 			iService := service.InstanceServiceMgr().FindService(serviceName)
+			if iService == nil {
+				return fmt.Errorf("CCluster.Go(%s) cannot find  service %s", NodeServiceMethod, serviceName)
+			}
 			if iService.IsInit() == false {
 				service.GetLogger().Printf(sysmodule.LEVER_WARN, "CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
 				return fmt.Errorf("CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)

@@ -31,7 +31,16 @@ type COriginNode struct {
 	debugListenAddress string
 }
 
+var initservicelist []service.IService
+
+func InitService(iservice service.IService) {
+	initservicelist = append(initservicelist, iservice)
+}
+
 func (s *COriginNode) Init() {
+
+	s.SetupService(initservicelist...)
+
 	//初始化全局模块
 	logger := service.InstanceServiceMgr().FindService("syslog").(service.ILogger)
 	ret := service.InstanceServiceMgr().Init(logger, s.exitChan, s.waitGroup)
