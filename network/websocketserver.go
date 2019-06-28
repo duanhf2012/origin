@@ -60,7 +60,7 @@ type WebsocketServer struct {
 	wsUri       string
 	maxClientid uint64 //记录当前最新clientid
 	mapClient   map[uint64]*WSClient
-	locker      sync.Mutex
+	locker      sync.RWMutex
 
 	port uint16
 
@@ -174,9 +174,34 @@ func (slf *WebsocketServer) Start() {
 	go slf.startListen()
 }
 
+func (slf *WebsocketServer) Clients() []uint64 {
+	slf.locker.RLock()
+	defer slf.locker.RUnlock()
+	r := make([]uint64, 0, len(slf.mapClient))
+	for i, _ := range slf.mapClient {
+		r = append(r, i)
+	}
+	return r
+}
+
+func (slf *WebsocketServer) BroadcastMsg(messageType int, msg []byte) int {
+	slf.locker.RLock()
+	defer slf.locker.RUnlock()
+	err := 0
+	wsMsg := WSMessage{messageType, msg}
+	for _, value := range slf.mapClient {
+		if len(value.bwritemsg) >= MAX_MSG_COUNT {
+			service.GetLogger().Printf(sysmodule.LEVER_ERROR, "message chan is full :%d\n", len(value.bwritemsg))
+			err++
+		}
+		value.bwritemsg <- wsMsg
+	}
+	return err
+}
+
 func (slf *WebsocketServer) SendMsg(clientid uint64, messageType int, msg []byte) bool {
-	slf.locker.Lock()
-	defer slf.locker.Unlock()
+	slf.locker.RLock()
+	defer slf.locker.RUnlock()
 	value, ok := slf.mapClient[clientid]
 	if ok == false {
 		return false
