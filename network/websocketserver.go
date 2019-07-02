@@ -23,6 +23,8 @@ type IWebsocketServer interface {
 	CreateClient(conn *websocket.Conn) *WSClient
 	Disconnect(clientid uint64)
 	ReleaseClient(pclient *WSClient)
+	Clients() []uint64
+	BroadcastMsg(messageType int, msg []byte) int
 }
 
 type IMessageReceiver interface {
