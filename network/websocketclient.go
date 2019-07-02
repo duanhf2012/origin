@@ -38,7 +38,7 @@ type WebsocketClient struct {
 	timeoutsec time.Duration
 
 	bRun bool
-	ping string
+	ping []byte
 }
 
 const (
@@ -71,12 +71,12 @@ func (ws *WebsocketClient) Init(slf IWebsocketClient, strurl, strProxyPath strin
 	}
 
 	ws.url = strurl
-	ws.ping = `ping`
+	ws.ping = []byte(`ping`)
 	return nil
 }
 
 func (ws *WebsocketClient) SetPing(ping string) {
-	ws.ping = ping
+	ws.ping = []byte(ping)
 }
 
 //OnRun ...
@@ -182,7 +182,7 @@ func (ws *WebsocketClient) writeMsg() error {
 
 		case <-timerC:
 			if ws.state == 2 {
-				err := ws.WriteMessage([]byte(ws.ping))
+				err := ws.WriteMessage(ws.ping)
 				if err != nil {
 					service.GetLogger().Printf(service.LEVER_WARN, "websocket client is disconnect [%s],information is %v", ws.url, err)
 					ws.state = 0
