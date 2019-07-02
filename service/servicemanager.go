@@ -84,7 +84,11 @@ func (slf *CServiceManager) GenServiceID() int {
 }
 
 func (slf *CServiceManager) GetLogger() ILogger {
-	return slf.logger
+	ret := slf.logger
+	if ret == nil {
+		ret = defaultLogger
+	}
+	return ret
 }
 
 var self *CServiceManager
