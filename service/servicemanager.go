@@ -20,8 +20,22 @@ type CServiceManager struct {
 }
 
 func (slf *CServiceManager) Setup(s IService) bool {
+
+	s.(IModule).SetOwnerService(s)
+	s.(IModule).SetOwner(s.(IModule))
+	s.(IModule).SetSelf(s.(IModule))
+
 	slf.localserviceMap[s.GetServiceName()] = s
 	slf.orderLocalService = append(slf.orderLocalService, s.GetServiceName())
+
+
+	//通知其他服务已经安装
+	for _, is := range slf.localserviceMap {
+		//
+		is.OnSetupService(s)
+		s.OnSetupService(is)
+	}
+
 	return true
 }
 

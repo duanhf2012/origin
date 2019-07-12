@@ -68,32 +68,7 @@ func (s *COriginNode) SetupService(services ...service.IService) {
 		if cluster.InstanceClusterMgr().HasLocalService(services[i].GetServiceName()) == true {
 			service.InstanceServiceMgr().Setup(services[i])
 		}
-
 	}
-
-	//将其他服务通知已经安装
-	for i := 0; i < len(services); i++ {
-		for j := 0; j < len(services); j++ {
-			if cluster.InstanceClusterMgr().HasLocalService(services[i].GetServiceName()) == false {
-				continue
-			}
-
-			if cluster.InstanceClusterMgr().HasLocalService(services[j].GetServiceName()) == false {
-				continue
-			}
-
-			if services[i].GetServiceName() == services[j].GetServiceName() {
-				continue
-			}
-
-			services[i].OnSetupService(services[j])
-
-		}
-		services[i].(service.IModule).SetOwnerService(services[i])
-		services[i].(service.IModule).SetOwner(services[i].(service.IModule))
-		services[i].(service.IModule).SetSelf(services[i].(service.IModule))
-	}
-
 }
 
 func (s *COriginNode) Start() {
