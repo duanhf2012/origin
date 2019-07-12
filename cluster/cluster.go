@@ -345,12 +345,19 @@ func (slf *CCluster) GetRpcClientByNodeId(nodeid int) *RpcClient {
 }
 
 func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}, queueModle bool) error {
+	return slf.goImpl(bCast, NodeServiceMethod, args, queueModle, true)
+}
+
+func (slf *CCluster) goImpl(bCast bool, NodeServiceMethod string, args interface{}, queueModle bool, log bool) error {
 	var callServiceName string
 	var serviceName string
 	nodeidList := slf.GetNodeList(NodeServiceMethod, &callServiceName, &serviceName)
 	if len(nodeidList) < 1 {
-		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) not find nodes.", NodeServiceMethod)
-		return fmt.Errorf("CCluster.Go(%s) not find nodes.", NodeServiceMethod)
+		err := fmt.Errorf("CCluster.Go(%s) not find nodes.", NodeServiceMethod)
+		if log {
+			service.GetLogger().Printf(sysmodule.LEVER_ERROR, err.Error())
+		}
+		return err
 	}
 
 	if bCast == false && len(nodeidList) > 1 {
@@ -364,23 +371,38 @@ func (slf *CCluster) Go(bCast bool, NodeServiceMethod string, args interface{}, 
 				return fmt.Errorf("CCluster.Go(%s) cannot find  service %s", NodeServiceMethod, serviceName)
 			}
 			if iService.IsInit() == false {
-				service.GetLogger().Printf(sysmodule.LEVER_WARN, "CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
-				return fmt.Errorf("CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
+				err := fmt.Errorf("CCluster.Call(%s): NodeId %d is not init.", NodeServiceMethod, nodeid)
+				if log {
+					service.GetLogger().Printf(sysmodule.LEVER_WARN, err.Error())
+				}
+				return err
 			}
 
 			replyCall := slf.LocalRpcClient.Go(callServiceName, args, nil, nil, queueModle)
 			if replyCall.Error != nil {
-				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
+				err := fmt.Errorf("CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
+				if log {
+					service.GetLogger().Printf(sysmodule.LEVER_ERROR, err.Error())
+				} else {
+					return err
+				}
 			}
 		} else {
 			pclient := slf.GetClusterClient(nodeid)
 			if pclient == nil {
-				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) NodeId %d not find client", NodeServiceMethod, nodeid)
-				return fmt.Errorf("CCluster.Go(%s) NodeId %d not find client", NodeServiceMethod, nodeid)
+				err := fmt.Errorf("CCluster.Go(%s) NodeId %d not find client", NodeServiceMethod, nodeid)
+				if log {
+					service.GetLogger().Printf(sysmodule.LEVER_ERROR, err.Error())
+				}
+				return err
 			}
 			replyCall := pclient.Go(callServiceName, args, nil, nil, queueModle)
 			if replyCall.Error != nil {
-				service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
+				err := fmt.Errorf("CCluster.Go(%s) fail:%v.", NodeServiceMethod, replyCall.Error)
+				if log {
+					service.GetLogger().Printf(sysmodule.LEVER_ERROR, err.Error())
+				}
+				return err
 			}
 		}
 	}
@@ -453,6 +475,11 @@ func GoNodeQueue(NodeId int, servicemethod string, args interface{}) error {
 
 func GoQueue(NodeServiceMethod string, args interface{}) error {
 	return InstanceClusterMgr().Go(false, NodeServiceMethod, args, true)
+}
+
+//在GoQueue的基础上增加是否写日志参数
+func GoQueueEx(NodeServiceMethod string, args interface{}, log bool) error {
+	return InstanceClusterMgr().goImpl(false, NodeServiceMethod, args, true, log)
 }
 
 func CastGoQueue(NodeServiceMethod string, args interface{}) error {
