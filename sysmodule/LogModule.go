@@ -4,12 +4,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/duanhf2012/origin/service"
+)
+
+const (
+	maxLinesInLog = 5000 //一个日志文件最多只写这么多行
 )
 
 //等级从低到高
@@ -35,7 +40,8 @@ type FunListenLog func(uint, string)
 
 type LogModule struct {
 	service.BaseModule
-	currentDay  int
+	currentDay  int64
+	lines       int64
 	logfilename string
 	logger      [LEVEL_MAX]*log.Logger
 	logFile     *os.File
@@ -46,38 +52,52 @@ type LogModule struct {
 }
 
 func (slf *LogModule) GetCurrentFileName() string {
-	return slf.logfilename + "-" + time.Now().Format("2006-01-02") + ".log"
+	now := time.Now()
+	fpath := filepath.Join("logs", now.Format("2006-01-02"))
+	os.MkdirAll(fpath, os.ModePerm)
+	fname := slf.logfilename + "-" + now.Format("20060102-150405") + ".log"
+	ret := filepath.Join(fpath, fname)
+	return ret
 }
 
-func (slf *LogModule) CheckAndGenFile() {
+//检查是否需要切换新的日志文件
+func (slf *LogModule) CheckAndGenFile(fileline string) (newFile bool) {
+	now := time.Now()
+	nowDate := int64(now.Day())
 
 	slf.locker.Lock()
-	if time.Now().Day() != slf.currentDay {
 
-		if time.Now().Day() == slf.currentDay {
-			slf.locker.Unlock()
-			return
-		}
+	isNewDay := nowDate != slf.currentDay
+	slf.lines++
+	if isNewDay || slf.lines > maxLinesInLog {
+		// if time.Now().Day() == slf.currentDay {
+		// 	slf.locker.Unlock()
+		// 	return
+		// }
+		//fmt.Println("new log file", slf.currentDay, nowDate, isNewDay, slf.lines, maxLinesInLog)
 
-		slf.currentDay = time.Now().Day()
+		slf.currentDay = nowDate
+		slf.lines = 1
+		newFile = true
 		if slf.logFile != nil {
 			slf.logFile.Close()
 		}
 
 		var err error
-		slf.logFile, err = os.OpenFile(slf.GetCurrentFileName(), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0766)
+		slf.logFile, err = os.OpenFile(slf.GetCurrentFileName(), os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
 		if err != nil {
 			fmt.Printf("create log file %+v error!", slf.GetCurrentFileName())
 			slf.locker.Unlock()
-			return
+			return false
 		}
 
 		for level := 0; level < LEVEL_MAX; level++ {
 			slf.logger[level] = log.New(slf.logFile, LogPrefix[level], log.Lshortfile|log.LstdFlags)
 		}
-
 	}
+
 	slf.locker.Unlock()
+	return newFile
 }
 
 func (slf *LogModule) Init(logfilename string, openLevel uint) {
@@ -103,33 +123,16 @@ func (slf *LogModule) Printf(level uint, format string, v ...interface{}) {
 		return
 	}
 
-	if slf.openLevel == LEVER_DEBUG || slf.listenFun != nil {
-		strlog := fmt.Sprintf(format, v...)
-		if slf.openLevel == LEVER_DEBUG {
-			fmt.Println(LogPrefix[level], time.Now().Format("2006/1/2 15:04:05"), strlog)
-		}
-
-		if slf.listenFun != nil {
-			var file string
-			var line int
-			var ok bool
-			_, file, line, ok = runtime.Caller(slf.calldepth - 1)
-			if !ok {
-				file = "???"
-				line = 0
-			}
-			parts := strings.Split(file, "/")
-			if len(parts) > 0 {
-				file = parts[len(parts)-1]
-			}
-
-			ft := LogPrefix[level] + time.Now().Format("2006/1/2 15:04:05") + fmt.Sprintf(" %s:%d:", file, line) + format
-			slf.listenFun(level, fmt.Sprintf(ft, v...))
-		}
+	_, file, line, ok := runtime.Caller(slf.calldepth - 1)
+	if !ok {
+		file = "???"
+		line = 0
 	}
+	fileLine := fmt.Sprintf(" %s:%d: ", file, line)
+	slf.CheckAndGenFile(fileLine)
 
-	slf.CheckAndGenFile()
-	slf.GetLoggerByLevel(level).Output(slf.calldepth, fmt.Sprintf(format, v...))
+	logContents := fmt.Sprintf(format, v...)
+	slf.doPutLog(level, fileLine, logContents)
 }
 
 func (slf *LogModule) Print(level uint, v ...interface{}) {
@@ -137,19 +140,38 @@ func (slf *LogModule) Print(level uint, v ...interface{}) {
 		return
 	}
 
+	_, file, line, ok := runtime.Caller(slf.calldepth - 1)
+	if !ok {
+		file = "???"
+		line = 0
+	}
+	fileLine := fmt.Sprintf(" %s:%d: ", file, line)
+	slf.CheckAndGenFile(fileLine)
+
+	logContents := fmt.Sprint(v...)
+	slf.doPutLog(level, fileLine, logContents)
+}
+
+//最终写日志的接口
+func (slf *LogModule) doPutLog(level uint, fileLine, logContents string) {
 	if slf.openLevel == LEVER_DEBUG || slf.listenFun != nil {
-		strlog := fmt.Sprint(v...)
+		strlog := fmt.Sprintf("%s %s %s", LogPrefix[level], time.Now().Format("2006-01-02 15:04:05"), logContents)
 		if slf.openLevel == LEVER_DEBUG {
-			fmt.Println(LogPrefix[level], strlog)
+			fmt.Println(strlog)
 		}
 
 		if slf.listenFun != nil {
-			slf.listenFun(level, fmt.Sprint(v...))
+			fline := fileLine
+			if idx := strings.LastIndex(fileLine, "/"); idx >= 0 {
+				fline = fileLine[idx+1:]
+			}
+
+			ft := fline + " " + strlog
+			slf.listenFun(level, fmt.Sprintf(ft))
 		}
 	}
 
-	slf.CheckAndGenFile()
-	slf.GetLoggerByLevel(level).Output(slf.calldepth, fmt.Sprint(v...))
+	slf.GetLoggerByLevel(level).Output(slf.calldepth+1, logContents)
 }
 
 func (slf *LogModule) AppendCallDepth(calldepth int) {
