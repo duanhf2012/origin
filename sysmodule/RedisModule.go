@@ -1035,3 +1035,92 @@ func (slf *RedisModule) Lrange(key string, start, end int) ([]string, error) {
 
 	return redis.Strings(reply, err)
 }
+
+//获取List的长度
+func (slf *RedisModule) GetListLen(key string ) (int , error)   {
+	conn , err := slf.getConn()
+	if err != nil {
+		return -1, err
+	}
+	defer conn.Close()
+
+	reply , err := conn.Do("LLEN", key)
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetListLen fail,reason:%v", err)
+		return -1, err
+	}
+	return redis.Int(reply,err)
+
+}
+
+//弹出List最后条记录
+func (slf *RedisModule) RPOPListValue(key string )  error   {
+	conn , err := slf.getConn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_ , err = conn.Do("RPOP", key , 100)
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "RPOPListValue fail,reason:%v", err)
+		return err
+	}
+	return nil
+
+}
+
+//弹出List最后条记录
+func (slf *RedisModule) LtrimList(key string , start , end int  )  error   {
+	conn , err := slf.getConn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_ , err = conn.Do("LTRIM", key , start,end)
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "LtrimListValue fail,reason:%v", err)
+		return err
+	}
+	return nil
+
+}
+
+//有序集合插入Json
+func (slf *RedisModule) ZADDInsertJson(key string,score float64,value interface{}) error{
+
+	conn , err := slf.getConn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	JsonValue , err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_ , err = conn.Do("ZADD", key , score,JsonValue)
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "LtrimListValue fail,reason:%v", err)
+		return err
+	}
+	return nil
+}
+
+//有序集合插入
+func (slf *RedisModule) ZADDInsert(key string,score float64, Data interface{}) error{
+
+	conn , err := slf.getConn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_ , err = conn.Do("ZADD", key , score, Data)
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "LtrimListValue fail,reason:%v", err)
+		return err
+	}
+	return nil
+}
+
