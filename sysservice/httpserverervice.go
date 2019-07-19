@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/sysmodule"
-	"github.com/origin/util/uuid"
+	"github.com/duanhf2012/origin/util/uuid"
 
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/gorilla/mux"
