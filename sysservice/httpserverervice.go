@@ -3,13 +3,16 @@ package sysservice
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"time"
 
 	"github.com/duanhf2012/origin/sysmodule"
+	"github.com/duanhf2012/origin/util/uuid"
 
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/gorilla/mux"
@@ -41,9 +44,11 @@ type HttpServerService struct {
 	keyfile          string
 	ishttps          bool
 	httpfiltrateList []HttpFiltrate
+	resourcedir      string //静态资源下载路径
 }
 
 func (slf *HttpServerService) OnInit() error {
+	//
 	slf.httpserver.Init(slf.port, slf.initRouterHandler(), 10*time.Second, 10*time.Second)
 	if slf.ishttps == true {
 		slf.httpserver.SetHttps(slf.certfile, slf.keyfile)
@@ -51,10 +56,21 @@ func (slf *HttpServerService) OnInit() error {
 	return nil
 }
 
+// CkUploadImgDir 检查文件上传路径
+func (slf *HttpServerService) CkResourceDir(dirname string) error {
+	slf.resourcedir = dirname
+	return nil
+}
+
 func (slf *HttpServerService) initRouterHandler() http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/{server:[a-zA-Z0-9]+}/{method:[a-zA-Z0-9]+}", func(w http.ResponseWriter, r *http.Request) {
 		slf.httpHandler(w, r)
+	})
+
+	//获取静态文件资源
+	r.HandleFunc("/"+slf.resourcedir+"/{filename:.*}", func(w http.ResponseWriter, r *http.Request) {
+		slf.staticServer(w, r)
 	})
 
 	cors := cors.AllowAll()
@@ -95,10 +111,9 @@ func (slf *HttpServerService) OnRemoveService(iservice service.IService) {
 	return
 }
 
-
 func (slf *HttpServerService) IsPrintRequestTime() bool {
 	if slf.PrintRequestTime == true {
-		return  true
+		return true
 	}
 	return false
 
@@ -106,6 +121,60 @@ func (slf *HttpServerService) IsPrintRequestTime() bool {
 
 func (slf *HttpServerService) SetPrintRequestTime(isPrint bool) {
 	slf.PrintRequestTime = isPrint
+}
+
+func (slf *HttpServerService) staticServer(w http.ResponseWriter, r *http.Request) {
+	writeResp := func(status int, msg string) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(status)
+		w.Write([]byte(msg))
+	}
+	nowpath, _ := os.Getwd()
+	upath := r.URL.Path
+	destLocalPath := nowpath + upath
+	switch r.Method {
+	//获取资源
+	case "GET":
+		//判断文件夹是否存在
+		_, err := os.Stat(destLocalPath)
+		if err == nil {
+			http.ServeFile(w, r, destLocalPath)
+		} else {
+			writeResp(http.StatusNotFound, "")
+			return
+		}
+	//上传资源
+	case "POST":
+		r.ParseMultipartForm(32 << 20) // max memory is set to 32MB
+		resourceFile, resourceFileHeader, err := r.FormFile("file")
+		if err != nil {
+			fmt.Println(err)
+			writeResp(http.StatusNotFound, err.Error())
+			return
+		}
+		defer resourceFile.Close()
+		//重新拼接文件名
+		imgFormat := strings.Split(resourceFileHeader.Filename, ".")
+		if len(imgFormat) != 2 {
+			writeResp(http.StatusNotFound, "not a file")
+			return
+		}
+		filePrefixName := uuid.Rand().HexEx()
+		fileName := filePrefixName + "." + imgFormat[1]
+		//创建文件
+		localpath := fmt.Sprintf("%s%s", destLocalPath, fileName)
+		localfd, err := os.OpenFile(localpath, os.O_WRONLY|os.O_CREATE, 0666)
+		if err != nil {
+			fmt.Println(err)
+			writeResp(http.StatusNotFound, "upload fail")
+			return
+		}
+		defer localfd.Close()
+
+		io.Copy(localfd, resourceFile)
+		writeResp(http.StatusOK, localpath)
+	}
+
 }
 
 func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request) {
