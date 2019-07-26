@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	maxLinesInLog = 5000 //一个日志文件最多只写这么多行
+	maxLinesInLog = 100000 //一个日志文件最多只写这么多行
 )
 
 //等级从低到高
