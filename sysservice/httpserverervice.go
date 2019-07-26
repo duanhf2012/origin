@@ -129,6 +129,24 @@ func (slf *HttpServerService) staticServer(w http.ResponseWriter, r *http.Reques
 		w.WriteHeader(status)
 		w.Write([]byte(msg))
 	}
+
+	// 在这儿处理例外路由接口
+	var errRet error
+	for _, filter := range slf.httpfiltrateList {
+		ret := filter(r.URL.Path, w, r)
+		if ret == nil {
+			errRet = nil
+			break
+		} else {
+			errRet = ret
+		}
+	}
+
+	if errRet != nil {
+		w.Write([]byte(errRet.Error()))
+		return
+	}
+
 	nowpath, _ := os.Getwd()
 	upath := r.URL.Path
 	destLocalPath := nowpath + upath
@@ -172,7 +190,7 @@ func (slf *HttpServerService) staticServer(w http.ResponseWriter, r *http.Reques
 		defer localfd.Close()
 
 		io.Copy(localfd, resourceFile)
-		writeResp(http.StatusOK, localpath)
+		writeResp(http.StatusOK, upath+fileName)
 	}
 
 }
@@ -187,6 +205,10 @@ func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request
 		//writeError(http.StatusMethodNotAllowed, "rpc: POST method required, received "+r.Method)
 		//return
 	}
+	if r.Method == "OPTIONS" {
+		return
+	}
+
 	defer r.Body.Close()
 	msg, err := ioutil.ReadAll(r.Body)
 	if err != nil {
