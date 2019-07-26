@@ -1101,7 +1101,7 @@ func (slf *RedisModule) ZADDInsertJson(key string,score float64,value interface{
 	}
 	_ , err = conn.Do("ZADD", key , score,JsonValue)
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "LtrimListValue fail,reason:%v", err)
+		service.GetLogger().Printf(service.LEVER_ERROR, "ZADDInsertJson fail,reason:%v", err)
 		return err
 	}
 	return nil
@@ -1118,9 +1118,8 @@ func (slf *RedisModule) ZADDInsert(key string,score float64, Data interface{}) e
 
 	_ , err = conn.Do("ZADD", key , score, Data)
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "LtrimListValue fail,reason:%v", err)
+		service.GetLogger().Printf(service.LEVER_ERROR, "ZADDInsert fail,reason:%v", err)
 		return err
 	}
 	return nil
 }
-
