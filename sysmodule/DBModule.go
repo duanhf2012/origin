@@ -342,6 +342,9 @@ func (slf *DBModule) CheckArgs(args ...interface{}) error {
 			if strings.Contains(retVal, "-") == true {
 				return fmt.Errorf("CheckArgs is error arg is %+v", retVal)
 			}
+			if strings.Contains(retVal, "#") == true {
+				return fmt.Errorf("CheckArgs is error arg is %+v", retVal)
+			}
 			if strings.Contains(retVal, "&") == true {
 				return fmt.Errorf("CheckArgs is error arg is %+v", retVal)
 			}
@@ -364,6 +367,9 @@ func (slf *DBModule) CheckArgs(args ...interface{}) error {
 				return fmt.Errorf("CheckArgs is error arg is %+v", retVal)
 			}
 			if strings.Contains(strings.ToLower(retVal), "from ") == true {
+				return fmt.Errorf("CheckArgs is error arg is %+v", retVal)
+			}
+			if strings.Contains(strings.ToLower(retVal), "set ") == true {
 				return fmt.Errorf("CheckArgs is error arg is %+v", retVal)
 			}
 		}
