@@ -1,25 +1,17 @@
 {
 "PublicServiceList":["logiclog"],
 
+"//":" Auto or Manual",
+"ClusterPattern":"Auto",
+"MasterNodeId":1,
 "NodeList":[
 {
 	"NodeID":1,
 	"NodeName":"N_Node1",
-	"ServerAddr":"127.0.0.1:8080",
-	
+	"ServerAddr":"127.0.0.1:10000",
 	"ServiceList":["CTestService1","CTestService2","HttpServerService","WSServerService","CWebSockService"],
 	"ClusterNode":["N_Node2"]
-},
-
-
-{
-	"NodeID":2,
-	"NodeName":"N_Node2",
-	"ServerAddr":"127.0.0.1:8081",
-	"ServiceList":["TestService1","collectTickLogService"],
-	"ClusterNode":[]
 }
-
 ]
 
 

@@ -81,7 +81,7 @@ func (slf *CTestService2) RPC_Add(arg *InputData, ret *int) error {
 }
 
 func main() {
-	node := originnode.NewOrginNode()
+	node := originnode.NewOriginNode()
 	if node == nil {
 		return
 	}
