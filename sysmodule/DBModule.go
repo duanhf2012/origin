@@ -23,13 +23,13 @@ const (
 // DBModule ...
 type DBModule struct {
 	service.BaseModule
-	db       *sql.DB
-	url      string
-	username string
-	password string
-	dbname   string
-	maxconn  int
-	PrintTime time.Duration
+	db               *sql.DB
+	url              string
+	username         string
+	password         string
+	dbname           string
+	maxconn          int
+	PrintTime        time.Duration
 	syncExecuteFun   chan SyncFun
 	syncCoroutineNum int
 }
@@ -373,7 +373,7 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, e
 	TimeFuncPass := time.Since(TimeFuncStart)
 
 	if	slf.IsPrintTimeLog(TimeFuncPass) {
-		service.GetLogger().Printf(service.LEVER_INFO, "DBModule QueryEx Time %s , Query :%s , args :%+v",TimeFuncPass,query,args)
+		service.GetLogger().Printf(service.LEVER_INFO, "DBModule QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
 	}
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%v)", query, err)
@@ -514,7 +514,7 @@ func (slf *DBModule) RunExecuteDBCoroutine() {
 
 func (slf *DataSetList) UnMarshal(args ...interface{}) error {
 	if len(slf.dataSetList) != len(args) {
-		return errors.New("Data set len(%d) is not equal to args!")
+		return errors.New(fmt.Sprintf("Data set len(%d,%d) is not equal to args!", len(slf.dataSetList), len(args)))
 	}
 
 	for _, out := range args {
