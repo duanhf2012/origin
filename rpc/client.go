@@ -347,9 +347,9 @@ func (client *Client) Call(serviceMethod string, args interface{}, reply interfa
 	select {
 	case call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1), false).Done:
 		return call.Error
-	case <-time.After(15 * time.Second):
+	case <-time.After(30 * time.Second):
 	}
 
 	//call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
-	return errors.New(fmt.Sprintf("Call RPC %s is time out 10s", serviceMethod))
+	return errors.New(fmt.Sprintf("Call RPC %s is time out 30s", serviceMethod))
 }
