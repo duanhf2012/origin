@@ -130,23 +130,6 @@ func (slf *HttpServerService) staticServer(w http.ResponseWriter, r *http.Reques
 		w.Write([]byte(msg))
 	}
 
-	// 在这儿处理例外路由接口
-	var errRet error
-	for _, filter := range slf.httpfiltrateList {
-		ret := filter(r.URL.Path, w, r)
-		if ret == nil {
-			errRet = nil
-			break
-		} else {
-			errRet = ret
-		}
-	}
-
-	if errRet != nil {
-		w.Write([]byte(errRet.Error()))
-		return
-	}
-
 	nowpath, _ := os.Getwd()
 	upath := r.URL.Path
 	destLocalPath := nowpath + upath
@@ -163,6 +146,24 @@ func (slf *HttpServerService) staticServer(w http.ResponseWriter, r *http.Reques
 		}
 	//上传资源
 	case "POST":
+
+		// 在这儿处理例外路由接口
+		var errRet error
+		for _, filter := range slf.httpfiltrateList {
+			ret := filter(r.URL.Path, w, r)
+			if ret == nil {
+				errRet = nil
+				break
+			} else {
+				errRet = ret
+			}
+		}
+
+		if errRet != nil {
+			w.Write([]byte(errRet.Error()))
+			return
+		}
+
 		r.ParseMultipartForm(32 << 20) // max memory is set to 32MB
 		resourceFile, resourceFileHeader, err := r.FormFile("file")
 		if err != nil {
@@ -190,6 +191,7 @@ func (slf *HttpServerService) staticServer(w http.ResponseWriter, r *http.Reques
 		defer localfd.Close()
 
 		io.Copy(localfd, resourceFile)
+
 		writeResp(http.StatusOK, upath+fileName)
 	}
 
