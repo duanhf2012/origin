@@ -163,6 +163,10 @@ func (slf *BaseModule) ReleaseModule(moduleId uint32) bool {
 
 	//locker := slf.GetRoot().getBaseModule().getLocker()
 	locker := baseModule.getLocker()
+	if locker == nil {
+		return false
+	}
+
 	locker.Lock()
 	slf.releaseModule(moduleId)
 	locker.Unlock()
