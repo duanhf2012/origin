@@ -1037,31 +1037,31 @@ func (slf *RedisModule) Lrange(key string, start, end int) ([]string, error) {
 }
 
 //获取List的长度
-func (slf *RedisModule) GetListLen(key string ) (int , error)   {
-	conn , err := slf.getConn()
+func (slf *RedisModule) GetListLen(key string) (int, error) {
+	conn, err := slf.getConn()
 	if err != nil {
 		return -1, err
 	}
 	defer conn.Close()
 
-	reply , err := conn.Do("LLEN", key)
+	reply, err := conn.Do("LLEN", key)
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "GetListLen fail,reason:%v", err)
 		return -1, err
 	}
-	return redis.Int(reply,err)
+	return redis.Int(reply, err)
 
 }
 
 //弹出List最后条记录
-func (slf *RedisModule) RPOPListValue(key string )  error   {
-	conn , err := slf.getConn()
+func (slf *RedisModule) RPOPListValue(key string) error {
+	conn, err := slf.getConn()
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	_ , err = conn.Do("RPOP", key , 100)
+	_, err = conn.Do("RPOP", key, 100)
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "RPOPListValue fail,reason:%v", err)
 		return err
@@ -1071,14 +1071,14 @@ func (slf *RedisModule) RPOPListValue(key string )  error   {
 }
 
 //弹出List最后条记录
-func (slf *RedisModule) LtrimList(key string , start , end int  )  error   {
-	conn , err := slf.getConn()
+func (slf *RedisModule) LtrimList(key string, start, end int) error {
+	conn, err := slf.getConn()
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	_ , err = conn.Do("LTRIM", key , start,end)
+	_, err = conn.Do("LTRIM", key, start, end)
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "LtrimListValue fail,reason:%v", err)
 		return err
@@ -1088,18 +1088,18 @@ func (slf *RedisModule) LtrimList(key string , start , end int  )  error   {
 }
 
 //有序集合插入Json
-func (slf *RedisModule) ZADDInsertJson(key string,score float64,value interface{}) error{
+func (slf *RedisModule) ZADDInsertJson(key string, score float64, value interface{}) error {
 
-	conn , err := slf.getConn()
+	conn, err := slf.getConn()
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	JsonValue , err := json.Marshal(value)
+	JsonValue, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	_ , err = conn.Do("ZADD", key , score,JsonValue)
+	_, err = conn.Do("ZADD", key, score, JsonValue)
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "ZADDInsertJson fail,reason:%v", err)
 		return err
@@ -1108,18 +1108,95 @@ func (slf *RedisModule) ZADDInsertJson(key string,score float64,value interface{
 }
 
 //有序集合插入
-func (slf *RedisModule) ZADDInsert(key string,score float64, Data interface{}) error{
-
-	conn , err := slf.getConn()
+func (slf *RedisModule) ZADDInsert(key string, score float64, Data interface{}) error {
+	conn, err := slf.getConn()
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	_ , err = conn.Do("ZADD", key , score, Data)
+	_, err = conn.Do("ZADD", key, score, Data)
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "ZADDInsert fail,reason:%v", err)
 		return err
 	}
 	return nil
+}
+
+func (slf *RedisModule) ZRangeJSON(key string, start, stop int, data interface{}) error {
+	b, err := slf.ZRange(key, start, stop)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (slf *RedisModule) ZRange(key string, start, stop int) ([]byte, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	reply, err := conn.Do("ZRANGE", key, start, stop)
+	if err != nil {
+		return nil, err
+	}
+	return redis.Bytes(reply, err)
+}
+
+func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, data interface{}) error {
+	b, err := slf.ZRangeByScore(key, start, stop)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (slf *RedisModule) ZRangeByScore(key string, start, stop int) ([]byte, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	reply, err := conn.Do("ZRANGEBYSCORE", key, start, stop)
+	if err != nil {
+		return nil, err
+	}
+	return redis.Bytes(reply, err)
+}
+
+func (slf *RedisModule) LRangeJSON(key string, start, stop int, data interface{}) error {
+	b, err := slf.LRange(key, start, stop)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (slf *RedisModule) LRange(key string, start, stop int) ([]byte, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	reply, err := conn.Do("LRANGE", key, start, stop)
+	if err != nil {
+		return nil, err
+	}
+	return redis.Bytes(reply, err)
 }
