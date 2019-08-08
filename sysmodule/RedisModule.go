@@ -1175,6 +1175,20 @@ func (slf *RedisModule) ZRangeByScore(key string, start, stop int) ([]byte, erro
 	return redis.Bytes(reply, err)
 }
 
+func (slf *RedisModule) ZREMRANGEBYSCORE(key string, start, stop interface{}) ( error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return  err
+	}
+	defer conn.Close()
+
+	_ , err = conn.Do("ZREMRANGEBYSCORE", key, start, stop)
+	if err != nil {
+		return  err
+	}
+	return  err
+}
+
 func (slf *RedisModule) LRangeJSON(key string, start, stop int, data interface{}) error {
 	b, err := slf.LRange(key, start, stop)
 	if err != nil {
