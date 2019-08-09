@@ -1123,8 +1123,8 @@ func (slf *RedisModule) ZADDInsert(key string, score float64, Data interface{}) 
 	return nil
 }
 
-func (slf *RedisModule) ZRangeJSON(key string, start, stop int, data interface{}) error {
-	b, err := slf.ZRange(key, start, stop)
+func (slf *RedisModule) ZRangeJSON(key string, start, stop int, ascend bool, data interface{}) error {
+	b, err := slf.ZRange(key, start, stop, ascend)
 	if err != nil {
 		return err
 	}
@@ -1135,22 +1135,26 @@ func (slf *RedisModule) ZRangeJSON(key string, start, stop int, data interface{}
 	return nil
 }
 
-func (slf *RedisModule) ZRange(key string, start, stop int) ([]byte, error) {
+//取有序set指定排名 ascend=true表示按升序遍历 否则按降序遍历
+func (slf *RedisModule) ZRange(key string, start, stop int, ascend bool) ([]byte, error) {
 	conn, err := slf.getConn()
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-
-	reply, err := conn.Do("ZRANGE", key, start, stop)
+	cmd := "ZREVRANGE"
+	if ascend {
+		cmd = "ZRANGE"
+	}
+	reply, err := conn.Do(cmd, key, start, stop)
 	if err != nil {
 		return nil, err
 	}
 	return redis.Bytes(reply, err)
 }
 
-func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, data interface{}) error {
-	b, err := slf.ZRangeByScore(key, start, stop)
+func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, ascend bool, data interface{}) error {
+	b, err := slf.ZRangeByScore(key, start, stop, ascend)
 	if err != nil {
 		return err
 	}
@@ -1161,32 +1165,35 @@ func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, data inte
 	return nil
 }
 
-func (slf *RedisModule) ZRangeByScore(key string, start, stop int) ([]byte, error) {
+func (slf *RedisModule) ZRangeByScore(key string, start, stop int, ascend bool) ([]byte, error) {
 	conn, err := slf.getConn()
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-
-	reply, err := conn.Do("ZRANGEBYSCORE", key, start, stop)
+	cmd := "ZREVRANGEBYSCORE"
+	if ascend {
+		cmd = "ZRANGEBYSCORE"
+	}
+	reply, err := conn.Do(cmd, key, start, stop)
 	if err != nil {
 		return nil, err
 	}
 	return redis.Bytes(reply, err)
 }
 
-func (slf *RedisModule) ZREMRANGEBYSCORE(key string, start, stop interface{}) ( error) {
+func (slf *RedisModule) ZREMRANGEBYSCORE(key string, start, stop interface{}) error {
 	conn, err := slf.getConn()
 	if err != nil {
-		return  err
+		return err
 	}
 	defer conn.Close()
 
-	_ , err = conn.Do("ZREMRANGEBYSCORE", key, start, stop)
+	_, err = conn.Do("ZREMRANGEBYSCORE", key, start, stop)
 	if err != nil {
-		return  err
+		return err
 	}
-	return  err
+	return err
 }
 
 func (slf *RedisModule) LRangeJSON(key string, start, stop int, data interface{}) error {
