@@ -76,6 +76,14 @@ type SyncExecuteDBResult struct {
 	err  chan error
 }
 
+func (slf *DBModule) OnRun() bool {
+	if slf.db != nil {
+		slf.db.Ping()
+
+	}
+	time.Sleep(time.Second * 5)
+	return true
+}
 func (slf *DBModule) Init(maxConn int, url string, userName string, password string, dbname string) error {
 	slf.url = url
 	slf.maxconn = maxConn
@@ -281,7 +289,7 @@ func (slf *DBResult) mapSlice2interface(data []map[string]string, in interface{}
 
 // Connect ...
 func (slf *DBModule) Connect(maxConn int) error {
-	cmd := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&parseTime=true&loc=%s",
+	cmd := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&parseTime=true&loc=%s&readTimeout=30s&timeout=15s&writeTimeout=30s",
 		slf.username,
 		slf.password,
 		slf.url,
@@ -292,7 +300,6 @@ func (slf *DBModule) Connect(maxConn int) error {
 	if err != nil {
 		return err
 	}
-
 	err = db.Ping()
 	if err != nil {
 		db.Close()
@@ -467,7 +474,11 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, e
 		datasetList.dataSetList = append(datasetList.dataSetList, dbResult)
 		//取下一个结果集
 		hasRet := rows.NextResultSet()
+
 		if hasRet == false {
+			if rows.Err()!= nil {
+				service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%+v)", query, rows)
+			}
 			break
 		}
 	}
