@@ -1,6 +1,7 @@
 package sysmodule
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1128,6 +1129,7 @@ func (slf *RedisModule) ZRangeJSON(key string, start, stop int, ascend bool, dat
 	if err != nil {
 		return err
 	}
+
 	err = json.Unmarshal(b, data)
 	if err != nil {
 		return err
@@ -1150,7 +1152,21 @@ func (slf *RedisModule) ZRange(key string, start, stop int, ascend bool) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	return redis.Bytes(reply, err)
+	return makeListJson(reply.([]interface{})), nil
+}
+
+//["123","234"]
+func makeListJson(redisReply []interface{}) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("[")
+	for i, v := range redisReply {
+		if i > 0 {
+			buf.WriteString(",")
+		}
+		buf.WriteString(fmt.Sprintf("%s", v))
+	}
+	buf.WriteString("]")
+	return buf.Bytes()
 }
 
 func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, ascend bool, data interface{}) error {
@@ -1179,7 +1195,7 @@ func (slf *RedisModule) ZRangeByScore(key string, start, stop int, ascend bool) 
 	if err != nil {
 		return nil, err
 	}
-	return redis.Bytes(reply, err)
+	return makeListJson(reply.([]interface{})), nil
 }
 
 func (slf *RedisModule) ZREMRANGEBYSCORE(key string, start, stop interface{}) error {
@@ -1219,5 +1235,5 @@ func (slf *RedisModule) LRange(key string, start, stop int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return redis.Bytes(reply, err)
+	return makeListJson(reply.([]interface{})), nil
 }
