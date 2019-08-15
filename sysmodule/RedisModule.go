@@ -1237,3 +1237,58 @@ func (slf *RedisModule) LRange(key string, start, stop int) ([]byte, error) {
 	}
 	return makeListJson(reply.([]interface{})), nil
 }
+
+//弹出list(消息队列)数据,数据放入out fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
+func (slf *RedisModule) ListPopJson(key string, fromLeft, block bool, timeout int, out interface{}) error {
+	b, err := slf.ListPop(key, fromLeft, block, timeout)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, out)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+//弹出list(消息队列)数据 fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
+func (slf *RedisModule) ListPop(key string, fromLeft, block bool, timeout int) ([]byte, error) {
+	cmd := ""
+	if fromLeft {
+		if block {
+			cmd = "BLPOP"
+		} else {
+			cmd = "LPOP"
+		}
+	} else {
+		if block {
+			cmd = "BRPOP"
+		} else {
+			cmd = "RPOP"
+		}
+	}
+
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	reply, err := conn.Do(cmd, key, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	if reply == nil {
+		err = errors.New("ListPop key is not exist!")
+		return nil, err
+	}
+
+	b, ok := reply.([]byte)
+	if !ok {
+		err = errors.New("ListPop redis data is error")
+		//service.GetLogger().Printf(service.LEVER_ERROR, "GetString redis data is error")
+		return nil, err
+	}
+	return b, nil
+}
