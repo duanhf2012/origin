@@ -662,7 +662,7 @@ func (slf *RedisModule) GetAllHashJSON(redisKey string) (map[string]string, erro
 	}
 	defer conn.Close()
 
-	value, err := redis.Values(conn.Do("HGETALL", redisKey))
+	value, err := conn.Do("HGETALL", redisKey)
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "GetAllHashJSON fail,reason:%v", err)
 		return nil, err
