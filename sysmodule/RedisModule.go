@@ -388,7 +388,7 @@ func (slf *RedisModule) GetStringJSON(key string, st interface{}) error {
 	}
 
 	if err = json.Unmarshal(str, st); err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "GetStringJSON fail json.Unmarshal is error,reason:%v", err)
+		service.GetLogger().Printf(service.LEVER_ERROR, "GetStringJSON fail json.Unmarshal is error:%s,%s,reason:%v", key, string(str), err)
 		return err
 	}
 
