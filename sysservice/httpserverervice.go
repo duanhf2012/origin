@@ -44,7 +44,7 @@ type HttpServerService struct {
 	keyfile          string
 	ishttps          bool
 	httpfiltrateList []HttpFiltrate
-	resourcedir      string //静态资源下载路径
+	resourcedir      string //静态资源文件夹绝对路径
 }
 
 func (slf *HttpServerService) OnInit() error {
@@ -56,8 +56,12 @@ func (slf *HttpServerService) OnInit() error {
 	return nil
 }
 
-// CkUploadImgDir 检查文件上传路径
+// CkResourceDir 检查静态资源文件夹路径
 func (slf *HttpServerService) CkResourceDir(dirname string) error {
+	_, err := os.Stat(dirname)
+	if err != nil {
+		return err
+	}
 	slf.resourcedir = dirname
 	return nil
 }
@@ -69,9 +73,13 @@ func (slf *HttpServerService) initRouterHandler() http.Handler {
 	})
 
 	//获取静态文件资源
-	r.HandleFunc("/"+slf.resourcedir+"/{filename:.*}", func(w http.ResponseWriter, r *http.Request) {
-		slf.staticServer(w, r)
-	})
+	if slf.resourcedir != "" {
+		relativeDirIndex := strings.LastIndex(slf.resourcedir, "/")
+		relativeDirName := slf.resourcedir[relativeDirIndex:]
+		r.HandleFunc(relativeDirName+"/{filename:.*}", func(w http.ResponseWriter, r *http.Request) {
+			slf.staticServer(w, r)
+		})
+	}
 
 	cors := cors.AllowAll()
 	//return cors.Handler(gziphandler.GzipHandler(r))
@@ -130,9 +138,11 @@ func (slf *HttpServerService) staticServer(w http.ResponseWriter, r *http.Reques
 		w.Write([]byte(msg))
 	}
 
-	nowpath, _ := os.Getwd()
+	//设置静态文件夹路径
 	upath := r.URL.Path
-	destLocalPath := nowpath + upath
+	relativeFileIndex := strings.LastIndex(upath, "/")
+	relativeFileName := upath[relativeFileIndex:]
+	destLocalPath := slf.resourcedir + relativeFileName
 	switch r.Method {
 	//获取资源
 	case "GET":
