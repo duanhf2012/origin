@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
@@ -446,6 +447,50 @@ func (ws *CCluster) OnFetchService(iservice service.IService) error {
 	return nil
 }
 
+func (slf *CCluster) CallRandomService(NodeServiceMethod string, args interface{}, reply interface{}) error {
+	var servicename string
+	parts := strings.Split(NodeServiceMethod, ".")
+	if len(parts) == 2 {
+		servicename = parts[0]
+	} else {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.CallRandomService(%s) method err", NodeServiceMethod)
+		return fmt.Errorf("CCluster.GoNode(%s) NodeId method err", NodeServiceMethod)
+	}
+
+	nodeList := slf.GetNodeIdByServiceName(servicename, true)
+	if len(nodeList) < 1 {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.CallRandomService(%s) no node is online", NodeServiceMethod)
+		return fmt.Errorf("CCluster.GoNode(%s) no node is online", NodeServiceMethod)
+	}
+
+	nodeIndex := rand.Intn(len(nodeList))
+	nodeID := nodeList[nodeIndex]
+
+	return slf.CallNode(nodeID, NodeServiceMethod, args, reply)
+}
+
+func (slf *CCluster) GoRandomService(NodeServiceMethod string, args interface{}, queueModle bool) error {
+	var servicename string
+	parts := strings.Split(NodeServiceMethod, ".")
+	if len(parts) == 2 {
+		servicename = parts[0]
+	} else {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.CallRandomService(%s) method err", NodeServiceMethod)
+		return fmt.Errorf("CCluster.GoNode(%s) NodeId method err", NodeServiceMethod)
+	}
+
+	nodeList := slf.GetNodeIdByServiceName(servicename, true)
+	if len(nodeList) < 1 {
+		service.GetLogger().Printf(sysmodule.LEVER_ERROR, "CCluster.CallRandomService(%s) no node is online", NodeServiceMethod)
+		return fmt.Errorf("CCluster.GoNode(%s) no node is online", NodeServiceMethod)
+	}
+
+	nodeIndex := rand.Intn(len(nodeList))
+	nodeID := nodeList[nodeIndex]
+
+	return slf.GoNode(nodeID, args, NodeServiceMethod, queueModle)
+}
+
 //向远程服务器调用
 //Node.servicename.methodname
 //servicename.methodname
@@ -489,6 +534,17 @@ func CastGoQueue(NodeServiceMethod string, args interface{}) error {
 //GetNodeIdByServiceName 根据服务名查找nodeid serviceName服务名 bOnline是否需要查找在线服务
 func GetNodeIdByServiceName(serviceName string, bOnline bool) []int {
 	return InstanceClusterMgr().GetNodeIdByServiceName(serviceName, bOnline)
+}
+
+//随机选择在线的node发送
+func CallRandomService(NodeServiceMethod string, args interface{}, reply interface{}) error {
+	return InstanceClusterMgr().CallRandomService(NodeServiceMethod, args, reply)
+}
+func GoRandomService(NodeServiceMethod string, args interface{}) error {
+	return InstanceClusterMgr().GoRandomService(NodeServiceMethod, args, false)
+}
+func GoRandomServiceQueue(NodeServiceMethod string, args interface{}) error {
+	return InstanceClusterMgr().GoRandomService(NodeServiceMethod, args, true)
 }
 
 var _self *CCluster
