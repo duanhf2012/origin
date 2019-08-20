@@ -113,7 +113,7 @@ func (slf *BaseModule) genModuleId() uint32 {
 	moduleId := slf.CurrMaxModuleId
 
     if moduleId == 0 {
-	  GetLogger().Printf(LEVER_ERROR, "%T Cannot AddModule %T is zero", slf.GetSelf(), module.GetSelf())
+	  GetLogger().Printf(LEVER_ERROR, "%T Cannot AddModule  is zero", slf.GetSelf())
 	}
 	return moduleId
 }
