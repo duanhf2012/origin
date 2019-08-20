@@ -1124,8 +1124,19 @@ func (slf *RedisModule) ZADDInsert(key string, score float64, Data interface{}) 
 	return nil
 }
 
-func (slf *RedisModule) ZRangeJSON(key string, start, stop int, ascend bool, data interface{}) error {
-	b, err := slf.ZRange(key, start, stop, ascend)
+type ZSetDataWithScore struct {
+	Data  json.RawMessage `json:"data"`
+	Score float64         `json:"score"`
+}
+
+func (slf *RedisModule) ZRangeJSON(key string, start, stop int, ascend bool, withScores bool, data interface{}) error {
+	if withScores {
+		if _, ok := data.(*[]ZSetDataWithScore); !ok {
+			return errors.New("withScores must decode by []ZSetDataWithScore")
+		}
+	}
+
+	b, err := slf.ZRange(key, start, stop, ascend, withScores)
 	if err != nil {
 		return err
 	}
@@ -1138,7 +1149,7 @@ func (slf *RedisModule) ZRangeJSON(key string, start, stop int, ascend bool, dat
 }
 
 //取有序set指定排名 ascend=true表示按升序遍历 否则按降序遍历
-func (slf *RedisModule) ZRange(key string, start, stop int, ascend bool) ([]byte, error) {
+func (slf *RedisModule) ZRange(key string, start, stop int, ascend bool, withScores bool) ([]byte, error) {
 	conn, err := slf.getConn()
 	if err != nil {
 		return nil, err
@@ -1148,32 +1159,59 @@ func (slf *RedisModule) ZRange(key string, start, stop int, ascend bool) ([]byte
 	if ascend {
 		cmd = "ZRANGE"
 	}
-	reply, err := conn.Do(cmd, key, start, stop)
+	var reply interface{}
+	if withScores {
+		reply, err = conn.Do(cmd, key, start, stop, "WITHSCORES")
+	} else {
+		reply, err = conn.Do(cmd, key, start, stop)
+	}
+
 	if err != nil {
 		return nil, err
 	}
-	return makeListJson(reply.([]interface{})), nil
+	return makeListJson(reply.([]interface{}), withScores), nil
 }
 
 //["123","234"]
-func makeListJson(redisReply []interface{}) []byte {
+func makeListJson(redisReply []interface{}, withScores bool) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("[")
+	data := true
 	for i, v := range redisReply {
 		if i > 0 {
 			buf.WriteString(",")
 		}
-		buf.WriteString(fmt.Sprintf("%s", v))
+		if !withScores {
+			buf.WriteString(fmt.Sprintf("%s", v))
+		} else {
+			if data {
+				buf.WriteString("{")
+				buf.WriteString(`"data":`)
+				buf.WriteString(fmt.Sprintf("%s", v))
+			} else {
+				buf.WriteString(`"score":`)
+				buf.WriteString(fmt.Sprintf("%s", v))
+				buf.WriteString("}")
+			}
+			data = !data
+		}
 	}
 	buf.WriteString("]")
 	return buf.Bytes()
 }
 
-func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, ascend bool, data interface{}) error {
-	b, err := slf.ZRangeByScore(key, start, stop, ascend)
+func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, ascend bool, withScores bool, data interface{}) error {
+	if withScores {
+		if _, ok := data.(*[]ZSetDataWithScore); !ok {
+			return errors.New("withScores must decode by []ZSetDataWithScore")
+		}
+	}
+
+	b, err := slf.ZRangeByScore(key, start, stop, ascend, withScores)
 	if err != nil {
 		return err
 	}
+
 	err = json.Unmarshal(b, data)
 	if err != nil {
 		return err
@@ -1181,7 +1219,7 @@ func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, ascend bo
 	return nil
 }
 
-func (slf *RedisModule) ZRangeByScore(key string, start, stop int, ascend bool) ([]byte, error) {
+func (slf *RedisModule) ZRangeByScore(key string, start, stop int, ascend bool, withScores bool) ([]byte, error) {
 	conn, err := slf.getConn()
 	if err != nil {
 		return nil, err
@@ -1191,11 +1229,16 @@ func (slf *RedisModule) ZRangeByScore(key string, start, stop int, ascend bool) 
 	if ascend {
 		cmd = "ZRANGEBYSCORE"
 	}
-	reply, err := conn.Do(cmd, key, start, stop)
+	var reply interface{}
+	if withScores {
+		reply, err = conn.Do(cmd, key, start, stop, "WITHSCORES")
+	} else {
+		reply, err = conn.Do(cmd, key, start, stop)
+	}
 	if err != nil {
 		return nil, err
 	}
-	return makeListJson(reply.([]interface{})), nil
+	return makeListJson(reply.([]interface{}), withScores), nil
 }
 
 func (slf *RedisModule) ZREMRANGEBYSCORE(key string, start, stop interface{}) error {
@@ -1235,7 +1278,7 @@ func (slf *RedisModule) LRange(key string, start, stop int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return makeListJson(reply.([]interface{})), nil
+	return makeListJson(reply.([]interface{}), false), nil
 }
 
 //弹出list(消息队列)数据,数据放入out fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
