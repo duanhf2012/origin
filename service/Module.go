@@ -112,9 +112,6 @@ func (slf *BaseModule) genModuleId() uint32 {
 	slf.CurrMaxModuleId = slf.CurrMaxModuleId + 1
 	moduleId := slf.CurrMaxModuleId
 
-    if moduleId == 0 {
-	  GetLogger().Printf(LEVER_ERROR, "%T Cannot AddModule  is zero", slf.GetSelf())
-	}
 	return moduleId
 }
 
@@ -216,7 +213,7 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 	//如果没有设置，自动生成ModuleId
 	var genid uint32
 	if module.GetModuleId() == 0 {
-	    genid = slf.genModuleId()
+		genid = slf.genModuleId()
 		module.SetModuleId(genid)
 	}
 
@@ -239,7 +236,7 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 	}
 	_, ok := slf.mapModule[module.GetModuleId()]
 	if ok == true {
-		GetLogger().Printf(LEVER_ERROR, "check  mapModule %#v id is %d ,%d is fail...", module, module.GetModuleId(),genid)
+		GetLogger().Printf(LEVER_ERROR, "check  mapModule %#v id is %d ,%d is fail...", module, module.GetModuleId(), genid)
 		return 0
 	}
 
