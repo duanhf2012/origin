@@ -504,6 +504,28 @@ func (slf *RedisModule) GetMuchStringJSON(keys map[string]interface{}) error {
 	return nil
 }
 
+//判断一个Key是否存在
+func (slf *RedisModule) ExistsKey(key string) (bool, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+
+	ret, err := conn.Do("EXISTS", key)
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "ExistsKey fail, reason:%v", err)
+		return false, err
+	}
+	retValue, ok := ret.(int64)
+	if !ok {
+		err = errors.New("Func[ExistsKey] Redis Data Error")
+		return false, err
+	}
+
+	return retValue != 0, nil
+}
+
 //DelRedisString redis删除string类型数据
 //示例:DelRedisString("AAAABTEST1")
 func (slf *RedisModule) DelString(key string) error {
@@ -526,7 +548,7 @@ func (slf *RedisModule) DelString(key string) error {
 	}
 
 	if retValue == 0 {
-		err = errors.New("Func[DelRedisString] Delete Key Fail")
+		err = fmt.Errorf("Func[DelRedisString] Delete Key(%s) not exists", key)
 		return err
 	}
 
