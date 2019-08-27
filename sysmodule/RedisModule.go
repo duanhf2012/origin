@@ -1222,7 +1222,7 @@ func makeListJson(redisReply []interface{}, withScores bool) []byte {
 	return buf.Bytes()
 }
 
-func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, ascend bool, withScores bool, data interface{}) error {
+func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop float64, ascend bool, withScores bool, data interface{}) error {
 	if withScores {
 		if _, ok := data.(*[]ZSetDataWithScore); !ok {
 			return errors.New("withScores must decode by []ZSetDataWithScore")
@@ -1241,7 +1241,7 @@ func (slf *RedisModule) ZRangeByScoreJSON(key string, start, stop int, ascend bo
 	return nil
 }
 
-func (slf *RedisModule) ZRangeByScore(key string, start, stop int, ascend bool, withScores bool) ([]byte, error) {
+func (slf *RedisModule) ZRangeByScore(key string, start, stop float64, ascend bool, withScores bool) ([]byte, error) {
 	conn, err := slf.getConn()
 	if err != nil {
 		return nil, err
@@ -1261,6 +1261,41 @@ func (slf *RedisModule) ZRangeByScore(key string, start, stop int, ascend bool, 
 		return nil, err
 	}
 	return makeListJson(reply.([]interface{}), withScores), nil
+}
+
+//获取指定member的排名
+func (slf *RedisModule) ZScore(key string, member interface{}) (float64, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return -1, err
+	}
+	defer conn.Close()
+	cmd := "ZSCORE"
+	var reply interface{}
+	reply, err = conn.Do(cmd, key, member)
+	if err != nil {
+		return -1, err
+	}
+	return redis.Float64(reply, err)
+}
+
+//获取指定member的排名
+func (slf *RedisModule) ZRank(key string, member interface{}, ascend bool) (int, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return -1, err
+	}
+	defer conn.Close()
+	cmd := "ZREVRANK"
+	if ascend {
+		cmd = "ZRANK"
+	}
+	var reply interface{}
+	reply, err = conn.Do(cmd, key, member)
+	if err != nil {
+		return -1, err
+	}
+	return redis.Int(reply, err)
 }
 
 func (slf *RedisModule) ZREMRANGEBYSCORE(key string, start, stop interface{}) error {
