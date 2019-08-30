@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"os"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -52,10 +51,10 @@ type BaseModule struct {
 	CurrMaxModuleId uint32
 	corouterstatus  int32 //0表示运行状态 //1释放消亡状态
 
-	rwModuleLocker *sync.Mutex
-	ExitChan       chan bool
-	WaitGroup      *sync.WaitGroup
-	bInit          bool
+	moduleLocker sync.RWMutex
+	ExitChan     chan bool
+	WaitGroup    *sync.WaitGroup
+	bInit        bool
 
 	recoverCount int8
 	bUnOnRun     bool
@@ -63,7 +62,6 @@ type BaseModule struct {
 
 func (slf *BaseModule) GetRoot() IModule {
 	currentOwner := slf.GetSelf()
-
 	for {
 		owner := currentOwner.GetOwner()
 		if owner == currentOwner {
@@ -71,10 +69,6 @@ func (slf *BaseModule) GetRoot() IModule {
 		}
 		currentOwner = owner
 	}
-}
-
-func (slf *BaseModule) getLocker() *sync.Mutex {
-	return slf.rwModuleLocker
 }
 
 func (slf *BaseModule) SetModuleId(moduleId uint32) {
@@ -86,90 +80,79 @@ func (slf *BaseModule) GetModuleId() uint32 {
 }
 
 func (slf *BaseModule) GetModuleById(moduleId uint32) IModule {
-	locker := slf.GetRoot().getBaseModule().getLocker()
-	locker.Lock()
-
+	slf.moduleLocker.RLock()
 	ret, ok := slf.mapModule[moduleId]
+	slf.moduleLocker.RUnlock()
 	if ok == false {
-
-		locker.Unlock()
 		return nil
 	}
 
-	locker.Unlock()
 	return ret
 }
 
 func (slf *BaseModule) GetModuleCount() int {
-	locker := slf.GetRoot().getBaseModule().getLocker()
-	locker.Lock()
-	defer locker.Unlock()
-
-	return len(slf.mapModule)
+	slf.moduleLocker.RLock()
+	moduleCount := len(slf.mapModule)
+	slf.moduleLocker.RUnlock()
+	return moduleCount
 }
 
 func (slf *BaseModule) genModuleId() uint32 {
-	slf.CurrMaxModuleId = slf.CurrMaxModuleId + 1
-	moduleId := slf.CurrMaxModuleId
+	slf.CurrMaxModuleId++
 
-	return moduleId
+	return slf.CurrMaxModuleId
 }
 
-func (slf *BaseModule) deleteModule(moduleId uint32) bool {
-	module, ok := slf.mapModule[moduleId]
-	if ok == false {
-		GetLogger().Printf(LEVER_WARN, "RemoveModule fail %d...", moduleId)
-		return false
+func (slf *BaseModule) deleteModule(baseModule *BaseModule) bool {
+	for _, subModule := range baseModule.mapModule {
+		baseModule.deleteModule(subModule.getBaseModule())
 	}
 
-	//协程退出
-	atomic.AddInt32(&module.getBaseModule().corouterstatus, 1)
-	module.getBaseModule().ownerService = nil
-	module.getBaseModule().mapModule = nil
-	module.getBaseModule().ownerModule = nil
-	module.getBaseModule().selfModule = nil
+	atomic.AddInt32(&baseModule.corouterstatus, 1)
+	//fmt.Printf("Delete %T->%T\n", slf.GetSelf(), baseModule.GetSelf())
+	baseModule.ownerService = nil
+	baseModule.mapModule = nil
+	baseModule.ownerModule = nil
+	baseModule.selfModule = nil
 
-	delete(slf.mapModule, moduleId)
+	delete(slf.mapModule, baseModule.GetModuleId())
+	baseModule.moduleLocker.Unlock()
 
 	return true
 }
 
-func (slf *BaseModule) releaseModule(moduleId uint32) bool {
+func (slf *BaseModule) LockTree(rootModule *BaseModule) {
+	rootModule.moduleLocker.Lock()
+	//fmt.Printf("Lock %T\n", rootModule.GetSelf())
+
+	for _, pModule := range rootModule.mapModule {
+		slf.LockTree(pModule.getBaseModule())
+		//pModule.getBaseModule().moduleLocker.Lock()
+	}
+}
+
+func (slf *BaseModule) UnLockTree(rootModule *BaseModule) {
+	for _, pModule := range rootModule.mapModule {
+		pModule.getBaseModule().moduleLocker.Unlock()
+	}
+	rootModule.moduleLocker.Unlock()
+}
+
+func (slf *BaseModule) ReleaseModule(moduleId uint32) bool {
+	slf.moduleLocker.Lock()
+
 	module, ok := slf.mapModule[moduleId]
 	if ok == false {
+		slf.moduleLocker.Unlock()
 		GetLogger().Printf(LEVER_FATAL, "RemoveModule fail %d...", moduleId)
 		return false
 	}
 
-	for submoduleId, _ := range module.getBaseModule().mapModule {
-		module.getBaseModule().releaseModule(submoduleId)
-	}
+	//锁住被结点树
+	slf.LockTree(module.getBaseModule())
+	slf.deleteModule(module.getBaseModule())
 
-	slf.deleteModule(moduleId)
-
-	return true
-}
-
-func (slf *BaseModule) ReleaseModule(moduleId uint32) bool {
-	pRoot := slf.GetRoot()
-	if pRoot == nil {
-		return false
-	}
-
-	baseModule := pRoot.getBaseModule()
-	if baseModule == nil {
-		return false
-	}
-
-	//locker := slf.GetRoot().getBaseModule().getLocker()
-	locker := baseModule.getLocker()
-	if locker == nil {
-		return false
-	}
-
-	locker.Lock()
-	slf.releaseModule(moduleId)
-	locker.Unlock()
+	slf.moduleLocker.Unlock()
 	return true
 }
 
@@ -206,11 +189,8 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 		return 0
 	}
 
-	locker := slf.GetRoot().getBaseModule().getLocker()
-	locker.Lock()
-	defer locker.Unlock()
-
 	//如果没有设置，自动生成ModuleId
+	slf.moduleLocker.Lock()
 	var genid uint32
 	if module.GetModuleId() == 0 {
 		genid = slf.genModuleId()
@@ -236,22 +216,31 @@ func (slf *BaseModule) AddModule(module IModule) uint32 {
 	}
 	_, ok := slf.mapModule[module.GetModuleId()]
 	if ok == true {
+		slf.moduleLocker.Unlock()
 		GetLogger().Printf(LEVER_ERROR, "check  mapModule %#v id is %d ,%d is fail...", module, module.GetModuleId(), genid)
 		return 0
 	}
 
 	slf.mapModule[module.GetModuleId()] = module
 
+	slf.moduleLocker.Unlock()
+
 	//运行模块
 	GetLogger().Printf(LEVER_INFO, "Start Init module %T.", module)
 	err := module.OnInit()
 	if err != nil {
+		delete(slf.mapModule, module.GetModuleId())
 		GetLogger().Printf(LEVER_ERROR, "End Init module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
-		os.Exit(-1)
+		return 0
 	}
-	module.getBaseModule().OnInit()
-	GetLogger().Printf(LEVER_INFO, "End Init module %T.", module)
+	initErr := module.getBaseModule().OnInit()
+	if initErr != nil {
+		delete(slf.mapModule, module.GetModuleId())
+		GetLogger().Printf(LEVER_ERROR, "OnInit module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), initErr)
+		return 0
+	}
 
+	GetLogger().Printf(LEVER_INFO, "End Init module %T.", module)
 	if module.getUnOnRun() == false {
 		go module.RunModule(module)
 	}
@@ -337,7 +326,6 @@ func (slf *BaseModule) RunModule(module IModule) {
 	slf.WaitGroup.Add(1)
 	defer slf.WaitGroup.Done()
 	for {
-
 		if atomic.LoadInt32(&slf.corouterstatus) != 0 {
 			module.OnEndRun()
 			GetLogger().Printf(LEVER_INFO, "OnEndRun module %T ...", module)
@@ -346,7 +334,6 @@ func (slf *BaseModule) RunModule(module IModule) {
 
 		//每500ms检查退出
 		if timer.CheckTimeOut() {
-
 			select {
 			case <-slf.ExitChan:
 				module.OnEndRun()
@@ -361,7 +348,6 @@ func (slf *BaseModule) RunModule(module IModule) {
 			GetLogger().Printf(LEVER_INFO, "OnEndRun module %T...", module)
 			return
 		}
-
 	}
 
 }

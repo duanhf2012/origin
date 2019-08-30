@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"sync"
 
 	"reflect"
 	"strings"
@@ -81,7 +80,6 @@ func (slf *BaseService) Init(iservice IService) error {
 	}
 
 	slf.serviceid = InstanceServiceMgr().GenServiceID()
-	slf.BaseModule.rwModuleLocker = &sync.Mutex{}
 
 	return nil
 }
