@@ -1312,6 +1312,30 @@ func (slf *RedisModule) ZREMRANGEBYSCORE(key string, start, stop interface{}) er
 	return err
 }
 
+func (slf *RedisModule) ZREM(key string, member interface{}) (int, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+
+	reply, err := conn.Do("ZREM", key, member)
+	return redis.Int(reply, err)
+}
+
+func (slf *RedisModule) ZREMMulti(key string, member ...interface{}) (int, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+
+	args := []interface{}{key}
+	args = append(args, member...)
+	reply, err := conn.Do("ZREM", args...)
+	return redis.Int(reply, err)
+}
+
 func (slf *RedisModule) LRangeJSON(key string, start, stop int, data interface{}) error {
 	b, err := slf.LRange(key, start, stop)
 	if err != nil {
