@@ -152,6 +152,9 @@ func (slf *BaseModule) ReleaseModule(moduleId uint32) bool {
 	slf.LockTree(module.getBaseModule())
 	slf.deleteModule(module.getBaseModule())
 
+	delete(slf.mapModule, moduleId)
+
+	//fmt.Printf("++Release %T  -- %+v\n", slf.GetSelf(), slf.mapModule)
 	slf.moduleLocker.Unlock()
 	return true
 }
