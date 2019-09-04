@@ -9,11 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/duanhf2012/origin/sysmodule"
-
-	"github.com/duanhf2012/origin/service"
-
 	"github.com/duanhf2012/origin/rpc"
+	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysmodule"
 )
 
 type RpcClient struct {
@@ -39,8 +37,12 @@ type CCluster struct {
 }
 
 func (slf *CCluster) ReadNodeInfo(nodeid int) error {
-	var err error
-	slf.cfg, err = ReadCfg("./config/cluster.json", nodeid)
+	mapNodeData, err := ReadAllNodeConfig("./config/nodeconfig.json")
+	if err != nil {
+		return err
+	}
+
+	slf.cfg, err = ReadCfg("./config/cluster.json", nodeid, mapNodeData)
 	if err != nil {
 		return err
 	}
@@ -126,6 +128,10 @@ func (slf *CPing) Ping(ping *CPing, pong *CPong) error {
 	return nil
 }
 
+func (slf *CCluster) GetClusterMode() string {
+	return slf.cfg.GetClusterMode()
+}
+
 func (slf *CCluster) ConnService() error {
 	ping := CPing{0}
 	pong := CPong{0}
@@ -140,6 +146,8 @@ func (slf *CCluster) ConnService() error {
 			slf.nodeclient[node.NodeID] = &RpcClient{node.NodeID, nil, node.ServerAddr}
 		}
 	}
+
+	//判断集群模式
 
 	for {
 		for _, rpcClient := range slf.nodeclient {
@@ -186,7 +194,6 @@ func (slf *CCluster) ConnService() error {
 
 func (slf *CCluster) Init() error {
 	if len(os.Args) < 2 {
-
 		return fmt.Errorf("Param error not find NodeId=number")
 	}
 
@@ -203,12 +210,12 @@ func (slf *CCluster) Init() error {
 	slf.nodeclient = make(map[int]*RpcClient)
 
 	//读取配置
-	ret, err := strconv.Atoi(parts[1])
+	currentNodeid, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return err
 	}
 
-	return slf.ReadNodeInfo(ret)
+	return slf.ReadNodeInfo(currentNodeid)
 }
 
 func (slf *CCluster) Start() error {
