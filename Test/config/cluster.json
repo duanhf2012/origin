@@ -1,20 +1,65 @@
 {
-"PublicServiceList":["logiclog"],
-
-"//":" Auto or Manual",
-"ClusterPattern":"Auto",
-"MasterNodeId":1,
-"NodeList":[
-{
-	"NodeID":1,
-	"NodeName":"N_Node1",
-	"ServerAddr":"127.0.0.1:10000",
-	"ServiceList":["CTestService1","CTestService2","HttpServerService","WSServerService","CWebSockService"],
-	"ClusterNode":["N_Node2"]
+	"SubNet": [{
+			"Remark": "Manual,Full,Auto",
+			"SubNetMode": "Full",
+			"SubNetName": "SubNet1",
+			"PublicServiceList": ["logiclog"],
+			"NodeList": [{
+				"NodeID": 1,
+				"NodeName": "N_Node1",
+				"ServiceList": [
+					"HttpServerService",
+					"SubNet1_Service",
+					"SubNet1_Service1"
+				],
+				"ClusterNode":["SubNet2.N_Node1"]
+			},
+			{
+				"NodeID": 2,
+				"NodeName": "N_Node2",
+				"ServiceList": [
+					"SubNet1_Service2"
+				],
+				"ClusterNode":[]
+			}
+			]
+		},
+		
+		
+		
+		
+		
+		{
+			"Remark": "Manual,Full,Auto",
+			"SubNetMode": "Full",
+			"SubNetName": "SubNet2",
+			"PublicServiceList": ["logiclog"],
+			"NodeList": [{
+					"NodeID": 30,
+					"NodeName": "N_Node1",
+					"ServiceList": [
+						"SubNet2_Service1"
+					],
+					"ClusterNode":["URQ.N_Node1"]
+				},
+				{
+					"NodeID": 40,
+					"NodeName": "N_Node4",
+					"ServiceList": [
+						"SubNet2_Service2"
+					],
+					"ClusterNode":[]
+				}
+			]
+		}
+	]
 }
-]
 
 
 
-}
+
+
+
+
+
 

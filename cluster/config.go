@@ -52,6 +52,17 @@ func GenNodeName(subnetName string, nodename string) string {
 	return nodename
 }
 
+func AddCluster(clusterNodeNameList *[]string, nodename string) bool {
+	for _, n := range *clusterNodeNameList {
+		if n == nodename {
+			return false
+		}
+	}
+
+	*clusterNodeNameList = append(*clusterNodeNameList, nodename)
+	return true
+}
+
 func ReadCfg(path string, nodeid int, mapNodeData map[int]NodeData) (*ClusterConfig, error) {
 	clsCfg := &ClusterConfig{}
 	clsCfg.mapIdNode = map[int]CNode{}
@@ -72,7 +83,7 @@ func ReadCfg(path string, nodeid int, mapNodeData map[int]NodeData) (*ClusterCon
 	}
 
 	//存储所有的nodeid对应cnode信息
-	var custerNodeNameList []string
+	var clusterNodeNameList []string
 	for _, c := range clsCfg.SubNet {
 		for _, v := range c.NodeList {
 			mapservice := make(map[string]bool, 1)
@@ -94,9 +105,9 @@ func ReadCfg(path string, nodeid int, mapNodeData map[int]NodeData) (*ClusterCon
 				}
 
 				for _, nodename := range v.ClusterNode {
-					custerNodeNameList = append(custerNodeNameList, GenNodeName(c.SubNetName, nodename))
+					AddCluster(&clusterNodeNameList, GenNodeName(c.SubNetName, nodename))
 				}
-				custerNodeNameList = append(custerNodeNameList, GenNodeName(c.SubNetName, v.NodeName))
+				AddCluster(&clusterNodeNameList, GenNodeName(c.SubNetName, v.NodeName))
 			}
 		}
 	}
@@ -110,13 +121,13 @@ func ReadCfg(path string, nodeid int, mapNodeData map[int]NodeData) (*ClusterCon
 		for _, subnet := range clsCfg.SubNet {
 			if subnet.SubNetName == clsCfg.currentNode.SubNetName {
 				for _, nodes := range subnet.NodeList {
-					custerNodeNameList = append(custerNodeNameList, subnet.SubNetName+"."+nodes.NodeName)
+					AddCluster(&clusterNodeNameList, GenNodeName(subnet.SubNetName, nodes.NodeName))
 				}
 			}
 		}
 	}
 
-	for _, clusternodename := range custerNodeNameList {
+	for _, clusternodename := range clusterNodeNameList {
 		for _, c := range clsCfg.SubNet {
 			for _, nodecfg := range c.NodeList {
 				if clusternodename != c.SubNetName+"."+nodecfg.NodeName {
@@ -126,7 +137,7 @@ func ReadCfg(path string, nodeid int, mapNodeData map[int]NodeData) (*ClusterCon
 				if ok == false {
 					return nil, errors.New(fmt.Sprintf("Cannot find NodeId %d in cluster.json!", nodecfg.NodeID))
 				}
-				clsCfg.mapClusterNodeService[clusternodename] = append(clsCfg.mapClusterNodeService[clusternodename], n)
+				clsCfg.mapClusterNodeService[nodecfg.NodeName] = append(clsCfg.mapClusterNodeService[nodecfg.NodeName], n)
 				for _, sname := range nodecfg.ServiceList {
 					clsCfg.mapClusterServiceNode[sname] = append(clsCfg.mapClusterServiceNode[sname], n)
 				}
