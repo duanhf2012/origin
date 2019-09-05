@@ -3,6 +3,8 @@ package originnode
 import (
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 
 	"github.com/duanhf2012/origin/util"
 
@@ -101,7 +103,38 @@ func (s *COriginNode) Stop() {
 	s.waitGroup.Wait()
 }
 
+func GetCmdParamNodeId() int {
+	if len(os.Args) < 2 {
+		return 0
+		//return fmt.Errorf("Param error not find NodeId=number")
+	}
+
+	parts := strings.Split(os.Args[1], "=")
+	if len(parts) < 2 {
+		return 0
+		//return fmt.Errorf("Param error not find NodeId=number")
+	}
+
+	if parts[0] != "NodeId" {
+		return 0
+		//return fmt.Errorf("Param error not find NodeId=number")
+	}
+
+	//读取配置
+	currentNodeid, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0
+	}
+
+	return currentNodeid
+}
+
 func NewOriginNode() *COriginNode {
+	CurrentNodeId := GetCmdParamNodeId()
+	if CurrentNodeId == 0 {
+		fmt.Print("Param error not find NodeId=number")
+		os.Exit(-1)
+	}
 
 	//创建模块
 	node := new(COriginNode)
@@ -110,12 +143,11 @@ func NewOriginNode() *COriginNode {
 
 	//安装系统服务
 	syslogservice := &sysservice.LogService{}
-	syslogservice.InitLog("syslog", sysmodule.LEVER_INFO)
-
+	syslogservice.InitLog("syslog", fmt.Sprintf("syslog_%d", CurrentNodeId), sysmodule.LEVER_INFO)
 	service.InstanceServiceMgr().Setup(syslogservice)
 
 	//初始化集群对象
-	err := cluster.InstanceClusterMgr().Init()
+	err := cluster.InstanceClusterMgr().Init(CurrentNodeId)
 	if err != nil {
 		fmt.Print(err)
 		os.Exit(-1)

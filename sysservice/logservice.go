@@ -10,10 +10,10 @@ type LogService struct {
 	logmodule *sysmodule.LogModule
 }
 
-func (slf *LogService) InitLog(logservicename string, openLevel uint) {
+func (slf *LogService) InitLog(logservicename string, logFilePrefix string, openLevel uint) {
 	slf.SetServiceName(logservicename)
 	slf.logmodule = &sysmodule.LogModule{}
-	slf.logmodule.Init(logservicename, openLevel)
+	slf.logmodule.Init(logFilePrefix, openLevel)
 }
 
 func (slf *LogService) Printf(level uint, format string, v ...interface{}) {

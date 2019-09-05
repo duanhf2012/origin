@@ -53,7 +53,7 @@ type LogModule struct {
 
 func (slf *LogModule) GetCurrentFileName() string {
 	now := time.Now()
-	fpath := filepath.Join("logs", now.Format("2006-01-02"))
+	fpath := filepath.Join("logs")
 	os.MkdirAll(fpath, os.ModePerm)
 	fname := slf.logfilename + "-" + now.Format("20060102-150405") + ".log"
 	ret := filepath.Join(fpath, fname)
@@ -100,9 +100,9 @@ func (slf *LogModule) CheckAndGenFile(fileline string) (newFile bool) {
 	return newFile
 }
 
-func (slf *LogModule) Init(logfilename string, openLevel uint) {
+func (slf *LogModule) Init(logFilePrefixName string, openLevel uint) {
 	slf.currentDay = 0
-	slf.logfilename = logfilename
+	slf.logfilename = logFilePrefixName
 	slf.openLevel = openLevel
 	slf.calldepth = 3
 }

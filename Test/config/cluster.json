@@ -12,7 +12,7 @@
 					"SubNet1_Service",
 					"SubNet1_Service1"
 				],
-				"ClusterNode":["SubNet2.N_Node1"]
+				"ClusterNode":["SubNet2.N_Node1","N_Node2"]
 			},
 			{
 				"NodeID": 2,

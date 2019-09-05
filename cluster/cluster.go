@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -192,28 +191,8 @@ func (slf *CCluster) ConnService() error {
 	return nil
 }
 
-func (slf *CCluster) Init() error {
-	if len(os.Args) < 2 {
-		return fmt.Errorf("Param error not find NodeId=number")
-	}
-
-	parts := strings.Split(os.Args[1], "=")
-	if len(parts) < 2 {
-		return fmt.Errorf("Param error not find NodeId=number")
-	}
-
-	if parts[0] != "NodeId" {
-
-		return fmt.Errorf("Param error not find NodeId=number")
-	}
-
+func (slf *CCluster) Init(currentNodeid int) error {
 	slf.nodeclient = make(map[int]*RpcClient)
-
-	//读取配置
-	currentNodeid, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return err
-	}
 
 	return slf.ReadNodeInfo(currentNodeid)
 }
