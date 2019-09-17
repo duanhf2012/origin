@@ -735,24 +735,29 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 	return nil
 }
 
-func (slf *DBModule) GetTx() (*Tx, error) {
+// Begin starts a transaction.
+func (slf *DBModule) Begin() (*Tx, error) {
 	var txDBMoudule Tx
 	txdb, err := slf.db.Begin()
 	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "Begin error:%s", err.Error())
 		return &txDBMoudule, err
 	}
 	txDBMoudule.tx = txdb
 	return &txDBMoudule, nil
 }
 
+// Rollback aborts the transaction.
 func (slf *Tx) Rollback() error {
 	return slf.tx.Rollback()
 }
 
+// Commit commits the transaction.
 func (slf *Tx) Commit() error {
 	return slf.tx.Commit()
 }
 
+// CheckArgs...
 func (slf *Tx) CheckArgs(args ...interface{}) error {
 	for _, val := range args {
 		if reflect.TypeOf(val).Kind() == reflect.String {
@@ -796,6 +801,7 @@ func (slf *Tx) CheckArgs(args ...interface{}) error {
 	return nil
 }
 
+// Query executes a query that returns rows, typically a SELECT.
 func (slf *Tx) Query(query string, args ...interface{}) DBResult {
 	if slf.CheckArgs(args) != nil {
 		ret := DBResult{}
@@ -813,7 +819,7 @@ func (slf *Tx) Query(query string, args ...interface{}) DBResult {
 
 	rows, err := slf.tx.Query(query, args...)
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%v)", query, err)
+		service.GetLogger().Printf(service.LEVER_ERROR, "Tx Query:%s(%v)", query, err)
 	}
 
 	return DBResult{
@@ -824,6 +830,7 @@ func (slf *Tx) Query(query string, args ...interface{}) DBResult {
 	}
 }
 
+// IsPrintTimeLog...
 func (slf *Tx) IsPrintTimeLog(Time time.Duration) bool {
 	if slf.PrintTime != 0 && Time >= slf.PrintTime {
 		return true
@@ -831,6 +838,7 @@ func (slf *Tx) IsPrintTimeLog(Time time.Duration) bool {
 	return false
 }
 
+// QueryEx executes a query that return rows.
 func (slf *Tx) QueryEx(query string, args ...interface{}) (*DataSetList, error) {
 	datasetList := DataSetList{}
 	datasetList.tag = "json"
@@ -851,7 +859,7 @@ func (slf *Tx) QueryEx(query string, args ...interface{}) (*DataSetList, error) 
 	TimeFuncPass := time.Since(TimeFuncStart)
 
 	if slf.IsPrintTimeLog(TimeFuncPass) {
-		service.GetLogger().Printf(service.LEVER_INFO, "DBModule Tx QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
+		service.GetLogger().Printf(service.LEVER_INFO, "Tx QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
 	}
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_ERROR, "Tx Query:%s(%v)", query, err)
@@ -895,7 +903,7 @@ func (slf *Tx) QueryEx(query string, args ...interface{}) (*DataSetList, error) 
 
 		if hasRet == false {
 			if rows.Err() != nil {
-				service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%+v)", query, rows)
+				service.GetLogger().Printf(service.LEVER_ERROR, "Tx Query:%s(%+v)", query, rows)
 			}
 			break
 		}
@@ -904,7 +912,7 @@ func (slf *Tx) QueryEx(query string, args ...interface{}) (*DataSetList, error) 
 	return &datasetList, nil
 }
 
-// Exec ...
+// Exec executes a query that doesn't return rows.
 func (slf *Tx) Exec(query string, args ...interface{}) (*DBResultEx, error) {
 	ret := &DBResultEx{}
 	if slf.tx == nil {
@@ -922,10 +930,10 @@ func (slf *Tx) Exec(query string, args ...interface{}) (*DBResultEx, error) {
 	res, err := slf.tx.Exec(query, args...)
 	TimeFuncPass := time.Since(TimeFuncStart)
 	if slf.IsPrintTimeLog(TimeFuncPass) {
-		service.GetLogger().Printf(service.LEVER_INFO, "DBModule QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
+		service.GetLogger().Printf(service.LEVER_INFO, "Tx QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
 	}
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "Exec:%s(%v)", query, err)
+		service.GetLogger().Printf(service.LEVER_ERROR, "Tx Exec:%s(%v)", query, err)
 		return nil, err
 	}
 
