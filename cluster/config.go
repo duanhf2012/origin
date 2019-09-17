@@ -8,6 +8,34 @@ import (
 	"strings"
 )
 
+//负载均衡信息
+type BalancingInfo struct {
+	NodeId      int    //我的nodeId
+	ServiceName string //负载均衡的ServiceName
+
+	TotalNum int   //总共有多少个协同Node
+	MyIndex  int   //负责的index [0, TotalNum)
+	NodeList []int //所有协同的node列表 按NodeId升序排列
+}
+
+//判断hash后的Id是否命中我的NodeId
+func (slf *BalancingInfo) Hit(hashId int) bool {
+	if hashId >= 0 && slf.TotalNum > 0 && slf.MyIndex >= 0 {
+		return hashId%slf.TotalNum == slf.MyIndex
+	}
+	return false
+}
+
+//判断命中的NodeId，-1表示无法取得
+func (slf *BalancingInfo) GetHitNodeId(hashId int) int {
+	if hashId >= 0 && slf.TotalNum > 0 {
+		if idx := hashId % slf.TotalNum; idx >= 0 && idx < len(slf.NodeList) {
+			return slf.NodeList[idx]
+		}
+	}
+	return -1
+}
+
 type CNodeCfg struct {
 	NodeID      int
 	NodeName    string
@@ -148,14 +176,16 @@ func ReadCfg(path string, nodeid int, mapNodeData map[int]NodeData) (*ClusterCon
 	return clsCfg, nil
 }
 
-func (slf *ClusterConfig) GetIdByService(serviceName string) []int {
-	var nodeidlist []int
-	nodeidlist = make([]int, 0)
+func (slf *ClusterConfig) GetIdByService(serviceName, subNetName string) []int {
+	var nodeidlist = []int{}
 
 	nodeList, ok := slf.mapClusterServiceNode[serviceName]
 	if ok == true {
+		nodeidlist = make([]int, 0, len(nodeList))
 		for _, v := range nodeList {
-			nodeidlist = append(nodeidlist, v.NodeID)
+			if subNetName == "" || subNetName == v.SubNetName {
+				nodeidlist = append(nodeidlist, v.NodeID)
+			}
 		}
 	}
 
