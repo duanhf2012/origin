@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -274,7 +275,7 @@ func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *stri
 			servicename = servicename[1:]
 			nodeidList = append(nodeidList, GetNodeId())
 		} else {
-			nodeidList = slf.cfg.GetIdByService(servicename)
+			nodeidList = slf.cfg.GetIdByService(servicename, "")
 		}
 	} else {
 		nodeidList = slf.GetIdByNodeService(nodename, servicename)
@@ -293,7 +294,7 @@ func (slf *CCluster) GetNodeList(NodeServiceMethod string, rpcServerMethod *stri
 
 //GetNodeIdByServiceName 根据服务名查找nodeid servicename服务名 bOnline是否需要查找在线服务
 func (slf *CCluster) GetNodeIdByServiceName(servicename string, bOnline bool) []int {
-	nodeIDList := slf.cfg.GetIdByService(servicename)
+	nodeIDList := slf.cfg.GetIdByService(servicename, "")
 
 	if bOnline {
 		ret := make([]int, 0, len(nodeIDList))
@@ -306,6 +307,40 @@ func (slf *CCluster) GetNodeIdByServiceName(servicename string, bOnline bool) []
 	}
 
 	return nodeIDList
+}
+
+//根据Service获取负载均衡信息
+//负载均衡的策略是从配置获取所有配置了该服务的NodeId 并按NodeId排序 每个node负责处理数组index所在的那一部分
+func (slf *CCluster) GetBalancingInfo(currentNodeId int, servicename string, inSubNet bool) (*BalancingInfo, error) {
+	subNetName := ""
+	if inSubNet {
+		if node, ok := slf.cfg.mapIdNode[currentNodeId]; ok {
+			subNetName = node.SubNetName
+		} else {
+			return nil, fmt.Errorf("[cluster.GetBalancingInfo] cannot find node %d", currentNodeId)
+		}
+	}
+	lst := slf.cfg.GetIdByService(servicename, subNetName)
+	// if len(lst) <= 0 {
+	// 	return nil, fmt.Errorf("[cluster.GetBalancingInfo] cannot find service %s in any node", servicename)
+	// }
+	sort.Ints(lst)
+	ret := &BalancingInfo{
+		NodeId:      currentNodeId,
+		ServiceName: servicename,
+		TotalNum:    len(lst),
+		MyIndex:     -1,
+		NodeList:    lst,
+	}
+	if _, ok := slf.cfg.mapIdNode[currentNodeId]; ok {
+		for i, v := range lst {
+			if v == currentNodeId {
+				ret.MyIndex = i
+				break
+			}
+		}
+	}
+	return ret, nil
 }
 
 func (slf *CCluster) CheckNodeIsConnectedByID(nodeid int) bool {
@@ -520,6 +555,12 @@ func CastGoQueue(NodeServiceMethod string, args interface{}) error {
 //GetNodeIdByServiceName 根据服务名查找nodeid serviceName服务名 bOnline是否需要查找在线服务
 func GetNodeIdByServiceName(serviceName string, bOnline bool) []int {
 	return InstanceClusterMgr().GetNodeIdByServiceName(serviceName, bOnline)
+}
+
+//获取服务的负载均衡信息
+//负载均衡的策略是从配置获取所有配置了该服务的NodeId 并按NodeId排序 每个node负责处理数组index所在的那一部分
+func GetBalancingInfo(currentNodeId int, servicename string, inSubNet bool) (*BalancingInfo, error) {
+	return InstanceClusterMgr().GetBalancingInfo(currentNodeId, servicename, inSubNet)
 }
 
 //随机选择在线的node发送
