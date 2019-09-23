@@ -41,44 +41,138 @@ origin引擎三大对象关系
 ---------------
 * Node:   可以认为每一个Node代表着一个origin进程
 * Service:一个独立的服务可以认为是一个大的功能模块，他是Node的子集，创建完成并安装Node对象中。服务可以支持外部RPC和HTTP接口对外功能。
-* Module: 这是origin最小对象单元，非常建议所有的业务模块都划分成各个小的Module组合。Module可以建立树状关系。Service也是Module的类型。
+* Module: 这是origin最小对象单元，强烈建议所有的业务模块都划分成各个小的Module组合。Module可以建立树状关系。Service本身也是Module的类型。
 
 origin集群核心配置文件config/cluser.json如下:
 ---------------
 ```
 {
-"PublicServiceList":["logiclog"],
-
-"NodeList":[
-
-{
-	"NodeID":1,
-	"NodeName":"N_Node1",
-	"ServerAddr":"127.0.0.1:8080",
-	
-	"ServiceList":["CTestService1"],
-	"ClusterNode":["N_Node2"]
-},
-
-{
-	"NodeID":2,
-	"NodeName":"N_Node2",
-	"ServerAddr":"127.0.0.1:8081",
-	"ServiceList":["CTestService2","CTestService3"],
-	"ClusterNode":[]
-}
-
-]
+	"SubNet": [{
+			"Remark": "Manual,Full,Auto",
+			"SubNetMode": "Full",
+			"SubNetName": "SubNet1",
+			"PublicServiceList": ["logiclog"],
+			"NodeList": [{
+				"NodeID": 1,
+				"NodeName": "N_Node1",
+				"ServiceList": [
+					"HttpServerService",
+					"SubNet1_Service",
+					"SubNet1_Service1"
+				],
+				"ClusterNode":["SubNet2.N_Node1","N_Node2"]
+			},
+			{
+				"NodeID": 2,
+				"NodeName": "N_Node2",
+				"ServiceList": [
+					"SubNet1_Service2"
+				],
+				"ClusterNode":[]
+			}
+			]
+		},
+		
+		
+		{
+			"Remark": "Manual,Full,Auto",
+			"SubNetMode": "Full",
+			"SubNetName": "SubNet2",
+			"PublicServiceList": ["logiclog"],
+			"NodeList": [{
+					"NodeID": 3,
+					"NodeName": "N_Node1",
+					"ServiceList": [
+						"SubNet2_Service1"
+					],
+					"ClusterNode":["URQ.N_Node1"]
+				},
+				{
+					"NodeID": 4,
+					"NodeName": "N_Node4",
+					"ServiceList": [
+						"SubNet2_Service2"
+					],
+					"ClusterNode":[]
+				}
+			]
+		}
+	]
 }
 ```
+origin集群配置以子网的模式配置，在每个子网下配置多个Node服务器,子网在应对复杂的系统时可以应用到各个子系统，方便每个子系统的隔离。
+
 origin所有的结点与服务通过配置进行关联，配置文件分为两大配置结点：
-* PublicServiceList：用于公共服务配置，所有的结点默认会加载该服务列表。
-* NodeList：Node所有的列表
-    * NodeId:     Node编号，用于标识唯一的进程id
-	* NodeName:   Node名称，用于区分Node结点功能。例如，可以是GameServer
-	* ServerAddr: 结点监听的地址与端口
-	* ServiceList:结点中允许开启的服务列表
-	* ClusterNode:将与列表中的Node产生集群关系。允许访问这些结点中所有的服务。
+* SubNet：配置子网，以上配置中包括子网名为SubNet1与SubNet2,每个子网包含多个Node结点。
+    * SubNetMode：子网模式，Manual手动模式,Full通过配置全自动连接集群模式（推荐模式）,Auto自动模式
+	* SubNetName：子网名称
+	* PublicServiceList：用于公共服务配置，所有的结点默认会加载该服务列表
+	* SubNetMode：子网集群模式，
+    * NodeList：Node所有的列表
+        * NodeId:     Node编号，用于标识唯一的进程id
+	    * NodeName:   Node名称，用于区分Node结点功能。例如，可以是GameServer
+	    * ServiceList:结点中允许开启的服务列表
+	    * ClusterNode:将与列表中的Node产生集群关系。允许访问这些结点中所有的服务。允许集群其他子网结点，例如：URQ.N_Node1
+
+origin集群核心配置文件config/nodeconfig.json如下:
+---------------
+```
+{
+	"Public": {
+		"LogLevel": 1,
+		"HttpPort": 9400,
+		"WSPort": 9500,
+
+		"CAFile": [{
+				"CertFile": "",
+				"KeyFile": ""
+			},
+			{
+				"CertFile": "",
+				"KeyFile": ""
+			}
+		],
+
+		"Environment": "FS_Dev_LFY",
+		"IsListenLog": 1,
+		"IsSendErrorMail": 0
+	},
+	"NodeList": [{
+			"NodeID": 1,
+			"NodeAddr": "127.0.0.1:8081",
+			"LogLevel": 1,
+			"HttpPort": 7001,
+			"WSPort": 7000,
+			"CertFile": "",
+			"KeyFile": ""
+		},
+		{
+			"NodeID": 2,
+			"NodeAddr": "127.0.0.1:8082"
+		},
+		{
+			"NodeID": 3,
+			"NodeAddr": "127.0.0.1:8083"
+		},
+		{
+			"NodeID": 4,
+			"NodeAddr": "127.0.0.1:8084"
+		}
+	]
+}
+```
+针对cluster.json中NodeId在该文件中配置具体环境的信息
+* Public：公共服务配置
+    * LogLevel：日志等级 1:DEBUG 2:INFO 3:WARN 4:ERROR 5:FATAL。
+	* HttpPort：当Node需要提供http服务时，安装HttpServerService后将使用该监听端口。
+	* WSPort：当Node需要提供Websocket服务时，安装HttpServerService后将使用该监听端口。
+	* CAFile：证书配置文件，支持多个。
+* NodeList：
+    * NodeID：结点ID，在cluster.json中所有的Node都需要在该文件中配置。
+    * NodeAddr：监听RPC地址与端口。
+    * 其他：该配置可以继承Public中所有的配置，可以在其中自定义LogLevel,HttpPort等。
+
+
 
 origin第一个服务:
 ---------------

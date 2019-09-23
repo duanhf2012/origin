@@ -1,12 +1,15 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/originnode"
 	"github.com/duanhf2012/origin/sysservice"
 )
 
 func main() {
+	strings.ReplaceAll
 	node := originnode.NewOriginNode()
 	if node == nil {
 		return

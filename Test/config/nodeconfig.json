@@ -33,33 +33,18 @@
 {
 	"NodeID":2,
 	"NodeAddr": "127.0.0.1:8082",
-    "LogLevel":1,
-	"HttpPort":7002,
-	"WSPort":7012,
-	"CertFile":"",
-	"KeyFile":""
 }
 ,
 {
-	"NodeID":30,
+	"NodeID":3,
 	"NodeAddr": "127.0.0.1:8083",
-    "LogLevel":1,
-	"HttpPort":7003,
-	"WSPort":7013,
-	"CertFile":"",
-	"KeyFile":""
 }
 ,
 {
 	"NodeID":40,
 	"NodeAddr": "127.0.0.1:8084",
-    "LogLevel":1,
-	"HttpPort":7004,
-	"WSPort":7014,
-	"CertFile":"",
-	"KeyFile":""
+    "LogLevel":1
 }
-
 ]
 
 }
