@@ -180,107 +180,221 @@ origin第一个服务:
 * config/cluster.json内容如下
 ```
 {
-"NodeList":[
-{
-	"NodeID":1,
-	"NodeName":"N_Node1",
-	"ServerAddr":"127.0.0.1:8080",
-	
-	"ServiceList":["CTestService1","CTestService2"],
-	"ClusterNode":[]
-}
-]
+	"SubNet": [{
+			"Remark": "Manual,Full,Auto",
+			"SubNetMode": "Full",
+			"SubNetName": "SubNet1",
+			"PublicServiceList": ["logiclog"],
+			"NodeList": [{
+				"NodeID": 1,
+				"NodeName": "N_Node1",
+				"ServiceList": [
+					"TestService1",
+					"TestService2"
+				],
+				"ClusterNode":[]
+			},
+			{
+				"NodeID": 2,
+				"NodeName": "N_Node2",
+				"ServiceList": [
+					"TestService3"
+				],
+				"ClusterNode":[]
+			}
+			]
+		}
+	]
 }
 ```
+* config/nodeconfig.json内容如下
+```
+{
+	"Public": {
+		"LogLevel": 1,
+		"HttpPort": 9400,
+		"WSPort": 9500,
+		"Environment": "Test",
+		"IsListenLog": 1,
+		"IsSendErrorMail": 0
+	},
+
+	"NodeList": [{
+			"NodeID": 1,
+			"NodeAddr": "127.0.0.1:8081"
+		},
+		{
+			"NodeID": 2,
+			"NodeAddr": "127.0.0.1:8082"
+		}
+	]
+}
+```
+
+
 * main.go运行代码
 
 ```go
 package main
 
 import (
-	"fmt"
-	"time"
-
 	"github.com/duanhf2012/origin/originnode"
-	"github.com/duanhf2012/origin/service"
 )
 
-//定义一个服务，必需继承自service.BaseService
-type CTestService1 struct {
-	service.BaseService
-}
-
-//服务的初始化
-func (slf *CTestService1) OnInit() error {
-	fmt.Println("CTestService1.OnInit")
-	return nil
-}
-
-//服务运行，返回值如果为true，将会重复的进入OnRun，
-//直到返回false为止，此函数只会进入一次
-func (slf *CTestService1) OnRun() bool {
-	fmt.Println("CTestService1.OnRun")
-	return false
-}
-
-//当OnRun退出时，调用OnEndRun，可以收尾OnRun的运行处理
-func (slf *CTestService1) OnEndRun() {
-	fmt.Println("CTestService1.OnEndRun")
-}
-
-
-type CTestService2 struct {
-	service.BaseService
-}
-
-func (slf *CTestService2) OnInit() error {
-	fmt.Println("CTestService2.OnInit")
-	return nil
-}
-
-func (slf *CTestService2) OnRun() bool {
-	fmt.Println("CTestService2.OnRun")
-	time.Sleep(time.Second * 5)
-	
-	//返回true，将重复进入
-	return true
-}
-
-func (slf *CTestService2) OnEndRun() {
-	fmt.Println("CTestService2.OnEndRun")
-}
-
 func main() {
-	//新建一个origin node对象
+
 	node := originnode.NewOriginNode()
 	if node == nil {
 		return
 	}
 
-	//安装CTestService1与CTestService2服务
-	node.SetupService(&CTestService1{}, &CTestService2{})
 	node.Init()
 	node.Start()
 }
+
 ```
+
+* TestService1.go运行代码
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/duanhf2012/origin/cluster"
+	"github.com/duanhf2012/origin/originnode"
+	"github.com/duanhf2012/origin/service"
+)
+
+type TestService1 struct {
+	service.BaseService
+}
+
+func init() {
+	originnode.InitService(&TestService1{})
+}
+
+//OnInit ...
+func (ws *TestService1) OnInit() error {
+
+	return nil
+}
+
+//OnRun ...
+func (ws *TestService1) OnRun() bool {
+	var i InputData
+	var j int
+	i.A1 = 3
+	i.A2 = 4
+	err := cluster.Call("TestService2.RPC_Add", &i, &j)
+	if err == nil {
+		fmt.Printf(" TestService2.RPC_Add is %d\n", j)
+	}
+
+	err = cluster.Call("TestService3.RPC_Multi", &i, &j)
+	if err == nil {
+		fmt.Printf(" TestService2.RPC_Multi is %d\n", j)
+	}
+
+	return false
+}
+
+```
+
+
+
+* TestService2.go运行代码
+```go
+package main
+
+import (
+	"github.com/duanhf2012/origin/originnode"
+	"github.com/duanhf2012/origin/service"
+)
+
+type InputData struct {
+	A1 int
+	A2 int
+}
+
+type TestService2 struct {
+	service.BaseService
+}
+
+func init() {
+	originnode.InitService(&TestService2{})
+}
+
+//OnInit ...
+func (ws *TestService2) OnInit() error {
+
+	return nil
+}
+
+//OnRun ...
+func (ws *TestService2) OnRun() bool {
+	return false
+}
+
+//服务要对外的接口规划如下：
+//RPC_MethodName(arg *DataType1, ret *DataType2) error
+//如果不符合规范，在加载服务时，该函数将不会被映射，其他服务将不允能调用。
+func (slf *TestService2) RPC_Add(arg *InputData, ret *int) error {
+
+	*ret = arg.A1 + arg.A2
+
+	return nil
+}
+```
+
+* TestService3.go运行代码
+```go
+package main
+
+import (
+	"github.com/duanhf2012/origin/originnode"
+	"github.com/duanhf2012/origin/service"
+)
+
+type TestService3 struct {
+	service.BaseService
+}
+
+func init() {
+	originnode.InitService(&TestService3{})
+}
+
+//OnInit ...
+func (ws *TestService3) OnInit() error {
+	return nil
+}
+
+//OnRun ...
+func (ws *TestService3) OnRun() bool {
+	return false
+}
+
+func (slf *TestService3) RPC_Multi(arg *InputData, ret *int) error {
+	*ret = arg.A1 * arg.A2
+	return nil
+}
+```
+
+
+
 通过以下命令运行：
 ```
-main.exe NodeId=1
+OriginServer.exe NodeId=2
+OriginServer.exe NodeId=1
 ```
-输出结果：
+其中NodeId=1的进程输出结果：
 ```
-CTestService2.OnInit
-CTestService1.OnInit
-CTestService2.OnRun
-CTestService1.OnRun
-CTestService1.OnEndRun
-CTestService2.OnRun
-CTestService2.OnRun
-CTestService2.OnRun
-CTestService2.OnRun
+TestService2.RPC_Add is 7
+TestService2.RPC_Multi is 12
 ```
-通过日志可以确认，在Node启动时分别驱动Service的OnInit,OnRun,OnEndRun，上面的日志中CTestService2.OnRun会被循环调用，
-因为在OnRun的返回是true，否则只会进入一次。如果你不需要OnRun可以不定义OnRun函数。我们已经成功的调用了两个服务了。
+通过日志可以确认，在Node启动时分别驱动Service的OnInit,OnRun,OnEndRun，上面的日志中TestService1.OnRun会被调用，
+因为在OnRun的返回是false，所以OnRun只会进入一次。当返回true时，会重复循环进入OnRun。如果你不需要OnRun可以不定义OnRun函数。
+示例中，我们分别调用了本进程的TestService2服务中的RPC_Add的RPC接口，以及NodeId为2进程中服务为TestService3的接口RPC_Multi。
 
 origin服务间通信:
 ---------------
@@ -341,6 +455,7 @@ func main() {
 	if node == nil {
 		return
 	}
+	//也可以通过以下方式安装服务CTestService1与CTestService2
 	node.SetupService(&CTestService1{}, &CTestService2{})
 	node.Init()
 	node.Start()
