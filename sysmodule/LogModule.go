@@ -55,7 +55,13 @@ func (slf *LogModule) GetCurrentFileName() string {
 	now := time.Now()
 	fpath := filepath.Join("logs")
 	os.MkdirAll(fpath, os.ModePerm)
-	fname := slf.logfilename + "-" + now.Format("20060102-150405") + ".log"
+	y, m, d := now.Date()
+	h := now.Hour()
+	mm := now.Minute()
+	mm -= mm % 15 //15分钟内使用同一个日志文件
+	dt := y*10000 + int(m)*100 + d
+	tm := h*100 + mm
+	fname := fmt.Sprintf("%s-%d-%d.log", slf.logfilename, dt, tm)
 	ret := filepath.Join(fpath, fname)
 	return ret
 }
@@ -84,9 +90,10 @@ func (slf *LogModule) CheckAndGenFile(fileline string) (newFile bool) {
 		}
 
 		var err error
-		slf.logFile, err = os.OpenFile(slf.GetCurrentFileName(), os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
+		filename := slf.GetCurrentFileName()
+		slf.logFile, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, os.ModePerm)
 		if err != nil {
-			fmt.Printf("create log file %+v error!", slf.GetCurrentFileName())
+			fmt.Printf("create log file %+v error!", filename)
 			slf.locker.Unlock()
 			return false
 		}
