@@ -1,0 +1,44 @@
+{
+"Public":{
+    "LogLevel":1,
+	"HttpPort":9400,
+	"WSPort":9500,
+	
+	"CAFile":[
+	{
+	"CertFile":"",
+	"KeyFile":""
+	},
+	{
+	"CertFile":"",
+	"KeyFile":""
+	}
+	],
+	
+	"Environment":"FS_Dev_LFY",
+	"IsListenLog":1,
+	"IsSendErrorMail":0
+},
+
+"NodeList":[
+{
+	"NodeID":1,
+	"NodeAddr": "127.0.0.1:8081",
+    "LogLevel":1,
+	"HttpPort":7001,
+	"WSPort":7000,
+	"CertFile":"",
+	"KeyFile":""
+},
+{
+	"NodeID":2,
+	"NodeAddr": "127.0.0.1:8082"
+}
+,
+{
+	"NodeID":3,
+	"NodeAddr": "127.0.0.1:8083"
+}
+]
+
+}
