@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/duanhf2012/origin/rpc"
@@ -33,6 +34,7 @@ type CCluster struct {
 	writer net.Conn
 
 	LocalRpcClient        *rpc.Client
+	localRpcLocker        sync.Mutex
 	innerLocalServiceList map[string]bool
 }
 
@@ -186,7 +188,7 @@ func (slf *CCluster) ConnService() error {
 		if slf.LocalRpcClient.IsClosed() {
 			slf.ReSetLocalRpcClient()
 		}
-		time.Sleep(time.Second * 4)
+		time.Sleep(time.Second * 2)
 	}
 
 	return nil
