@@ -51,7 +51,6 @@ type Client struct {
 	pending  map[uint64]*Call
 	closing  bool // user has called Close
 	shutdown bool // server has told us to stop
-	bPipe    bool
 }
 
 // A ClientCodec implements writing of RPC requests and
@@ -152,9 +151,6 @@ func (client *Client) input() {
 			if err != nil {
 				call.Error = errors.New("reading body " + err.Error())
 			}
-			if client.bPipe {
-				err = nil
-			}
 			call.done()
 		}
 	}
@@ -203,19 +199,18 @@ func (call *Call) done() {
 // so no interlocking is required. However each half may be accessed
 // concurrently so the implementation of conn should protect against
 // concurrent reads or concurrent writes.
-func NewClient(conn io.ReadWriteCloser, isPipe bool) *Client {
+func NewClient(conn io.ReadWriteCloser) *Client {
 	encBuf := bufio.NewWriter(conn)
 	client := &gobClientCodec{conn, gob.NewDecoder(conn), gob.NewEncoder(encBuf), encBuf}
-	return NewClientWithCodec(client, isPipe)
+	return NewClientWithCodec(client)
 }
 
 // NewClientWithCodec is like NewClient but uses the specified
 // codec to encode requests and decode responses.
-func NewClientWithCodec(codec ClientCodec, isPipe bool) *Client {
+func NewClientWithCodec(codec ClientCodec) *Client {
 	client := &Client{
 		codec:   codec,
 		pending: make(map[uint64]*Call),
-		bPipe:   isPipe,
 	}
 	go client.input()
 	return client
@@ -274,7 +269,7 @@ func DialHTTPPath(network, address, path string) (*Client, error) {
 	// before switching to RPC protocol.
 	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
 	if err == nil && resp.Status == connected {
-		return NewClient(conn, false), nil
+		return NewClient(conn), nil
 	}
 	if err == nil {
 		err = errors.New("unexpected HTTP response: " + resp.Status)
@@ -296,7 +291,7 @@ func Dial(network, address string) (*Client, error) {
 	}
 	tcpconn, _ := conn.(*net.TCPConn)
 	tcpconn.SetNoDelay(true)
-	return NewClient(conn, false), nil
+	return NewClient(conn), nil
 }
 
 func DialTimeOut(network, address string, timeout time.Duration) (*Client, error) {
@@ -306,7 +301,7 @@ func DialTimeOut(network, address string, timeout time.Duration) (*Client, error
 	}
 	tcpconn, _ := conn.(*net.TCPConn)
 	tcpconn.SetNoDelay(true)
-	return NewClient(conn, false), nil
+	return NewClient(conn), nil
 }
 
 // Close calls the underlying codec's Close method. If the connection is already
