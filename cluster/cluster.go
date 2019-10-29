@@ -113,7 +113,7 @@ func (slf *CCluster) ListenService() error {
 func (slf *CCluster) ReSetLocalRpcClient() {
 	slf.reader, slf.writer = net.Pipe()
 	go rpc.ServeConn(slf.reader)
-	slf.LocalRpcClient = rpc.NewClient(slf.writer)
+	slf.LocalRpcClient = rpc.NewClient(slf.writer,true)
 }
 
 type CPing struct {
