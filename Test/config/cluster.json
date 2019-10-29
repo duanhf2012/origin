@@ -38,14 +38,6 @@
 						"SubNet2_Service1"
 					],
 					"ClusterNode":["URQ.N_Node1"]
-				},
-				{
-					"NodeID": 4,
-					"NodeName": "N_Node4",
-					"ServiceList": [
-						"SubNet2_Service2"
-					],
-					"ClusterNode":[]
 				}
 			]
 		}
