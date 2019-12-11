@@ -2,6 +2,9 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "D:\\GOPATH\\src\\github.com\\duanhf2012\\origin"
 		}
 	],
 	"settings": {
