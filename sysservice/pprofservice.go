@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysservice/originhttp"
 )
 
 type PProfService struct {
@@ -17,7 +18,7 @@ type PProfService struct {
 type ProfileData struct {
 	Name  string
 	Count int
-}
+} 
 
 type Profilestruct struct {
 	Fisttime    int
@@ -27,7 +28,7 @@ type Profilestruct struct {
 func (slf *PProfService) OnInit() error {
 	slf.fisttime = (int)(time.Now().UnixNano())
 	return nil
-}
+}  
 
 func (slf *PProfService) GetPprof() ([]byte, error) {
 	var pfiles Profilestruct
@@ -43,7 +44,7 @@ func (slf *PProfService) GetPprof() ([]byte, error) {
 	return json.Marshal(pfiles)
 }
 
-func (slf *PProfService) HTTP_DebugPProf(request *HttpRequest, resp *HttpRespone) error {
+func (slf *PProfService) HTTP_DebugPProf(request *originhttp.HttpRequest, resp *originhttp.HttpRespone) error {
 	var err error
 	resp.Respone, err = slf.GetPprof()
 	if err != nil {
@@ -65,7 +66,7 @@ func (slf *PProfService) RPC_DebugPProf(arg *string, ret *Profilestruct) error {
 	return nil
 }
 
-func (slf *PProfService) HTTP_Test(request *HttpRequest, resp *HttpRespone) error {
+func (slf *PProfService) HTTP_Test(request *originhttp.HttpRequest, resp *originhttp.HttpRespone) error {
 
 	resp.Respone = []byte(request.Body)
 	return nil

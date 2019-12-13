@@ -13,7 +13,7 @@ type WSServerService struct {
 	port               uint16
 	messageReciver     network.IMessageReceiver
 	bEnableCompression bool
-}
+  }
 
 func (ws *WSServerService) OnInit() error {
 

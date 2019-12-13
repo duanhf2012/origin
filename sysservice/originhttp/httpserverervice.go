@@ -1,22 +1,20 @@
-package sysservice
+package originhttp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/duanhf2012/origin/sysmodule"
-	"github.com/duanhf2012/origin/util/uuid"
 
 	"github.com/duanhf2012/origin/rpc"
-	"github.com/gorilla/mux"
-	"github.com/gotoxu/cors"
 
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/network"
@@ -26,64 +24,242 @@ import (
 type HttpRequest struct {
 	Header http.Header
 	Body   string
+
+	ParamStr string
+	mapParam map[string]string
 }
 
 type HttpRespone struct {
 	Respone []byte
 }
 
+type ServeHTTPRouterMux struct {
+}
 type ControllerMapsType map[string]reflect.Value
 
 type HttpServerService struct {
 	service.BaseService
-	httpserver       network.HttpServer
-	port             uint16
-	PrintRequestTime bool
+	httpserver network.HttpServer
+	port       uint16
+
 	controllerMaps   ControllerMapsType
 	certfile         string
 	keyfile          string
 	ishttps          bool
 	httpfiltrateList []HttpFiltrate
-	resourcedir      string //静态资源文件夹绝对路径
+}
+
+type RouterMatchData struct {
+	callpath   string
+	matchURL   string
+	routerType int8 //0表示函数调用  1表示静态资源
+}
+
+type RouterStaticResoutceData struct {
+	localpath string
+	method    string
+}
+
+type HTTP_METHOD int
+
+const (
+	METHOD_GET  HTTP_METHOD = iota
+	METHOD_POST HTTP_METHOD = 1
+	//METHOD_PUT  HTTP_METHOD = 2
+)
+
+var bPrintRequestTime bool
+
+var postAliasUrl map[string]map[string]RouterMatchData //url地址，对应本service地址
+var staticRouterResource map[string]RouterStaticResoutceData
+
+func init() {
+	postAliasUrl = make(map[string]map[string]RouterMatchData)
+	postAliasUrl["GET"] = make(map[string]RouterMatchData)
+	postAliasUrl["POST"] = make(map[string]RouterMatchData)
+
+	staticRouterResource = make(map[string]RouterStaticResoutceData)
+}
+
+type HttpHandle func(request *HttpRequest, resp *HttpRespone) error
+
+func AnalysisRouterUrl(url string) (string, error) {
+
+	//替换所有空格
+	url = strings.ReplaceAll(url, " ", "")
+	if len(url) <= 1 || url[0] != '/' {
+		return "", fmt.Errorf("url %s format is error!", url)
+	}
+
+	//去掉尾部的/
+	return strings.Trim(url, "/"), nil
+}
+
+func (slf *HttpRequest) Query(key string) (string, bool) {
+	if slf.mapParam == nil {
+		slf.mapParam = make(map[string]string)
+		//分析字符串
+		slf.ParamStr = strings.Trim(slf.ParamStr, "/")
+		paramStrList := strings.Split(slf.ParamStr, "&")
+		for _, val := range paramStrList {
+			param := strings.Split(val, "=")
+			if len(param) == 2 {
+				slf.mapParam[param[0]] = param[1]
+			}
+		}
+	}
+
+	ret, ok := slf.mapParam[key]
+	return ret, ok
+}
+
+func Request(method HTTP_METHOD, url string, handle HttpHandle) error {
+	fnpath := runtime.FuncForPC(reflect.ValueOf(handle).Pointer()).Name()
+	fmt.Print(fnpath)
+	sidx := strings.LastIndex(fnpath, "*")
+	if sidx == -1 {
+		return errors.New(fmt.Sprintf("http post func path is error, %s", fnpath))
+	}
+
+	eidx := strings.LastIndex(fnpath, "-fm")
+	if sidx == -1 {
+		return errors.New(fmt.Sprintf("http post func path is error, %s", fnpath))
+	}
+	callpath := fnpath[sidx+1 : eidx]
+	ridx := strings.LastIndex(callpath, ")")
+	if ridx == -1 {
+		return errors.New(fmt.Sprintf("http post func path is error, %s", fnpath))
+	}
+
+	hidx := strings.LastIndex(callpath, "HTTP_")
+	if hidx == -1 {
+		return errors.New(fmt.Sprintf("http post func not contain HTTP_, %s", fnpath))
+	}
+
+	callpath = strings.ReplaceAll(callpath, ")", "")
+
+	var r RouterMatchData
+	var matchURL string
+	var err error
+	r.routerType = 0
+	r.callpath = "_" + callpath
+	matchURL, err = AnalysisRouterUrl(url)
+	if err != nil {
+		return err
+	}
+
+	var strMethod string
+	if method == METHOD_GET {
+		strMethod = "GET"
+	} else if method == METHOD_POST {
+		strMethod = "POST"
+	} else {
+		return fmt.Errorf("not support method.")
+	}
+
+	postAliasUrl[strMethod][matchURL] = r
+
+	return nil
+}
+
+func Post(url string, handle HttpHandle) error {
+	return Request(METHOD_POST, url, handle)
+}
+
+func Get(url string, handle HttpHandle) error {
+	return Request(METHOD_GET, url, handle)
 }
 
 func (slf *HttpServerService) OnInit() error {
-	//
-	slf.httpserver.Init(slf.port, slf.initRouterHandler(), 10*time.Second, 10*time.Second)
+	slf.httpserver.Init(slf.port, &ServeHTTPRouterMux{}, 10*time.Second, 10*time.Second)
 	if slf.ishttps == true {
 		slf.httpserver.SetHttps(slf.certfile, slf.keyfile)
 	}
 	return nil
 }
 
+func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	methodRouter, bok := postAliasUrl[r.Method]
+	if bok == false {
+		writeRespone(w, http.StatusNotFound, fmt.Sprint("Can not support method."))
+		return
+	}
+
+	url := strings.Trim(r.URL.Path, "/")
+	var strCallPath string
+	matchData, ok := methodRouter[url]
+	if ok == true {
+		strCallPath = matchData.callpath
+	} else {
+		//如果是资源处理
+		for k, v := range staticRouterResource {
+			idx := strings.Index(url, k)
+			if idx != -1 {
+				staticServer(k, v, w, r)
+				return
+			}
+		}
+
+		// 拼接得到rpc服务的名称
+		vstr := strings.Split(url, "/")
+		if len(vstr) != 3 {
+			writeRespone(w, http.StatusNotFound, "Cannot find path.")
+			return
+		}
+		strCallPath = "_" + vstr[1] + ".HTTP_" + vstr[2]
+	}
+
+	defer r.Body.Close()
+	msg, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		writeRespone(w, http.StatusBadRequest, "")
+		return
+	}
+
+	request := HttpRequest{r.Header, string(msg), r.URL.RawQuery, nil}
+	var resp HttpRespone
+
+	timeFuncStart := time.Now()
+	err = cluster.InstanceClusterMgr().Call(strCallPath, &request, &resp)
+
+	timeFuncPass := time.Since(timeFuncStart)
+	if bPrintRequestTime {
+		service.GetLogger().Printf(service.LEVER_INFO, "HttpServer Time : %s url : %s", timeFuncPass, strCallPath)
+	}
+	if err != nil {
+		writeRespone(w, http.StatusBadRequest, fmt.Sprint(err))
+	} else {
+		writeRespone(w, http.StatusOK, string(resp.Respone))
+	}
+}
+
 // CkResourceDir 检查静态资源文件夹路径
-func (slf *HttpServerService) CkResourceDir(dirname string) error {
+func SetStaticResource(method HTTP_METHOD, urlpath string, dirname string) error {
 	_, err := os.Stat(dirname)
 	if err != nil {
 		return err
 	}
-	slf.resourcedir = dirname
+	matchURL, berr := AnalysisRouterUrl(urlpath)
+	if berr != nil {
+		return berr
+	}
+
+	var routerData RouterStaticResoutceData
+	if method == METHOD_GET {
+		routerData.method = "GET"
+	} else if method == METHOD_POST {
+		routerData.method = "POST"
+	}
+	routerData.localpath = dirname
+
+	staticRouterResource[matchURL] = routerData
 	return nil
 }
 
-func (slf *HttpServerService) initRouterHandler() http.Handler {
-	r := mux.NewRouter()
-	r.HandleFunc("/{server:[a-zA-Z0-9]+}/{method:[a-zA-Z0-9]+}", func(w http.ResponseWriter, r *http.Request) {
-		slf.httpHandler(w, r)
-	})
-
-	//获取静态文件资源
-	if slf.resourcedir != "" {
-		relativeDirIndex := strings.LastIndex(slf.resourcedir, "/")
-		relativeDirName := slf.resourcedir[relativeDirIndex:]
-		r.HandleFunc(relativeDirName+"/{filename:.*}", func(w http.ResponseWriter, r *http.Request) {
-			slf.staticServer(w, r)
-		})
-	}
-
-	cors := cors.AllowAll()
-	//return cors.Handler(gziphandler.GzipHandler(r))
-	return cors.Handler(r)
+func writeRespone(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(status)
+	w.Write([]byte(msg))
 }
 
 type HttpFiltrate func(path string, w http.ResponseWriter, r *http.Request) error
@@ -119,30 +295,23 @@ func (slf *HttpServerService) OnRemoveService(iservice service.IService) {
 	return
 }
 
-func (slf *HttpServerService) IsPrintRequestTime() bool {
-	if slf.PrintRequestTime == true {
-		return true
-	}
-	return false
-
-}
-
 func (slf *HttpServerService) SetPrintRequestTime(isPrint bool) {
-	slf.PrintRequestTime = isPrint
+	bPrintRequestTime = isPrint
 }
 
-func (slf *HttpServerService) staticServer(w http.ResponseWriter, r *http.Request) {
+func staticServer(routerUrl string, routerData RouterStaticResoutceData, w http.ResponseWriter, r *http.Request) {
+	upath := r.URL.Path
+	idx := strings.Index(upath, routerUrl)
+	subPath := strings.Trim(upath[idx+len(routerUrl):], "/")
+
+	destLocalPath := routerData.localpath + subPath
+
 	writeResp := func(status int, msg string) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(status)
 		w.Write([]byte(msg))
 	}
 
-	//设置静态文件夹路径
-	upath := r.URL.Path
-	relativeFileIndex := strings.LastIndex(upath, "/")
-	relativeFileName := upath[relativeFileIndex:]
-	destLocalPath := slf.resourcedir + relativeFileName
 	switch r.Method {
 	//获取资源
 	case "GET":
@@ -156,119 +325,55 @@ func (slf *HttpServerService) staticServer(w http.ResponseWriter, r *http.Reques
 		}
 	//上传资源
 	case "POST":
-
-		// 在这儿处理例外路由接口
-		var errRet error
-		for _, filter := range slf.httpfiltrateList {
-			ret := filter(r.URL.Path, w, r)
-			if ret == nil {
-				errRet = nil
-				break
-			} else {
-				errRet = ret
+		/*
+			// 在这儿处理例外路由接口
+			var errRet error
+			for _, filter := range slf.httpfiltrateList {
+				ret := filter(r.URL.Path, w, r)
+				if ret == nil {
+					errRet = nil
+					break
+				} else {
+					errRet = ret
+				}
 			}
-		}
 
-		if errRet != nil {
-			w.Write([]byte(errRet.Error()))
-			return
-		}
+			if errRet != nil {
+				w.Write([]byte(errRet.Error()))
+				return
+			}
 
-		r.ParseMultipartForm(32 << 20) // max memory is set to 32MB
-		resourceFile, resourceFileHeader, err := r.FormFile("file")
-		if err != nil {
-			fmt.Println(err)
-			writeResp(http.StatusNotFound, err.Error())
-			return
-		}
-		defer resourceFile.Close()
-		//重新拼接文件名
-		imgFormat := strings.Split(resourceFileHeader.Filename, ".")
-		if len(imgFormat) != 2 {
-			writeResp(http.StatusNotFound, "not a file")
-			return
-		}
-		filePrefixName := uuid.Rand().HexEx()
-		fileName := filePrefixName + "." + imgFormat[1]
-		//创建文件
-		localpath := fmt.Sprintf("%s%s", destLocalPath, fileName)
-		localfd, err := os.OpenFile(localpath, os.O_WRONLY|os.O_CREATE, 0666)
-		if err != nil {
-			fmt.Println(err)
-			writeResp(http.StatusNotFound, "upload fail")
-			return
-		}
-		defer localfd.Close()
+			r.ParseMultipartForm(32 << 20) // max memory is set to 32MB
+			resourceFile, resourceFileHeader, err := r.FormFile("file")
+			if err != nil {
+				fmt.Println(err)
+				writeResp(http.StatusNotFound, err.Error())
+				return
+			}
+			defer resourceFile.Close()
+			//重新拼接文件名
+			imgFormat := strings.Split(resourceFileHeader.Filename, ".")
+			if len(imgFormat) != 2 {
+				writeResp(http.StatusNotFound, "not a file")
+				return
+			}
+			filePrefixName := uuid.Rand().HexEx()
+			fileName := filePrefixName + "." + imgFormat[1]
+			//创建文件
+			localpath := fmt.Sprintf("%s%s", destLocalPath, fileName)
+			localfd, err := os.OpenFile(localpath, os.O_WRONLY|os.O_CREATE, 0666)
+			if err != nil {
+				fmt.Println(err)
+				writeResp(http.StatusNotFound, "upload fail")
+				return
+			}
+			defer localfd.Close()
 
-		io.Copy(localfd, resourceFile)
+			io.Copy(localfd, resourceFile)
 
-		writeResp(http.StatusOK, upath+fileName)
+			writeResp(http.StatusOK, upath+fileName)*/
 	}
 
-}
-
-func (slf *HttpServerService) httpHandler(w http.ResponseWriter, r *http.Request) {
-	writeError := func(status int, msg string) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(status)
-		w.Write([]byte(msg))
-	}
-	if r.Method != "POST" {
-		//writeError(http.StatusMethodNotAllowed, "rpc: POST method required, received "+r.Method)
-		//return
-	}
-	if r.Method == "OPTIONS" {
-		return
-	}
-
-	defer r.Body.Close()
-	msg, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		writeError(http.StatusBadRequest, "rpc: ioutil.ReadAll "+err.Error())
-		return
-	}
-
-	// 在这儿处理例外路由接口
-	var errRet error
-	for _, filter := range slf.httpfiltrateList {
-		ret := filter(r.URL.Path, w, r)
-		if ret == nil {
-			errRet = nil
-			break
-		} else {
-			errRet = ret
-		}
-	}
-
-	if errRet != nil {
-		w.Write([]byte(errRet.Error()))
-		return
-	}
-
-	// 拼接得到rpc服务的名称
-	vstr := strings.Split(r.URL.Path, "/")
-	if len(vstr) != 3 {
-		writeError(http.StatusBadRequest, "rpc: ioutil.ReadAll "+err.Error())
-		return
-	}
-	strCallPath := "_" + vstr[1] + ".HTTP_" + vstr[2]
-
-	request := HttpRequest{r.Header, string(msg)}
-	var resp HttpRespone
-
-	TimeFuncStart := time.Now()
-	err = cluster.InstanceClusterMgr().Call(strCallPath, &request, &resp)
-
-	TimeFuncPass := time.Since(TimeFuncStart)
-	if slf.IsPrintRequestTime() {
-		service.GetLogger().Printf(service.LEVER_INFO, "HttpServer Time : %s url : %s", TimeFuncPass, strCallPath)
-	}
-
-	w.Header().Set("Content-Type", "application/json;charset=utf-8")
-	if err != nil {
-		resp.Respone = []byte(fmt.Sprint(err))
-	}
-	w.Write([]byte(resp.Respone))
 }
 
 func (slf *HttpServerService) GetMethod(strCallPath string) (*reflect.Value, error) {
