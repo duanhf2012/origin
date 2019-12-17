@@ -23,11 +23,11 @@ func init() {
 
 //OnInit ...
 func (ws *SubNet1_Service1) OnInit() error {
-
-	originhttp.Post(" / aaa/bb/ :user/:pass/", ws.HTTP_UserIntegralInfo)
+	originhttp.Post("", ws.HTTP_UserIntegralInfo)
 	originhttp.Post(" /aaa/bbb", ws.Test)
-	originhttp.Get(" /aaa/bbb", ws.HTTP_UserIntegralInfo)
+	originhttp.Get("/Login/bbb", ws.HTTP_UserIntegralInfo)
 	originhttp.SetStaticResource(originhttp.METHOD_GET, "/file/", "d:\\")
+
 	return nil
 }
 

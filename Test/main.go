@@ -1,7 +1,6 @@
 package main
 
 import (
-
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/originnode"
 	"github.com/duanhf2012/origin/sysservice/originhttp"

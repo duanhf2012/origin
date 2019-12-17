@@ -115,25 +115,25 @@ func (slf *HttpRequest) Query(key string) (string, bool) {
 
 func Request(method HTTP_METHOD, url string, handle HttpHandle) error {
 	fnpath := runtime.FuncForPC(reflect.ValueOf(handle).Pointer()).Name()
-	fmt.Print(fnpath)
+
 	sidx := strings.LastIndex(fnpath, "*")
 	if sidx == -1 {
-		return errors.New(fmt.Sprintf("http post func path is error, %s", fnpath))
+		return errors.New(fmt.Sprintf("http post func path is error, %s\n", fnpath))
 	}
 
 	eidx := strings.LastIndex(fnpath, "-fm")
 	if sidx == -1 {
-		return errors.New(fmt.Sprintf("http post func path is error, %s", fnpath))
+		return errors.New(fmt.Sprintf("http post func path is error, %s\n", fnpath))
 	}
 	callpath := fnpath[sidx+1 : eidx]
 	ridx := strings.LastIndex(callpath, ")")
 	if ridx == -1 {
-		return errors.New(fmt.Sprintf("http post func path is error, %s", fnpath))
+		return errors.New(fmt.Sprintf("http post func path is error, %s\n", fnpath))
 	}
 
 	hidx := strings.LastIndex(callpath, "HTTP_")
 	if hidx == -1 {
-		return errors.New(fmt.Sprintf("http post func not contain HTTP_, %s", fnpath))
+		return errors.New(fmt.Sprintf("http post func not contain HTTP_, %s\n", fnpath))
 	}
 
 	callpath = strings.ReplaceAll(callpath, ")", "")
@@ -224,7 +224,7 @@ func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	timeFuncPass := time.Since(timeFuncStart)
 	if bPrintRequestTime {
-		service.GetLogger().Printf(service.LEVER_INFO, "HttpServer Time : %s url : %s", timeFuncPass, strCallPath)
+		service.GetLogger().Printf(service.LEVER_INFO, "HttpServer Time : %s url : %s\n", timeFuncPass, strCallPath)
 	}
 	if err != nil {
 		writeRespone(w, http.StatusBadRequest, fmt.Sprint(err))
