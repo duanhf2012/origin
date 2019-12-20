@@ -410,3 +410,32 @@ func (slf *HttpRespone) WriteRespne(v interface{}) error {
 
 	return retErr
 }
+
+func (slf *HttpRespone) WriteRespones(Code int32, Msg string, Data interface{}) {
+
+	var StrRet string
+	//判断是否有错误码
+	if Code > 0 {
+		StrRet = fmt.Sprintf(`{"RCode": %d,"RMsg":"%s"}`, Code, Msg)
+	} else {
+		if Data == nil {
+			if Msg != "" {
+				StrRet = fmt.Sprintf(`{"RCode": 0,"RMsg":"%s"}`, Msg)
+			} else {
+				StrRet = `{"RCode": 0}`
+			}
+		} else {
+			if reflect.TypeOf(Data).Kind() == reflect.String {
+				StrRet = fmt.Sprintf(`{"RCode": %d , "Data": "%s"}`, Code, Data)
+			} else {
+				JsonRet, Err := json.Marshal(Data)
+				if Err != nil {
+					service.GetLogger().Printf(sysmodule.LEVER_ERROR, "common WriteRespone Json Marshal Err %+v", Data)
+				} else {
+					StrRet = fmt.Sprintf(`{"RCode": %d , "Data": %s}`, Code, JsonRet)
+				}
+			}
+		}
+	}
+	slf.Respone = []byte(StrRet)
+}
