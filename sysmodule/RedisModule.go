@@ -1416,3 +1416,22 @@ func (slf *RedisModule) ListPop(key string, fromLeft, block bool, timeout int) (
 	}
 	return b, nil
 }
+
+
+func (slf *RedisModule) HincrbyHashInt(redisKey, hashKey string, value int) error {
+	if redisKey == "" || hashKey == "" {
+	  return errors.New("Key Is Empty")
+	}
+	conn, err := slf.getConn()
+	if err != nil {
+	  return err
+	}
+	defer conn.Close()
+  
+	_, retErr := conn.Do("HINCRBY", redisKey, hashKey, value)
+	if retErr != nil {
+	  service.GetLogger().Printf(service.LEVER_ERROR, "HincrbyHashInt fail,reason:%v", retErr)
+	}
+  
+	return retErr
+  }
