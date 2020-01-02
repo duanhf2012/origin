@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+
 	"os"
 	"reflect"
 	"runtime"
@@ -34,6 +35,7 @@ type HttpRequest struct {
 
 	ParamStr string
 	mapParam map[string]string
+	URL string
 	//Req http.Request
 	
 }
@@ -214,11 +216,11 @@ func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		// 拼接得到rpc服务的名称
 		vstr := strings.Split(url, "/")
-		if len(vstr) != 3 {
+		if len(vstr) < 2 {
 			writeRespone(w, http.StatusNotFound, "Cannot find path.")
 			return
 		}
-		strCallPath = "_" + vstr[1] + ".HTTP_" + vstr[2]
+		strCallPath = "_" + vstr[0] + ".HTTP_" + vstr[1]
 	}
 
 	defer r.Body.Close()
@@ -228,7 +230,7 @@ func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	request := HttpRequest{r.Header, string(msg), r.URL.RawQuery, nil}
+	request := HttpRequest{r.Header, string(msg), r.URL.RawQuery, nil,r.URL.Path}
 	var resp HttpRespone
 	//resp.Resp = w
 	timeFuncStart := time.Now()
