@@ -268,6 +268,8 @@ func SetStaticResource(method HTTP_METHOD, urlpath string, dirname string) error
 		routerData.method = "GET"
 	} else if method == METHOD_POST {
 		routerData.method = "POST"
+	}else{
+		return nil
 	}
 	routerData.localpath = dirname
 
