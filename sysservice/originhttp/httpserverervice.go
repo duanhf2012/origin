@@ -468,12 +468,10 @@ func (slf *HttpRespone) Redirect(url string,cookieList []*http.Cookie) {
 func (slf *HttpRespone) redirects(w *http.ResponseWriter, req *http.Request) {
 	if slf.RedirectData.CookieList != nil {
 		for _,v := range slf.RedirectData.CookieList{
-			//req.AddCookie(v)
 			http.SetCookie(*w,v)
 		}
 	}
-	//http.SetCookie()
-	
+
 	http.Redirect(*w, req, slf.RedirectData.Url,
 		// see @andreiavrammsd comment: often 307 > 301
 		http.StatusTemporaryRedirect)
