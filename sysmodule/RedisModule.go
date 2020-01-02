@@ -1435,3 +1435,18 @@ func (slf *RedisModule) HincrbyHashInt(redisKey, hashKey string, value int) erro
   
 	return retErr
   }
+
+  func (slf *RedisModule) EXPlREInsert(key string, TTl int) error {
+	conn, err := slf.getConn()
+	if err != nil {
+	  return err
+	}
+	defer conn.Close()
+  
+	_, err = conn.Do("expire", key, TTl)
+	if err != nil {
+	  service.GetLogger().Printf(service.LEVER_ERROR, "expire fail,reason:%v", err)
+	  return err
+	}
+	return nil
+  }
