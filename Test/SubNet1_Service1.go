@@ -6,6 +6,8 @@ import (
 	"github.com/duanhf2012/origin/originnode"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/sysservice/originhttp"
+	"net/http"
+
 )
 
 type InputData struct {
@@ -24,7 +26,7 @@ func init() {
 //OnInit ...
 func (ws *SubNet1_Service1) OnInit() error {
 	originhttp.Post("", ws.HTTP_UserIntegralInfo)
-	originhttp.Post(" /aaa/bbb", ws.Test)
+	originhttp.Get("/aaa/bbb", ws.HTTP_Test)
 	originhttp.Get("/Login/bbb", ws.HTTP_UserIntegralInfo)
 	originhttp.SetStaticResource(originhttp.METHOD_GET, "/file/", "d:\\")
 
@@ -44,12 +46,21 @@ func (slf *SubNet1_Service1) RPC_Add(arg *InputData, ret *int) error {
 	return nil
 }
 
-func (slf *SubNet1_Service1) Test(request *originhttp.HttpRequest, resp *originhttp.HttpRespone) error {
+
+
+func (slf *SubNet1_Service1) HTTP_Test(request *originhttp.HttpRequest, resp *originhttp.HttpRespone) error {
+	var cookieList []*http.Cookie
+	cookieList = append(cookieList,&http.Cookie{Name: "X-Xsrftoken",Value: "df41ba54db5011e89861002324e63af81", HttpOnly: true,Domain:"urquant.net"})
+	resp.Redirect("https://www.urquant.net?sdaf=1",cookieList)
+	//redirects(&resp.Resp, &request.Req)
 	return nil
 }
 
 func (slf *SubNet1_Service1) HTTP_UserIntegralInfo(request *originhttp.HttpRequest, resp *originhttp.HttpRespone) error {
 	ret, ok := request.Query("a")
 	fmt.Print(ret, ok)
+	
 	return nil
 }
+   
+

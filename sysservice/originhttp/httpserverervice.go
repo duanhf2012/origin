@@ -21,16 +21,28 @@ import (
 	"github.com/duanhf2012/origin/service"
 )
 
+type HttpRedirectData struct {
+	Url string
+	//Cookies map[string]string
+	
+	CookieList []*http.Cookie
+}
+
 type HttpRequest struct {
 	Header http.Header
 	Body   string
 
 	ParamStr string
 	mapParam map[string]string
+	//Req http.Request
+	
 }
+
 
 type HttpRespone struct {
 	Respone []byte
+	RedirectData HttpRedirectData
+	//Resp http.ResponseWriter
 }
 
 type ServeHTTPRouterMux struct {
@@ -218,7 +230,7 @@ func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	request := HttpRequest{r.Header, string(msg), r.URL.RawQuery, nil}
 	var resp HttpRespone
-
+	//resp.Resp = w
 	timeFuncStart := time.Now()
 	err = cluster.InstanceClusterMgr().Call(strCallPath, &request, &resp)
 
@@ -229,7 +241,12 @@ func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		writeRespone(w, http.StatusBadRequest, fmt.Sprint(err))
 	} else {
-		writeRespone(w, http.StatusOK, string(resp.Respone))
+		if resp.RedirectData.Url != ""{
+			resp.redirects(&w,r)
+		}else {
+			writeRespone(w, http.StatusOK, string(resp.Respone))
+		}
+		
 	}
 }
 
@@ -438,4 +455,24 @@ func (slf *HttpRespone) WriteRespones(Code int32, Msg string, Data interface{}) 
 		}
 	}
 	slf.Respone = []byte(StrRet)
+}
+
+func (slf *HttpRespone) Redirect(url string,cookieList []*http.Cookie) {
+	slf.RedirectData.Url = url
+	slf.RedirectData.CookieList = cookieList
+}
+
+
+
+
+func (slf *HttpRespone) redirects(w *http.ResponseWriter, req *http.Request) {
+	if slf.RedirectData.CookieList != nil {
+		for _,v := range slf.RedirectData.CookieList{
+			req.AddCookie(v)
+		}
+	}
+	
+	http.Redirect(*w, req, slf.RedirectData.Url,
+		// see @andreiavrammsd comment: often 307 > 301
+		http.StatusTemporaryRedirect)
 }
