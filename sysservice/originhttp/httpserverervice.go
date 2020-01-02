@@ -168,7 +168,7 @@ func Request(method HTTP_METHOD, url string, handle HttpHandle) error {
 	} else if method == METHOD_POST {
 		strMethod = "POST"
 	} else {
-		return fmt.Errorf("not support method.")
+		return nil
 	}
 
 	postAliasUrl[strMethod][matchURL] = r
