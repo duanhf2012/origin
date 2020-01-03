@@ -1194,6 +1194,21 @@ func (slf *RedisModule) ZRange(key string, start, stop int, ascend bool, withSco
 	return makeListJson(reply.([]interface{}), withScores), nil
 }
 
+//获取有序集合长度
+func (slf *RedisModule) Zcard(key string) (int, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+
+	reply, err := conn.Do("ZCARD", key)
+	if err != nil {
+		return 0, err
+	}
+	return int(reply.(int64)), nil
+}
+
 //["123","234"]
 func makeListJson(redisReply []interface{}, withScores bool) []byte {
 	var buf bytes.Buffer
@@ -1417,24 +1432,23 @@ func (slf *RedisModule) ListPop(key string, fromLeft, block bool, timeout int) (
 	return b, nil
 }
 
-
 func (slf *RedisModule) HincrbyHashInt(redisKey, hashKey string, value int) error {
 	if redisKey == "" || hashKey == "" {
-	  return errors.New("Key Is Empty")
+		return errors.New("Key Is Empty")
 	}
 	conn, err := slf.getConn()
 	if err != nil {
-	  return err
+		return err
 	}
 	defer conn.Close()
-  
+
 	_, retErr := conn.Do("HINCRBY", redisKey, hashKey, value)
 	if retErr != nil {
-	  service.GetLogger().Printf(service.LEVER_ERROR, "HincrbyHashInt fail,reason:%v", retErr)
+		service.GetLogger().Printf(service.LEVER_ERROR, "HincrbyHashInt fail,reason:%v", retErr)
 	}
-  
+
 	return retErr
-  }
+}
 
   func (slf *RedisModule) EXPlREInsert(key string, TTl int) error {
 	conn, err := slf.getConn()
@@ -1450,3 +1464,14 @@ func (slf *RedisModule) HincrbyHashInt(redisKey, hashKey string, value int) erro
 	}
 	return nil
   }
+
+func (slf *RedisModule) Zremrangebyrank(redisKey string, start, end interface{}) (int, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+
+	reply, err := conn.Do("ZREMRANGEBYRANK", redisKey, start, end)
+	return redis.Int(reply, err)
+}
