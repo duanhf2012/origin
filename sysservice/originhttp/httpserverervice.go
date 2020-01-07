@@ -117,7 +117,7 @@ func (slf *HttpRequest) Query(key string) (string, bool) {
 		paramStrList := strings.Split(slf.ParamStr, "&")
 		for _, val := range paramStrList {
 			Index  := strings.Index(val,"=")
-			slf.mapParam[val[0:Index-1]] = val[Index+1:]
+			slf.mapParam[val[0:Index]] = val[Index+1:]
 		}
 	}
 
