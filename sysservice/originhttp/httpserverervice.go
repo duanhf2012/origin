@@ -25,7 +25,7 @@ import (
 type HttpRedirectData struct {
 	Url string
 	//Cookies map[string]string
-	
+
 	CookieList []*http.Cookie
 }
 
@@ -35,19 +35,19 @@ type HttpRequest struct {
 
 	ParamStr string
 	mapParam map[string]string
-	URL string
+	URL      string
 	//Req http.Request
-	
+
 }
 
-
 type HttpRespone struct {
-	Respone []byte
+	Respone      []byte
 	RedirectData HttpRedirectData
 	//Resp http.ResponseWriter
 }
 
 type ServeHTTPRouterMux struct {
+	httpfiltrateList []HttpFiltrate
 }
 type ControllerMapsType map[string]reflect.Value
 
@@ -56,11 +56,11 @@ type HttpServerService struct {
 	httpserver network.HttpServer
 	port       uint16
 
-	controllerMaps   ControllerMapsType
-	certfile         string
-	keyfile          string
-	ishttps          bool
-	httpfiltrateList []HttpFiltrate
+	controllerMaps ControllerMapsType
+	certfile       string
+	keyfile        string
+	ishttps        bool
+	serverHTTPMux  ServeHTTPRouterMux
 }
 
 type RouterMatchData struct {
@@ -116,7 +116,7 @@ func (slf *HttpRequest) Query(key string) (string, bool) {
 		slf.ParamStr = strings.Trim(slf.ParamStr, "/")
 		paramStrList := strings.Split(slf.ParamStr, "&")
 		for _, val := range paramStrList {
-			Index  := strings.Index(val,"=")
+			Index := strings.Index(val, "=")
 			slf.mapParam[val[0:Index]] = val[Index+1:]
 		}
 	}
@@ -183,7 +183,8 @@ func Get(url string, handle HttpHandle) error {
 }
 
 func (slf *HttpServerService) OnInit() error {
-	slf.httpserver.Init(slf.port, &ServeHTTPRouterMux{}, 10*time.Second, 10*time.Second)
+	slf.serverHTTPMux = ServeHTTPRouterMux{}
+	slf.httpserver.Init(slf.port, &slf.serverHTTPMux, 10*time.Second, 10*time.Second)
 	if slf.ishttps == true {
 		slf.httpserver.SetHttps(slf.certfile, slf.keyfile)
 	}
@@ -194,6 +195,22 @@ func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	methodRouter, bok := postAliasUrl[r.Method]
 	if bok == false {
 		writeRespone(w, http.StatusNotFound, fmt.Sprint("Can not support method."))
+		return
+	}
+
+	//权限验证
+	var errRet error
+	for _, filter := range slf.httpfiltrateList {
+		ret := filter(r.URL.Path, w, r)
+		if ret == nil {
+			errRet = nil
+			break
+		} else {
+			errRet = ret
+		}
+	}
+	if errRet != nil {
+		writeRespone(w, http.StatusOK, errRet.Error())
 		return
 	}
 
@@ -228,7 +245,7 @@ func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	request := HttpRequest{r.Header, string(msg), r.URL.RawQuery, nil,r.URL.Path}
+	request := HttpRequest{r.Header, string(msg), r.URL.RawQuery, nil, r.URL.Path}
 	var resp HttpRespone
 	//resp.Resp = w
 	timeFuncStart := time.Now()
@@ -241,12 +258,12 @@ func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		writeRespone(w, http.StatusBadRequest, fmt.Sprint(err))
 	} else {
-		if resp.RedirectData.Url != ""{
-			resp.redirects(&w,r)
-		}else {
+		if resp.RedirectData.Url != "" {
+			resp.redirects(&w, r)
+		} else {
 			writeRespone(w, http.StatusOK, string(resp.Respone))
 		}
-		
+
 	}
 }
 
@@ -266,7 +283,7 @@ func SetStaticResource(method HTTP_METHOD, urlpath string, dirname string) error
 		routerData.method = "GET"
 	} else if method == METHOD_POST {
 		routerData.method = "POST"
-	}else{
+	} else {
 		return nil
 	}
 	routerData.localpath = dirname
@@ -284,7 +301,7 @@ func writeRespone(w http.ResponseWriter, status int, msg string) {
 type HttpFiltrate func(path string, w http.ResponseWriter, r *http.Request) error
 
 func (slf *HttpServerService) AppendHttpFiltrate(fun HttpFiltrate) bool {
-	slf.httpfiltrateList = append(slf.httpfiltrateList, fun)
+	slf.serverHTTPMux.httpfiltrateList = append(slf.serverHTTPMux.httpfiltrateList, fun)
 
 	return false
 }
@@ -356,12 +373,10 @@ func staticServer(routerUrl string, routerData RouterStaticResoutceData, w http.
 					errRet = ret
 				}
 			}
-
 			if errRet != nil {
 				w.Write([]byte(errRet.Error()))
 				return
 			}
-
 			r.ParseMultipartForm(32 << 20) // max memory is set to 32MB
 			resourceFile, resourceFileHeader, err := r.FormFile("file")
 			if err != nil {
@@ -387,9 +402,7 @@ func staticServer(routerUrl string, routerData RouterStaticResoutceData, w http.
 				return
 			}
 			defer localfd.Close()
-
 			io.Copy(localfd, resourceFile)
-
 			writeResp(http.StatusOK, upath+fileName)*/
 	}
 
@@ -459,18 +472,15 @@ func (slf *HttpRespone) WriteRespones(Code int32, Msg string, Data interface{}) 
 	slf.Respone = []byte(StrRet)
 }
 
-func (slf *HttpRespone) Redirect(url string,cookieList []*http.Cookie) {
+func (slf *HttpRespone) Redirect(url string, cookieList []*http.Cookie) {
 	slf.RedirectData.Url = url
 	slf.RedirectData.CookieList = cookieList
 }
 
-
-
-
 func (slf *HttpRespone) redirects(w *http.ResponseWriter, req *http.Request) {
 	if slf.RedirectData.CookieList != nil {
-		for _,v := range slf.RedirectData.CookieList{
-			http.SetCookie(*w,v)
+		for _, v := range slf.RedirectData.CookieList {
+			http.SetCookie(*w, v)
 		}
 	}
 
