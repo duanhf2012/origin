@@ -7,6 +7,7 @@ import (
 	"github.com/duanhf2012/origin/service"
 	"io"
 	"net"
+	"unsafe"
 
 	"os"
 	"time"
@@ -23,11 +24,12 @@ type SClient struct {
 	id uint64
 	conn net.Conn
 
-	recvPack util.SyncQueue
-	sendPack util.SyncQueue
+	recvPack *util.SyncQueue
+	sendPack *util.SyncQueue
 	tcpserver *TcpSocketServer
 	remoteip string
 	starttime int64
+	bClose bool
 }
 
 type TcpSocketServer struct {
@@ -45,6 +47,15 @@ type MsgBasePack struct {
 	body []byte
 	StartTime time.Time
 }
+
+func (slf *MsgBasePack) PackType() uint16 {
+	return slf.packtype
+}
+
+func (slf *MsgBasePack) Body() []byte{
+	return slf.body
+}
+
 
 func (slf *TcpSocketServer) Register(listenAddr string,iReciver ITcpSocketServerReciver){
 	slf.listenAddr = listenAddr
@@ -80,7 +91,8 @@ func (slf *TcpSocketServer) listenServer(){
 				continue
 			}
 
-			sc :=&SClient{id:clientId,conn:conn,tcpserver:slf,remoteip:conn.RemoteAddr().String(),starttime:time.Now().UnixNano()}
+			sc :=&SClient{id:clientId,conn:conn,tcpserver:slf,remoteip:conn.RemoteAddr().String(),starttime:time.Now().UnixNano(),
+				recvPack:util.NewSyncQueue(),sendPack:util.NewSyncQueue()}
 			slf.iReciver.OnConnected(sc)
 			util.Go(sc.listendata)
 			//收来自客户端数据
@@ -98,6 +110,7 @@ func (slf *TcpSocketServer) listenServer(){
 func (slf *SClient) listendata(){
 	defer func() {
 		slf.tcpserver.iReciver.OnDisconnect(slf)
+		slf.bClose = true
 		slf.conn.Close()
 		slf.tcpserver.mapClient.Del(slf.id)
 	}()
@@ -137,12 +150,14 @@ func (slf *SClient) listendata(){
 }
 
 
-func (slf *MsgBasePack) Bytes() (bRet []byte){
+func (slf *MsgBasePack) Bytes() []byte{
+	var bRet []byte
+	bRet = make([]byte,4)
 	binary.BigEndian.PutUint16(bRet,slf.packsize)
-	binary.BigEndian.PutUint16(bRet,slf.packtype)
+	binary.BigEndian.PutUint16(bRet[2:],slf.packtype)
 	bRet = append(bRet,slf.body...)
 
-	return
+	return bRet
 }
 
 //返回值：填充多少字节，是否完成
@@ -155,7 +170,7 @@ func (slf *MsgBasePack) FillData(bdata []byte,datasize uint16) (uint16,bool) {
 		}
 
 		slf.packsize= binary.BigEndian.Uint16(bdata[:2])
-		slf.packtype= binary.BigEndian.Uint16(bdata[2:2])
+		slf.packtype= binary.BigEndian.Uint16(bdata[2:4])
 		fillsize += 4
 	}
 
@@ -170,6 +185,12 @@ func (slf *MsgBasePack) FillData(bdata []byte,datasize uint16) (uint16,bool) {
 }
 
 func (slf *MsgBasePack) Clear() {
+}
+
+func (slf *MsgBasePack) Make(packtype uint16,data []byte) {
+	slf.packtype = packtype
+	slf.body = data
+	slf.packsize = uint16(unsafe.Sizeof(slf.packtype)*2)+uint16(len(data))
 }
 
 func (slf *SClient) Send(pack *MsgBasePack){
@@ -199,5 +220,9 @@ func (slf *SClient) onrecv(){
 	}
 }
 
-
+func (slf *SClient) Close(){
+	if slf.bClose == false {
+		slf.conn.Close()
+	}
+}
 

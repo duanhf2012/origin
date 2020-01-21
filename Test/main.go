@@ -1,11 +1,12 @@
 package main
 
 import (
+	_ "github.com/duanhf2012/origin/Test/logicservice"
 	"github.com/duanhf2012/origin/cluster"
+	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/originnode"
 	"github.com/duanhf2012/origin/sysservice"
 	"github.com/duanhf2012/origin/sysservice/originhttp"
-	"github.com/duanhf2012/origin/network"
 )
 
 
@@ -21,9 +22,7 @@ func (slf *TcpSocketServerReciver) OnDisconnect(pClient *network.SClient){
 
 }
 
-func (slf *TcpSocketServerReciver) OnRecvMsg(pClient *network.SClient, pPack *network.MsgBasePack){
 
-}
 
 func main() {
 
@@ -38,7 +37,7 @@ func main() {
 		httpserver.SetHttps(ca.CertFile, ca.KeyFile)
 	}
 
-	pTcpService := sysservice.NewTcpSocketPbService(":9004",&TcpSocketServerReciver{})
+	pTcpService := sysservice.NewTcpSocketPbService(":9004")
 	httpserver.SetPrintRequestTime(true)
 
 	node.SetupService(httpserver,pTcpService)
