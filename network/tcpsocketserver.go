@@ -17,6 +17,7 @@ type ITcpSocketServerReciver interface {
 	OnConnected(pClient *SClient)
 	OnDisconnect(pClient *SClient)
 	OnRecvMsg(pClient *SClient, pPack *MsgBasePack)
+	VerifyPackType(packtype uint16) bool
 }
 
 
@@ -139,13 +140,23 @@ func (slf *SClient) listendata(){
 			return
 		}
 
-		fillsize,bfillRet := pack.FillData(buff,buffDataSize)
+		fillsize,bfillRet,fillhead := pack.FillData(buff,buffDataSize)
+		//提交校验头
+		if fillhead == true {
+			if pack.packsize>slf.tcpserver.MaxRecvPackSize || slf.tcpserver.iReciver.VerifyPackType(pack.packtype) == false {
+				service.GetLogger().Printf(service.LEVER_WARN, "VerifyPackType error clent id %d is disconnect  %d,%d",slf.id,pack.packtype, pack.packsize)
+				return
+			}
+		}
 		if bfillRet == true {
 			slf.recvPack.Push(pack)
 			pack = MsgBasePack{}
 		}
-		buff = append(buff[fillsize:])
-		buffDataSize -= fillsize
+		if fillsize>0 {
+			buff = append(buff[fillsize:])
+			buffDataSize -= fillsize
+		}
+
 	}
 }
 
@@ -160,28 +171,30 @@ func (slf *MsgBasePack) Bytes() []byte{
 	return bRet
 }
 
-//返回值：填充多少字节，是否完成
-func (slf *MsgBasePack) FillData(bdata []byte,datasize uint16) (uint16,bool) {
+//返回值：填充多少字节，是否完成,是否填充头
+func (slf *MsgBasePack) FillData(bdata []byte,datasize uint16) (uint16,bool,bool) {
 	var fillsize uint16
+	fillhead := false
 	//解包头
 	if slf.packsize ==0 {
 		if datasize < 4 {
-			return 0,false
+			return 0,false,fillhead
 		}
 
 		slf.packsize= binary.BigEndian.Uint16(bdata[:2])
 		slf.packtype= binary.BigEndian.Uint16(bdata[2:4])
 		fillsize += 4
+		fillhead = true
 	}
 
 	//解包体
-	if slf.packsize>0 && slf.packsize>=datasize {
+	if slf.packsize>0 && datasize+4>=slf.packsize {
 		slf.body = append(slf.body, bdata[fillsize:slf.packsize]...)
-		fillsize += (datasize - fillsize)
-		return fillsize,true
+		fillsize += (slf.packsize - fillsize)
+		return fillsize,true,fillhead
 	}
 
-	return fillsize,false
+	return fillsize,false,fillhead
 }
 
 func (slf *MsgBasePack) Clear() {
@@ -226,3 +239,7 @@ func (slf *SClient) Close(){
 	}
 }
 
+
+func (slf *SClient) GetId() uint64{
+	return slf.id
+}

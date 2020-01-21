@@ -1,7 +1,7 @@
 package logicservice
 
 import (
-
+	"fmt"
 	"github.com/duanhf2012/origin/Test/msgpb"
 	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/sysservice"
@@ -51,6 +51,7 @@ func (ws *SubNet1_Service) OnRun() bool {
 
 
  func (ws *SubNet1_Service) MessageHandler(pClient *network.SClient,msgtype uint16,msg proto.Message){
+ 	fmt.Print(pClient.GetId(),"\n",msg)
  }
 
 func (ws *SubNet1_Service) ConnEventHandler (pClient *network.SClient){

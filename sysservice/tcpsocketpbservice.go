@@ -98,6 +98,12 @@ func (slf *TcpSocketPbService) OnDisconnect(pClient *network.SClient){
 	}
 }
 
+func (slf *TcpSocketPbService) VerifyPackType(packtype uint16) bool{
+	_,ok := slf.mapMsg[packtype]
+	return ok
+}
+
+
 func (slf *TcpSocketPbService) OnExceptMsg (pClient *network.SClient,pPack *network.MsgBasePack,err error){
 	if slf.exceptMsgHandler!=nil {
 		slf.exceptMsgHandler(pClient,pPack,err)
