@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"github.com/duanhf2012/origin/util"
 	"github.com/duanhf2012/origin/service"
+	"github.com/golang/protobuf/proto"
 	"io"
 	"net"
 	"unsafe"
@@ -208,6 +209,20 @@ func (slf *MsgBasePack) Make(packtype uint16,data []byte) {
 
 func (slf *SClient) Send(pack *MsgBasePack){
 	slf.sendPack.Push(pack)
+}
+
+
+func (slf *SClient)  SendMsg(packtype uint16,message proto.Message) error{
+	var msg MsgBasePack
+	data,err := proto.Marshal(message)
+	if err != nil {
+		return err
+	}
+
+	msg.Make(packtype,data)
+	slf.sendPack.Push(&msg)
+
+	return nil
 }
 
 func (slf *SClient) onsend(){

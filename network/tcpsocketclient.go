@@ -23,6 +23,7 @@ func (slf *TcpSocketClient) Connect(addr string) error{
 	}
 	slf.conn = conn
 
+
 	//
 	return nil
 }
