@@ -10,7 +10,8 @@
 				"ServiceList": [
 					"HttpServerService",
 					"SubNet1_Service",
-					"TcpSocketPbService"
+					"TcpSocketPbService",
+					"ls"
 				],
 				"ClusterNode":["SubNet2.N_Node1","N_Node2"]
 			},

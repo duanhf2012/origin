@@ -22,16 +22,24 @@ func init() {
 
 //OnInit ...
 func (ws *SubNet1_Service) OnInit() error {
-	sysservice.DefaultTSPbService().RegConnectEvent(ws.ConnEventHandler)
-	sysservice.DefaultTSPbService().RegDisconnectEvent(ws.DisconnEventHandler)
-	sysservice.DefaultTSPbService().RegExceptMessage(ws.ExceptMessage)
-	sysservice.DefaultTSPbService().RegMessage(110, &msgpb.Test{}, ws.MessageHandler)
+	sysservice.GetTcpSocketPbService("ls").RegConnectEvent(ws.ConnEventHandler)
+	sysservice.GetTcpSocketPbService("ls").RegDisconnectEvent(ws.DisconnEventHandler)
+	sysservice.GetTcpSocketPbService("ls").RegExceptMessage(ws.ExceptMessage)
+	sysservice.GetTcpSocketPbService("ls").RegMessage(110, &msgpb.Test{}, ws.MessageHandler)
+
+	/*
+	sysservice.GetTcpSocketPbService("lc").RegConnectEvent(ws.ConnEventHandler2)
+	sysservice.GetTcpSocketPbService("lc").RegDisconnectEvent(ws.DisconnEventHandler2)
+	sysservice.GetTcpSocketPbService("lc").RegExceptMessage(ws.ExceptMessage2)
+	sysservice.GetTcpSocketPbService("lc").RegMessage(110, &msgpb.Test{}, ws.MessageHandler2)
+*/
 
 	return nil
 }
 
 //OnRun ...
 func (ws *SubNet1_Service) OnRun() bool {
+
 
 	time.Sleep(time.Second * 10)
 	var cli network.TcpSocketClient
@@ -47,10 +55,15 @@ func (ws *SubNet1_Service) OnRun() bool {
 func (ws *SubNet1_Service) MessageHandler(pClient *network.SClient, msgtype uint16, msg proto.Message) {
 	fmt.Print("recv:",pClient.GetId(), "：", msg,"\n")
 	pClient.SendMsg(msgtype,msg)
+
+	var a map[int]int
+	a[33] = 3
+	fmt.Print(a[44])
 }
 
 func (ws *SubNet1_Service) ConnEventHandler(pClient *network.SClient) {
 	fmt.Print("connected..",pClient.GetId(),"\n")
+
 }
 
 func (ws *SubNet1_Service) DisconnEventHandler(pClient *network.SClient) {
@@ -58,5 +71,26 @@ func (ws *SubNet1_Service) DisconnEventHandler(pClient *network.SClient) {
 }
 
 func (ws *SubNet1_Service) ExceptMessage(pClient *network.SClient, pPack *network.MsgBasePack, err error) {
+	fmt.Print("except..",pClient.GetId(),"，",pPack,"\n")
+}
+
+
+
+///////////////////////////
+
+func (ws *SubNet1_Service) MessageHandler2(pClient *network.SClient, msgtype uint16, msg proto.Message) {
+	fmt.Print("recv:",pClient.GetId(), "：", msg,"\n")
+	pClient.SendMsg(msgtype,msg)
+}
+
+func (ws *SubNet1_Service) ConnEventHandler2(pClient *network.SClient) {
+	fmt.Print("connected..",pClient.GetId(),"\n")
+}
+
+func (ws *SubNet1_Service) DisconnEventHandler2(pClient *network.SClient) {
+	fmt.Print("disconnected..",pClient.GetId(),"\n")
+}
+
+func (ws *SubNet1_Service) ExceptMessage2(pClient *network.SClient, pPack *network.MsgBasePack, err error) {
 	fmt.Print("except..",pClient.GetId(),"，",pPack,"\n")
 }

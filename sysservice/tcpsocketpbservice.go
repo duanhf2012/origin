@@ -142,3 +142,11 @@ func DefaultTSPbService() *TcpSocketPbService{
 	return iservice.(*TcpSocketPbService)
 }
 
+func GetTcpSocketPbService(serviceName string) *TcpSocketPbService{
+	iservice :=  service.InstanceServiceMgr().FindService(serviceName)
+	if iservice == nil {
+		return  nil
+	}
+
+	return iservice.(*TcpSocketPbService)
+}

@@ -38,9 +38,14 @@ func main() {
 	}
 
 	pTcpService := sysservice.NewTcpSocketPbService(":9004")
+	pTcpService.SetServiceName("ls")
+
+	pTcpService2 := sysservice.NewTcpSocketPbService(":9005")
+	pTcpService2.SetServiceName("lc")
+
 	httpserver.SetPrintRequestTime(true)
 
-	node.SetupService(httpserver,pTcpService)
+	node.SetupService(httpserver,pTcpService,pTcpService2)
 	node.Init()
 	node.Start()
 }
