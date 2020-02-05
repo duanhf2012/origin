@@ -6,7 +6,7 @@ import (
 	"runtime/debug"
 )
 
-func F(callback interface{}, args ...interface{}) {
+func F(callback interface{},recoverNum int, args ...interface{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			var coreInfo string
@@ -16,6 +16,11 @@ func F(callback interface{}, args ...interface{}) {
 				Log(5, coreInfo)
 			} else {
 				fmt.Print(coreInfo)
+			}
+
+			if recoverNum==-1 ||recoverNum-1 >= 0 {
+				recoverNum -= 1
+				go F(callback,recoverNum, args...)
 			}
 		}
 	}()
@@ -33,5 +38,10 @@ func F(callback interface{}, args ...interface{}) {
 }
 
 func Go(callback interface{}, args ...interface{}) {
-	go F(callback, args...)
+	go F(callback,0, args...)
+}
+
+//-1表示一直恢复
+func GoRecover(callback interface{},recoverNum int, args ...interface{}) {
+	go F(callback,recoverNum, args...)
 }

@@ -247,7 +247,12 @@ func (slf *SClient) onsend(){
 		}
 
 		pPackData := pack.(*MsgBasePack)
-		slf.conn.Write(pPackData.Bytes())
+		_,e := slf.conn.Write(pPackData.Bytes())
+		if e!=nil {
+			service.GetLogger().Printf(service.LEVER_DEBUG, "clent id %d write error...",slf.id)
+			return
+		}
+		//fmt.Print("xxxxxxxxxxxxxxx:",n,e)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 type TcpSocketClient struct {
 	conn net.Conn
+	addr string
 }
 
 func (slf *TcpSocketClient) Connect(addr string) error{
@@ -22,13 +23,17 @@ func (slf *TcpSocketClient) Connect(addr string) error{
 		return err
 	}
 	slf.conn = conn
-
+	slf.addr = addr
 
 	//
 	return nil
 }
 
 func (slf *TcpSocketClient) SendMsg(packtype uint16,message proto.Message) error{
+	if slf.conn == nil {
+		return fmt.Errorf("cannt connect %s",slf.addr)
+	}
+
 	var msg MsgBasePack
 	data,err := proto.Marshal(message)
 	if err != nil {

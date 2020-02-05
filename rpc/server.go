@@ -324,7 +324,7 @@ func (server *Server) register(rcvr interface{}, name string, prefix string, use
 	_, ok := server.mapCallQueue[sname]
 	if ok == false {
 		server.mapCallQueue[sname] = make(chan *CQueueRpcData, 10240)
-		util.Go(server.ProcessQueue, sname)
+		util.GoRecover(server.ProcessQueue,-1, sname)
 	}
 	if useName {
 		sname = name
@@ -612,7 +612,8 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 		wg.Add(1)
 		//queueMode
 		//fmt.Print(queueMode)
-		go service.call(server, sending, wg, mtype, req, argv, replyv, codec)
+		util.Go(service.call,server, sending, wg, mtype, req, argv, replyv, codec)
+		//go service.call(server, sending, wg, mtype, req, argv, replyv, codec)
 	}
 	// We've seen that there are no more requests.
 	// Wait for responses to be sent before closing codec.

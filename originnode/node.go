@@ -143,7 +143,7 @@ func NewOriginNode() *COriginNode {
 
 	//安装系统服务
 	syslogservice := &sysservice.LogService{}
-	syslogservice.InitLog("syslog", fmt.Sprintf("syslog_%d", CurrentNodeId), sysmodule.LEVER_INFO)
+	syslogservice.InitLog("syslog", fmt.Sprintf("syslog_%d", CurrentNodeId), sysmodule.LEVER_DEBUG)
 	service.InstanceServiceMgr().Setup(syslogservice)
 
 	//初始化集群对象
