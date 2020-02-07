@@ -261,6 +261,7 @@ type NodeData struct {
 	LogLevel uint
 	HttpPort uint16
 	WSPort   uint16
+	ListenPort uint16
 	NodeAddr string
 	CAFile   []CACfg
 
