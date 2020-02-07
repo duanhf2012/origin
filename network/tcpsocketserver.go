@@ -42,6 +42,7 @@ type TcpSocketServer struct {
 	MaxRecvPackSize uint16
 	MaxSendPackSize uint16
 	iReciver ITcpSocketServerReciver
+	nodelay bool
 }
 
 type MsgBasePack struct {
@@ -74,6 +75,8 @@ func (slf *TcpSocketServer) Start(){
 }
 
 func (slf *TcpSocketServer) listenServer(){
+	slf.nodelay = true
+
 	listener, err := net.Listen("tcp", slf.listenAddr)
 	if err != nil {
 		service.GetLogger().Printf(service.LEVER_FATAL, "TcpSocketServer Listen error %+v",err)
@@ -88,6 +91,9 @@ func (slf *TcpSocketServer) listenServer(){
 			continue
 		}
 
+		if slf.nodelay {
+			//conn.(ifaceSetNoDelay)
+		}
 		for {
 			clientId += 1
 			if slf.mapClient.Get(clientId)!= nil {

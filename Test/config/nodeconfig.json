@@ -2,8 +2,8 @@
 "Public":{
     "LogLevel":1,
 	"HttpPort":9400,
-	"WSPort":9500,
-	
+	"WSPort":9401,
+	"ListenPort":9402,
 	"CAFile":[
 	{
 	"CertFile":"",
