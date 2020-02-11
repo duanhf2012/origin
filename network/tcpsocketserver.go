@@ -115,6 +115,14 @@ func (slf *TcpSocketServer) listenServer(){
 	}
 }
 
+func (slf *TcpSocketServer)  SendMsg(clientid uint64,packtype uint16,message proto.Message) error{
+	pClient := slf.mapClient.Get(clientid)
+	if pClient == nil {
+		return fmt.Errorf("clientid %d is not in connect pool.",clientid)
+	}
+
+	return pClient.(*SClient).SendMsg(packtype,message)
+}
 
 func (slf *SClient) listendata(){
 	defer func() {
@@ -204,6 +212,7 @@ func (slf *MsgBasePack) FillData(bdata []byte,datasize uint16) (uint16,bool,bool
 
 	return fillsize,false,fillhead
 }
+
 
 func (slf *MsgBasePack) Clear() {
 }

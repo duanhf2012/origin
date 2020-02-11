@@ -37,15 +37,15 @@ func main() {
 		httpserver.SetHttps(ca.CertFile, ca.KeyFile)
 	}
 
-	pTcpService := sysservice.NewTcpSocketPbService(":9004")
+	pTcpService := sysservice.NewTcpSocketPbService(":9402")
 	pTcpService.SetServiceName("ls")
-
+/*
 	pTcpService2 := sysservice.NewTcpSocketPbService(":9005")
 	pTcpService2.SetServiceName("lc")
-
+*/
 	httpserver.SetPrintRequestTime(true)
 
-	node.SetupService(httpserver,pTcpService,pTcpService2)
+	node.SetupService(httpserver,pTcpService)
 	node.Init()
 	node.Start()
 }

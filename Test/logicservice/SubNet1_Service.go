@@ -3,6 +3,7 @@ package logicservice
 import (
 	"fmt"
 	"github.com/duanhf2012/origin/Test/msgpb"
+	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/sysservice"
 	"github.com/golang/protobuf/proto"
@@ -37,60 +38,73 @@ func (ws *SubNet1_Service) OnInit() error {
 	return nil
 }
 
+type InputData struct {
+	A1 int
+	A2 int
+}
+
 //OnRun ...
 func (ws *SubNet1_Service) OnRun() bool {
 
 
 	time.Sleep(time.Second * 10)
 	var cli network.TcpSocketClient
-	cli.Connect("127.0.0.1:9004")
+	cli.Connect("127.0.0.1:9402")
 	test := msgpb.Test{}
 	test.AssistCount = proto.Int32(343)
 
 	cli.SendMsg(110, &test)
 	cli.SendMsg(110, &test)
+
+	var a InputData
+	var rs int
+	a.A1 = 3
+	a.A2 = 4
+	cluster.Call("SubNet1_Service2.RPC_Sub",&a,&rs)
+	fmt.Print(rs)
 	return false
 }
 
-func (ws *SubNet1_Service) MessageHandler(pClient *network.SClient, msgtype uint16, msg proto.Message) {
-	fmt.Print("recv:",pClient.GetId(), "：", msg,"\n")
-	pClient.SendMsg(msgtype,msg)
-
+func (ws *SubNet1_Service) MessageHandler(clientid uint64, msgtype uint16, msg proto.Message) {
+	fmt.Print("recv:",clientid, "：", msg,"\n")
+	sysservice.GetTcpSocketPbService("ls").SendMsg(clientid,msgtype,msg)
+/*test core dump
 	var a map[int]int
 	a[33] = 3
 	fmt.Print(a[44])
+ */
 }
 
-func (ws *SubNet1_Service) ConnEventHandler(pClient *network.SClient) {
-	fmt.Print("connected..",pClient.GetId(),"\n")
-
+func (ws *SubNet1_Service) ConnEventHandler(clientid uint64) {
+	fmt.Print("connected..",clientid,"\n")
 }
 
-func (ws *SubNet1_Service) DisconnEventHandler(pClient *network.SClient) {
-	fmt.Print("disconnected..",pClient.GetId(),"\n")
+func (ws *SubNet1_Service) DisconnEventHandler(clientid uint64) {
+	fmt.Print("disconnected..",clientid,"\n")
 }
 
-func (ws *SubNet1_Service) ExceptMessage(pClient *network.SClient, pPack *network.MsgBasePack, err error) {
-	fmt.Print("except..",pClient.GetId(),"，",pPack,"\n")
+func (ws *SubNet1_Service) ExceptMessage(clientid uint64, pPack *network.MsgBasePack, err error) {
+	fmt.Print("except..",clientid,"，",pPack,"\n")
 }
 
 
 
 ///////////////////////////
 
-func (ws *SubNet1_Service) MessageHandler2(pClient *network.SClient, msgtype uint16, msg proto.Message) {
-	fmt.Print("recv:",pClient.GetId(), "：", msg,"\n")
-	pClient.SendMsg(msgtype,msg)
+func (ws *SubNet1_Service) MessageHandler2(clientid uint64, msgtype uint16, msg proto.Message) {
+	fmt.Print("recv:",clientid, "：", msg,"\n")
+	//pClient.SendMsg(msgtype,msg)
+	sysservice.GetTcpSocketPbService("ls").SendMsg(clientid,msgtype,msg)
 }
 
-func (ws *SubNet1_Service) ConnEventHandler2(pClient *network.SClient) {
-	fmt.Print("connected..",pClient.GetId(),"\n")
+func (ws *SubNet1_Service) ConnEventHandler2(clientid uint64) {
+	fmt.Print("connected..",clientid,"\n")
 }
 
-func (ws *SubNet1_Service) DisconnEventHandler2(pClient *network.SClient) {
-	fmt.Print("disconnected..",pClient.GetId(),"\n")
+func (ws *SubNet1_Service) DisconnEventHandler2(clientid uint64) {
+	fmt.Print("disconnected..",clientid,"\n")
 }
 
-func (ws *SubNet1_Service) ExceptMessage2(pClient *network.SClient, pPack *network.MsgBasePack, err error) {
-	fmt.Print("except..",pClient.GetId(),"，",pPack,"\n")
+func (ws *SubNet1_Service) ExceptMessage2(clientid uint64, pPack *network.MsgBasePack, err error) {
+	fmt.Print("except..",clientid,"，",pPack,"\n")
 }

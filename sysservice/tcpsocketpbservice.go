@@ -21,9 +21,9 @@ type TcpSocketPbService struct {
 }
 
 
-type MessageHandler func(pClient *network.SClient,msgtype uint16,msg proto.Message)
-type EventHandler func(pClient *network.SClient)
-type ExceptMsgHandler func(pClient *network.SClient,pPack *network.MsgBasePack,err error)
+type MessageHandler func(clientid uint64,msgtype uint16,msg proto.Message)
+type EventHandler func(clientid uint64)
+type ExceptMsgHandler func(clientid uint64,pPack *network.MsgBasePack,err error)
 
 
 
@@ -88,13 +88,13 @@ func (slf *TcpSocketPbService) RegExceptMessage(exceptMsgHandler ExceptMsgHandle
 
 func (slf *TcpSocketPbService) OnConnected(pClient *network.SClient){
 	if slf.connEvent!=nil {
-		slf.connEvent(pClient)
+		slf.connEvent(pClient.GetId())
 	}
 }
 
 func (slf *TcpSocketPbService) OnDisconnect(pClient *network.SClient){
 	if slf.disconnEvent!=nil {
-		slf.disconnEvent(pClient)
+		slf.disconnEvent(pClient.GetId())
 	}
 }
 
@@ -106,7 +106,7 @@ func (slf *TcpSocketPbService) VerifyPackType(packtype uint16) bool{
 
 func (slf *TcpSocketPbService) OnExceptMsg (pClient *network.SClient,pPack *network.MsgBasePack,err error){
 	if slf.exceptMsgHandler!=nil {
-		slf.exceptMsgHandler(pClient,pPack,err)
+		slf.exceptMsgHandler(pClient.GetId(),pPack,err)
 	}else{
 		pClient.Close()
 		//记录日志
@@ -124,7 +124,7 @@ func (slf *TcpSocketPbService) OnRecvMsg(pClient *network.SClient, pPack *networ
 			return
 		}
 
-		info.msgHandler(pClient,pPack.PackType(), msg.(proto.Message))
+		info.msgHandler(pClient.GetId(),pPack.PackType(), msg.(proto.Message))
 		return
 	}
 
@@ -149,4 +149,8 @@ func GetTcpSocketPbService(serviceName string) *TcpSocketPbService{
 	}
 
 	return iservice.(*TcpSocketPbService)
+}
+
+func (slf *TcpSocketPbService)  SendMsg(clientid uint64,packtype uint16,message proto.Message) error{
+	return slf.tcpsocketserver.SendMsg(clientid,packtype,message)
 }
