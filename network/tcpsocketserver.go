@@ -115,6 +115,16 @@ func (slf *TcpSocketServer) listenServer(){
 	}
 }
 
+func (slf *TcpSocketServer)  Close(clientid uint64) error {
+	pClient := slf.mapClient.Get(clientid)
+	if pClient == nil {
+		return fmt.Errorf("clientid %d is not in connect pool.",clientid)
+	}
+
+	pClient.(*SClient).Close()
+	return nil
+}
+
 func (slf *TcpSocketServer)  SendMsg(clientid uint64,packtype uint16,message proto.Message) error{
 	pClient := slf.mapClient.Get(clientid)
 	if pClient == nil {

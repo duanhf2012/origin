@@ -154,3 +154,9 @@ func GetTcpSocketPbService(serviceName string) *TcpSocketPbService{
 func (slf *TcpSocketPbService)  SendMsg(clientid uint64,packtype uint16,message proto.Message) error{
 	return slf.tcpsocketserver.SendMsg(clientid,packtype,message)
 }
+
+func (slf *TcpSocketPbService)  Close(clientid uint64) error{
+	return slf.tcpsocketserver.Close(clientid)
+}
+
+
