@@ -159,4 +159,6 @@ func (slf *TcpSocketPbService)  Close(clientid uint64) error{
 	return slf.tcpsocketserver.Close(clientid)
 }
 
-
+func (slf *TcpSocketPbService) Send(clientid uint64,pack *network.MsgBasePack) error {
+	return slf.tcpsocketserver.Send(clientid,pack)
+}
