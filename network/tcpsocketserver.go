@@ -134,6 +134,16 @@ func (slf *TcpSocketServer)  SendMsg(clientid uint64,packtype uint16,message pro
 	return pClient.(*SClient).SendMsg(packtype,message)
 }
 
+func (slf *TcpSocketServer) Send(clientid uint64,pack *MsgBasePack) error{
+	pClient := slf.mapClient.Get(clientid)
+	if pClient == nil {
+		return fmt.Errorf("clientid %d is not in connect pool.",clientid)
+	}
+
+	return pClient.(*SClient).Send(pack)
+}
+
+
 func (slf *SClient) listendata(){
 	defer func() {
 		slf.Close()
@@ -233,8 +243,14 @@ func (slf *MsgBasePack) Make(packtype uint16,data []byte) {
 	slf.packsize = uint16(unsafe.Sizeof(slf.packtype)*2)+uint16(len(data))
 }
 
-func (slf *SClient) Send(pack *MsgBasePack){
+func (slf *SClient) Send(pack *MsgBasePack) error {
+	if slf.bClose == true {
+		return fmt.Errorf("client id %d is close!",slf.id)
+	}
+
 	slf.sendPack.Push(pack)
+
+	return nil
 }
 
 
@@ -254,6 +270,8 @@ func (slf *SClient)  SendMsg(packtype uint16,message proto.Message) error{
 
 	return nil
 }
+
+
 
 func (slf *SClient) onsend(){
 	defer func() {
