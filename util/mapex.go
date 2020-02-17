@@ -49,6 +49,9 @@ func (m *MapEx) GetHashCode(key interface{}) int {
 }
 
 func (m *MapEx) GetArrayIdByKey(key interface{}) int {
+	if m.hashMapNum ==0 {
+	  return -1
+	}
 	idx := m.GetHashCode(key) % m.hashMapNum
 	if idx > m.hashMapNum {
 		return -1
