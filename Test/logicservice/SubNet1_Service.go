@@ -11,6 +11,7 @@ import (
 
 	"github.com/duanhf2012/origin/originnode"
 	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysservice/originhttp"
 )
 
 type SubNet1_Service struct {
@@ -34,6 +35,12 @@ func (ws *SubNet1_Service) OnInit() error {
 	sysservice.GetTcpSocketPbService("lc").RegExceptMessage(ws.ExceptMessage2)
 	sysservice.GetTcpSocketPbService("lc").RegMessage(110, &msgpb.Test{}, ws.MessageHandler2)
 */
+
+
+	//originhttp.Post(" / aaa/bb/ :user/:pass/", ws.HTTP_UserIntegralInfo)
+
+	originhttp.Get(" /aaa/bbb", ws.HTTP_UserIntegralInfo)
+	originhttp.SetStaticResource(originhttp.METHOD_GET, "/file/", "d:\\")
 
 	return nil
 }
@@ -107,4 +114,11 @@ func (ws *SubNet1_Service) DisconnEventHandler2(clientid uint64) {
 
 func (ws *SubNet1_Service) ExceptMessage2(clientid uint64, pPack *network.MsgBasePack, err error) {
 	fmt.Print("except..",clientid,"，",pPack,"\n")
+}
+
+
+func (slf *SubNet1_Service) HTTP_UserIntegralInfo(request *originhttp.HttpRequest, resp *originhttp.HttpRespone) error {
+	ret, ok := request.Query("a")
+	fmt.Print(ret, ok)
+	return nil
 }
