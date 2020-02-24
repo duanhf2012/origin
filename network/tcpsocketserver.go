@@ -46,19 +46,14 @@ type TcpSocketServer struct {
 }
 
 type MsgBasePack struct {
-	packsize uint16
-	packtype uint16
-	body []byte
+	PackSize uint16
+	PackType uint16
+	Body []byte
 	StartTime time.Time
 }
 
-func (slf *MsgBasePack) PackType() uint16 {
-	return slf.packtype
-}
 
-func (slf *MsgBasePack) Body() []byte{
-	return slf.body
-}
+
 
 
 func (slf *TcpSocketServer) Register(listenAddr string,iReciver ITcpSocketServerReciver){
@@ -180,8 +175,8 @@ func (slf *SClient) listendata(){
 		fillsize,bfillRet,fillhead := pack.FillData(buff,buffDataSize)
 		//提交校验头
 		if fillhead == true {
-			if pack.packsize>slf.tcpserver.MaxRecvPackSize || slf.tcpserver.iReciver.VerifyPackType(pack.packtype) == false {
-				service.GetLogger().Printf(service.LEVER_WARN, "VerifyPackType error clent id %d is disconnect  %d,%d",slf.id,pack.packtype, pack.packsize)
+			if pack.PackSize>slf.tcpserver.MaxRecvPackSize || slf.tcpserver.iReciver.VerifyPackType(pack.PackType) == false {
+				service.GetLogger().Printf(service.LEVER_WARN, "VerifyPackType error clent id %d is disconnect  %d,%d",slf.id,pack.PackType, pack.PackSize)
 				return
 			}
 		}
@@ -200,9 +195,9 @@ func (slf *SClient) listendata(){
 func (slf *MsgBasePack) Bytes() []byte{
 	var bRet []byte
 	bRet = make([]byte,4)
-	binary.BigEndian.PutUint16(bRet,slf.packsize)
-	binary.BigEndian.PutUint16(bRet[2:],slf.packtype)
-	bRet = append(bRet,slf.body...)
+	binary.BigEndian.PutUint16(bRet,slf.PackSize)
+	binary.BigEndian.PutUint16(bRet[2:],slf.PackType)
+	bRet = append(bRet,slf.Body...)
 
 	return bRet
 }
@@ -212,21 +207,21 @@ func (slf *MsgBasePack) FillData(bdata []byte,datasize uint16) (uint16,bool,bool
 	var fillsize uint16
 	fillhead := false
 	//解包头
-	if slf.packsize ==0 {
+	if slf.PackSize ==0 {
 		if datasize < 4 {
 			return 0,false,fillhead
 		}
 
-		slf.packsize= binary.BigEndian.Uint16(bdata[:2])
-		slf.packtype= binary.BigEndian.Uint16(bdata[2:4])
+		slf.PackSize= binary.BigEndian.Uint16(bdata[:2])
+		slf.PackType= binary.BigEndian.Uint16(bdata[2:4])
 		fillsize += 4
 		fillhead = true
 	}
 
 	//解包体
-	if slf.packsize>0 && datasize+4>=slf.packsize {
-		slf.body = append(slf.body, bdata[fillsize:slf.packsize]...)
-		fillsize += (slf.packsize - fillsize)
+	if slf.PackSize>0 && datasize+4>=slf.PackSize {
+		slf.Body = append(slf.Body, bdata[fillsize:slf.PackSize]...)
+		fillsize += (slf.PackSize - fillsize)
 		return fillsize,true,fillhead
 	}
 
@@ -238,9 +233,9 @@ func (slf *MsgBasePack) Clear() {
 }
 
 func (slf *MsgBasePack) Make(packtype uint16,data []byte) {
-	slf.packtype = packtype
-	slf.body = data
-	slf.packsize = uint16(unsafe.Sizeof(slf.packtype)*2)+uint16(len(data))
+	slf.PackType = packtype
+	slf.Body = data
+	slf.PackSize = uint16(unsafe.Sizeof(slf.PackType)*2)+uint16(len(data))
 }
 
 func (slf *SClient) Send(pack *MsgBasePack) error {
