@@ -110,21 +110,21 @@ func (slf *TcpSocketPbService) OnExceptMsg (pClient *network.SClient,pPack *netw
 	}else{
 		pClient.Close()
 		//记录日志
-		service.GetLogger().Printf(service.LEVER_WARN, "OnExceptMsg packtype %d,error %+v",pPack.PackType(),err)
+		service.GetLogger().Printf(service.LEVER_WARN, "OnExceptMsg packtype %d,error %+v",pPack.PackType,err)
 	}
 }
 
 func (slf *TcpSocketPbService) OnRecvMsg(pClient *network.SClient, pPack *network.MsgBasePack){
-	if info, ok := slf.mapMsg[pPack.PackType()]; ok {
+	if info, ok := slf.mapMsg[pPack.PackType]; ok {
 		msg := reflect.New(info.msgType.Elem()).Interface()
 		tmp := msg.(proto.Message)
-		err := proto.Unmarshal(pPack.Body(), tmp)
+		err := proto.Unmarshal(pPack.Body, tmp)
 		if err != nil {
 			slf.OnExceptMsg(pClient,pPack,err)
 			return
 		}
 
-		info.msgHandler(pClient.GetId(),pPack.PackType(), msg.(proto.Message))
+		info.msgHandler(pClient.GetId(),pPack.PackType, msg.(proto.Message))
 		return
 	}
 
