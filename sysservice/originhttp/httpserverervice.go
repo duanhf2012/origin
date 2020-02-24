@@ -33,7 +33,7 @@ type HttpRequest struct {
 	Header http.Header
 	Body   string
 
-	ParamStr string
+	ParamStr string   //http://127.0.0.1:7001/aaa/bbb?aa=1中的aa=1部分
 	mapParam map[string]string
 	URL      string
 	//Req http.Request
@@ -117,7 +117,9 @@ func (slf *HttpRequest) Query(key string) (string, bool) {
 		paramStrList := strings.Split(slf.ParamStr, "&")
 		for _, val := range paramStrList {
 			Index := strings.Index(val, "=")
-			slf.mapParam[val[0:Index]] = val[Index+1:]
+			if Index >= 0 {
+				slf.mapParam[val[0:Index]] = val[Index+1:]
+			}
 		}
 	}
 
