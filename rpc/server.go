@@ -146,6 +146,7 @@ import (
 
 	orginservice "github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/util"
+	"github.com/duanhf2012/origin/util/uuid"
 )
 
 const (
@@ -275,43 +276,28 @@ func (server *Server) ProcessQueue(name string) {
 	}
 
 	//定时报告队列超负荷运行
-	const reportDur = time.Minute
-	chCap := int64(cap(chanRpc))
-	reportLimit := chCap * 1 / 2
-	errNum := int64(0)
-	lastSize := int64(0)
-	maxSize := int64(0)
-	totalSize := int64(0)
-	lastReportTime := time.Now()
+	var checktm util.Timer
+	checktm.SetupTimerEx(time.Minute*1)
 
+	maxSize := 0
+	uuidkey := uuid.Rand().HexEx()
 	for {
-		//定时报告channel有没有超负荷运行
-		if size := int64(len(chanRpc)); size >= reportLimit || lastSize >= reportLimit {
-			if size >= reportLimit {
-				errNum++
-				totalSize += size
-				if size > maxSize {
-					maxSize = size
-				}
-			}
-			dur := time.Now().Sub(lastReportTime)
-			if dur >= reportDur {
-				avgSize := int64(0)
-				if errNum > 0 {
-					avgSize = totalSize / errNum
-				}
-				orginservice.GetLogger().Printf(orginservice.LEVER_WARN, "RpcServer.ProcessQueue(%s) %d erros when channel size reaches %d/%d maxSize=%d avgSize=%d during last %s",
-					name, errNum, reportLimit, chCap, maxSize, avgSize, dur)
-				errNum = 0
-				maxSize = 0
-				totalSize = 0
-				lastSize = size
-				lastReportTime = time.Now()
+		if checktm.CheckTimeOut() {
+			orginservice.GetLogger().Printf(orginservice.LEVER_WARN, "RpcServer.ProcessQueue(%s) max %d",name,maxSize)
+			maxSize = 0
+		}else {
+			curSize := len(chanRpc)
+			if curSize > maxSize {
+				maxSize = curSize
 			}
 		}
 
 		rpcData := <-chanRpc
+
+
+		orginservice.MonitorEnter(uuidkey,name)
 		rpcData.service.call(rpcData.server, rpcData.sending, rpcData.wg, rpcData.mtype, rpcData.req, rpcData.argv, rpcData.replyv, rpcData.codec)
+		orginservice.MonitorLeave(uuidkey)
 	}
 }
 

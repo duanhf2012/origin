@@ -7,6 +7,7 @@ import (
 	"github.com/duanhf2012/origin/originnode"
 	"github.com/duanhf2012/origin/sysservice"
 	"github.com/duanhf2012/origin/sysservice/originhttp"
+	"time"
 )
 
 
@@ -31,6 +32,9 @@ func main() {
 		return
 	}
 
+	//打开Module死循环监控
+	node.EnableMonitorModule(time.Second*5)
+
 	nodeCfg, _ := cluster.ReadNodeConfig("./config/nodeconfig.json", cluster.GetNodeId())
 	httpserver := originhttp.NewHttpServerService(nodeCfg.HttpPort) // http服务
 	for _, ca := range nodeCfg.CAFile {
@@ -46,6 +50,7 @@ func main() {
 	httpserver.SetPrintRequestTime(true)
 
 	node.SetupService(httpserver,pTcpService)
+
 	node.Init()
 	node.Start()
 }

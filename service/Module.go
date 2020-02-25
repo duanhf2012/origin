@@ -2,11 +2,11 @@ package service
 
 import (
 	"fmt"
+	"github.com/duanhf2012/origin/util"
+	"github.com/duanhf2012/origin/util/uuid"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
-
-	"github.com/duanhf2012/origin/util"
 )
 
 const (
@@ -328,6 +328,9 @@ func (slf *BaseModule) RunModule(module IModule) {
 	timer.SetupTimer(1000)
 	slf.WaitGroup.Add(1)
 	defer slf.WaitGroup.Done()
+
+	uuidkey := uuid.Rand().HexEx()
+	moduleTypeName := fmt.Sprintf("%T",module)
 	for {
 		if atomic.LoadInt32(&slf.corouterstatus) != 0 {
 			module.OnEndRun()
@@ -346,11 +349,14 @@ func (slf *BaseModule) RunModule(module IModule) {
 			}
 		}
 
+		MonitorEnter(uuidkey,moduleTypeName)
 		if module.OnRun() == false {
 			module.OnEndRun()
+			MonitorLeave(uuidkey)
 			GetLogger().Printf(LEVER_INFO, "OnEndRun module %T...", module)
 			return
 		}
-	}
 
+		MonitorLeave(uuidkey)
+	}
 }

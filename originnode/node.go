@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/duanhf2012/origin/util"
 
@@ -167,3 +168,8 @@ func (s *COriginNode) GetSysLog() *sysservice.LogService {
 
 	return logService.(*sysservice.LogService)
 }
+
+func (s *COriginNode) EnableMonitorModule(checkInterval time.Duration){
+	service.EnableDeadForMonitor(checkInterval)
+}
+

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/duanhf2012/origin/util"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -79,7 +80,6 @@ const (
 )
 
 func (slf *WebsocketServer) Init(port uint16) {
-
 	slf.port = port
 	slf.mapClient = make(map[uint64]*WSClient)
 }
@@ -88,7 +88,7 @@ func (slf *WebsocketServer) CreateClient(conn *websocket.Conn) *WSClient {
 	slf.locker.Lock()
 	slf.maxClientid++
 	clientid := slf.maxClientid
-	pclient := &WSClient{clientid, conn, make(chan WSMessage, MAX_MSG_COUNT)}
+	pclient := &WSClient{clientid, conn, make(chan WSMessage, MAX_MSG_COUNT+1)}
 	slf.mapClient[pclient.clientid] = pclient
 	slf.locker.Unlock()
 
@@ -245,6 +245,12 @@ func (slf *BaseMessageReciver) startReadMsg(pclient *WSClient) {
 		}
 	}()
 
+	var maxTimeStamp int64
+	var maxMsgType int
+	logMinMsgTime :=time.Millisecond*300
+
+	statisticsIntervalTm := util.Timer{}
+	statisticsIntervalTm.SetupTimer(1000 * 15)//15秒间隔
 	for {
 		pclient.conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 		msgtype, message, err := pclient.conn.ReadMessage()
@@ -255,7 +261,20 @@ func (slf *BaseMessageReciver) startReadMsg(pclient *WSClient) {
 			return
 		}
 
+		if statisticsIntervalTm.CheckTimeOut() {
+			service.GetLogger().Printf(service.LEVER_INFO, "MaxMsgtype:%d,diff:%d",maxMsgType,maxTimeStamp)
+		}
+		//记录处理时间
+		startRecvTm := time.Now().UnixNano()
 		slf.messageReciver.OnRecvMsg(pclient.clientid, msgtype, message)
+		diff := time.Now().UnixNano() - startRecvTm
+		if diff> maxTimeStamp{
+			maxTimeStamp = diff
+			maxMsgType = msgtype
+		}
+		if diff >= int64(logMinMsgTime) {
+			service.GetLogger().Printf(service.LEVER_WARN, "Process slowly MaxMsgtype:%d,diff:%d",maxMsgType,maxTimeStamp)
+		}
 	}
 }
 

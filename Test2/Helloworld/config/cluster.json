@@ -9,7 +9,8 @@
 				"NodeName": "N_Node1",
 				"ServiceList": [
 					"TestService1",
-					"TestService2"
+					"TestService2",
+					"HttpServerService"
 				],
 				"ClusterNode":[]
 			},

@@ -18,6 +18,12 @@ func (slf *Timer) SetupTimer(ms int32) {
 	slf.timeinterval = int64(ms) * 1e6
 }
 
+func (slf *Timer) SetupTimerEx(tm time.Duration) {
+	slf.lasttime = time.Now().UnixNano()
+	slf.timeinterval = int64(tm)
+}
+
+
 func (slf *Timer) SetupTimerDouble() {
 	slf.lasttime = time.Now().UnixNano()
 	slf.timeinterval *= 2
