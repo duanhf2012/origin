@@ -1475,3 +1475,33 @@ func (slf *RedisModule) Zremrangebyrank(redisKey string, start, end interface{})
 	reply, err := conn.Do("ZREMRANGEBYRANK", redisKey, start, end)
 	return redis.Int(reply, err)
 }
+
+
+func (slf *RedisModule) Keys(key string) ([]string, error) {
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	ret, err := conn.Do("KEYS", key)
+	if err != nil {
+		service.GetLogger().Printf(service.LEVER_ERROR, "KEYS fail, reason:%v", err)
+		return nil, err
+	}
+	retList, ok := ret.([]interface{})
+	if !ok {
+		err = errors.New("Func[KEYS] Redis Data Error")
+		return nil, err
+	}
+
+	strs := []string{}
+	for _, val := range retList {
+		strVal, ok := val.([]byte)
+		if !ok {
+			return nil, fmt.Errorf("value not string")
+		}
+		strs = append(strs, string(strVal))
+	}
+	return strs, nil
+}
