@@ -63,3 +63,32 @@ func (slf *Timer) CheckTimeOut() bool {
 
 	return false
 }
+
+func GetTomorrowTimestamp() int64{
+	timeStr := time.Now().Format("2006-01-02")
+	t, _ := time.ParseInLocation("2006-01-02 15:04:05", timeStr+" 23:59:59", time.Local)
+	return t.Unix()+1
+}
+
+func IsSameDay(timeFir, timeSec int64) bool{
+	firTime:=time.Unix(timeFir,0)
+	secTime:=time.Unix(timeSec,0)
+	if firTime.Day()==secTime.Day()&&firTime.Month()==secTime.Month()&&firTime.Year()==secTime.Year(){
+		return true
+	}
+
+	return false
+}
+
+func IsCrossOneDay(timeFir,timeSec int64)bool{
+	firTime := time.Unix(timeFir,0)
+	secTime := time.Unix(timeSec,0)
+	firTime.Add(time.Hour*24).Day()
+
+	if firTime.Day() == secTime.Day() &&
+	firTime.Month()==secTime.Month()&&
+	firTime.Year()==secTime.Year(){
+		return true
+	}
+	return false
+}
