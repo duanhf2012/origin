@@ -3,7 +3,7 @@
     "LogLevel":1,
 	"HttpPort":9400,
 	"WSPort":9401,
-	"ListenPort":9402,
+	"ListenPort":9412,
 	"CAFile":[
 	{
 	"CertFile":"",
@@ -23,7 +23,7 @@
 "NodeList":[
 {
 	"NodeID":1,
-	"NodeAddr": "127.0.0.1:8081",
+	"NodeAddr": "127.0.0.1:8181",
     "LogLevel":1,
 	"HttpPort":7001,
 	"WSPort":7000,

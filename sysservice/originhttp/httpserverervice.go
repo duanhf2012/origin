@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/util/uuid"
 )
 
 type HttpRedirectData struct {
@@ -194,6 +196,17 @@ func (slf *HttpServerService) OnInit() error {
 }
 
 func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers",
+			"Action, Module")   //有使用自定义头 需要这个,Action, Module是例子
+	}
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
 	methodRouter, bok := postAliasUrl[r.Method]
 	if bok == false {
 		writeRespone(w, http.StatusNotFound, fmt.Sprint("Can not support method."))
@@ -363,8 +376,8 @@ func staticServer(routerUrl string, routerData RouterStaticResoutceData, w http.
 		}
 	//上传资源
 	case "POST":
-		/*
 			// 在这儿处理例外路由接口
+			/*
 			var errRet error
 			for _, filter := range slf.httpfiltrateList {
 				ret := filter(r.URL.Path, w, r)
@@ -378,7 +391,7 @@ func staticServer(routerUrl string, routerData RouterStaticResoutceData, w http.
 			if errRet != nil {
 				w.Write([]byte(errRet.Error()))
 				return
-			}
+			}*/
 			r.ParseMultipartForm(32 << 20) // max memory is set to 32MB
 			resourceFile, resourceFileHeader, err := r.FormFile("file")
 			if err != nil {
@@ -405,7 +418,7 @@ func staticServer(routerUrl string, routerData RouterStaticResoutceData, w http.
 			}
 			defer localfd.Close()
 			io.Copy(localfd, resourceFile)
-			writeResp(http.StatusOK, upath+fileName)*/
+			writeResp(http.StatusOK, upath+"/"+fileName)
 	}
 
 }

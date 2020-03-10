@@ -52,8 +52,6 @@ type InputData struct {
 
 //OnRun ...
 func (ws *SubNet1_Service) OnRun() bool {
-
-
 	time.Sleep(time.Second * 10)
 	var cli network.TcpSocketClient
 	cli.Connect("127.0.0.1:9402")

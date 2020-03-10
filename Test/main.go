@@ -33,15 +33,15 @@ func main() {
 	}
 
 	//打开Module死循环监控
-	node.EnableMonitorModule(time.Second*5)
-
+	node.EnableMonitorModule(time.Minute*5)
+	originhttp.SetStaticResource(originhttp.METHOD_GET,"/img/","d:/")
 	nodeCfg, _ := cluster.ReadNodeConfig("./config/nodeconfig.json", cluster.GetNodeId())
 	httpserver := originhttp.NewHttpServerService(nodeCfg.HttpPort) // http服务
 	for _, ca := range nodeCfg.CAFile {
 		httpserver.SetHttps(ca.CertFile, ca.KeyFile)
 	}
 
-	pTcpService := sysservice.NewTcpSocketPbService(":9402")
+	pTcpService := sysservice.NewTcpSocketPbService(":9412")
 	pTcpService.SetServiceName("ls")
 /*
 	pTcpService2 := sysservice.NewTcpSocketPbService(":9005")
