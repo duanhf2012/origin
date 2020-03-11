@@ -195,8 +195,8 @@ func (slf *HttpServerService) OnInit() error {
 	return nil
 }
 
-func (slf *ServeHTTPRouterMux) SetAlowOrigin(w http.ResponseWriter, r *http.Request) {
-	slf.allowOrigin = true
+func (slf *ServeHTTPRouterMux) SetAlowOrigin(allowOrigin bool) {
+	slf.allowOrigin = allowOrigin
 }
 
 func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
