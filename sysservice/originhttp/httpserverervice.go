@@ -39,7 +39,6 @@ type HttpRequest struct {
 	mapParam map[string]string
 	URL      string
 	//Req http.Request
-
 }
 
 type HttpRespone struct {
@@ -50,6 +49,7 @@ type HttpRespone struct {
 
 type ServeHTTPRouterMux struct {
 	httpfiltrateList []HttpFiltrate
+	allowOrigin bool
 }
 type ControllerMapsType map[string]reflect.Value
 
@@ -195,12 +195,18 @@ func (slf *HttpServerService) OnInit() error {
 	return nil
 }
 
+func (slf *ServeHTTPRouterMux) SetAlowOrigin(w http.ResponseWriter, r *http.Request) {
+	slf.allowOrigin = true
+}
+
 func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if origin := r.Header.Get("Origin"); origin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		w.Header().Set("Access-Control-Allow-Headers",
-			"Action, Module")   //有使用自定义头 需要这个,Action, Module是例子
+	if slf.allowOrigin == true {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers",
+				"Action, Module")   //有使用自定义头 需要这个,Action, Module是例子
+		}
 	}
 
 	if r.Method == "OPTIONS" {
