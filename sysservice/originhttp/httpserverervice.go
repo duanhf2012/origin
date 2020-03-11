@@ -35,7 +35,7 @@ type HttpRequest struct {
 	Header http.Header
 	Body   string
 
-	ParamStr string   //http://127.0.0.1:7001/aaa/bbb?aa=1中的aa=1部分
+	ParamStr string //http://127.0.0.1:7001/aaa/bbb?aa=1中的aa=1部分
 	mapParam map[string]string
 	URL      string
 	//Req http.Request
@@ -49,7 +49,7 @@ type HttpRespone struct {
 
 type ServeHTTPRouterMux struct {
 	httpfiltrateList []HttpFiltrate
-	allowOrigin bool
+	allowOrigin      bool
 }
 type ControllerMapsType map[string]reflect.Value
 
@@ -205,7 +205,7 @@ func (slf *ServeHTTPRouterMux) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 			w.Header().Set("Access-Control-Allow-Headers",
-				"Action, Module")   //有使用自定义头 需要这个,Action, Module是例子
+				"Action, Module") //有使用自定义头 需要这个,Action, Module是例子
 		}
 	}
 
@@ -382,8 +382,8 @@ func staticServer(routerUrl string, routerData RouterStaticResoutceData, w http.
 		}
 	//上传资源
 	case "POST":
-			// 在这儿处理例外路由接口
-			/*
+		// 在这儿处理例外路由接口
+		/*
 			var errRet error
 			for _, filter := range slf.httpfiltrateList {
 				ret := filter(r.URL.Path, w, r)
@@ -398,33 +398,33 @@ func staticServer(routerUrl string, routerData RouterStaticResoutceData, w http.
 				w.Write([]byte(errRet.Error()))
 				return
 			}*/
-			r.ParseMultipartForm(32 << 20) // max memory is set to 32MB
-			resourceFile, resourceFileHeader, err := r.FormFile("file")
-			if err != nil {
-				fmt.Println(err)
-				writeResp(http.StatusNotFound, err.Error())
-				return
-			}
-			defer resourceFile.Close()
-			//重新拼接文件名
-			imgFormat := strings.Split(resourceFileHeader.Filename, ".")
-			if len(imgFormat) != 2 {
-				writeResp(http.StatusNotFound, "not a file")
-				return
-			}
-			filePrefixName := uuid.Rand().HexEx()
-			fileName := filePrefixName + "." + imgFormat[1]
-			//创建文件
-			localpath := fmt.Sprintf("%s%s", destLocalPath, fileName)
-			localfd, err := os.OpenFile(localpath, os.O_WRONLY|os.O_CREATE, 0666)
-			if err != nil {
-				fmt.Println(err)
-				writeResp(http.StatusNotFound, "upload fail")
-				return
-			}
-			defer localfd.Close()
-			io.Copy(localfd, resourceFile)
-			writeResp(http.StatusOK, upath+"/"+fileName)
+		r.ParseMultipartForm(32 << 20) // max memory is set to 32MB
+		resourceFile, resourceFileHeader, err := r.FormFile("file")
+		if err != nil {
+			fmt.Println(err)
+			writeResp(http.StatusNotFound, err.Error())
+			return
+		}
+		defer resourceFile.Close()
+		//重新拼接文件名
+		imgFormat := strings.Split(resourceFileHeader.Filename, ".")
+		if len(imgFormat) < 2 {
+			writeResp(http.StatusNotFound, "not a file")
+			return
+		}
+		filePrefixName := uuid.Rand().HexEx()
+		fileName := filePrefixName + "." + imgFormat[len(imgFormat)-1]
+		//创建文件
+		localpath := fmt.Sprintf("%s%s", destLocalPath, fileName)
+		localfd, err := os.OpenFile(localpath, os.O_WRONLY|os.O_CREATE, 0666)
+		if err != nil {
+			fmt.Println(err)
+			writeResp(http.StatusNotFound, "upload fail")
+			return
+		}
+		defer localfd.Close()
+		io.Copy(localfd, resourceFile)
+		writeResp(http.StatusOK, upath+"/"+fileName)
 	}
 
 }
