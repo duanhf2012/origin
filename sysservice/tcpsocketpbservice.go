@@ -12,22 +12,59 @@ type TcpSocketPbService struct {
 	service.BaseService
 	listenaddr string
 	tcpsocketserver network.TcpSocketServer
-	mapMsg map[uint16]MessageInfo
+	MsgProcessor
+}
 
+
+type MessageHandler func(clientid uint64,msgtype uint16,msg proto.Message)
+type MessageRecvHandler func(pClient *network.SClient,pPack *network.MsgBasePack)
+type EventHandler func(clientid uint64)
+type ExceptMsgHandler func(clientid uint64,pPack *network.MsgBasePack,err error)
+
+type MsgProcessor struct {
+	mapMsg map[uint16]MessageInfo
 	connEvent EventHandler
 	disconnEvent EventHandler
-
 	exceptMsgHandler ExceptMsgHandler
 	messageRecvHandler MessageRecvHandler
 }
 
 
-type MessageHandler func(clientid uint64,msgtype uint16,msg proto.Message)
-type MessageRecvHandler func(clientid uint64,pPack *network.MsgBasePack)
-type EventHandler func(clientid uint64)
-type ExceptMsgHandler func(clientid uint64,pPack *network.MsgBasePack,err error)
 
 
+func (slf *MsgProcessor) RegMessage(msgtype uint16,msg proto.Message,handle MessageHandler){
+	var info MessageInfo
+
+	info.msgType = reflect.TypeOf(msg.(proto.Message))
+	info.msgHandler = handle
+	slf.mapMsg[msgtype] = info
+}
+
+func (slf *MsgProcessor) RegConnectEvent(eventHandler EventHandler){
+	slf.connEvent = eventHandler
+}
+
+func (slf *MsgProcessor) RegDisconnectEvent(eventHandler EventHandler){
+	slf.disconnEvent = eventHandler
+}
+
+func (slf *MsgProcessor) RegExceptMessage(exceptMsgHandler ExceptMsgHandler){
+	slf.exceptMsgHandler = exceptMsgHandler
+}
+
+func (slf *MsgProcessor) RegRecvMessage(msgHandler MessageRecvHandler){
+	slf.messageRecvHandler = msgHandler
+}
+
+func (slf *MsgProcessor) OnExceptMsg (pClient *network.SClient,pPack *network.MsgBasePack,err error){
+	if slf.exceptMsgHandler!=nil {
+		slf.exceptMsgHandler(pClient.GetId(),pPack,err)
+	}else{
+		pClient.Close()
+		//记录日志
+		service.GetLogger().Printf(service.LEVER_WARN, "OnExceptMsg packtype %d,error %+v",pPack.PackType,err)
+	}
+}
 
 func NewTcpSocketPbService(listenaddr string) *TcpSocketPbService {
 	ts := new(TcpSocketPbService)
@@ -45,18 +82,6 @@ func (slf *TcpSocketPbService) OnInit() error {
 func (slf *TcpSocketPbService) OnRun() bool {
 	slf.tcpsocketserver.Start()
 
-/*
-	slf.RegisterMessage(10,&msgpb.Test{},slf.Test)
-	var testpack network.MsgBasePack
-	a := msgpb.Test{}
-	a.WinCount =proto.Int32(33)
-	d,err := proto.Marshal(&a)
-	fmt.Print(err)
-
-	testpack.Make(10,d)
-	slf.OnRecvMsg(nil,&testpack)
-
- */
 	return false
 }
 
@@ -75,22 +100,6 @@ func (slf *TcpSocketPbService) RegMessage(msgtype uint16,msg proto.Message,handl
 	slf.mapMsg[msgtype] = info
 }
 
-func (slf *TcpSocketPbService) RegConnectEvent(eventHandler EventHandler){
-	slf.connEvent = eventHandler
-}
-
-func (slf *TcpSocketPbService) RegDisconnectEvent(eventHandler EventHandler){
-	slf.disconnEvent = eventHandler
-}
-
-func (slf *TcpSocketPbService) RegExceptMessage(exceptMsgHandler ExceptMsgHandler){
-	slf.exceptMsgHandler = exceptMsgHandler
-}
-
-func (slf *TcpSocketPbService) RegRecvMessage(msgHandler MessageRecvHandler){
-	slf.messageRecvHandler = msgHandler
-}
-
 
 func (slf *TcpSocketPbService) OnConnected(pClient *network.SClient){
 	if slf.connEvent!=nil {
@@ -103,24 +112,12 @@ func (slf *TcpSocketPbService) OnDisconnect(pClient *network.SClient){
 		slf.disconnEvent(pClient.GetId())
 	}
 }
-
 func (slf *TcpSocketPbService) VerifyPackType(packtype uint16) bool{
 	_,ok := slf.mapMsg[packtype]
 	return ok
 }
 
-
-func (slf *TcpSocketPbService) OnExceptMsg (pClient *network.SClient,pPack *network.MsgBasePack,err error){
-	if slf.exceptMsgHandler!=nil {
-		slf.exceptMsgHandler(pClient.GetId(),pPack,err)
-	}else{
-		pClient.Close()
-		//记录日志
-		service.GetLogger().Printf(service.LEVER_WARN, "OnExceptMsg packtype %d,error %+v",pPack.PackType,err)
-	}
-}
-
-func (slf *TcpSocketPbService) OnRecvMsg(pClient *network.SClient, pPack *network.MsgBasePack){
+func (slf *MsgProcessor) Handle(pClient *network.SClient,pPack *network.MsgBasePack){
 	if info, ok := slf.mapMsg[pPack.PackType]; ok {
 		msg := reflect.New(info.msgType.Elem()).Interface()
 		tmp := msg.(proto.Message)
@@ -133,13 +130,16 @@ func (slf *TcpSocketPbService) OnRecvMsg(pClient *network.SClient, pPack *networ
 		info.msgHandler(pClient.GetId(),pPack.PackType, msg.(proto.Message))
 		return
 	}else if slf.messageRecvHandler!=nil {
-		slf.messageRecvHandler(pClient.GetId(),pPack)
+		slf.messageRecvHandler(pClient,pPack)
 		return
 	}
 
 	slf.OnExceptMsg(pClient,pPack,errors.New("not found PackType"))
+}
 
-	return
+
+func (slf *TcpSocketPbService) OnRecvMsg(pClient *network.SClient, pPack *network.MsgBasePack){
+	slf.Handle(pClient,pPack)
 }
 
 func DefaultTSPbService() *TcpSocketPbService{
