@@ -18,10 +18,12 @@ type TcpSocketPbService struct {
 	disconnEvent EventHandler
 
 	exceptMsgHandler ExceptMsgHandler
+	messageRecvHandler MessageRecvHandler
 }
 
 
 type MessageHandler func(clientid uint64,msgtype uint16,msg proto.Message)
+type MessageRecvHandler func(clientid uint64,pPack *network.MsgBasePack)
 type EventHandler func(clientid uint64)
 type ExceptMsgHandler func(clientid uint64,pPack *network.MsgBasePack,err error)
 
@@ -85,6 +87,10 @@ func (slf *TcpSocketPbService) RegExceptMessage(exceptMsgHandler ExceptMsgHandle
 	slf.exceptMsgHandler = exceptMsgHandler
 }
 
+func (slf *TcpSocketPbService) RegRecvMessage(msgHandler MessageRecvHandler){
+	slf.messageRecvHandler = msgHandler
+}
+
 
 func (slf *TcpSocketPbService) OnConnected(pClient *network.SClient){
 	if slf.connEvent!=nil {
@@ -125,6 +131,9 @@ func (slf *TcpSocketPbService) OnRecvMsg(pClient *network.SClient, pPack *networ
 		}
 
 		info.msgHandler(pClient.GetId(),pPack.PackType, msg.(proto.Message))
+		return
+	}else if slf.messageRecvHandler!=nil {
+		slf.messageRecvHandler(pClient.GetId(),pPack)
 		return
 	}
 
