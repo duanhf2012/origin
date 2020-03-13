@@ -114,10 +114,7 @@ func (slf *TcpSocketPbService) OnDisconnect(pClient *network.SClient){
 		slf.disconnEvent(pClient.GetId())
 	}
 }
-func (slf *TcpSocketPbService) VerifyPackType(packtype uint16) bool{
-	_,ok := slf.mapMsg[packtype]
-	return ok
-}
+
 
 func (slf *MsgProcessor) Handle(pClient *network.SClient,pPack *network.MsgBasePack){
 	if info, ok := slf.mapMsg[pPack.PackType]; ok {

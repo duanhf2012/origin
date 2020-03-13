@@ -19,7 +19,6 @@ type ITcpSocketServerReciver interface {
 	OnConnected(pClient *SClient)
 	OnDisconnect(pClient *SClient)
 	OnRecvMsg(pClient *SClient, pPack *MsgBasePack)
-	VerifyPackType(packtype uint16) bool
 }
 
 
@@ -175,7 +174,7 @@ func (slf *SClient) listendata(){
 		fillsize,bfillRet,fillhead := pack.FillData(buff,buffDataSize)
 		//提交校验头
 		if fillhead == true {
-			if pack.PackSize>slf.tcpserver.MaxRecvPackSize || slf.tcpserver.iReciver.VerifyPackType(pack.PackType) == false {
+			if pack.PackSize>slf.tcpserver.MaxRecvPackSize {
 				service.GetLogger().Printf(service.LEVER_WARN, "VerifyPackType error clent id %d is disconnect  %d,%d",slf.id,pack.PackType, pack.PackSize)
 				return
 			}
