@@ -30,7 +30,9 @@ type MsgProcessor struct {
 }
 
 
-
+func (slf *MsgProcessor) InitProcessor(){
+	slf.mapMsg = make(map[uint16]MessageInfo)
+}
 
 func (slf *MsgProcessor) RegMessage(msgtype uint16,msg proto.Message,handle MessageHandler){
 	var info MessageInfo

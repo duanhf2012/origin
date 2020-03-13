@@ -2,9 +2,9 @@ package util
 
 import (
 	"fmt"
-	"sync"
-
 	"github.com/duanhf2012/origin/util/hash"
+	"sync"
+	"sync/atomic"
 )
 
 const (
@@ -16,6 +16,7 @@ type MapEx struct {
 	m          []map[interface{}]interface{}
 	l          []sync.RWMutex
 	hashMapNum int
+	rangeIdx uint32
 }
 
 func (m *MapEx) Init(hashMapNum int) {
@@ -35,6 +36,19 @@ func NewMapEx() *MapEx {
 	mapEx.Init(DEFAULT_SAFE_MAP_MAX_HASH_NUM)
 	return &mapEx
 }
+
+
+func (m *MapEx) NextRLockRange(f func(key interface{}, value interface{})) {
+		i := atomic.AddUint32(&m.rangeIdx,1)%uint32(m.hashMapNum)
+
+		m.l[i].RLock()
+		for key, val := range m.m[i] {
+			f(key, val)
+		}
+
+		m.l[i].RUnlock()
+}
+
 
 func (m *MapEx) ClearMap() {
 	for i := 0; i < DEFAULT_SAFE_MAP_MAX_HASH_NUM; i++ {
@@ -197,9 +211,15 @@ func (m *MapEx) LockSet(key interface{}, f func(value interface{}) interface{}) 
 	ret, ok := val[key]
 
 	if ok == false {
-		val[key] = f(nil)
+		ret := f(nil)
+		if ret != nil {
+			val[key] =ret
+		}
 	} else {
-		val[key] = f(ret)
+		ret := f(ret)
+		if ret != nil {
+			val[key] =ret
+		}
 	}
 
 	m.l[idx].Unlock()
