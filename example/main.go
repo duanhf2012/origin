@@ -121,28 +121,28 @@ type Param struct {
 
 func  (slf *TestServiceCall) Run(){
 	//var ret int
-	var input int = 10000
-	bT := time.Now()            // 开始时间
+	//var input int = 10000
+	//bT := time.Now()            // 开始时间
 
 	//err := slf.Call("TestServiceCall.RPC_Test",&ret,&input)
 	var param Param
 	param.A = 2342342341
 	param.B = "xxxxxxxxxxxxxxxxxxxxxxx"
 	param.Pa = []string{"ccccc","asfsdfsdaf","bbadfsdf","ewrwefasdf","safsadfka;fksd"}
-
+	/*
 	for i:=input;i>=0;i--{
 		param.Index = i
 		slf.AsyncCall("TestService1.RPC_Test",&param, func(reply *Param, err error) {
 			if reply.Index == 0 || err != nil{
 				eT := time.Since(bT)      // 从开始到当前所消耗的时间
 				fmt.Print(err,eT.Milliseconds())
-				fmt.Print("..................",eT,"\n")
+				fmt.Print("xxxx..................",eT,err,"\n")
 			}
 			//fmt.Print(*reply,"\n",err)
 		})
 
 	}
-
+*/
 	fmt.Print("finsh....")
 
 

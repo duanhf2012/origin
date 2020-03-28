@@ -13,11 +13,11 @@ type TcpService struct {
 	tcpServer network.TCPServer
 	service.Service
 
-	tcpService *TcpService
+	tcpService      *TcpService
 	mapClientLocker sync.RWMutex
-	mapClient map[uint64] *Client
-	initClientId uint64
-	process network.Processor
+	mapClient       map[uint64] *Client
+	initClientId    uint64
+	process         network.Processor
 }
 
 const Default_MaxConnNum = 3000

@@ -1,4 +1,4 @@
-package GateService
+package processor
 
 import (
 	"encoding/binary"
@@ -22,14 +22,14 @@ func (slf *PBProcessor) SetLittleEndian(littleEndian bool){
 	slf.LittleEndian = littleEndian
 }
 
-type PackInfo struct {
+type PBPackInfo struct {
 	typ uint16
 	msg proto.Message
 }
 
 // must goroutine safe
 func (slf *PBProcessor ) Route(msg interface{},userdata interface{}) error{
-	pPackInfo := msg.(*PackInfo)
+	pPackInfo := msg.(*PBPackInfo)
 	v,ok := slf.mapMsg[pPackInfo.typ]
 	if ok == false {
 		return fmt.Errorf("cannot find msgtype %d is register!",pPackInfo.typ)
@@ -60,7 +60,7 @@ func (slf *PBProcessor ) Unmarshal(data []byte) (interface{}, error) {
 		return nil,err
 	}
 
-	return &PackInfo{typ:msgType,msg:protoMsg},nil
+	return &PBPackInfo{typ:msgType,msg:protoMsg},nil
 }
 
 // must goroutine safe

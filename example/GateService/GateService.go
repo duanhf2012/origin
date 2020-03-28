@@ -2,19 +2,22 @@ package GateService
 
 import (
 	"github.com/duanhf2012/origin/event"
+	"github.com/duanhf2012/origin/network"
+	"github.com/duanhf2012/origin/network/processor"
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/sysservice"
 )
 
 type GateService struct {
-	processor *PBProcessor
 	service.Service
+	processor network.Processor
 }
 
 func (slf *GateService) OnInit() error{
 	tcpervice := node.GetService("TcpService").(*sysservice.TcpService)
-	tcpervice.SetProcessor(&PBProcessor{})
+	slf.processor = &processor.PBProcessor{}
+	tcpervice.SetProcessor(slf.processor)
 	return nil
 }
 
@@ -22,7 +25,7 @@ func (slf *GateService) OnInit() error{
 func (slf *GateService) OnEventHandler(ev *event.Event) error{
 	if ev.Type == event.Sys_Event_Tcp_RecvPack {
 		pPack := ev.Data.(*sysservice.TcpPack)
-		slf.processor.Route(pPack.Data,pPack.ClientId)
+		slf.processor.Route(ev.Data,pPack.ClientId)
 	}else if ev.Type == event.Sys_Event_Tcp_Connected {
 		pPack := ev.Data.(*sysservice.TcpPack)
 		slf.OnConnected(pPack.ClientId)
