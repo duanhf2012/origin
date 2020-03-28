@@ -4,13 +4,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/duanhf2012/originnet/log"
+	"math/rand"
 	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/originnet/service"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -20,9 +23,19 @@ const (
 	MAX_EXECUTE_FUN = 10000
 )
 
+type DBExecute struct {
+	syncExecuteFun   chan SyncFun
+	syncExecuteExit  chan bool
+}
+
+type PingExecute struct {
+	tickerPing *time.Ticker
+	pintExit   chan bool
+}
+
 // DBModule ...
 type DBModule struct {
-	service.BaseModule
+	service.Module
 	db               *sql.DB
 	url              string
 	username         string
@@ -30,8 +43,12 @@ type DBModule struct {
 	dbname           string
 	maxconn          int
 	PrintTime        time.Duration
-	syncExecuteFun   chan SyncFun
+
+	pingCoroutine 	 PingExecute
+
 	syncCoroutineNum int
+	executeList  	 []DBExecute
+	waitGroup    	 sync.WaitGroup
 }
 
 // Tx ...
@@ -72,9 +89,24 @@ type SyncDBResult struct {
 	sres chan DBResult
 }
 
+type SyncDBResultExCallBack func(dataList *DataSetList, err error)
+
 type SyncQueryDBResultEx struct {
 	sres chan *DataSetList
 	err  chan error
+}
+
+func (slf *SyncQueryDBResultEx) Get(timeoutMs int) (*DataSetList, error) {
+	timerC := time.NewTicker(time.Millisecond * time.Duration(timeoutMs)).C
+	select {
+	case <-timerC:
+		break
+	case err := <-slf.err:
+		dataset := <-slf.sres
+		return dataset, err
+	}
+
+	return nil, fmt.Errorf("Getting the return result timeout [%d]ms", timeoutMs)
 }
 
 type SyncExecuteDBResult struct {
@@ -82,31 +114,70 @@ type SyncExecuteDBResult struct {
 	err  chan error
 }
 
-func (slf *DBModule) OnRun() bool {
-	if slf.db != nil {
-		slf.db.Ping()
-
+func (slf *SyncExecuteDBResult) Get(timeoutMs int) (*DBResultEx, error) {
+	timerC := time.NewTicker(time.Millisecond * time.Duration(timeoutMs)).C
+	select {
+	case <-timerC:
+		break
+	case err := <-slf.err:
+		dataset := <-slf.sres
+		return dataset, err
 	}
-	time.Sleep(time.Second * 5)
-	return true
+
+	return nil, fmt.Errorf("Getting the return result timeout [%d]ms", timeoutMs)
 }
-func (slf *DBModule) Init(maxConn int, url string, userName string, password string, dbname string) error {
+
+func (slf *DBModule) RunPing() {
+	for {
+		select {
+		case <-slf.pingCoroutine.pintExit:
+			log.Error("RunPing stopping %s...", fmt.Sprintf("%T", slf))
+			return
+		case <-slf.pingCoroutine.tickerPing.C:
+			if slf.db != nil {
+				slf.db.Ping()
+			}
+		}
+	}
+}
+
+func (slf *DBModule) Init(maxConn, executeNum int, url string, userName string, password string, dbname string) error {
 	slf.url = url
 	slf.maxconn = maxConn
 	slf.username = userName
 	slf.password = password
 	slf.dbname = dbname
-	slf.syncExecuteFun = make(chan SyncFun, MAX_EXECUTE_FUN)
+	slf.syncCoroutineNum = executeNum
+
+	if executeNum <= 0 {
+		return fmt.Errorf("executeNum mast more than zero:%d", executeNum)
+	}
+
+	slf.executeList = []DBExecute{}
+	for i := 0; i < executeNum; i++ {
+		itemInfo := DBExecute{syncExecuteFun:make(chan SyncFun, MAX_EXECUTE_FUN), syncExecuteExit:make(chan bool, 1)}
+		slf.executeList = append(slf.executeList, itemInfo)
+	}
+	slf.pingCoroutine = PingExecute{tickerPing : time.NewTicker(5*time.Second), pintExit : make(chan bool, 1)}
+
+	rand.Seed(time.Now().Unix())
 
 	return slf.Connect(slf.maxconn)
 }
 
 func (slf *DBModule) OnInit() error {
 	for i := 0; i < slf.syncCoroutineNum; i++ {
-		go slf.RunExecuteDBCoroutine()
+		go slf.RunExecuteDBCoroutine(i)
 	}
+	go slf.RunPing()
 
 	return nil
+}
+
+func (slf *DBModule) OnRelease() {
+	for i := 0; i < slf.syncCoroutineNum; i++ {
+		close(slf.executeList[i].syncExecuteExit)
+	}
 }
 
 //Close ...
@@ -316,8 +387,6 @@ func (slf *DBModule) Connect(maxConn int) error {
 	db.SetMaxIdleConns(maxConn)
 	db.SetConnMaxLifetime(time.Second * 90)
 
-	slf.syncCoroutineNum = maxConn
-
 	return nil
 }
 
@@ -333,19 +402,6 @@ func (slf *SyncDBResult) Get(timeoutMs int) DBResult {
 	return DBResult{
 		Err: fmt.Errorf("Getting the return result timeout [%d]ms", timeoutMs),
 	}
-}
-
-func (slf *SyncQueryDBResultEx) Get(timeoutMs int) (*DataSetList, error) {
-	timerC := time.NewTicker(time.Millisecond * time.Duration(timeoutMs)).C
-	select {
-	case <-timerC:
-		break
-	case err := <-slf.err:
-		dataset := <-slf.sres
-		return dataset, err
-	}
-
-	return nil, fmt.Errorf("Getting the return result timeout [%d]ms", timeoutMs)
 }
 
 func (slf *DBModule) CheckArgs(args ...interface{}) error {
@@ -395,20 +451,20 @@ func (slf *DBModule) CheckArgs(args ...interface{}) error {
 func (slf *DBModule) Query(query string, args ...interface{}) DBResult {
 	if slf.CheckArgs(args) != nil {
 		ret := DBResult{}
-		service.GetLogger().Printf(service.LEVER_ERROR, "CheckArgs is error :%s", query)
+		log.Error("CheckArgs is error :%s", query)
 		ret.Err = fmt.Errorf("CheckArgs is error!")
 		return ret
 	}
 
 	if slf.db == nil {
 		ret := DBResult{}
-		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
+		log.Error("cannot connect database:%s", query)
 		ret.Err = fmt.Errorf("cannot connect database!")
 		return ret
 	}
 	rows, err := slf.db.Query(query, args...)
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%v)", query, err)
+		log.Error("Query:%s(%v)", query, err)
 	}
 
 	return DBResult{
@@ -425,12 +481,12 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, e
 	datasetList.blur = true
 
 	if slf.CheckArgs(args) != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "CheckArgs is error :%s", query)
+		log.Error("CheckArgs is error :%s", query)
 		return &datasetList, fmt.Errorf("CheckArgs is error!")
 	}
 
 	if slf.db == nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
+		log.Error("cannot connect database:%s", query)
 		return &datasetList, fmt.Errorf("cannot connect database!")
 	}
 
@@ -439,10 +495,10 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, e
 	TimeFuncPass := time.Since(TimeFuncStart)
 
 	if slf.IsPrintTimeLog(TimeFuncPass) {
-		service.GetLogger().Printf(service.LEVER_INFO, "DBModule QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
+		log.Error("DBModule QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
 	}
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%v)", query, err)
+		log.Error("Query:%s(%v)", query, err)
 		if rows != nil {
 			rows.Close()
 		}
@@ -483,7 +539,7 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, e
 
 		if hasRet == false {
 			if rows.Err() != nil {
-				service.GetLogger().Printf(service.LEVER_ERROR, "Query:%s(%+v)", query, rows)
+				log.Error( "Query:%s(%+v)", query, rows)
 			}
 			break
 		}
@@ -493,13 +549,18 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, e
 }
 
 // SyncQuery ...
-func (slf *DBModule) SyncQuery(query string, args ...interface{}) SyncQueryDBResultEx {
+func (slf *DBModule) SyncQuery(queryHas int, query string, args ...interface{}) SyncQueryDBResultEx {
 	ret := SyncQueryDBResultEx{
 		sres: make(chan *DataSetList, 1),
 		err:  make(chan error, 1),
 	}
 
-	if len(slf.syncExecuteFun) >= MAX_EXECUTE_FUN {
+	chanIndex := queryHas % len(slf.executeList)
+	if chanIndex < 0 {
+		chanIndex = rand.Intn(len(slf.executeList))
+	}
+
+	if len(slf.executeList[chanIndex].syncExecuteFun) >= MAX_EXECUTE_FUN {
 		dbret := DataSetList{}
 		ret.err <- fmt.Errorf("chan is full,sql:%s", query)
 		ret.sres <- &dbret
@@ -507,7 +568,7 @@ func (slf *DBModule) SyncQuery(query string, args ...interface{}) SyncQueryDBRes
 		return ret
 	}
 
-	slf.syncExecuteFun <- func() {
+	slf.executeList[chanIndex].syncExecuteFun <- func() {
 		rsp, err := slf.QueryEx(query, args...)
 		ret.err <- err
 		ret.sres <- rsp
@@ -516,16 +577,35 @@ func (slf *DBModule) SyncQuery(query string, args ...interface{}) SyncQueryDBRes
 	return ret
 }
 
+func (slf *DBModule) AsyncQuery(call SyncDBResultExCallBack, queryHas int, query string, args ...interface{}) error {
+	chanIndex := queryHas % len(slf.executeList)
+	if chanIndex < 0 {
+		chanIndex = rand.Intn(len(slf.executeList))
+	}
+	
+	if len(slf.executeList[chanIndex].syncExecuteFun) >= MAX_EXECUTE_FUN {
+		return fmt.Errorf("chan is full,sql:%s", query)
+	}
+
+	slf.executeList[chanIndex].syncExecuteFun <- func() {
+		rsp, err := slf.QueryEx(query, args...)
+		call(rsp, err)
+		return
+	}
+
+	return nil
+}
+
 // Exec ...
 func (slf *DBModule) Exec(query string, args ...interface{}) (*DBResultEx, error) {
 	ret := &DBResultEx{}
 	if slf.db == nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
+		log.Error("cannot connect database:%s", query)
 		return ret, fmt.Errorf("cannot connect database!")
 	}
 
 	if slf.CheckArgs(args) != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "CheckArgs is error :%s", query)
+		log.Error("CheckArgs is error :%s", query)
 		//return ret, fmt.Errorf("cannot connect database!")
 		return ret, fmt.Errorf("CheckArgs is error!")
 	}
@@ -534,10 +614,10 @@ func (slf *DBModule) Exec(query string, args ...interface{}) (*DBResultEx, error
 	res, err := slf.db.Exec(query, args...)
 	TimeFuncPass := time.Since(TimeFuncStart)
 	if slf.IsPrintTimeLog(TimeFuncPass) {
-		service.GetLogger().Printf(service.LEVER_INFO, "DBModule QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
+		log.Error("DBModule QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
 	}
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "Exec:%s(%v)", query, err)
+		log.Error("Exec:%s(%v)", query, err)
 		return nil, err
 	}
 
@@ -548,18 +628,23 @@ func (slf *DBModule) Exec(query string, args ...interface{}) (*DBResultEx, error
 }
 
 // SyncExec ...
-func (slf *DBModule) SyncExec(query string, args ...interface{}) *SyncExecuteDBResult {
+func (slf *DBModule) SyncExec(queryHas int, query string, args ...interface{}) *SyncExecuteDBResult {
 	ret := &SyncExecuteDBResult{
 		sres: make(chan *DBResultEx, 1),
 		err:  make(chan error, 1),
 	}
 
-	if len(slf.syncExecuteFun) >= MAX_EXECUTE_FUN {
+	chanIndex := queryHas % len(slf.executeList)
+	if chanIndex < 0 {
+		chanIndex = rand.Intn(len(slf.executeList))
+	}
+
+	if len(slf.executeList[chanIndex].syncExecuteFun) >= MAX_EXECUTE_FUN {
 		ret.err <- fmt.Errorf("chan is full,sql:%s", query)
 		return ret
 	}
 
-	slf.syncExecuteFun <- func() {
+	slf.executeList[chanIndex].syncExecuteFun <- func() {
 		rsp, err := slf.Exec(query, args...)
 		if err != nil {
 			ret.err <- err
@@ -573,19 +658,41 @@ func (slf *DBModule) SyncExec(query string, args ...interface{}) *SyncExecuteDBR
 	return ret
 }
 
-func (slf *DBModule) RunExecuteDBCoroutine() {
-	slf.WaitGroup.Add(1)
-	defer slf.WaitGroup.Done()
+func (slf *DBModule) AsyncExec(call SyncDBResultExCallBack, queryHas int, query string, args ...interface{}) error {
+	chanIndex := queryHas % len(slf.executeList)
+	if chanIndex < 0 {
+		chanIndex = rand.Intn(len(slf.executeList))
+	}
+
+	if len(slf.executeList[chanIndex].syncExecuteFun) >= MAX_EXECUTE_FUN {
+		return fmt.Errorf("chan is full,sql:%s", query)
+	}
+
+	slf.executeList[chanIndex].syncExecuteFun <- func() {
+		rsp, err := slf.Exec(query, args...)
+
+		data := DataSetList{tag:"json", blur:true, dataSetList:[]DBResultEx{}}
+		data.dataSetList = append(data.dataSetList, *rsp)
+		call(&data, err)
+
+		return
+	}
+
+	return nil
+}
+
+func (slf *DBModule) RunExecuteDBCoroutine(has int) {
+	slf.waitGroup.Add(1)
+	defer slf.waitGroup.Done()
 	for {
 		select {
-		case <-slf.ExitChan:
-			service.GetLogger().Printf(LEVER_WARN, "stopping module %s...", fmt.Sprintf("%T", slf))
+		case <-slf.executeList[has].syncExecuteExit:
+			log.Error("stopping module %s...", fmt.Sprintf("%T", slf))
 			return
-		case fun := <-slf.syncExecuteFun:
+		case fun := <-slf.executeList[has].syncExecuteFun:
 			fun()
 		}
 	}
-
 }
 
 func (slf *DataSetList) UnMarshal(args ...interface{}) error {
@@ -740,7 +847,7 @@ func (slf *DBModule) Begin() (*Tx, error) {
 	var txDBMoudule Tx
 	txdb, err := slf.db.Begin()
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "Begin error:%s", err.Error())
+		log.Error("Begin error:%s", err.Error())
 		return &txDBMoudule, err
 	}
 	txDBMoudule.tx = txdb
@@ -805,21 +912,21 @@ func (slf *Tx) CheckArgs(args ...interface{}) error {
 func (slf *Tx) Query(query string, args ...interface{}) DBResult {
 	if slf.CheckArgs(args) != nil {
 		ret := DBResult{}
-		service.GetLogger().Printf(service.LEVER_ERROR, "CheckArgs is error :%s", query)
+		log.Error("CheckArgs is error :%s", query)
 		ret.Err = fmt.Errorf("CheckArgs is error!")
 		return ret
 	}
 
 	if slf.tx == nil {
 		ret := DBResult{}
-		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
+		log.Error("cannot connect database:%s", query)
 		ret.Err = fmt.Errorf("cannot connect database!")
 		return ret
 	}
 
 	rows, err := slf.tx.Query(query, args...)
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "Tx Query:%s(%v)", query, err)
+		log.Error("Tx Query:%s(%v)", query, err)
 	}
 
 	return DBResult{
@@ -845,12 +952,12 @@ func (slf *Tx) QueryEx(query string, args ...interface{}) (*DataSetList, error) 
 	datasetList.blur = true
 
 	if slf.CheckArgs(args) != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "CheckArgs is error :%s", query)
+		log.Error("CheckArgs is error :%s", query)
 		return &datasetList, fmt.Errorf("CheckArgs is error!")
 	}
 
 	if slf.tx == nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
+		log.Error("cannot connect database:%s", query)
 		return &datasetList, fmt.Errorf("cannot connect database!")
 	}
 
@@ -859,10 +966,10 @@ func (slf *Tx) QueryEx(query string, args ...interface{}) (*DataSetList, error) 
 	TimeFuncPass := time.Since(TimeFuncStart)
 
 	if slf.IsPrintTimeLog(TimeFuncPass) {
-		service.GetLogger().Printf(service.LEVER_INFO, "Tx QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
+		log.Error("Tx QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
 	}
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "Tx Query:%s(%v)", query, err)
+		log.Error("Tx Query:%s(%v)", query, err)
 		if rows != nil {
 			rows.Close()
 		}
@@ -903,7 +1010,7 @@ func (slf *Tx) QueryEx(query string, args ...interface{}) (*DataSetList, error) 
 
 		if hasRet == false {
 			if rows.Err() != nil {
-				service.GetLogger().Printf(service.LEVER_ERROR, "Tx Query:%s(%+v)", query, rows)
+				log.Error("Tx Query:%s(%+v)", query, rows)
 			}
 			break
 		}
@@ -916,12 +1023,12 @@ func (slf *Tx) QueryEx(query string, args ...interface{}) (*DataSetList, error) 
 func (slf *Tx) Exec(query string, args ...interface{}) (*DBResultEx, error) {
 	ret := &DBResultEx{}
 	if slf.tx == nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "cannot connect database:%s", query)
+		log.Error("cannot connect database:%s", query)
 		return ret, fmt.Errorf("cannot connect database!")
 	}
 
 	if slf.CheckArgs(args) != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "CheckArgs is error :%s", query)
+		log.Error("CheckArgs is error :%s", query)
 		//return ret, fmt.Errorf("cannot connect database!")
 		return ret, fmt.Errorf("CheckArgs is error!")
 	}
@@ -930,10 +1037,10 @@ func (slf *Tx) Exec(query string, args ...interface{}) (*DBResultEx, error) {
 	res, err := slf.tx.Exec(query, args...)
 	TimeFuncPass := time.Since(TimeFuncStart)
 	if slf.IsPrintTimeLog(TimeFuncPass) {
-		service.GetLogger().Printf(service.LEVER_INFO, "Tx QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
+		log.Error("Tx QueryEx Time %s , Query :%s , args :%+v", TimeFuncPass, query, args)
 	}
 	if err != nil {
-		service.GetLogger().Printf(service.LEVER_ERROR, "Tx Exec:%s(%v)", query, err)
+		log.Error("Tx Exec:%s(%v)", query, err)
 		return nil, err
 	}
 

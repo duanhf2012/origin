@@ -1,0 +1,23 @@
+{
+    "NodeList":[
+        {
+          "NodeId": 1,
+          "ListenAddr":"127.0.0.1:8001",
+          "NodeName": "Node_Test1",
+		  "remark":"//以_打头的，表示只在本机进程，不对整个子网开发",
+          "ServiceList": ["TestService1","TestService2","TestServiceCall"]
+        },
+        {
+          "NodeId": 2,
+          "ListenAddr":"127.0.0.1:8002",
+          "NodeName": "Node_Gate2",
+          "ServiceList": ["SubNet1_Service"]
+        },
+        {
+          "NodeId": 3,
+          "ListenAddr":"127.0.0.1:8003",
+          "NodeName": "Node_Room",
+          "ServiceList": ["SubNet1_Service"]
+        }
+    ]
+}

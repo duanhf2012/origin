@@ -2,361 +2,191 @@ package service
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/util"
-	"github.com/duanhf2012/origin/util/uuid"
-	"runtime/debug"
-	"sync"
-	"sync/atomic"
+	"github.com/duanhf2012/originnet/event"
+	"github.com/duanhf2012/originnet/util/timer"
+	"time"
 )
 
-const (
-	//ModuleNone ...
-	INIT_AUTO_INCREMENT = 0
-)
+const InitModuleId = 1e18
+
 
 type IModule interface {
-	OnInit() error //Module初始化时调用
-	OnRun() bool   //Module运行时调用
-	OnEndRun()
-	SetModuleId(moduleId uint32)           //手动设置ModuleId
-	GetModuleId() uint32                   //获取ModuleId
-	GetModuleById(moduleId uint32) IModule //通过ModuleId获取Module
-	AddModule(module IModule) uint32       //添加Module
-	ReleaseModule(moduleId uint32) bool    //释放Module
-
-	SetSelf(module IModule)            //设置保存自己interface
-	GetSelf() IModule                  //获取自己interface
-	SetOwner(module IModule)           //设置父Module
-	GetOwner() IModule                 //获取父Module
-	SetOwnerService(iservice IService) //设置拥有者服务
-	GetOwnerService() IService         //获取拥有者服务
-	GetRoot() IModule                  //获取Root根Module
-
-	RunModule(module IModule)                                    //手动运行Module
-	InitModule(exit chan bool, pwaitGroup *sync.WaitGroup) error //手动初始化Module
-	getBaseModule() *BaseModule                                  //获取BaseModule指针
-	IsInit() bool
-	SetUnOnRun()
-	getUnOnRun() bool
+	SetModuleId(moduleId int64) bool
+	GetModuleId() int64
+	AddModule(module IModule) (int64,error)
+	GetModule(moduleId int64) IModule
+	GetAncestor()IModule
+	ReleaseModule(moduleId int64)
+	NewModuleId() int64
+	GetParent()IModule
+	OnInit() error
+	OnRelease()
+	getBaseModule() IModule
+	GetService() IService
+	GetEventChan() chan *event.Event
 }
 
-type BaseModule struct {
-	moduleId uint32
 
-	ownerService IService
-	mapModule    map[uint32]IModule
-	ownerModule  IModule
-	selfModule   IModule
 
-	CurrMaxModuleId uint32
-	corouterstatus  int32 //0表示运行状态 //1释放消亡状态
+//1.管理各模块树层关系
+//2.提供定时器常用工具
+type Module struct {
+	moduleId int64
+	parent IModule        //父亲
+	self IModule        //父亲
+	child map[int64]IModule //孩子们
+	mapActiveTimer map[*timer.Timer]interface{}
+	mapActiveCron map[*timer.Cron]interface{}
 
-	moduleLocker sync.RWMutex
-	ExitChan     chan bool
-	WaitGroup    *sync.WaitGroup
-	bInit        bool
+	dispatcher         *timer.Dispatcher //timer
 
-	recoverCount int8
-	bUnOnRun     bool
+	//根结点
+	ancestor IModule      //始祖
+	seedModuleId int64    //模块id种子
+	descendants map[int64]IModule//始祖的后裔们
+
+	//事件管道
+	event.EventProcessor
+	//eventChan chan *SEvent
 }
 
-func (slf *BaseModule) GetRoot() IModule {
-	currentOwner := slf.GetSelf()
-	for {
-		owner := currentOwner.GetOwner()
-		if owner == currentOwner {
-			return owner
-		}
-		currentOwner = owner
-	}
-}
 
-func (slf *BaseModule) SetModuleId(moduleId uint32) {
-	slf.moduleId = moduleId
-}
-
-func (slf *BaseModule) GetModuleId() uint32 {
-	return slf.moduleId
-}
-
-func (slf *BaseModule) GetModuleById(moduleId uint32) IModule {
-	slf.moduleLocker.RLock()
-	ret, ok := slf.mapModule[moduleId]
-	slf.moduleLocker.RUnlock()
-	if ok == false {
-		return nil
-	}
-
-	return ret
-}
-
-func (slf *BaseModule) GetModuleCount() int {
-	slf.moduleLocker.RLock()
-	moduleCount := len(slf.mapModule)
-	slf.moduleLocker.RUnlock()
-	return moduleCount
-}
-
-func (slf *BaseModule) genModuleId() uint32 {
-	slf.CurrMaxModuleId++
-
-	return slf.CurrMaxModuleId
-}
-
-func (slf *BaseModule) deleteModule(baseModule *BaseModule) bool {
-	for _, subModule := range baseModule.mapModule {
-		baseModule.deleteModule(subModule.getBaseModule())
-	}
-
-	atomic.AddInt32(&baseModule.corouterstatus, 1)
-	//fmt.Printf("Delete %T->%T\n", slf.GetSelf(), baseModule.GetSelf())
-	baseModule.ownerService = nil
-	baseModule.mapModule = nil
-	baseModule.ownerModule = nil
-	baseModule.selfModule = nil
-
-	delete(slf.mapModule, baseModule.GetModuleId())
-	baseModule.moduleLocker.Unlock()
-
-	return true
-}
-
-func (slf *BaseModule) LockTree(rootModule *BaseModule) {
-	rootModule.moduleLocker.Lock()
-	//fmt.Printf("Lock %T\n", rootModule.GetSelf())
-
-	for _, pModule := range rootModule.mapModule {
-		slf.LockTree(pModule.getBaseModule())
-		//pModule.getBaseModule().moduleLocker.Lock()
-	}
-}
-
-func (slf *BaseModule) UnLockTree(rootModule *BaseModule) {
-	for _, pModule := range rootModule.mapModule {
-		pModule.getBaseModule().moduleLocker.Unlock()
-	}
-	rootModule.moduleLocker.Unlock()
-}
-
-func (slf *BaseModule) ReleaseModule(moduleId uint32) bool {
-	slf.moduleLocker.Lock()
-
-	module, ok := slf.mapModule[moduleId]
-	if ok == false {
-		slf.moduleLocker.Unlock()
-		GetLogger().Printf(LEVER_FATAL, "RemoveModule fail %d...", moduleId)
+func (slf *Module) SetModuleId(moduleId int64) bool{
+	if moduleId > 0 {
 		return false
 	}
 
-	//锁住被结点树
-	slf.LockTree(module.getBaseModule())
-	slf.deleteModule(module.getBaseModule())
-
-	delete(slf.mapModule, moduleId)
-
-	//fmt.Printf("++Release %T  -- %+v\n", slf.GetSelf(), slf.mapModule)
-	slf.moduleLocker.Unlock()
+	slf.moduleId = moduleId
 	return true
 }
 
-func (slf *BaseModule) IsRoot() bool {
-	return slf.GetOwner() == slf.GetSelf()
+func (slf *Module) GetModuleId() int64{
+	return slf.moduleId
 }
 
-func (slf *BaseModule) GetSelf() IModule {
-	if slf.selfModule == nil {
-		return slf
-	}
-
-	return slf.selfModule
+func (slf *Module) OnInit() error{
+ 	return nil
 }
 
-func (slf *BaseModule) SetUnOnRun() {
-	slf.bUnOnRun = true
-}
-
-func (slf *BaseModule) getUnOnRun() bool {
-	return slf.bUnOnRun
-}
-
-func (slf *BaseModule) AddModule(module IModule) uint32 {
-	//消亡状态不允许加入模块
-	if atomic.LoadInt32(&slf.corouterstatus) != 0 {
-		GetLogger().Printf(LEVER_ERROR, "%T Cannot AddModule %T", slf.GetSelf(), module.GetSelf())
-		return 0
+func (slf *Module) AddModule(module IModule) (int64,error){
+	pAddModule := module.getBaseModule().(*Module)
+	if pAddModule.GetModuleId()==0 {
+		pAddModule.moduleId = slf.NewModuleId()
 	}
 
-	pModule := slf.GetModuleById(module.GetModuleId())
-	if pModule != nil {
-		GetLogger().Printf(LEVER_ERROR, "%T Cannot AddModule %T,moduleid %d is  repeat!", slf.GetSelf(), module.GetSelf(), module.GetModuleId())
-		return 0
+	if slf.child == nil {
+		slf.child = map[int64]IModule{}
 	}
-
-	//如果没有设置，自动生成ModuleId
-	slf.moduleLocker.Lock()
-	var genid uint32
-	if module.GetModuleId() == 0 {
-		genid = slf.genModuleId()
-		module.SetModuleId(genid)
-	}
-
-	module.getBaseModule().selfModule = module
-	if slf.GetOwner() != nil {
-		if slf.IsRoot() {
-			//root owner为自己
-			module.SetOwner(slf.GetOwner())
-		} else {
-			module.SetOwner(slf.GetSelf())
-		}
-	}
-
-	//设置模块退出信号捕获
-	module.InitModule(slf.ExitChan, slf.WaitGroup)
-
-	//存入父模块中
-	if slf.mapModule == nil {
-		slf.mapModule = make(map[uint32]IModule)
-	}
-	_, ok := slf.mapModule[module.GetModuleId()]
+	_,ok := slf.child[module.GetModuleId()]
 	if ok == true {
-		slf.moduleLocker.Unlock()
-		GetLogger().Printf(LEVER_ERROR, "check  mapModule %#v id is %d ,%d is fail...", module, module.GetModuleId(), genid)
-		return 0
+		return 0,fmt.Errorf("Exists module id %d",module.GetModuleId())
 	}
 
-	slf.mapModule[module.GetModuleId()] = module
+	pAddModule.self = module
+	pAddModule.parent = slf.self
+	pAddModule.dispatcher = slf.GetAncestor().getBaseModule().(*Module).dispatcher
+	pAddModule.ancestor = slf.ancestor
 
-	slf.moduleLocker.Unlock()
-
-	//运行模块
-	GetLogger().Printf(LEVER_INFO, "Start Init module %T.", module)
 	err := module.OnInit()
 	if err != nil {
-		delete(slf.mapModule, module.GetModuleId())
-		GetLogger().Printf(LEVER_ERROR, "End Init module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), err)
-		return 0
-	}
-	initErr := module.getBaseModule().OnInit()
-	if initErr != nil {
-		delete(slf.mapModule, module.GetModuleId())
-		GetLogger().Printf(LEVER_ERROR, "OnInit module %T id is %d is fail,reason:%v...", module, module.GetModuleId(), initErr)
-		return 0
+		return 0,err
 	}
 
-	GetLogger().Printf(LEVER_INFO, "End Init module %T.", module)
-	if module.getUnOnRun() == false {
-		go module.RunModule(module)
+	slf.child[module.GetModuleId()] = module
+	slf.ancestor.getBaseModule().(*Module).descendants[module.GetModuleId()] = module
+
+	return module.GetModuleId(),nil
+}
+
+func (slf *Module) ReleaseModule(moduleId int64){
+	//pBaseModule :=  slf.GetModule(moduleId).getBaseModule().(*Module)
+	pModule := slf.GetModule(moduleId).getBaseModule().(*Module)
+
+	//释放子孙
+	for id,_ := range pModule.child {
+		slf.ReleaseModule(id)
+	}
+	pModule.self.OnRelease()
+	for pTimer,_ := range pModule.mapActiveTimer {
+		pTimer.Stop()
 	}
 
-	return module.GetModuleId()
-}
-
-func (slf *BaseModule) OnInit() error {
-	slf.bInit = true
-	return nil
-}
-
-func (slf *BaseModule) OnRun() bool {
-	return false
-}
-
-func (slf *BaseModule) OnEndRun() {
-}
-
-func (slf *BaseModule) SetOwner(ownerModule IModule) {
-	slf.ownerModule = ownerModule
-}
-
-func (slf *BaseModule) SetSelf(module IModule) {
-	slf.selfModule = module
-}
-
-func (slf *BaseModule) GetOwner() IModule {
-
-	if slf.ownerModule == nil {
-		return slf
+	for pCron,_ := range pModule.mapActiveCron {
+		pCron.Stop()
 	}
-	return slf.ownerModule
+
+	delete(slf.child,moduleId)
+	delete (slf.ancestor.getBaseModule().(*Module).descendants,moduleId)
+
+	//清理被删除的Module
+	pModule.self = nil
+	pModule.parent = nil
+	pModule.child = nil
+	pModule.mapActiveTimer = nil
+	pModule.mapActiveCron = nil
+	pModule.dispatcher = nil
+	pModule.ancestor = nil
+	pModule.descendants = nil
 }
 
-func (slf *BaseModule) GetOwnerService() IService {
-	return slf.ownerService
+func (slf *Module) NewModuleId() int64{
+	slf.ancestor.getBaseModule().(*Module).seedModuleId+=1
+	return slf.ancestor.getBaseModule().(*Module).seedModuleId
 }
 
-func (slf *BaseModule) SetOwnerService(iservice IService) {
-	slf.ownerService = iservice
+func (slf *Module) GetAncestor()IModule{
+	return slf.ancestor
 }
 
-func (slf *BaseModule) InitModule(exit chan bool, pwaitGroup *sync.WaitGroup) error {
-	slf.CurrMaxModuleId = INIT_AUTO_INCREMENT
-	slf.WaitGroup = pwaitGroup
-	slf.ExitChan = exit
-	return nil
+func (slf *Module) GetModule(moduleId int64) IModule{
+	iModule,ok := slf.GetAncestor().getBaseModule().(*Module).descendants[moduleId]
+	if ok == false{
+		return nil
+	}
+	return iModule
 }
 
-func (slf *BaseModule) getBaseModule() *BaseModule {
+func (slf *Module) getBaseModule() IModule{
 	return slf
 }
 
-func (slf *BaseModule) IsInit() bool {
-	return slf.bInit
+
+func (slf *Module) GetParent()IModule{
+	return slf.parent
 }
 
-func (slf *BaseModule) RunModule(module IModule) {
-	GetLogger().Printf(LEVER_INFO, "Start Run module %T ...", module)
-
-	defer func() {
-		if r := recover(); r != nil {
-			var coreInfo string
-			coreInfo = string(debug.Stack())
-
-			coreInfo += "\n" + fmt.Sprintf("Core module is %T, try count %d. core information is %v\n", module, slf.recoverCount, r)
-			GetLogger().Printf(LEVER_FATAL, coreInfo)
-			slf.recoverCount += 1
-
-			//重试3次
-			if slf.recoverCount < 10 {
-				go slf.RunModule(slf.GetSelf())
-			} else {
-				GetLogger().Printf(LEVER_FATAL, "Routine %T.OnRun has exited!", module)
-			}
-		}
-	}()
-
-	//运行所有子模块
-	timer := util.Timer{}
-	timer.SetupTimer(1000)
-	slf.WaitGroup.Add(1)
-	defer slf.WaitGroup.Done()
-
-	uuidkey := uuid.Rand().HexEx()
-	moduleTypeName := fmt.Sprintf("%T",module)
-	for {
-		if atomic.LoadInt32(&slf.corouterstatus) != 0 {
-			module.OnEndRun()
-			GetLogger().Printf(LEVER_INFO, "OnEndRun module %T ...", module)
-			break
-		}
-
-		//每500ms检查退出
-		if timer.CheckTimeOut() {
-			select {
-			case <-slf.ExitChan:
-				module.OnEndRun()
-				GetLogger().Printf(LEVER_INFO, "OnEndRun module %T...", module)
-				return
-			default:
-			}
-		}
-
-		MonitorEnter(uuidkey,moduleTypeName)
-		if module.OnRun() == false {
-			module.OnEndRun()
-			MonitorLeave(uuidkey)
-			GetLogger().Printf(LEVER_INFO, "OnEndRun module %T...", module)
-			return
-		}
-
-		MonitorLeave(uuidkey)
+func (slf *Module) AfterFunc(d time.Duration, cb func()) *timer.Timer {
+	if slf.mapActiveTimer == nil {
+		slf.mapActiveTimer =map[*timer.Timer]interface{}{}
 	}
+
+	 tm := slf.dispatcher.AfterFuncEx(d,func(t *timer.Timer){
+		cb()
+		delete(slf.mapActiveTimer,t)
+	 })
+
+	 slf.mapActiveTimer[tm] = nil
+	 return tm
 }
+
+func (slf *Module) CronFunc(cronExpr *timer.CronExpr, cb func()) *timer.Cron {
+	if slf.mapActiveCron == nil {
+		slf.mapActiveCron =map[*timer.Cron]interface{}{}
+	}
+
+	cron := slf.dispatcher.CronFuncEx(cronExpr, func(cron *timer.Cron) {
+		cb()
+		delete(slf.mapActiveCron,cron)
+	})
+
+	slf.mapActiveCron[cron] = nil
+	return cron
+}
+
+func (slf *Module) OnRelease(){
+}
+
+func (slf *Module) GetService() IService {
+	return slf.GetAncestor().(IService)
+}
+

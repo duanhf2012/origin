@@ -1,0 +1,13 @@
+{
+  "HttpService":{
+	"Port":10001
+  },
+  "TcpService":{
+	"ListenAddr":"0.0.0.0:9030",
+	"MaxConnNum":3000,
+	"PendingWriteNum":10000,
+	"LittleEndian":false,
+	"MinMsgLen":4,
+	"MaxMsgLen":65535
+  }
+}

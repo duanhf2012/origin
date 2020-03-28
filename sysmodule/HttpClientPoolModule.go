@@ -10,11 +10,11 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/originnet/service"
 )
 
 type HttpClientPoolModule struct {
-	service.BaseModule
+	service.Module
 	client *http.Client
 }
 

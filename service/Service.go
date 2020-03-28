@@ -1,85 +1,126 @@
 package service
 
 import (
-	"fmt"
-
+	"github.com/duanhf2012/originnet/rpc"
+	"github.com/duanhf2012/originnet/util/timer"
 	"reflect"
-	"strings"
+	"sync"
+	"sync/atomic"
 )
 
-type MethodInfo struct {
-	Fun       reflect.Value
-	ParamList []reflect.Value
-	types     reflect.Type
-}
+
+var closeSig chan bool
+var timerDispatcherLen = 10
 
 type IService interface {
-	Init(Iservice IService) error
+	Init(iservice IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})
+	GetName() string
+
 	OnInit() error
-	OnRun() bool
-	OnFetchService(iservice IService) error
-	OnSetupService(iservice IService)  //其他服务被安装
-	OnRemoveService(iservice IService) //其他服务被安装
-
-	GetServiceName() string
-	SetServiceName(serviceName string) bool
-	GetServiceId() int
-
-	GetStatus() int
-	IsInit() bool
+	OnRelease()
+	Wait()
+	Start()
+	GetRpcHandler() rpc.IRpcHandler
+	GetServiceCfg()interface{}
 }
 
-type BaseService struct {
-	BaseModule
 
-	serviceid   int
-	servicename string
-	Status      int
+
+type Service struct {
+	Module
+	rpc.RpcHandler   //rpc
+	name string    //service name
+	closeSig chan bool
+	wg      sync.WaitGroup
+	this    IService
+	serviceCfg interface{}
+	gorouterNum int32
+	startStatus bool
 }
 
-func (slf *BaseService) GetServiceId() int {
-	return slf.serviceid
+func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
+	slf.name = reflect.Indirect(reflect.ValueOf(iservice)).Type().Name()
+	slf.dispatcher =timer.NewDispatcher(timerDispatcherLen)
+	slf.this = iservice
+	slf.InitRpcHandler(iservice.(rpc.IRpcHandler),getClientFun,getServerFun)
+
+	//初始化祖先
+	slf.ancestor = iservice.(IModule)
+	slf.seedModuleId =InitModuleId
+	slf.descendants = map[int64]IModule{}
+	slf.serviceCfg = serviceCfg
+	slf.gorouterNum = 1
+	slf.this.OnInit()
 }
 
-func (slf *BaseService) GetServiceName() string {
-	return slf.servicename
-}
+func (slf *Service) SetGoRouterNum(gorouterNum int32) bool {
+	//已经开始状态不允许修改协程数量
+	if slf.startStatus == true {
+		return false
+	}
 
-func (slf *BaseService) SetServiceName(serviceName string) bool {
-	slf.servicename = serviceName
+	slf.gorouterNum = gorouterNum
 	return true
 }
 
-func (slf *BaseService) GetStatus() int {
-	return slf.Status
+func (slf *Service) Start() {
+	slf.startStatus = true
+	for i:=int32(0);i<slf.gorouterNum;i++{
+		slf.wg.Add(1)
+		go func(){
+			slf.Run()
+		}()
+	}
 }
 
-func (slf *BaseService) OnFetchService(iservice IService) error {
-	return nil
-}
-
-func (slf *BaseService) OnSetupService(iservice IService) {
-}
-
-func (slf *BaseService) OnRemoveService(iservice IService) {
-}
-
-func (slf *BaseService) Init(iservice IService) error {
-	slf.ownerService = iservice
-
-	if iservice.GetServiceName() == "" {
-		slf.servicename = fmt.Sprintf("%T", iservice)
-		parts := strings.Split(slf.servicename, ".")
-		if len(parts) != 2 {
-			GetLogger().Printf(LEVER_ERROR, "BaseService.Init: service name is error: %q", slf.servicename)
-			err := fmt.Errorf("BaseService.Init: service name is error: %q", slf.servicename)
-			return err
+func (slf *Service) Run() {
+	defer slf.wg.Done()
+	var bStop = false
+	for{
+		rpcRequestChan := slf.GetRpcRequestChan()
+		rpcResponeCallBack := slf.GetRpcResponeChan()
+		eventChan := slf.GetEventChan()
+		select {
+		case <- closeSig:
+			bStop = true
+		case rpcRequest :=<- rpcRequestChan:
+			slf.GetRpcHandler().HandlerRpcRequest(rpcRequest)
+		case rpcResponeCB := <- rpcResponeCallBack:
+				slf.GetRpcHandler().HandlerRpcResponeCB(rpcResponeCB)
+		case event := <- eventChan:
+				slf.OnEventHandler(event)
+		case t := <- slf.dispatcher.ChanTimer:
+			t.Cb()
 		}
 
-		slf.servicename = parts[1]
+		if bStop == true {
+			if atomic.AddInt32(&slf.gorouterNum,-1)<=0 {
+				slf.startStatus = false
+				slf.OnRelease()
+			}
+			break
+		}
 	}
 
-	slf.serviceid = InstanceServiceMgr().GenServiceID()
+}
 
+func (slf *Service) GetName() string{
+	return slf.name
+}
+
+
+func (slf *Service) OnRelease(){
+}
+
+func (slf *Service) OnInit() error {
 	return nil
+}
+
+
+func (slf *Service) Wait(){
+	slf.wg.Wait()
+}
+
+func (slf *Service) GetServiceCfg()interface{}{
+	return slf.serviceCfg
 }
