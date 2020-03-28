@@ -71,13 +71,14 @@ func (slf *PBProcessor ) Unmarshal(data []byte) (interface{}, error) {
 
 // must goroutine safe
 func (slf *PBProcessor ) Marshal(msg interface{}) ([]byte, error){
-	bytes,err := proto.Marshal(msg.(proto.Message))
+	pMsg := msg.(*PBPackInfo)
+
+	bytes,err := proto.Marshal(pMsg.msg.(proto.Message))
 	if err != nil {
 		return nil,err
 	}
 
-	buff := make([]byte, 0, len(bytes)+MsgTypeSize)
-	pMsg := msg.(*PBPackInfo)
+	buff := make([]byte, 2, len(bytes)+MsgTypeSize)
 	if slf.LittleEndian == true {
 		binary.LittleEndian.PutUint16(buff[:2],pMsg.typ)
 	}else{

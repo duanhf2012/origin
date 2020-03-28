@@ -89,6 +89,7 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 			msgLen = binary.BigEndian.Uint32(bufMsgLen)
 		}
 	}
+	msgLen -= 2
 
 	// check len
 	if msgLen > p.maxMsgLen {
@@ -121,6 +122,7 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 		return errors.New("message too short")
 	}
 
+	//msgLen -= 2
 	msg := make([]byte, uint32(p.lenMsgLen)+msgLen)
 
 	// write len
@@ -131,7 +133,7 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 		if p.littleEndian {
 			binary.LittleEndian.PutUint16(msg, uint16(msgLen))
 		} else {
-			binary.BigEndian.PutUint16(msg, uint16(msgLen))
+			binary.BigEndian.PutUint16(msg, uint16(msgLen)+uint16(p.lenMsgLen))
 		}
 	case 4:
 		if p.littleEndian {

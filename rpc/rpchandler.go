@@ -40,6 +40,16 @@ type IRpcHandler interface {
 	GetRpcRequestChan() chan *RpcRequest
 	GetRpcResponeChan() chan *Call
 	CallMethod(ServiceMethod string,param interface{},reply interface{}) error
+	
+	AsyncCall(serviceMethod string,args interface{},callback interface{}) error
+	GRAsyncCall(serviceMethod string,args interface{},callback interface{}) error
+	Call(serviceMethod string,args interface{},reply interface{}) error
+	GRCall(serviceMethod string,args interface{},reply interface{}) error
+	Go(serviceMethod string,args interface{}) error
+	GRGo(serviceMethod string,args interface{}) error
+	AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error
+	CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error
+	GoNode(nodeId int,serviceMethod string,args interface{}) error
 }
 
 func (slf *RpcHandler) GetRpcHandler() IRpcHandler{

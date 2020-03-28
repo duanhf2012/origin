@@ -86,7 +86,7 @@ func (slf *TcpService) NewClient(conn *network.TCPConn) network.Agent {
 			continue
 		}
 
-		pClient := &Client{tcpConn:conn}
+		pClient := &Client{tcpConn:conn, id:slf.initClientId}
 		pClient.tcpService = slf
 		slf.mapClient[slf.initClientId] = pClient
 		return pClient

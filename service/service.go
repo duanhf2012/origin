@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
 	"reflect"
@@ -94,8 +95,8 @@ func (slf *Service) Run() {
 			slf.GetRpcHandler().HandlerRpcRequest(rpcRequest)
 		case rpcResponeCB := <- rpcResponeCallBack:
 				slf.GetRpcHandler().HandlerRpcResponeCB(rpcResponeCB)
-		case event := <- eventChan:
-				slf.OnEventHandler(event)
+		case ev := <- eventChan:
+				slf.this.(event.IEventProcessor).OnEventHandler(ev)
 		case t := <- slf.dispatcher.ChanTimer:
 			t.Cb()
 		}
