@@ -19,6 +19,11 @@ type PBProcessor struct {
 	LittleEndian bool
 }
 
+func NewPBProcessor() *PBProcessor {
+	processor := &PBProcessor{mapMsg:map[uint16]MessageInfo{}}
+	return processor
+}
+
 func (slf *PBProcessor) SetLittleEndian(littleEndian bool){
 	slf.LittleEndian = littleEndian
 }
