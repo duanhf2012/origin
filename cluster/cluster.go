@@ -2,9 +2,9 @@ package cluster
 
 import (
 	"fmt"
-	"github.com/duanhf2012/originnet/log"
-	"github.com/duanhf2012/originnet/rpc"
-	"github.com/duanhf2012/originnet/service"
+	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/rpc"
+	"github.com/duanhf2012/origin/service"
 	"strings"
 )
 

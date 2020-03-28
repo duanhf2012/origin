@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/duanhf2012/originnet/log"
+	"github.com/duanhf2012/origin/log"
 	"time"
 
-	"github.com/duanhf2012/originnet/service"
+	"github.com/duanhf2012/origin/service"
 	"github.com/gomodule/redigo/redis"
 )
 

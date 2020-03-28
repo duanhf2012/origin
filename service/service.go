@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/duanhf2012/originnet/rpc"
-	"github.com/duanhf2012/originnet/util/timer"
+	"github.com/duanhf2012/origin/rpc"
+	"github.com/duanhf2012/origin/util/timer"
 	"reflect"
 	"sync"
 	"sync/atomic"

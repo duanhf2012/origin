@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/duanhf2012/originnet/log"
+	"github.com/duanhf2012/origin/log"
 	"math/rand"
 	"net/url"
 	"reflect"
@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/duanhf2012/originnet/service"
+	"github.com/duanhf2012/origin/service"
 	_ "github.com/go-sql-driver/mysql"
 )
 

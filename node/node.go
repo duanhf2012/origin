@@ -2,8 +2,8 @@ package node
 
 import (
 	"fmt"
-	"github.com/duanhf2012/originnet/service"
-	"github.com/duanhf2012/originnet/cluster"
+	"github.com/duanhf2012/origin/cluster"
+	"github.com/duanhf2012/origin/service"
 	"io/ioutil"
 	"os"
 	"os/signal"

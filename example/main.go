@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/duanhf2012/originnet/example/GateService"
-	"github.com/duanhf2012/originnet/node"
-	"github.com/duanhf2012/originnet/service"
-	"github.com/duanhf2012/originnet/sysmodule"
-	"github.com/duanhf2012/originnet/sysservice"
+	"github.com/duanhf2012/origin/example/GateService"
+	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysmodule"
+	"github.com/duanhf2012/origin/sysservice"
 	"time"
 )
 

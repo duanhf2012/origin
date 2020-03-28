@@ -1,7 +1,7 @@
 package event
 
 import (
-	"github.com/duanhf2012/originnet/log"
+	"github.com/duanhf2012/origin/log"
 	"sync"
 )
 

@@ -2,8 +2,8 @@ package service
 
 import (
 	"fmt"
-	"github.com/duanhf2012/originnet/event"
-	"github.com/duanhf2012/originnet/util/timer"
+	"github.com/duanhf2012/origin/event"
+	"github.com/duanhf2012/origin/util/timer"
 	"time"
 )
 

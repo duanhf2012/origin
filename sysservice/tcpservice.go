@@ -2,10 +2,10 @@ package sysservice
 
 import (
 	"fmt"
-	"github.com/duanhf2012/originnet/event"
-	"github.com/duanhf2012/originnet/log"
-	"github.com/duanhf2012/originnet/network"
-	"github.com/duanhf2012/originnet/service"
+	"github.com/duanhf2012/origin/event"
+	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/network"
+	"github.com/duanhf2012/origin/service"
 	"sync"
 )
 

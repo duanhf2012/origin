@@ -1,10 +1,10 @@
 package GateService
 
 import (
-	"github.com/duanhf2012/originnet/event"
-	"github.com/duanhf2012/originnet/node"
-	"github.com/duanhf2012/originnet/service"
-	"github.com/duanhf2012/originnet/sysservice"
+	"github.com/duanhf2012/origin/event"
+	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysservice"
 )
 
 type GateService struct {

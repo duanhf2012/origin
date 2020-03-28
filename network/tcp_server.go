@@ -1,7 +1,7 @@
 package network
 
 import (
-	"github.com/duanhf2012/originnet/log"
+	"github.com/duanhf2012/origin/log"
 	"net"
 	"sync"
 	"time"
