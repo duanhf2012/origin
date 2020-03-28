@@ -64,6 +64,7 @@ func (slf *TcpService) OnInit() error{
 	if ok == true {
 		slf.tcpServer.MaxMsgLen = uint32(MaxMsgLen.(float64))
 	}
+	slf.mapClient = make( map[uint64] *Client,slf.tcpServer.MaxConnNum)
 	slf.tcpServer.NewAgent =slf.NewClient
 	slf.tcpServer.Start()
 	//加载配置
@@ -86,6 +87,7 @@ func (slf *TcpService) NewClient(conn *network.TCPConn) network.Agent {
 		}
 
 		pClient := &Client{tcpConn:conn}
+		pClient.tcpService = slf
 		slf.mapClient[slf.initClientId] = pClient
 		return pClient
 	}
@@ -124,7 +126,6 @@ func (slf *Client) Run() {
 			continue
 		}
 
-
 		slf.tcpService.GetEventReciver().NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp_RecvPack,Data:&TcpPack{ClientId:slf.id,Data:data}})
 	}
 }
@@ -134,4 +135,20 @@ func (slf *Client) OnClose(){
 	slf.tcpService.mapClientLocker.Lock()
 	defer slf.tcpService.mapClientLocker.Unlock()
 	delete (slf.tcpService.mapClient,slf.GetId())
+}
+
+func (slf *TcpService) SendMsg(clientid uint64,msg interface{}) error{
+	slf.mapClientLocker.Lock()
+	client,ok := slf.mapClient[clientid]
+	if ok == false{
+		slf.mapClientLocker.Unlock()
+		return fmt.Errorf("client %d is disconnect!",clientid)
+	}
+
+	slf.mapClientLocker.Unlock()
+	bytes,err := slf.process.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	return client.tcpConn.WriteMsg(bytes)
 }

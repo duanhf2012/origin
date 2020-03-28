@@ -12,7 +12,8 @@ type MessageInfo struct {
 	msgHandler MessageHandler
 }
 
-
+type MessageHandler func(clientid uint64,msg proto.Message)
+const MsgTypeSize = 2
 type PBProcessor struct {
 	mapMsg map[uint16]MessageInfo
 	LittleEndian bool
@@ -65,10 +66,22 @@ func (slf *PBProcessor ) Unmarshal(data []byte) (interface{}, error) {
 
 // must goroutine safe
 func (slf *PBProcessor ) Marshal(msg interface{}) ([]byte, error){
-	return proto.Marshal(msg.(proto.Message))
-}
+	bytes,err := proto.Marshal(msg.(proto.Message))
+	if err != nil {
+		return nil,err
+	}
 
-type MessageHandler func(clientid uint64,msg proto.Message)
+	buff := make([]byte, 0, len(bytes)+MsgTypeSize)
+	pMsg := msg.(*PBPackInfo)
+	if slf.LittleEndian == true {
+		binary.LittleEndian.PutUint16(buff[:2],pMsg.typ)
+	}else{
+		binary.BigEndian.PutUint16(buff[:2],pMsg.typ)
+	}
+
+	buff = append(buff,bytes...)
+	return buff,nil
+}
 
 func (slf *PBProcessor) Register(msgtype uint16,msg proto.Message,handle MessageHandler)  {
 	var info MessageInfo
@@ -76,4 +89,8 @@ func (slf *PBProcessor) Register(msgtype uint16,msg proto.Message,handle Message
 	info.msgType = reflect.TypeOf(msg.(proto.Message))
 	info.msgHandler = handle
 	slf.mapMsg[msgtype] = info
+}
+
+func (slf *PBProcessor) MakeMsg(msgType uint16,protoMsg proto.Message) *PBPackInfo {
+	return &PBPackInfo{typ:msgType,msg:protoMsg}
 }
