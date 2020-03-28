@@ -102,6 +102,7 @@ func Start() {
 
 func Setup(s ...service.IService)  {
 	for _,sv := range s {
+		sv.OnSetup(sv)
 		preSetupService = append(preSetupService,sv)
 	}
 }

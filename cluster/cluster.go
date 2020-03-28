@@ -11,6 +11,7 @@ import (
 var configdir = "./config/"
 
 type SubNet struct {
+	SubNetName string
 	NodeList []NodeInfo
 }
 

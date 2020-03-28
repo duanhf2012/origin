@@ -189,12 +189,11 @@ func (slf *TestService2) OnInit() error {
 }
 
 func main(){
-	node.Init()
 	tcpService := &sysservice.TcpService{}
 	gateService := &GateService.GateService{}
-
 	tcpService.SetEventReciver(gateService)
 	node.Setup(tcpService,gateService)
+	node.Init()
 
 	node.Start()
 }

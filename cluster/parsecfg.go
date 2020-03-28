@@ -119,7 +119,7 @@ func (slf *Cluster) InitCfg(currentNodeId int) error{
 	if ok == false {
 		return fmt.Errorf("NodeId %d not in any subnet",currentNodeId)
 	}
-
+	subnet.SubNetName = localSubnetName
 	for _,nodeinfo := range subnet.NodeList {
 		localSubNetMapNode[nodeinfo.NodeId] = nodeinfo
 
@@ -160,7 +160,7 @@ func (slf *Cluster) InitCfg(currentNodeId int) error{
 	slf.localNodeInfo =localNodeInfo
 
 	//读取服务
-
+	slf.ReadLocalSubNetServiceConfig(slf.localsubnet.SubNetName)
 	return err
 }
 

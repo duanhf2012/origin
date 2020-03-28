@@ -1,6 +1,7 @@
 package GateService
 
 import (
+	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/network/processor"
@@ -37,10 +38,10 @@ func (slf *GateService) OnEventHandler(ev *event.Event) error{
 }
 
 func (slf *GateService) OnConnected(clientid uint64){
-
+	fmt.Printf("client id %d connected",clientid)
 }
 
 
 func (slf *GateService) OnDisconnected(clientid uint64){
-
+	fmt.Printf("client id %d disconnected",clientid)
 }

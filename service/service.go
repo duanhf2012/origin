@@ -16,6 +16,7 @@ type IService interface {
 	Init(iservice IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})
 	GetName() string
 
+	OnSetup(iservice IService)
 	OnInit() error
 	OnRelease()
 	Wait()
@@ -38,8 +39,14 @@ type Service struct {
 	startStatus bool
 }
 
+func (slf *Service) OnSetup(iservice IService){
+	if iservice.GetName() == "" {
+		slf.name = reflect.Indirect(reflect.ValueOf(iservice)).Type().Name()
+	}
+}
+
 func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
-	slf.name = reflect.Indirect(reflect.ValueOf(iservice)).Type().Name()
+
 	slf.dispatcher =timer.NewDispatcher(timerDispatcherLen)
 	slf.this = iservice
 	slf.InitRpcHandler(iservice.(rpc.IRpcHandler),getClientFun,getServerFun)
