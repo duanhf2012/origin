@@ -253,7 +253,10 @@ func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,m
 	if mutiCoroutine == true {
 		go rpcHandler.HandlerRpcRequest(&req)
 	}else{
-		rpcHandler.PushRequest(&req)
+		err := rpcHandler.PushRequest(&req)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
