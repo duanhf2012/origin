@@ -193,8 +193,6 @@ func main(){
 	gateService := &GateService.GateService{}
 	tcpService.SetEventReciver(gateService)
 	node.Setup(tcpService,gateService)
-	node.Init()
-
 	node.Start()
 }
 

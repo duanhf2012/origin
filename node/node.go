@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"github.com/duanhf2012/origin/cluster"
+	"github.com/duanhf2012/origin/console"
 	"github.com/duanhf2012/origin/service"
 	"io/ioutil"
 	"os"
@@ -14,7 +15,7 @@ import (
 
 var closeSig chan bool
 var sigs chan os.Signal
-
+var nodeId int
 var preSetupService []service.IService //预安装
 
 func init() {
@@ -56,10 +57,11 @@ func writeProcessPid() {
 }
 
 func GetNodeId() int {
-	return 1
+	return nodeId
 }
 
-func Init(){
+func initNode(id int){
+	nodeId = id
 	//1.初始化集群
 	err := cluster.GetCluster().Init(GetNodeId())
 	if err != nil {
@@ -82,6 +84,22 @@ func Init(){
 }
 
 func Start() {
+	console.RegisterCommand("start",startNode)
+	console.RegisterCommand("stop",stopNode)
+	err := console.Run(os.Args)
+	if err!=nil {
+		fmt.Printf("%+v\n",err)
+		return
+	}
+}
+
+
+func stopNode(processid interface{}){
+
+}
+
+func startNode(paramNodeId interface{}) {
+	initNode(paramNodeId.(int))
 	cluster.GetCluster().Start()
 	service.Start()
 	writeProcessPid()
