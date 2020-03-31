@@ -23,6 +23,7 @@ type Client struct {
 
 func (slf *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 	slf.conn = conn
+	slf.pending = map[uint64]*Call{}
 	return slf
 }
 

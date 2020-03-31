@@ -258,6 +258,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,mutiCoro
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
+			continue
 		}
 
 		//跨node调用
@@ -265,6 +266,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,mutiCoro
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
+
 	}
 
 	return err
