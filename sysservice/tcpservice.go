@@ -122,7 +122,7 @@ func (slf *Client) Run() {
 		}
 		data,err:=slf.tcpService.process.Unmarshal(bytes)
 		if err != nil {
-			slf.tcpService.GetEventReciver().NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp_RecvPack,Data:&TcpPack{ClientId:slf.id,Data:bytes}})
+			slf.tcpService.GetEventReciver().NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp_PackException,Data:&TcpPack{ClientId:slf.id,Data:bytes}})
 			//log.Debug("process.Unmarshal is error:%+v",err)
 			continue
 		}
