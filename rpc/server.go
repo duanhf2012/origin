@@ -228,6 +228,7 @@ func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,m
 	//pCall.done = make( chan *Call,1)
 	pCall.rpcHandler = callerRpcHandler
 	pCall.callback = &callback
+	pCall.Reply = reply
 	rpcHandler := slf.rpcHandleFinder.FindRpcHandler(handlerName)
 	if rpcHandler== nil {
 		err := fmt.Errorf("service method %s.%s not config!", handlerName,methodName)
@@ -245,7 +246,9 @@ func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,m
 	if noReply == false {
 		req.requestHandle = func(Returns interface{},Err error){
 			pCall.Err = Err
-			pCall.Reply = Returns
+			if Returns!=nil {
+				pCall.Reply = Returns
+			}
 			pCall.rpcHandler.(*RpcHandler).callResponeCallBack<-pCall
 		}
 	}

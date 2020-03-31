@@ -181,12 +181,15 @@ func (slf *Client) Run(){
 		}else  {
 			delete(slf.pending,respone.Seq)
 			slf.pendingLock.Unlock()
-
-			err = processor.Unmarshal(respone.Returns,v.Reply)
-			if err != nil {
-				log.Error("rpcClient Unmarshal body error,error:%+v",err)
-				continue
+			//*****如果对方返回nil，测试跨node时，调用其他服务rpc不存在的情况
+			if len(respone.Returns) >0 {
+				err = processor.Unmarshal(respone.Returns,v.Reply)
+				if err != nil {
+					log.Error("rpcClient Unmarshal body error,error:%+v",err)
+					v.Err = err
+				}
 			}
+
 
 			if v.callback.IsValid() {
 				 v.rpcHandler.(*RpcHandler).callResponeCallBack<-v
