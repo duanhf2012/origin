@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/console"
+	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/service"
 	"io/ioutil"
+	syslog "log"
 	"os"
 	"os/signal"
 	"strconv"
@@ -84,6 +86,7 @@ func initNode(id int){
 }
 
 func Start() {
+	SetSysLog("debug","./",syslog.Lshortfile|syslog.LstdFlags)
 	console.RegisterCommand("start",startNode)
 	console.RegisterCommand("stop",stopNode)
 	err := console.Run(os.Args)
@@ -131,4 +134,9 @@ func GetService(servicename string) service.IService {
 
 func SetConfigDir(configdir string){
 	cluster.SetConfigDir(configdir)
+}
+
+func SetSysLog(strLevel string, pathname string, flag int){
+	logs,_:= log.New(strLevel,pathname,flag)
+	log.Export(logs)
 }

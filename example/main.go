@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/duanhf2012/origin/example/GateService"
+	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/sysmodule"
@@ -91,6 +92,7 @@ func (slf *Module4) OnRelease() {
 
 func (slf *TestServiceCall) OnInit() error {
 	slf.AfterFunc(time.Second*1,slf.Run)
+	slf.AfterFunc(time.Second*1,slf.Test)
 	moduleid1,_ = slf.AddModule(&Module1{})
 	moduleid2,_ = slf.AddModule(&Module2{})
 	fmt.Print(moduleid1,moduleid2)
@@ -118,38 +120,47 @@ type Param struct {
 	Pa []string
 }
 
-
-func  (slf *TestServiceCall) Run(){
-	//var ret int
-	//var input int = 10000
-	//bT := time.Now()            // 开始时间
-
-	//err := slf.Call("TestServiceCall.RPC_Test",&ret,&input)
+var index int
+func (slf *TestServiceCall) Test(){
+	index += 1
 	var param Param
 	param.A = 2342342341
 	param.B = "xxxxxxxxxxxxxxxxxxxxxxx"
 	param.Pa = []string{"ccccc","asfsdfsdaf","bbadfsdf","ewrwefasdf","safsadfka;fksd"}
-	/*
+	param.Index = index
+	slf.AsyncCall("TestService1.RPC_Test",&param, func(reply *Param, err error) {
+		fmt.Print(reply,"\n")
+	})
+	slf.AfterFunc(time.Second*1,slf.Test)
+}
+
+func  (slf *TestServiceCall) Run(){
+	//var ret int
+	var input int = 1000000
+	//bT := time.Now()            // 开始时间
+
+	//err := slf.Call("TestServiceCall.RPC_Test",&ret,&input)
 	for i:=input;i>=0;i--{
+		var param Param
+		param.A = 2342342341
+		param.B = "xxxxxxxxxxxxxxxxxxxxxxx"
+		param.Pa = []string{"ccccc","asfsdfsdaf","bbadfsdf","ewrwefasdf","safsadfka;fksd"}
 		param.Index = i
+		if param.Index == 0 {
+			fmt.Print(".......................\n")
+		}
 		slf.AsyncCall("TestService1.RPC_Test",&param, func(reply *Param, err error) {
-			if reply.Index == 0 || err != nil{
-				eT := time.Since(bT)      // 从开始到当前所消耗的时间
-				fmt.Print(err,eT.Milliseconds())
-				fmt.Print("xxxx..................",eT,err,"\n")
-			}
-			//fmt.Print(*reply,"\n",err)
+			log.Debug(" index %d ,err %+v",reply.Index,err)
 		})
 
 	}
-*/
+
 	fmt.Print("finsh....")
-
-
 }
 
 func (slf *TestService1) RPC_Test(a *Param,b *Param) error {
-	*a = *b
+	//*a = *b
+	*b = *a
 	return nil
 }
 

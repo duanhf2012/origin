@@ -70,7 +70,6 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,mutiCoroutine bool,serviceMetho
 	request.Seq = slf.startSeq
 	slf.pending[call.Seq] = call
 	slf.pendingLock.Unlock()
-
 	request.ServiceMethod = serviceMethod
 	var herr error
 	request.InParam,herr = processor.Marshal(args)
@@ -163,8 +162,8 @@ func (slf *Client) Run(){
 	for {
 		bytes,err := slf.conn.ReadMsg()
 		if err != nil {
-			slf.Close()
-			slf.Start()
+			log.Error("rpcClient %s ReadMsg error:%+v",slf.Addr,err)
+			return
 		}
 		//1.解析head
 		respone := &RpcResponse{}
@@ -198,12 +197,7 @@ func (slf *Client) Run(){
 
 		}
 	}
-
 }
 
 func (slf *Client) OnClose(){
-	if slf.blocalhost== false{
-		//关闭时，重新连接
-		slf.Start()
-	}
 }

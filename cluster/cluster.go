@@ -93,6 +93,7 @@ func (slf *Cluster) Start() {
 	slf.rpcServer.Start(slf.localNodeInfo.ListenAddr)
 }
 
+
 func GetCluster() *Cluster{
 	return &cluster
 }

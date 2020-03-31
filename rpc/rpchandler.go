@@ -179,13 +179,16 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		v.iparam = request.localParam
 	}
 
-
+	var oParam reflect.Value
 	paramList = append(paramList,reflect.ValueOf(slf.GetRpcHandler())) //接受者
 	if request.localReply!=nil {
-		v.oParam = reflect.ValueOf(request.localReply)
+		oParam = reflect.ValueOf(request.localReply)
+	}else{
+		oParam = reflect.New(v.oParam.Type().Elem())
 	}
+
 	paramList = append(paramList,reflect.ValueOf(v.iparam))
-	paramList = append(paramList,v.oParam) //输出参数
+	paramList = append(paramList,oParam) //输出参数
 
 	returnValues := v.method.Func.Call(paramList)
 	errInter := returnValues[0].Interface()
@@ -194,7 +197,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	}
 
 	if request.requestHandle!=nil {
-		request.requestHandle(v.oParam.Interface(), err)
+		request.requestHandle(oParam.Interface(), err)
 	}
 }
 
