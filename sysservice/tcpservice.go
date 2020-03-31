@@ -153,3 +153,20 @@ func (slf *TcpService) SendMsg(clientid uint64,msg interface{}) error{
 	}
 	return client.tcpConn.WriteMsg(bytes)
 }
+
+func (slf *TcpService) Close(clientid uint64) {
+	//
+	slf.mapClientLocker.Lock()
+	defer slf.mapClientLocker.Unlock()
+
+	client,ok := slf.mapClient[clientid]
+	if ok == false{
+		return
+	}
+
+	if client.tcpConn!=nil {
+		client.tcpConn.Close()
+	}
+
+	return
+}
