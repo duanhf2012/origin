@@ -13,16 +13,11 @@ type FuncRpcClient func(nodeid int,serviceMethod string) ([]*Client,error)
 type FuncRpcServer func() (*Server)
 var NilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
-type RpcError struct {
-	Err string
-}
+type RpcError string
 
-func (slf *RpcError) Error() string {
-	return slf.Err
-}
 
-func NewRpcError(e string) *RpcError {
-	return &RpcError{Err:e}
+func (e RpcError) Error() string {
+	return string(e)
 }
 
 func ConvertError(e error) *RpcError{
@@ -30,11 +25,13 @@ func ConvertError(e error) *RpcError{
 		return nil
 	}
 
-	return &RpcError{Err:e.Error()}
+	rpcErr := RpcError(e.Error())
+	return &rpcErr
 }
 
 func Errorf(format string, a ...interface{}) *RpcError {
-	return NewRpcError(fmt.Sprintf(format,a...))
+	rpcErr := RpcError(fmt.Sprintf(format,a...))
+	return &rpcErr
 }
 
 
