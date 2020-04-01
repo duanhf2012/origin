@@ -123,7 +123,7 @@ func (logger *Logger) Fatal(format string, a ...interface{}) {
 	logger.doPrintf(fatalLevel, printFatalLevel, format, a...)
 }
 
-var gLogger, _ = New("debug", "", log.LstdFlags)
+var gLogger, _ = New("debug", "", log.LstdFlags|log.Lshortfile)
 
 // It's dangerous to call the method on logging
 func Export(logger *Logger) {
