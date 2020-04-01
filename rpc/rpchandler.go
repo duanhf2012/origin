@@ -171,7 +171,7 @@ func (slf *RpcHandler) GetRpcResponeChan() chan *Call{
 func (slf *RpcHandler) HandlerRpcResponeCB(call *Call){
 	defer func() {
 		if r := recover(); r != nil {
-			buf := make([]byte, LenStackBuf)
+			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			err := fmt.Errorf("%v: %s\n", r, buf[:l])
 			log.Error("core dump info:%+v",err)
@@ -186,17 +186,18 @@ func (slf *RpcHandler) HandlerRpcResponeCB(call *Call){
 
 }
 
-var LenStackBuf int = 40960
 
 func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	defer func() {
 		if r := recover(); r != nil {
-				buf := make([]byte, LenStackBuf)
+				buf := make([]byte, 4096)
 				l := runtime.Stack(buf, false)
 				err := fmt.Errorf("%v: %s", r, buf[:l])
-				log.Error("core dump info:%+v\n",err)
+				log.Error("Handler Rpc %s Core dump info:%+v\n",request.ServiceMethod,err)
 				rpcErr := RpcError("call error : core dumps")
-				request.requestHandle(nil,&rpcErr)
+				if request.requestHandle!=nil {
+					request.requestHandle(nil,&rpcErr)
+				}
 		}
 	}()
 

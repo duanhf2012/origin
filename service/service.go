@@ -124,7 +124,7 @@ func (slf *Service) GetName() string{
 func (slf *Service) Release(){
 	defer func() {
 		if r := recover(); r != nil {
-			buf := make([]byte, 40960)
+			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			err := fmt.Errorf("%v: %s", r, buf[:l])
 			log.Error("core dump info:%+v\n",err)

@@ -85,7 +85,7 @@ func (slf *EventProcessor) GetEventReciver() IEventProcessor{
 func (slf *EventProcessor) EventHandler(processor IEventProcessor,ev *Event) {
 	defer func() {
 		if r := recover(); r != nil {
-			buf := make([]byte, 40960)
+			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			err := fmt.Errorf("%v: %s", r, buf[:l])
 			log.Error("core dump info:%+v\n",err)

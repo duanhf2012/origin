@@ -22,10 +22,11 @@ type TestService2 struct {
 type TestServiceCall struct {
 	service.Service
 	dbModule sysmodule.DBModule
+	param *Param
 }
 
 func init(){
-	node.Setup(&TestService1{},&TestService2{},&TestServiceCall{})
+	node.Setup(&TestService1{},&TestService2{},&TestServiceCall{param:&Param{}})
 }
 
 type Module1 struct{
@@ -91,7 +92,7 @@ func (slf *Module4) OnRelease() {
 }
 
 func (slf *TestServiceCall) OnInit() error {
-	slf.AfterFunc(time.Second*1,slf.Run)
+	//slf.AfterFunc(time.Second*1,slf.Run)
 	slf.AfterFunc(time.Second*1,slf.Test)
 	moduleid1,_ = slf.AddModule(&Module1{})
 	moduleid2,_ = slf.AddModule(&Module2{})
@@ -123,41 +124,50 @@ type Param struct {
 var index int
 func (slf *TestServiceCall) Test(){
 	index += 1
-	var param Param
+	//var param *Param
+	param:=&Param{}
 	param.A = 2342342341
 	param.B = "xxxxxxxxxxxxxxxxxxxxxxx"
 	param.Pa = []string{"ccccc","asfsdfsdaf","bbadfsdf","ewrwefasdf","safsadfka;fksd"}
 	param.Index = index
+/*
 	slf.AsyncCall("TestService1.RPC_Test1",&param, func(reply *Param, err error) {
 		fmt.Print(reply,"\n")
 	})
-	slf.AfterFunc(time.Second*1,slf.Test)
+
+ */
+	slf.Go("TestService1.RPC_Test",&slf.param)
+	//slf.AfterFunc(time.Second*1,slf.Test)
 }
 func  (slf *TestServiceCall) OnRelease(){
 	fmt.Print("OnRelease")
 }
 func  (slf *TestServiceCall) Run(){
 	//var ret int
-	var input int = 1
-	//bT := time.Now()            // 开始时间
+	var input int = 10000
+	bT := time.Now()            // 开始时间
 
 	//err := slf.Call("TestServiceCall.RPC_Test",&ret,&input)
 	for i:=input;i>=0;i--{
 		var param Param
 		param.A = 2342342341
 		param.B = "xxxxxxxxxxxxxxxxxxxxxxx"
-		param.Pa = []string{"ccccc","asfsdfsdaf","bbadfsdf","ewrwefasdf","safsadfka;fksd"}
+		//param.Pa = []string{"ccccc","asfsdfsdaf","bbadfsdf","ewrwefasdf","safsadfka;fksd"}
 		param.Index = i
 		if param.Index == 0 {
 			fmt.Print(".......................\n")
 		}
 		err := slf.AsyncCall("TestService1.RPC_Test",&param, func(reply *Param, err error) {
 			log.Debug(" index %d ,err %+v",reply.Index,err)
+			if reply.Index == 0 {
+				eT := time.Since(bT)      // 从开始到当前所消耗的时间
+				fmt.Print(err,eT.Milliseconds())
+				fmt.Print("xxxx..................",eT,err,"\n")
+			}
 		})
 		if err != nil {
 			fmt.Printf("x333333333333:%+v",err)
 		}
-
 	}
 
 	fmt.Print("finsh....")
