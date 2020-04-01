@@ -151,7 +151,7 @@ type RpcResponse struct {
 	Err *RpcError
 
 	//returns
-	Returns []byte
+	Reply []byte
 }
 
 
@@ -179,14 +179,15 @@ func (slf *Client) Run(){
 			delete(slf.pending,respone.Seq)
 			slf.pendingLock.Unlock()
 			v.Err = nil
-			//*****如果对方返回nil，测试跨node时，调用其他服务rpc不存在的情况
-			if len(respone.Returns) >0 {
-				err = processor.Unmarshal(respone.Returns,v.Reply)
+
+			if len(respone.Reply) >0 {
+				err = processor.Unmarshal(respone.Reply,v.Reply)
 				if err != nil {
 					log.Error("rpcClient Unmarshal body error,error:%+v",err)
 					v.Err = err
 				}
 			}
+
 			if respone.Err != nil {
 				v.Err= respone.Err
 			}
@@ -194,10 +195,8 @@ func (slf *Client) Run(){
 			if v.callback.IsValid() {
 				 v.rpcHandler.(*RpcHandler).callResponeCallBack<-v
 			}else{
-				//发送至接受者
 				v.done <- v
 			}
-
 		}
 	}
 }

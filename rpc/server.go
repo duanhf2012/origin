@@ -84,8 +84,8 @@ func (agent *RpcAgent) WriteRespone(serviceMethod string,seq uint64,reply interf
 	rpcRespone.Err = err
 	var errM error
 	if reply!=nil {
-		rpcRespone.Returns,errM = processor.Marshal(reply)
-		if errM!= nil {
+		rpcRespone.Reply,errM = processor.Marshal(reply)
+		if errM != nil {
 			rpcRespone.Err = ConvertError(errM)
 		}
 	}
