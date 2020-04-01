@@ -213,7 +213,12 @@ func (slf *Server) rpcHandlerGo(noReply bool,handlerName string,methodName strin
 
 	if noReply == false {
 		req.requestHandle = func(Returns interface{},Err *RpcError){
-			pCall.Err = Err
+			if Err!=nil {
+				pCall.Err = Err
+			}else{
+				pCall.Err = nil
+			}
+
 			pCall.done <- pCall
 		}
 	}
@@ -245,7 +250,12 @@ func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,h
 
 	if noReply == false {
 		req.requestHandle = func(Returns interface{},Err *RpcError){
-			pCall.Err = Err
+			if Err == nil {
+				pCall.Err = nil
+			}else{
+				pCall.Err = Err
+			}
+
 			if Returns!=nil {
 				pCall.Reply = Returns
 			}
