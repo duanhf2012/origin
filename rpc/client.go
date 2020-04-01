@@ -130,7 +130,7 @@ func (slf *Client) Go(noReply bool,mutiCoroutine bool,serviceMethod string, args
 	return call
 }
 
-type RequestHandler func(Returns interface{},Err error)
+type RequestHandler func(Returns interface{},Err *RpcError)
 
 type RpcRequest struct {
 	//packhead
@@ -151,7 +151,7 @@ type RpcRequest struct {
 type RpcResponse struct {
 	//head
 	Seq           uint64   // sequence number chosen by client
-	Err error
+	Err *RpcError
 
 	//returns
 	Returns []byte
@@ -188,6 +188,9 @@ func (slf *Client) Run(){
 					log.Error("rpcClient Unmarshal body error,error:%+v",err)
 					v.Err = err
 				}
+			}
+			if respone.Err != nil {
+				v.Err= respone.Err
 			}
 
 

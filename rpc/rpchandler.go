@@ -13,6 +13,31 @@ type FuncRpcClient func(nodeid int,serviceMethod string) ([]*Client,error)
 type FuncRpcServer func() (*Server)
 var NilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
+type RpcError struct {
+	Err string
+}
+
+func (slf *RpcError) Error() string {
+	return slf.Err
+}
+
+func NewRpcError(e string) *RpcError {
+	return &RpcError{Err:e}
+}
+
+func ConvertError(e error) *RpcError{
+	if e == nil {
+		return nil
+	}
+
+	return &RpcError{Err:e.Error()}
+}
+
+func Errorf(format string, a ...interface{}) *RpcError {
+	return NewRpcError(fmt.Sprintf(format,a...))
+}
+
+
 type RpcMethodInfo struct {
 	method reflect.Method
 	iparam interface{}
@@ -157,10 +182,11 @@ func (slf *RpcHandler) HandlerRpcResponeCB(call *Call){
 
 }
 
+
 func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	v,ok := slf.mapfunctons[request.ServiceMethod]
 	if ok == false {
-		err := fmt.Errorf("RpcHandler %s cannot find %s",slf.rpcHandler.GetName(),request.ServiceMethod)
+		err := Errorf("RpcHandler %s cannot find %s",slf.rpcHandler.GetName(),request.ServiceMethod)
 		log.Error("%s",err.Error())
 		if request.requestHandle!=nil {
 			request.requestHandle(nil,err)
@@ -174,7 +200,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	if request.localParam==nil{
 		err = processor.Unmarshal(request.InParam,&v.iparam)
 		if err!=nil {
-			rerr := fmt.Errorf("Call Rpc %s Param error %+v",request.ServiceMethod,err)
+			rerr := Errorf("Call Rpc %s Param error %+v",request.ServiceMethod,err)
 			log.Error("%s",rerr.Error())
 			if request.requestHandle!=nil {
 				request.requestHandle(nil, rerr)
@@ -199,7 +225,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	}
 
 	if request.requestHandle!=nil {
-		request.requestHandle(oParam.Interface(), err)
+		request.requestHandle(oParam.Interface(), ConvertError(err))
 	}
 }
 

@@ -136,7 +136,7 @@ func (slf *TestServiceCall) Test(){
 
 func  (slf *TestServiceCall) Run(){
 	//var ret int
-	var input int = 1000000
+	var input int = 1
 	//bT := time.Now()            // 开始时间
 
 	//err := slf.Call("TestServiceCall.RPC_Test",&ret,&input)
@@ -149,9 +149,12 @@ func  (slf *TestServiceCall) Run(){
 		if param.Index == 0 {
 			fmt.Print(".......................\n")
 		}
-		slf.AsyncCall("TestService1.RPC_Test",&param, func(reply *Param, err error) {
+		err := slf.AsyncCall("TestService1.RPC_Test",&param, func(reply *Param, err error) {
 			log.Debug(" index %d ,err %+v",reply.Index,err)
 		})
+		if err != nil {
+			fmt.Printf("x333333333333:%+v",err)
+		}
 
 	}
 
@@ -167,13 +170,13 @@ func (slf *TestService1) RPC_Test(a *Param,b *Param) error {
 func (slf *TestService1) OnInit() error {
 	return nil
 }
-
+/*
 func (slf *TestServiceCall) RPC_Test(a *int,b *int) error {
 	fmt.Printf("TestService2\n")
 	*a = *b
 	return nil
 }
-
+*/
 func (slf *TestServiceCall) TestDB() {
 	assetsInfo := &struct {
 		Cash  int64 `json:"cash"`  //美金余额 100

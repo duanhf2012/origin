@@ -120,15 +120,19 @@ func (agent *RpcAgent) Run() {
 			continue
 		}
 		if req.NoReply == false {
-			req.requestHandle = func(Returns interface{},Err error){
+			req.requestHandle = func(Returns interface{},Err *RpcError){
 				var rpcRespone RpcResponse
 				rpcRespone.Seq = req.Seq
 				rpcRespone.Err = Err
 				if Err==nil {
-					rpcRespone.Returns,rpcRespone.Err = processor.Marshal(Returns)
+					rpcRespone.Returns,err = processor.Marshal(Returns)
+					if err!= nil {
+						rpcRespone.Err = ConvertError(err)
+					}
+					//rpcRespone.Returns, = processor.Marshal(Returns)
 				}
 
-				bytes,err :=  processor.Marshal(rpcRespone)
+				bytes,err :=  processor.Marshal(&rpcRespone)
 				if err != nil {
 					log.Error("service method %s Marshal error:%+v!", req.ServiceMethod,err)
 					return
@@ -208,7 +212,7 @@ func (slf *Server) rpcHandlerGo(noReply bool,mutiCoroutine bool,handlerName stri
 	req.NoReply = noReply
 
 	if noReply == false {
-		req.requestHandle = func(Returns interface{},Err error){
+		req.requestHandle = func(Returns interface{},Err *RpcError){
 			pCall.Err = Err
 			pCall.done <- pCall
 		}
@@ -244,7 +248,7 @@ func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,m
 	req.MutiCoroutine = mutiCoroutine
 
 	if noReply == false {
-		req.requestHandle = func(Returns interface{},Err error){
+		req.requestHandle = func(Returns interface{},Err *RpcError){
 			pCall.Err = Err
 			if Returns!=nil {
 				pCall.Reply = Returns
