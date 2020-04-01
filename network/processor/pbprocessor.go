@@ -24,9 +24,10 @@ func NewPBProcessor() *PBProcessor {
 	return processor
 }
 
-func (slf *PBProcessor) SetLittleEndian(littleEndian bool){
-	slf.LittleEndian = littleEndian
+func (p *PBProcessor) SetByteOrder(littleEndian bool) {
+	p.LittleEndian = littleEndian
 }
+
 
 type PBPackInfo struct {
 	typ uint16

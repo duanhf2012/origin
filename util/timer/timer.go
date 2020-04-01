@@ -1,6 +1,9 @@
 package timer
 
 import (
+	"fmt"
+	"github.com/duanhf2012/origin/log"
+	"runtime"
 	"time"
 )
 
@@ -28,20 +31,14 @@ func (t *Timer) Stop() {
 }
 
 func (t *Timer) Cb() {
-	/*
 	defer func() {
-		t.cb = nil
 		if r := recover(); r != nil {
-			if conf.LenStackBuf > 0 {
-				buf := make([]byte, conf.LenStackBuf)
-				l := runtime.Stack(buf, false)
-				log.Error("%v: %s", r, buf[:l])
-			} else {
-				log.Error("%v", r)
-			}
+			buf := make([]byte, 40960)
+			l := runtime.Stack(buf, false)
+			err := fmt.Errorf("%v: %s", r, buf[:l])
+			log.Error("core dump info:%+v\n",err)
 		}
 	}()
-	*/
 
 	if t.cbex!=nil {
 		t.cbex(t)

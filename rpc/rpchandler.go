@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"reflect"
+	"runtime"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -168,6 +169,15 @@ func (slf *RpcHandler) GetRpcResponeChan() chan *Call{
 }
 
 func (slf *RpcHandler) HandlerRpcResponeCB(call *Call){
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, LenStackBuf)
+			l := runtime.Stack(buf, false)
+			err := fmt.Errorf("%v: %s\n", r, buf[:l])
+			log.Error("core dump info:%+v",err)
+		}
+	}()
+
 	if call.Err == nil {
 		call.callback.Call([]reflect.Value{reflect.ValueOf(call.Reply),NilError})
 	}else{
@@ -176,8 +186,20 @@ func (slf *RpcHandler) HandlerRpcResponeCB(call *Call){
 
 }
 
+var LenStackBuf int = 40960
 
 func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
+	defer func() {
+		if r := recover(); r != nil {
+				buf := make([]byte, LenStackBuf)
+				l := runtime.Stack(buf, false)
+				err := fmt.Errorf("%v: %s", r, buf[:l])
+				log.Error("core dump info:%+v\n",err)
+				rpcErr := RpcError("call error : core dumps")
+				request.requestHandle(nil,&rpcErr)
+		}
+	}()
+
 	v,ok := slf.mapfunctons[request.ServiceMethod]
 	if ok == false {
 		err := Errorf("RpcHandler %s cannot find %s",slf.rpcHandler.GetName(),request.ServiceMethod)

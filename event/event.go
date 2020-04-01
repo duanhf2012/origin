@@ -1,7 +1,9 @@
 package event
 
 import (
+	"fmt"
 	"github.com/duanhf2012/origin/log"
+	"runtime"
 	"sync"
 )
 
@@ -77,4 +79,18 @@ func (slf *EventProcessor) SetEventReciver(eventProcessor IEventProcessor){
 
 func (slf *EventProcessor) GetEventReciver() IEventProcessor{
 	return slf.eventReciver
+}
+
+
+func (slf *EventProcessor) EventHandler(processor IEventProcessor,ev *Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 40960)
+			l := runtime.Stack(buf, false)
+			err := fmt.Errorf("%v: %s", r, buf[:l])
+			log.Error("core dump info:%+v\n",err)
+		}
+	}()
+
+	processor.OnEventHandler(ev)
 }

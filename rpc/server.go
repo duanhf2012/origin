@@ -77,14 +77,6 @@ type RpcAgent struct {
 	userData interface{}
 }
 
-type RpcRequestRw struct {
-	//
-	ServiceMethod string   // format: "Service.Method"
-	//Seq           uint64   // sequence number chosen by client
-	InputParam []byte
-
-	requestHandle RequestHandler
-}
 
 func (agent *RpcAgent) WriteRespone(serviceMethod string,seq uint64,reply interface{},err *RpcError) {
 	var rpcRespone RpcResponse

@@ -1,10 +1,13 @@
 package service
 
 import (
+	"fmt"
 	"github.com/duanhf2012/origin/event"
+	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
 	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
 )
@@ -27,7 +30,6 @@ type IService interface {
 }
 
 
-
 type Service struct {
 	Module
 	rpc.RpcHandler   //rpc
@@ -38,6 +40,7 @@ type Service struct {
 	serviceCfg interface{}
 	gorouterNum int32
 	startStatus bool
+
 }
 
 func (slf *Service) OnSetup(iservice IService){
@@ -82,6 +85,7 @@ func (slf *Service) Start() {
 }
 
 func (slf *Service) Run() {
+
 	defer slf.wg.Done()
 	var bStop = false
 	for{
@@ -96,7 +100,7 @@ func (slf *Service) Run() {
 		case rpcResponeCB := <- rpcResponeCallBack:
 				slf.GetRpcHandler().HandlerRpcResponeCB(rpcResponeCB)
 		case ev := <- eventChan:
-				slf.this.(event.IEventProcessor).OnEventHandler(ev)
+				slf.EventHandler(slf.this.(event.IEventProcessor),ev)
 		case t := <- slf.dispatcher.ChanTimer:
 			t.Cb()
 		}
@@ -118,6 +122,16 @@ func (slf *Service) GetName() string{
 
 
 func (slf *Service) OnRelease(){
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 40960)
+			l := runtime.Stack(buf, false)
+			err := fmt.Errorf("%v: %s", r, buf[:l])
+			log.Error("core dump info:%+v\n",err)
+		}
+	}()
+
+	slf.this.OnRelease()
 }
 
 func (slf *Service) OnInit() error {
