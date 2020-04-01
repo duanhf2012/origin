@@ -115,22 +115,24 @@ func (agent *RpcAgent) Run() {
 	for {
 		data,err := agent.conn.ReadMsg()
 		if err != nil {
-			log.Debug("read message: %v", err)
+			log.Error("read message: %v", err)
+			//will close tcpconn
 			break
 		}
 
-		if processor==nil{
-			log.Error("Rpc Processor not set!")
-			continue
-		}
-
-		var req RpcRequest
 		//解析head
+		var req RpcRequest
 		err = processor.Unmarshal(data,&req)
 		if err != nil {
-			log.Debug("processor message: %v", err)
-			agent.Close()
-			break
+			if req.Seq>0 {
+				rpcError := RpcError("rpc Unmarshal request is error")
+				agent.WriteRespone(req.ServiceMethod,req.Seq,nil,&rpcError)
+				continue
+			}else{
+				log.Error("rpc Unmarshal request is error: %v", err)
+				//will close tcpconn
+				break
+			}
 		}
 
 		//交给程序处理
@@ -141,6 +143,7 @@ func (agent *RpcAgent) Run() {
 			log.Debug("rpc request req.ServiceMethod is error")
 			continue
 		}
+
 		rpcHandler := agent.rpcserver.rpcHandleFinder.FindRpcHandler(serviceMethod[0])
 		if rpcHandler== nil {
 			rpcError := RpcError(fmt.Sprintf("service method %s not config!", req.ServiceMethod))

@@ -135,13 +135,13 @@ type RpcRequest struct {
 	Seq uint64             // sequence number chosen by client
 	ServiceMethod string   // format: "Service.Method"
 	NoReply bool           //是否需要返回
-
 	//packbody
 	InParam []byte
+
+	//other data
 	localReply interface{}
 	localParam interface{} //本地调用的参数列表
 	requestHandle RequestHandler
-
 	callback *reflect.Value
 }
 
