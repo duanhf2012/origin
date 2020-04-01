@@ -62,7 +62,6 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,mutiCoroutine bool,serviceMetho
 
 	request := &RpcRequest{}
 	request.NoReply = false
-	request.MutiCoroutine = mutiCoroutine
 	call.Arg = args
 	slf.pendingLock.Lock()
 	slf.startSeq += 1
@@ -92,13 +91,12 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,mutiCoroutine bool,serviceMetho
 	return call.Err
 }
 
-func (slf *Client) Go(noReply bool,mutiCoroutine bool,serviceMethod string, args interface{},reply interface{}) *Call {
+func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply interface{}) *Call {
 	call := new(Call)
 	call.done = make(chan *Call,1)
 	call.Reply = reply
 
 	request := &RpcRequest{}
-	request.MutiCoroutine = mutiCoroutine
 	request.NoReply = noReply
 	call.Arg = args
 	slf.pendingLock.Lock()
@@ -137,7 +135,6 @@ type RpcRequest struct {
 	Seq uint64             // sequence number chosen by client
 	ServiceMethod string   // format: "Service.Method"
 	NoReply bool           //是否需要返回
-	MutiCoroutine bool     // 是否多协程模式
 
 	//packbody
 	InParam []byte
@@ -192,7 +189,6 @@ func (slf *Client) Run(){
 			if respone.Err != nil {
 				v.Err= respone.Err
 			}
-
 
 			if v.callback.IsValid() {
 				 v.rpcHandler.(*RpcHandler).callResponeCallBack<-v

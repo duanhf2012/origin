@@ -86,6 +86,31 @@ type RpcRequestRw struct {
 	requestHandle RequestHandler
 }
 
+func (agent *RpcAgent) WriteRespone(serviceMethod string,seq uint64,reply interface{},err *RpcError) {
+	var rpcRespone RpcResponse
+	rpcRespone.Seq = seq
+	rpcRespone.Err = err
+	var errM error
+	if reply!=nil {
+		rpcRespone.Returns,errM = processor.Marshal(reply)
+		if errM!= nil {
+			rpcRespone.Err = ConvertError(errM)
+		}
+	}
+
+	bytes,errM :=  processor.Marshal(&rpcRespone)
+	if errM != nil {
+		log.Error("service method %s %+v Marshal error:%+v!", serviceMethod,rpcRespone,errM)
+		return
+	}
+
+	errM = agent.conn.WriteMsg(bytes)
+	if errM != nil {
+		log.Error("Rpc %s return is error:%+v",serviceMethod,errM)
+	}
+}
+
+
 func (agent *RpcAgent) Run() {
 	for {
 		data,err := agent.conn.ReadMsg()
@@ -111,46 +136,26 @@ func (agent *RpcAgent) Run() {
 		//交给程序处理
 		serviceMethod := strings.Split(req.ServiceMethod,".")
 		if len(serviceMethod)!=2 {
+			rpcError := RpcError("rpc request req.ServiceMethod is error")
+			agent.WriteRespone(req.ServiceMethod,req.Seq,nil,&rpcError)
 			log.Debug("rpc request req.ServiceMethod is error")
 			continue
 		}
 		rpcHandler := agent.rpcserver.rpcHandleFinder.FindRpcHandler(serviceMethod[0])
 		if rpcHandler== nil {
+			rpcError := RpcError(fmt.Sprintf("service method %s not config!", req.ServiceMethod))
+			agent.WriteRespone(req.ServiceMethod,req.Seq,nil,&rpcError)
 			log.Error("service method %s not config!", req.ServiceMethod)
 			continue
 		}
+
 		if req.NoReply == false {
 			req.requestHandle = func(Returns interface{},Err *RpcError){
-				var rpcRespone RpcResponse
-				rpcRespone.Seq = req.Seq
-				rpcRespone.Err = Err
-				if Err==nil {
-					rpcRespone.Returns,err = processor.Marshal(Returns)
-					if err!= nil {
-						rpcRespone.Err = ConvertError(err)
-					}
-					//rpcRespone.Returns, = processor.Marshal(Returns)
-				}
-
-				bytes,err :=  processor.Marshal(&rpcRespone)
-				if err != nil {
-					log.Error("service method %s Marshal error:%+v!", req.ServiceMethod,err)
-					return
-				}
-
-				err = agent.conn.WriteMsg(bytes)
-				if err != nil {
-					log.Error("Rpc %s return is error:%+v",req.ServiceMethod,err)
-				}
+				agent.WriteRespone(req.ServiceMethod,req.Seq,Returns,Err)
 			}
 		}
 
-		if req.MutiCoroutine == true {
-			go rpcHandler.HandlerRpcRequest(&req)
-		}else{
-			rpcHandler.PushRequest(&req)
-		}
-
+		rpcHandler.PushRequest(&req)
 	}
 }
 
@@ -195,7 +200,7 @@ func (slf *Server) myselfRpcHandlerGo(handlerName string,methodName string, args
 }
 
 
-func (slf *Server) rpcHandlerGo(noReply bool,mutiCoroutine bool,handlerName string,methodName string, args interface{},reply interface{}) *Call {
+func (slf *Server) rpcHandlerGo(noReply bool,handlerName string,methodName string, args interface{},reply interface{}) *Call {
 	pCall := &Call{}
 	pCall.done = make( chan *Call,1)
 	rpcHandler := slf.rpcHandleFinder.FindRpcHandler(handlerName)
@@ -218,16 +223,13 @@ func (slf *Server) rpcHandlerGo(noReply bool,mutiCoroutine bool,handlerName stri
 		}
 	}
 
-	if mutiCoroutine == true {
-		go rpcHandler.HandlerRpcRequest(&req)
-	}else{
-		rpcHandler.PushRequest(&req)
-	}
+
+	rpcHandler.PushRequest(&req)
 
 	return pCall
 }
 
-func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,mutiCoroutine bool,handlerName string,methodName string,args interface{},reply interface{},callback reflect.Value) error {
+func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,handlerName string,methodName string,args interface{},reply interface{},callback reflect.Value) error {
 	pCall := &Call{}
 	//pCall.done = make( chan *Call,1)
 	pCall.rpcHandler = callerRpcHandler
@@ -245,7 +247,6 @@ func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,m
 	req.localParam = args
 	req.localReply = reply
 	req.NoReply = noReply
-	req.MutiCoroutine = mutiCoroutine
 
 	if noReply == false {
 		req.requestHandle = func(Returns interface{},Err *RpcError){
@@ -257,13 +258,10 @@ func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,m
 		}
 	}
 
-	if mutiCoroutine == true {
-		go rpcHandler.HandlerRpcRequest(&req)
-	}else{
-		err := rpcHandler.PushRequest(&req)
-		if err != nil {
-			return err
-		}
+
+	err := rpcHandler.PushRequest(&req)
+	if err != nil {
+		return err
 	}
 
 	return nil

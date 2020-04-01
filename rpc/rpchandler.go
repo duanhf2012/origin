@@ -64,11 +64,8 @@ type IRpcHandler interface {
 	CallMethod(ServiceMethod string,param interface{},reply interface{}) error
 	
 	AsyncCall(serviceMethod string,args interface{},callback interface{}) error
-	GRAsyncCall(serviceMethod string,args interface{},callback interface{}) error
 	Call(serviceMethod string,args interface{},reply interface{}) error
-	GRCall(serviceMethod string,args interface{},reply interface{}) error
 	Go(serviceMethod string,args interface{}) error
-	GRGo(serviceMethod string,args interface{}) error
 	AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error
 	CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error
 	GoNode(nodeId int,serviceMethod string,args interface{}) error
@@ -282,7 +279,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,mutiCoro
 				return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,nil)
 			}
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.rpcHandlerGo(true,mutiCoroutine,sMethod[0],sMethod[1],args,nil)
+			pCall := pLocalRpcServer.rpcHandlerGo(true,sMethod[0],sMethod[1],args,nil)
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
@@ -290,7 +287,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,mutiCoro
 		}
 
 		//跨node调用
-		pCall := pClient.Go(true,mutiCoroutine,serviceMethod,args,nil)
+		pCall := pClient.Go(true,serviceMethod,args,nil)
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
@@ -329,13 +326,13 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,mutiCoroutine boo
 			return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,reply)
 		}
 		//其他的rpcHandler的处理器
-		pCall := pLocalRpcServer.rpcHandlerGo(false,mutiCoroutine,sMethod[0],sMethod[1],args,reply)
+		pCall := pLocalRpcServer.rpcHandlerGo(false,sMethod[0],sMethod[1],args,reply)
 		pResult := pCall.Done()
 		return pResult.Err
 	}
 
 	//跨node调用
-	pCall := pClient.Go(false,mutiCoroutine,serviceMethod,args,reply)
+	pCall := pClient.Go(false,serviceMethod,args,reply)
 	pResult := pCall.Done()
 	return pResult.Err
 }
@@ -387,13 +384,13 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,mutiCoroutin
 
 		//其他的rpcHandler的处理器
 		if callback!=nil {
-			err =  pLocalRpcServer.rpcHandlerAsyncGo(slf,false,mutiCoroutine,sMethod[0],sMethod[1],args,reply,fVal)
+			err =  pLocalRpcServer.rpcHandlerAsyncGo(slf,false,sMethod[0],sMethod[1],args,reply,fVal)
 			if err != nil {
 				fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 			}
 			return nil
 		}
-		pCall := pLocalRpcServer.rpcHandlerGo(false,mutiCoroutine,sMethod[0],sMethod[1],args,reply)
+		pCall := pLocalRpcServer.rpcHandlerGo(false,sMethod[0],sMethod[1],args,reply)
 		pResult := pCall.Done()
 		return pResult.Err
 	}
@@ -419,31 +416,18 @@ func (slf *RpcHandler) AsyncCall(serviceMethod string,args interface{},callback 
 	return slf.asyncCallRpc(0,serviceMethod,false,args,callback)
 }
 
-func (slf *RpcHandler) GRAsyncCall(serviceMethod string,args interface{},callback interface{}) error {
-	return slf.asyncCallRpc(0,serviceMethod,true,args,callback)
-}
-
 func (slf *RpcHandler) Call(serviceMethod string,args interface{},reply interface{}) error {
 	return slf.callRpc(0,serviceMethod,false,args,reply)
 }
 
-func (slf *RpcHandler) GRCall(serviceMethod string,args interface{},reply interface{}) error {
-	return slf.callRpc(0,serviceMethod,true,args,reply)
-}
 
 func (slf *RpcHandler) Go(serviceMethod string,args interface{}) error {
 	return slf.goRpc(false,0,serviceMethod,false,args)
 }
 
-func (slf *RpcHandler) GRGo(serviceMethod string,args interface{}) error {
-	return slf.goRpc(false,0,serviceMethod,true,args)
-}
-
-
 func (slf *RpcHandler) AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error {
 	return slf.asyncCallRpc(nodeId,serviceMethod,false,args,callback)
 }
-
 
 func (slf *RpcHandler) CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
 	return slf.callRpc(nodeId,serviceMethod,false,args,reply)
