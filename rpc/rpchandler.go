@@ -269,7 +269,7 @@ func (slf *RpcHandler) CallMethod(ServiceMethod string,param interface{},reply i
 	return err
 }
 
-func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,mutiCoroutine bool,args interface{}) error {
+func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args interface{}) error {
 	pClientList,err := slf.funcRpcClient(nodeId,serviceMethod)
 	if err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
@@ -319,7 +319,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,mutiCoro
 	return err
 }
 
-func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,mutiCoroutine bool,args interface{},reply interface{}) error {
+func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
 	pClientList,err := slf.funcRpcClient(nodeId,serviceMethod)
 	if err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
@@ -359,10 +359,24 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,mutiCoroutine boo
 	return pResult.Err
 }
 
-func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,mutiCoroutine bool,args interface{},callback interface{}) error {
+func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interface{},callback interface{}) error {
 	fVal := reflect.ValueOf(callback)
 	if fVal.Kind()!=reflect.Func{
-		return fmt.Errorf("input function is error!")
+		err := fmt.Errorf("call %s input callback param is error!",serviceMethod)
+		log.Error("+v",err)
+		return err
+	}
+
+    if fVal.Type().NumIn()!= 2 {
+    	err := fmt.Errorf("call %s callback param function is error!",serviceMethod)
+		log.Error("%+v",err)
+		return err
+	}
+
+	if  fVal.Type().In(0).Kind() != reflect.Ptr || fVal.Type().In(1).String() != "error"{
+		err :=  fmt.Errorf("call %s callback  function param is error!",serviceMethod)
+		log.Error("%+v",err)
+		return err
 	}
 
 	reply := reflect.New(fVal.Type().In(0).Elem()).Interface()
@@ -418,7 +432,7 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,mutiCoroutin
 	}
 
 	//跨node调用
-	err =  pClient.AsycGo(slf,mutiCoroutine,serviceMethod,fVal,args,reply)
+	err =  pClient.AsycGo(slf,serviceMethod,fVal,args,reply)
 	if err != nil {
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 	}
@@ -435,30 +449,30 @@ func (slf *RpcHandler) GetName() string{
 //func (slf *RpcHandler) goRpc(serviceMethod string,mutiCoroutine bool,args ...interface{}) error {
 //(reply *int,err error) {}
 func (slf *RpcHandler) AsyncCall(serviceMethod string,args interface{},callback interface{}) error {
-	return slf.asyncCallRpc(0,serviceMethod,false,args,callback)
+	return slf.asyncCallRpc(0,serviceMethod,args,callback)
 }
 
 func (slf *RpcHandler) Call(serviceMethod string,args interface{},reply interface{}) error {
-	return slf.callRpc(0,serviceMethod,false,args,reply)
+	return slf.callRpc(0,serviceMethod,args,reply)
 }
 
 
 func (slf *RpcHandler) Go(serviceMethod string,args interface{}) error {
-	return slf.goRpc(false,0,serviceMethod,false,args)
+	return slf.goRpc(false,0,serviceMethod,args)
 }
 
 func (slf *RpcHandler) AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error {
-	return slf.asyncCallRpc(nodeId,serviceMethod,false,args,callback)
+	return slf.asyncCallRpc(nodeId,serviceMethod,args,callback)
 }
 
 func (slf *RpcHandler) CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
-	return slf.callRpc(nodeId,serviceMethod,false,args,reply)
+	return slf.callRpc(nodeId,serviceMethod,args,reply)
 }
 
 func (slf *RpcHandler) GoNode(nodeId int,serviceMethod string,args interface{}) error {
-	return slf.goRpc(false,nodeId,serviceMethod,false,args)
+	return slf.goRpc(false,nodeId,serviceMethod,args)
 }
 
 func (slf *RpcHandler) CastGo(serviceMethod string,args interface{})  {
-	slf.goRpc(true,0,serviceMethod,false,args)
+	slf.goRpc(true,0,serviceMethod,args)
 }

@@ -54,7 +54,7 @@ func (slf *Client) Connect(addr string) error {
 	return nil
 }
 
-func (slf *Client) AsycGo(rpcHandler IRpcHandler,mutiCoroutine bool,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
+func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
 	call := new(Call)
 	call.Reply = replyParam
 	call.callback = &callback
