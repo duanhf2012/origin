@@ -7,7 +7,6 @@ import (
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/service"
 	"io/ioutil"
-	syslog "log"
 	"os"
 	"os/signal"
 	"strconv"
@@ -85,7 +84,6 @@ func initNode(id int){
 }
 
 func Start() {
-	SetSysLog("debug","./",syslog.Lshortfile|syslog.LstdFlags)
 	console.RegisterCommand("start",startNode)
 	console.RegisterCommand("stop",stopNode)
 	err := console.Run(os.Args)
@@ -107,6 +105,7 @@ func stopNode(arg interface{}) error {
 }
 
 func startNode(paramNodeId interface{}) error {
+	log.Release("Start running server.")
 	initNode(paramNodeId.(int))
 	cluster.GetCluster().Start()
 	service.Start()
@@ -123,6 +122,8 @@ func startNode(paramNodeId interface{}) error {
 
 	close(closeSig)
 	service.WaitStop()
+
+	log.Debug("Server is stop.")
 	return nil
 }
 

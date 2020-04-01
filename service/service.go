@@ -85,7 +85,7 @@ func (slf *Service) Start() {
 }
 
 func (slf *Service) Run() {
-
+	log.Debug("Start running Service %s.",slf.GetName())
 	defer slf.wg.Done()
 	var bStop = false
 	for{
@@ -130,8 +130,8 @@ func (slf *Service) Release(){
 			log.Error("core dump info:%+v\n",err)
 		}
 	}()
-
 	slf.this.OnRelease()
+	log.Debug("Release Service %s.",slf.GetName())
 }
 
 func (slf *Service) OnRelease(){

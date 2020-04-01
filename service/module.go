@@ -3,7 +3,9 @@ package service
 import (
 	"fmt"
 	"github.com/duanhf2012/origin/event"
+	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/util/timer"
+	"reflect"
 	"time"
 )
 
@@ -24,6 +26,7 @@ type IModule interface {
 	getBaseModule() IModule
 	GetService() IService
 	GetEventChan() chan *event.Event
+	GetModuleName() string
 }
 
 
@@ -47,6 +50,7 @@ type Module struct {
 
 	//事件管道
 	event.EventProcessor
+	moduleName string
 	//eventChan chan *SEvent
 }
 
@@ -62,6 +66,10 @@ func (slf *Module) SetModuleId(moduleId int64) bool{
 
 func (slf *Module) GetModuleId() int64{
 	return slf.moduleId
+}
+
+func (slf *Module) GetModuleName() string{
+	return slf.moduleName
 }
 
 func (slf *Module) OnInit() error{
@@ -86,7 +94,7 @@ func (slf *Module) AddModule(module IModule) (int64,error){
 	pAddModule.parent = slf.self
 	pAddModule.dispatcher = slf.GetAncestor().getBaseModule().(*Module).dispatcher
 	pAddModule.ancestor = slf.ancestor
-
+	pAddModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
 	err := module.OnInit()
 	if err != nil {
 		return 0,err
@@ -95,6 +103,7 @@ func (slf *Module) AddModule(module IModule) (int64,error){
 	slf.child[module.GetModuleId()] = module
 	slf.ancestor.getBaseModule().(*Module).descendants[module.GetModuleId()] = module
 
+	log.Debug("Add module %s completed",slf.GetModuleName())
 	return module.GetModuleId(),nil
 }
 
@@ -107,6 +116,7 @@ func (slf *Module) ReleaseModule(moduleId int64){
 		slf.ReleaseModule(id)
 	}
 	pModule.self.OnRelease()
+	log.Debug("Release module %s.",slf.GetModuleName())
 	for pTimer,_ := range pModule.mapActiveTimer {
 		pTimer.Stop()
 	}
