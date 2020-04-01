@@ -128,12 +128,14 @@ func (slf *TestServiceCall) Test(){
 	param.B = "xxxxxxxxxxxxxxxxxxxxxxx"
 	param.Pa = []string{"ccccc","asfsdfsdaf","bbadfsdf","ewrwefasdf","safsadfka;fksd"}
 	param.Index = index
-	slf.AsyncCall("TestService1.RPC_Test",&param, func(reply *Param, err error) {
+	slf.AsyncCall("TestService1.RPC_Test1",&param, func(reply *Param, err error) {
 		fmt.Print(reply,"\n")
 	})
 	slf.AfterFunc(time.Second*1,slf.Test)
 }
-
+func  (slf *TestServiceCall) OnRelease(){
+	fmt.Print("OnRelease")
+}
 func  (slf *TestServiceCall) Run(){
 	//var ret int
 	var input int = 1
@@ -163,7 +165,9 @@ func  (slf *TestServiceCall) Run(){
 
 func (slf *TestService1) RPC_Test(a *Param,b *Param) error {
 	//*a = *b
+	//a = nil
 	*b = *a
+
 	return nil
 }
 

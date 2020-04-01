@@ -6,7 +6,9 @@ import (
 	"strings"
 )
 
-var mapRegisterCmd map[string]func(param interface{}) =  map[string]func(param interface{}){}
+type CommandFunctionCB func(param interface{})error
+
+var mapRegisterCmd map[string]CommandFunctionCB =  map[string]CommandFunctionCB{}
 var programName string
 
 func Run(args []string) error {
@@ -27,12 +29,14 @@ func Run(args []string) error {
 		}else{
 			return start(fn,args[2])
 		}
+	case "stop":
+		return fn(nil)
 	}
 
 	return fmt.Errorf("command not found, try `%s help` for help",args[0])
 }
 
-func start(fn func(param interface{}),param string) error {
+func start(fn CommandFunctionCB,param string) error {
 	sparam := strings.Split(param,"=")
 	if len(sparam) != 2 {
 		return fmt.Errorf("invalid option %s",param)
@@ -45,10 +49,10 @@ func start(fn func(param interface{}),param string) error {
 		return fmt.Errorf("invalid option %s",param)
 	}
 
-	fn(nodeId)
-	return nil
+	return fn(nodeId)
 }
 
-func RegisterCommand(cmd string,fn func(param interface{})){
+
+func RegisterCommand(cmd string,fn CommandFunctionCB){
 	mapRegisterCmd[cmd] = fn
 }

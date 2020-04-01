@@ -170,3 +170,7 @@ func (slf *TcpService) Close(clientid uint64) {
 
 	return
 }
+
+func (slf *TcpService) OnRelease() {
+
+}

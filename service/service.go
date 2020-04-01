@@ -108,6 +108,7 @@ func (slf *Service) Run() {
 		if bStop == true {
 			if atomic.AddInt32(&slf.gorouterNum,-1)<=0 {
 				slf.startStatus = false
+				slf.Release()
 				slf.OnRelease()
 			}
 			break
@@ -120,8 +121,7 @@ func (slf *Service) GetName() string{
 	return slf.name
 }
 
-
-func (slf *Service) OnRelease(){
+func (slf *Service) Release(){
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 40960)
@@ -132,6 +132,9 @@ func (slf *Service) OnRelease(){
 	}()
 
 	slf.this.OnRelease()
+}
+
+func (slf *Service) OnRelease(){
 }
 
 func (slf *Service) OnInit() error {

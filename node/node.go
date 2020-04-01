@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
-	"time"
 )
 
 var closeSig chan bool
@@ -97,27 +96,34 @@ func Start() {
 }
 
 
-func stopNode(processid interface{}){
+func stopNode(arg interface{}) error {
+	processid,err := getRunProcessPid()
+	if err != nil {
+		return err
+	}
 
+	KillProcess(processid)
+	return nil
 }
 
-func startNode(paramNodeId interface{}) {
+func startNode(paramNodeId interface{}) error {
 	initNode(paramNodeId.(int))
 	cluster.GetCluster().Start()
 	service.Start()
 	writeProcessPid()
-	for {
+	bRun := true
+
+	for bRun {
 		select {
 		case <-sigs:
-			fmt.Printf("Recv stop sig")
-			break
-		default:
-			time.Sleep(time.Second)
+			log.Debug("receipt stop signal.")
+			bRun = false
 		}
 	}
 
 	close(closeSig)
 	service.WaitStop()
+	return nil
 }
 
 
