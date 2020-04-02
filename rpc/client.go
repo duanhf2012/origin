@@ -122,6 +122,11 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 		return call
 	}
 
+	if slf.conn == nil {
+		call.Err = fmt.Errorf("call %s is fail,rpc client is disconnect.",serviceMethod)
+		return call
+	}
+	
 	err = slf.conn.WriteMsg(bytes)
 	if err != nil {
 		call.Err = err
