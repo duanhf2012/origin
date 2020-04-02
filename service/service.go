@@ -53,7 +53,7 @@ func (slf *Service) OnSetup(iservice IService){
 	}
 }
 
-func (slf *Service) OpenProfiler(){
+func (slf *Service) OpenProfiler()  {
 	slf.profiler = profiler.RegProfiler(slf.GetName())
 	if slf.profiler==nil {
 		log.Fatal("rofiler.RegProfiler %s fail.",slf.GetName())
@@ -75,8 +75,9 @@ func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getSer
 }
 
 func (slf *Service) SetGoRouterNum(gorouterNum int32) bool {
-	//已经开始状态不允许修改协程数量
-	if slf.startStatus == true {
+	//已经开始状态不允许修改协程数量,打开性能分析器不允许开多线程
+	if slf.startStatus == true || slf.profiler!=nil {
+		log.Error("open profiler mode is not allowed to set Multi-coroutine.")
 		return false
 	}
 
@@ -102,41 +103,46 @@ func (slf *Service) Run() {
 		rpcRequestChan := slf.GetRpcRequestChan()
 		rpcResponeCallBack := slf.GetRpcResponeChan()
 		eventChan := slf.GetEventChan()
+		var analyzer *profiler.Analyzer
 		select {
 		case <- closeSig:
 			bStop = true
 		case rpcRequest :=<- rpcRequestChan:
 			if slf.profiler!=nil {
-				slf.profiler.Push("Req_"+rpcRequest.ServiceMethod)
+				analyzer = slf.profiler.Push("Req_"+rpcRequest.ServiceMethod)
 			}
 
 			slf.GetRpcHandler().HandlerRpcRequest(rpcRequest)
-			if slf.profiler!=nil {
-				slf.profiler.Pop()
+			if analyzer!=nil {
+				analyzer.Pop()
+				analyzer = nil
 			}
 		case rpcResponeCB := <- rpcResponeCallBack:
 			if slf.profiler!=nil {
-				slf.profiler.Push("Res_" + rpcResponeCB.ServiceMethod)
+				analyzer = slf.profiler.Push("Res_" + rpcResponeCB.ServiceMethod)
 			}
 			slf.GetRpcHandler().HandlerRpcResponeCB(rpcResponeCB)
-			if slf.profiler!=nil {
-				slf.profiler.Pop()
+			if analyzer!=nil {
+				analyzer.Pop()
+				analyzer = nil
 			}
 		case ev := <- eventChan:
 			if slf.profiler!=nil {
-				slf.profiler.Push(fmt.Sprintf("Event_%d", int(ev.Type)))
+				analyzer = slf.profiler.Push(fmt.Sprintf("Event_%d", int(ev.Type)))
 			}
 			slf.EventHandler(slf.this.(event.IEventProcessor),ev)
-			if slf.profiler!=nil {
-				slf.profiler.Pop()
+			if analyzer!=nil {
+				analyzer.Pop()
+				analyzer = nil
 			}
 		case t := <- slf.dispatcher.ChanTimer:
 			if slf.profiler!=nil {
-				slf.profiler.Push(fmt.Sprintf("Timer_%s", t.GetFunctionName()))
+				analyzer = slf.profiler.Push(fmt.Sprintf("Timer_%s", t.GetFunctionName()))
 			}
 			t.Cb()
-			if slf.profiler!=nil {
-				slf.profiler.Pop()
+			if analyzer!=nil {
+				analyzer.Pop()
+				analyzer = nil
 			}
 		}
 

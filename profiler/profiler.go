@@ -32,10 +32,17 @@ type Record struct {
 	RecordName string
 }
 
+
+type Analyzer struct {
+	elem *list.Element
+	profiler *Profiler
+}
+
+
 type Profiler struct {
 	stack *list.List //Element
 	stackLocker sync.RWMutex
-
+	mapAnalyzer map[*list.Element]Analyzer
 	record *list.List   //Record
 
 	callNum int //调用次数
@@ -62,22 +69,15 @@ func RegProfiler(profilerName string) *Profiler {
 	return pProfiler
 }
 
-func (slf *Profiler) Push(tag string) {
+func (slf *Profiler) Push(tag string) *Analyzer{
 	slf.stackLocker.Lock()
-	slf.stack.PushBack(&Element{tagName:tag,pushTime:time.Now()})
-	slf.stackLocker.Unlock()
+	defer slf.stackLocker.Unlock()
+
+	pElem := slf.stack.PushBack(&Element{tagName:tag,pushTime:time.Now()})
+
+	return &Analyzer{elem:pElem,profiler:slf}
 }
 
-func (slf *Profiler) pushRecordLog(record *Record){
-	if slf.record.Len()>=Default_MaxRecordNum{
-		front := slf.stack.Front()
-		if front!=nil {
-			slf.stack.Remove(front)
-		}
-	}
-
-	slf.record.PushBack(record)
-}
 
 func (slf *Profiler) check(pElem *Element) (*Record,time.Duration) {
 	if pElem == nil {
@@ -102,23 +102,32 @@ func (slf *Profiler) check(pElem *Element) (*Record,time.Duration) {
 	return &record,subTm
 }
 
-func (slf *Profiler) Pop() {
-	slf.stackLocker.Lock()
+func (slf *Analyzer) Pop(){
+	slf.profiler.stackLocker.Lock()
+	defer slf.profiler.stackLocker.Unlock()
 
-	back := slf.stack.Back()
-	if back!=nil && back.Value!=nil {
-		pElement := back.Value.(*Element)
-		pElem,subTm := slf.check(pElement)
-		slf.callNum+=1
-		slf.totalCostTime += subTm
-		if pElem != nil {
-			slf.pushRecordLog(pElem)
+	pElement := slf.elem.Value.(*Element)
+	pElem,subTm := slf.profiler.check(pElement)
+	slf.profiler.callNum+=1
+	slf.profiler.totalCostTime += subTm
+	if pElem != nil {
+		slf.profiler.pushRecordLog(pElem)
+	}
+	slf.profiler.stack.Remove(slf.elem)
+}
+
+func (slf *Profiler) pushRecordLog(record *Record){
+	if slf.record.Len()>=Default_MaxRecordNum{
+		front := slf.stack.Front()
+		if front!=nil {
+			slf.stack.Remove(front)
 		}
-		slf.stack.Remove(back)
 	}
 
-	slf.stackLocker.Unlock()
+	slf.record.PushBack(record)
 }
+
+
 
 type ReportFunType func(name string,callNum int,costTime time.Duration,record *list.List)
 
@@ -165,11 +174,13 @@ func Report() {
 
 		//取栈顶，是否存在异常MaxOverTime数据
 		pElem := prof.stack.Back()
-		if pElem!=nil && pElem.Value!=nil{
-			pRecord,_ := prof.check(pElem.Value.(*Element))
-			if pRecord!=nil {
-				prof.pushRecordLog(pRecord)
+		for pElem!=nil {
+			pElement := pElem.Value.(*Element)
+			pExceptionElem,_ := prof.check(pElement)
+			if pExceptionElem!=nil {
+				prof.pushRecordLog(pExceptionElem)
 			}
+			pElem = pElem.Prev()
 		}
 
 		if prof.record.Len() == 0 {
