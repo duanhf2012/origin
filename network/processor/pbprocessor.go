@@ -32,6 +32,7 @@ func (p *PBProcessor) SetByteOrder(littleEndian bool) {
 type PBPackInfo struct {
 	typ uint16
 	msg proto.Message
+	rawMsg []byte
 }
 
 func (slf *PBPackInfo) GetPackType() uint16 {
@@ -82,19 +83,22 @@ func (slf *PBProcessor ) Unmarshal(data []byte) (interface{}, error) {
 func (slf *PBProcessor ) Marshal(msg interface{}) ([]byte, error){
 	pMsg := msg.(*PBPackInfo)
 
-	bytes,err := proto.Marshal(pMsg.msg.(proto.Message))
-	if err != nil {
-		return nil,err
+	var err error
+	if pMsg.msg!=nil {
+		pMsg.rawMsg,err = proto.Marshal(pMsg.msg.(proto.Message))
+		if err != nil {
+			return nil,err
+		}
 	}
 
-	buff := make([]byte, 2, len(bytes)+MsgTypeSize)
+	buff := make([]byte, 2, len(pMsg.rawMsg)+MsgTypeSize)
 	if slf.LittleEndian == true {
 		binary.LittleEndian.PutUint16(buff[:2],pMsg.typ)
 	}else{
 		binary.BigEndian.PutUint16(buff[:2],pMsg.typ)
 	}
 
-	buff = append(buff,bytes...)
+	buff = append(buff,pMsg.rawMsg...)
 	return buff,nil
 }
 
@@ -108,4 +112,8 @@ func (slf *PBProcessor) Register(msgtype uint16,msg proto.Message,handle Message
 
 func (slf *PBProcessor) MakeMsg(msgType uint16,protoMsg proto.Message) *PBPackInfo {
 	return &PBPackInfo{typ:msgType,msg:protoMsg}
+}
+
+func (slf *PBProcessor) MakeRawMsg(msgType uint16,msg []byte) *PBPackInfo {
+	return &PBPackInfo{typ:msgType,rawMsg:msg}
 }
