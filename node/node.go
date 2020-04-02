@@ -5,18 +5,21 @@ import (
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/console"
 	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/service"
 	"io/ioutil"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 )
 
 var closeSig chan bool
 var sigs chan os.Signal
 var nodeId int
 var preSetupService []service.IService //预安装
+var profilerInterval time.Duration
 
 func init() {
 	closeSig = make(chan bool,1)
@@ -111,12 +114,18 @@ func startNode(paramNodeId interface{}) error {
 	service.Start()
 	writeProcessPid()
 	bRun := true
+	var pProfilerTicker *time.Ticker = &time.Ticker{}
+	if profilerInterval>0 {
+		pProfilerTicker = time.NewTicker(profilerInterval)
+	}
 
 	for bRun {
 		select {
 		case <-sigs:
 			log.Debug("receipt stop signal.")
 			bRun = false
+		case <- pProfilerTicker.C:
+			profiler.Report()
 		}
 	}
 
@@ -146,4 +155,8 @@ func SetConfigDir(configdir string){
 func SetSysLog(strLevel string, pathname string, flag int){
 	logs,_:= log.New(strLevel,pathname,flag)
 	log.Export(logs)
+}
+
+func OpenProfilerReport(interval time.Duration){
+	profilerInterval = interval
 }

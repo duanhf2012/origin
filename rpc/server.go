@@ -15,7 +15,7 @@ var LittleEndian bool
 
 type Call struct {
 	Seq uint64
-	//ServiceMethod string
+	ServiceMethod string
 	Arg interface{}
 	Reply interface{}
 	Respone *RpcResponse

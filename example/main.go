@@ -92,6 +92,8 @@ func (slf *Module4) OnRelease() {
 }
 
 func (slf *TestServiceCall) OnInit() error {
+	slf.OpenProfiler()
+
 	//slf.AfterFunc(time.Second*1,slf.Run)
 	slf.AfterFunc(time.Second*1,slf.Test)
 	moduleid1,_ = slf.AddModule(&Module1{})
@@ -182,6 +184,7 @@ func (slf *TestService1) RPC_Test(a *Param,b *Param) error {
 }
 
 func (slf *TestService1) OnInit() error {
+	slf.OpenProfiler()
 	return nil
 }
 /*
@@ -213,6 +216,7 @@ func (slf *TestServiceCall) TestDB() {
 }
 
 func (slf *TestService2) OnInit() error {
+	slf.OpenProfiler()
 	return nil
 }
 
@@ -221,6 +225,7 @@ func main(){
 	gateService := &GateService.GateService{}
 	tcpService.SetEventReciver(gateService)
 	node.Setup(tcpService,gateService)
+	node.OpenProfilerReport(time.Second*10)
 	node.Start()
 }
 

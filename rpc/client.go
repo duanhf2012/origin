@@ -59,6 +59,7 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback r
 	call.Reply = replyParam
 	call.callback = &callback
 	call.rpcHandler = rpcHandler
+	call.ServiceMethod = serviceMethod
 
 	request := &RpcRequest{}
 	request.NoReply = false
@@ -95,7 +96,7 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 	call := new(Call)
 	call.done = make(chan *Call,1)
 	call.Reply = reply
-
+	call.ServiceMethod = serviceMethod
 	request := &RpcRequest{}
 	request.NoReply = noReply
 	call.Arg = args

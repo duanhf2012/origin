@@ -3,6 +3,7 @@ package timer
 import (
 	"fmt"
 	"github.com/duanhf2012/origin/log"
+	"reflect"
 	"runtime"
 	"time"
 )
@@ -23,11 +24,16 @@ type Timer struct {
 	t  *time.Timer
 	cb func()
 	cbex func(*Timer)
+	name string
 }
 
 func (t *Timer) Stop() {
 	t.t.Stop()
 	t.cb = nil
+}
+
+func (t *Timer) GetFunctionName() string {
+	return t.name
 }
 
 func (t *Timer) Cb() {
@@ -51,15 +57,20 @@ func (t *Timer) Cb() {
 func (disp *Dispatcher) AfterFunc(d time.Duration, cb func()) *Timer {
 	t := new(Timer)
 	t.cb = cb
+	t.name = reflect.TypeOf(cb).Name()
+
 	t.t = time.AfterFunc(d, func() {
 		disp.ChanTimer <- t
 	})
+
 	return t
 }
 
-func (disp *Dispatcher) AfterFuncEx(d time.Duration, cbex func(timer *Timer)) *Timer {
+func (disp *Dispatcher) AfterFuncEx(funName string,d time.Duration, cbex func(timer *Timer)) *Timer {
 	t := new(Timer)
 	t.cbex = cbex
+	t.name = funName//reflect.TypeOf(cbex).Name()
+	//t.name = runtime.FuncForPC(reflect.ValueOf(cbex).Pointer()).Name()
 	t.t = time.AfterFunc(d, func() {
 		disp.ChanTimer <- t
 	})

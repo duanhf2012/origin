@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
 	"reflect"
@@ -27,6 +28,8 @@ type IService interface {
 	Start()
 	GetRpcHandler() rpc.IRpcHandler
 	GetServiceCfg()interface{}
+	OpenProfiler()
+	GetProfiler() *profiler.Profiler
 }
 
 
@@ -41,6 +44,7 @@ type Service struct {
 	gorouterNum int32
 	startStatus bool
 
+	profiler *profiler.Profiler //性能分析器
 }
 
 func (slf *Service) OnSetup(iservice IService){
@@ -49,8 +53,14 @@ func (slf *Service) OnSetup(iservice IService){
 	}
 }
 
-func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
+func (slf *Service) OpenProfiler(){
+	slf.profiler = profiler.RegProfiler(slf.GetName())
+	if slf.profiler==nil {
+		log.Fatal("rofiler.RegProfiler %s fail.",slf.GetName())
+	}
+}
 
+func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
 	slf.dispatcher =timer.NewDispatcher(timerDispatcherLen)
 	slf.this = iservice
 	slf.InitRpcHandler(iservice.(rpc.IRpcHandler),getClientFun,getServerFun)
@@ -96,13 +106,38 @@ func (slf *Service) Run() {
 		case <- closeSig:
 			bStop = true
 		case rpcRequest :=<- rpcRequestChan:
+			if slf.profiler!=nil {
+				slf.profiler.Push("Req_"+rpcRequest.ServiceMethod)
+			}
+
 			slf.GetRpcHandler().HandlerRpcRequest(rpcRequest)
+			if slf.profiler!=nil {
+				slf.profiler.Pop()
+			}
 		case rpcResponeCB := <- rpcResponeCallBack:
-				slf.GetRpcHandler().HandlerRpcResponeCB(rpcResponeCB)
+			if slf.profiler!=nil {
+				slf.profiler.Push("Res_" + rpcResponeCB.ServiceMethod)
+			}
+			slf.GetRpcHandler().HandlerRpcResponeCB(rpcResponeCB)
+			if slf.profiler!=nil {
+				slf.profiler.Pop()
+			}
 		case ev := <- eventChan:
-				slf.EventHandler(slf.this.(event.IEventProcessor),ev)
+			if slf.profiler!=nil {
+				slf.profiler.Push(fmt.Sprintf("Event_%d", int(ev.Type)))
+			}
+			slf.EventHandler(slf.this.(event.IEventProcessor),ev)
+			if slf.profiler!=nil {
+				slf.profiler.Pop()
+			}
 		case t := <- slf.dispatcher.ChanTimer:
+			if slf.profiler!=nil {
+				slf.profiler.Push(fmt.Sprintf("Timer_%s", t.GetFunctionName()))
+			}
 			t.Cb()
+			if slf.profiler!=nil {
+				slf.profiler.Pop()
+			}
 		}
 
 		if bStop == true {
@@ -114,7 +149,6 @@ func (slf *Service) Run() {
 			break
 		}
 	}
-
 }
 
 func (slf *Service) GetName() string{
@@ -149,3 +183,9 @@ func (slf *Service) Wait(){
 func (slf *Service) GetServiceCfg()interface{}{
 	return slf.serviceCfg
 }
+
+
+func (slf *Service) GetProfiler() *profiler.Profiler{
+	return slf.profiler
+}
+

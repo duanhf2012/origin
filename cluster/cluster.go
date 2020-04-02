@@ -69,8 +69,8 @@ func (slf *Cluster) Init(currentNodeId int) error{
 		rpcinfo.nodeinfo = nodeinfo
 		rpcinfo.client = &rpc.Client{}
 		if nodeinfo.NodeId == currentNodeId {
-			rpcinfo.client.Connect("localhost")
-			//rpcinfo.client.Connect(nodeinfo.ListenAddr)
+			//rpcinfo.client.Connect("localhost")
+			rpcinfo.client.Connect(nodeinfo.ListenAddr)
 		}else{
 			rpcinfo.client.Connect(nodeinfo.ListenAddr)
 		}

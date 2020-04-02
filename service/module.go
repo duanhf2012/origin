@@ -6,6 +6,7 @@ import (
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/util/timer"
 	"reflect"
+	"runtime"
 	"time"
 )
 
@@ -170,7 +171,8 @@ func (slf *Module) AfterFunc(d time.Duration, cb func()) *timer.Timer {
 		slf.mapActiveTimer =map[*timer.Timer]interface{}{}
 	}
 
-	 tm := slf.dispatcher.AfterFuncEx(d,func(t *timer.Timer){
+	funName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
+	 tm := slf.dispatcher.AfterFuncEx(funName,d,func(t *timer.Timer){
 		cb()
 		delete(slf.mapActiveTimer,t)
 	 })
