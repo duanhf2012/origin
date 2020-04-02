@@ -69,6 +69,18 @@ func RegProfiler(profilerName string) *Profiler {
 	return pProfiler
 }
 
+func (slf *Profiler) SetMaxOverTime(tm time.Duration){
+	slf.maxOverTime = tm
+}
+
+func (slf *Profiler) SetOverTime(tm time.Duration){
+	slf.overTime = tm
+}
+
+func (slf *Profiler) SetMaxRecordNum(num int){
+	slf.maxRecordNum = num
+}
+
 func (slf *Profiler) Push(tag string) *Analyzer{
 	slf.stackLocker.Lock()
 	defer slf.stackLocker.Unlock()
