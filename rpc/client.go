@@ -6,6 +6,7 @@ import (
 	"github.com/duanhf2012/origin/network"
 	"math"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -157,6 +158,15 @@ type RpcResponse struct {
 
 
 func (slf *Client) Run(){
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 4096)
+			l := runtime.Stack(buf, false)
+			err := fmt.Errorf("%v: %s\n", r, buf[:l])
+			log.Error("core dump info:%+v",err)
+		}
+	}()
+
 	for {
 		bytes,err := slf.conn.ReadMsg()
 		if err != nil {
@@ -193,7 +203,7 @@ func (slf *Client) Run(){
 				v.Err= respone.Err
 			}
 
-			if v.callback.IsValid() {
+			if v.callback!=nil && v.callback.IsValid() {
 				 v.rpcHandler.(*RpcHandler).callResponeCallBack<-v
 			}else{
 				v.done <- v
