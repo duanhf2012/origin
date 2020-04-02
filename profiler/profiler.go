@@ -105,16 +105,16 @@ func (slf *Profiler) check(pElem *Element) (*Record,time.Duration) {
 func (slf *Profiler) Pop() {
 	slf.stackLocker.Lock()
 
-	front := slf.stack.Front()
-	if front!=nil && front.Value!=nil {
-		pElement := front.Value.(*Element)
+	back := slf.stack.Back()
+	if back!=nil && back.Value!=nil {
+		pElement := back.Value.(*Element)
 		pElem,subTm := slf.check(pElement)
 		slf.callNum+=1
 		slf.totalCostTime += subTm
 		if pElem != nil {
 			slf.pushRecordLog(pElem)
 		}
-		slf.stack.Remove(front)
+		slf.stack.Remove(back)
 	}
 
 	slf.stackLocker.Unlock()
@@ -135,7 +135,12 @@ func DefaultReportFunction(name string,callNum int,costTime time.Duration,record
 
 	var strReport string
 	strReport = "Profiler report tag "+name+":\n"
-	strReport += fmt.Sprintf("process count %d,take time %d Milliseconds,average %d Milliseconds/per.\n",callNum,costTime.Milliseconds(),costTime.Milliseconds()/int64(callNum))
+	var average int64
+	if callNum>0 {
+		average = costTime.Milliseconds()/int64(callNum)
+	}
+
+	strReport += fmt.Sprintf("process count %d,take time %d Milliseconds,average %d Milliseconds/per.\n",callNum,costTime.Milliseconds(),average)
 	elem := record.Front()
 	var strTypes string
 	for elem!=nil {
@@ -157,19 +162,21 @@ func Report() {
 	var record *list.List
 	for name,prof := range mapProfiler{
 		prof.stackLocker.RLock()
-		if prof.record.Len() == 0 {
-			prof.stackLocker.RUnlock()
-			continue
-		}
 
-		//取栈的队首，是否存在异常MaxOverTime数据
-		pElem := prof.stack.Front()
+		//取栈顶，是否存在异常MaxOverTime数据
+		pElem := prof.stack.Back()
 		if pElem!=nil && pElem.Value!=nil{
 			pRecord,_ := prof.check(pElem.Value.(*Element))
 			if pRecord!=nil {
 				prof.pushRecordLog(pRecord)
 			}
 		}
+
+		if prof.record.Len() == 0 {
+			prof.stackLocker.RUnlock()
+			continue
+		}
+
 		record = prof.record
 		prof.record = list.New()
 		prof.stackLocker.RUnlock()
