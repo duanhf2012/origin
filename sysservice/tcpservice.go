@@ -117,7 +117,7 @@ func (slf *Client) Run() {
 	for{
 		bytes,err := slf.tcpConn.ReadMsg()
 		if err != nil {
-			log.Debug("read client id %d is error",err)
+			log.Debug("read client id %d is error:%+v",slf.id,err)
 			break
 		}
 		data,err:=slf.tcpService.process.Unmarshal(bytes)
