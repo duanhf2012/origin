@@ -34,6 +34,14 @@ type PBPackInfo struct {
 	msg proto.Message
 }
 
+func (slf *PBPackInfo) GetPackType() uint16 {
+	return slf.typ
+}
+
+func (slf *PBPackInfo) GetMsg() proto.Message {
+	return slf.msg
+}
+
 // must goroutine safe
 func (slf *PBProcessor ) Route(msg interface{},userdata interface{}) error{
 	pPackInfo := msg.(*PBPackInfo)
