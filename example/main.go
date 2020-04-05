@@ -125,6 +125,12 @@ type Param struct {
 
 var index int
 func (slf *TestServiceCall) Test(){
+	//any := slf.GetProfiler().Push("xxxxxx")
+	//defer any.Pop()
+	for{
+		time.Sleep(time.Second*1)
+	}
+
 	index += 1
 	//var param *Param
 	param:=&Param{}
@@ -144,6 +150,7 @@ func (slf *TestServiceCall) Test(){
 func  (slf *TestServiceCall) OnRelease(){
 	fmt.Print("OnRelease")
 }
+
 func  (slf *TestServiceCall) Run(){
 	//var ret int
 	var input int = 10000
@@ -220,7 +227,12 @@ func (slf *TestService2) OnInit() error {
 	return nil
 }
 
+
 func main(){
+
+	//data := P{3, 4, 5, "CloudGeek"}
+	//buf := encode(data)
+
 	tcpService := &sysservice.TcpService{}
 	gateService := &GateService.GateService{}
 	tcpService.SetEventReciver(gateService)
