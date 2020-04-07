@@ -1,6 +1,16 @@
 {
-  "HttpService":{
-	"Port":10001
+ "HttpService":{
+    "ListenAddr":"0.0.0.0:9402",
+	"ReadTimeout":10000,
+	"WriteTimeout":10000,
+	"ProcessTimeout":10000,
+	"CAFile":[
+	{
+		"Certfile":"",
+		"Keyfile":""
+	}
+	]
+	
   },
   "TcpService":{
 	"ListenAddr":"0.0.0.0:9030",

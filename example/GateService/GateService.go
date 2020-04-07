@@ -13,15 +13,30 @@ import (
 type GateService struct {
 	service.Service
 	processor network.Processor
+	httpRouter sysservice.IHttpRouter
 }
 
 func (slf *GateService) OnInit() error{
 	tcpervice := node.GetService("TcpService").(*sysservice.TcpService)
 	slf.processor = &processor.PBProcessor{}
 	tcpervice.SetProcessor(slf.processor)
+
+	httpervice := node.GetService("HttpService").(*sysservice.HttpService)
+	slf.httpRouter = sysservice.NewHttpHttpRouter(slf)
+	httpervice.SetHttpRouter(slf.httpRouter)
+
+	slf.httpRouter.RegRouter(sysservice.METHOD_GET,"/get/query",slf.HttpTest)
+	slf.httpRouter.SetServeFile(sysservice.METHOD_GET,"/img/head/","d:/img")
 	return nil
 }
 
+func (slf *GateService) HttpTest(session *sysservice.HttpSession) {
+	session.SetHeader("a","b")
+	session.Write([]byte("this is a test"))
+	v,_:=session.Query("a")
+	v2,_:=session.Query("b")
+	fmt.Print(string(session.GetBody()),"\n",v,"\n",v2)
+}
 
 func (slf *GateService) OnEventHandler(ev *event.Event) error{
 	if ev.Type == event.Sys_Event_Tcp_RecvPack {

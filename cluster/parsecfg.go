@@ -42,19 +42,20 @@ func (slf *Cluster) ReadAllSubNetConfig() error {
 	clusterCfgPath :=strings.TrimRight(configdir,"/")  +"/cluster"
 	fileInfoList,err := ioutil.ReadDir(clusterCfgPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("Read dir %s is fail :%+v",clusterCfgPath,err)
 	}
+
 	slf.mapSubNetInfo =map[string] SubNet{}
 	for _,f := range fileInfoList{
 		if f.IsDir() == true {
-			subnetinfo,err:=slf.ReadClusterConfig(strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()+"/"+"cluster.json")
+			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()+"/"+"cluster.json"
+			subnetinfo,err:=slf.ReadClusterConfig(filePath)
 			if err != nil {
-				return err
+				return fmt.Errorf("read file path %s is error:%+v" ,filePath,err)
 			}
 			slf.mapSubNetInfo[f.Name()] = *subnetinfo
 		}
 	}
-
 
 	return nil
 }
@@ -63,14 +64,16 @@ func (slf *Cluster) ReadLocalSubNetServiceConfig(subnet string) error {
 	clusterCfgPath :=strings.TrimRight(configdir,"/")  +"/cluster"
 	fileInfoList,err := ioutil.ReadDir(clusterCfgPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("Read %s dir is fail:%+v ",clusterCfgPath,err)
 	}
+
 	slf.mapSubNetInfo =map[string] SubNet{}
 	for _,f := range fileInfoList{
 		if f.IsDir() == true && f.Name()==subnet{ //同一子网
-			localNodeServiceCfg,err:=slf.ReadServiceConfig(strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()+"/"+"service.json")
+			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()+"/"+"service.json"
+			localNodeServiceCfg,err:=slf.ReadServiceConfig(filePath)
 			if err != nil {
-				return err
+				return fmt.Errorf("Read file %s is fail :%+v",filePath,err)
 			}
 			slf.localNodeServiceCfg =localNodeServiceCfg
 		}
@@ -89,8 +92,10 @@ func (slf *Cluster) InitCfg(currentNodeId int) error{
 	localNodeMapService := map[string]interface{}{}    //本Node支持的服务
 	localNodeInfo := NodeInfo{}
 
-
 	err := slf.ReadAllSubNetConfig()
+	if err != nil {
+		return err
+	}
 
 	//分析配置
 	var localSubnetName string
@@ -160,8 +165,7 @@ func (slf *Cluster) InitCfg(currentNodeId int) error{
 	slf.localNodeInfo =localNodeInfo
 
 	//读取服务
-	slf.ReadLocalSubNetServiceConfig(slf.localsubnet.SubNetName)
-	return err
+	return slf.ReadLocalSubNetServiceConfig(slf.localsubnet.SubNetName)
 }
 
 

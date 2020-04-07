@@ -236,7 +236,10 @@ func main(){
 	tcpService := &sysservice.TcpService{}
 	gateService := &GateService.GateService{}
 	tcpService.SetEventReciver(gateService)
-	node.Setup(tcpService,gateService)
+
+	httpService := &sysservice.HttpService{}
+
+	node.Setup(tcpService,gateService,httpService)
 	node.OpenProfilerReport(time.Second*10)
 	node.Start()
 }

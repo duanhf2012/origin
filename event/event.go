@@ -81,6 +81,9 @@ func (slf *EventProcessor) GetEventReciver() IEventProcessor{
 	return slf.eventReciver
 }
 
+type IHttpEventData interface {
+	Handle()
+}
 
 func (slf *EventProcessor) EventHandler(processor IEventProcessor,ev *Event) {
 	defer func() {
@@ -92,5 +95,21 @@ func (slf *EventProcessor) EventHandler(processor IEventProcessor,ev *Event) {
 		}
 	}()
 
+	if slf.innerEventHandler(ev) == true {
+		return
+	}
+
 	processor.OnEventHandler(ev)
 }
+
+func (slf *EventProcessor) innerEventHandler(ev *Event) bool {
+	switch ev.Type {
+	case Sys_Event_Http_Event:
+		ev.Data.(IHttpEventData).Handle()
+		return true
+	}
+
+	return false
+}
+
+

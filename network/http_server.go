@@ -77,6 +77,6 @@ func (slf *HttpServer) startListen() error {
 }
 
 
-func (slf *HttpServer) SetHttps(caFile []CAFile) {
+func (slf *HttpServer) SetCAFile(caFile []CAFile) {
 	slf.caFileList = caFile
 }

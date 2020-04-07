@@ -68,21 +68,25 @@ func initNode(id int){
 	//1.初始化集群
 	err := cluster.GetCluster().Init(GetNodeId())
 	if err != nil {
-		panic(err)
+		log.Fatal("read system config is error %+v",err)
 	}
 
 	//2.service模块初始化
 	service.Init(closeSig)
 
-	//3.初始化预安装的服务
+	//3.setup service
 	for _,s := range preSetupService {
-		pServiceCfg := cluster.GetCluster().GetServiceCfg(s.GetName())
-		s.Init(s,cluster.GetRpcClient,cluster.GetRpcServer,pServiceCfg)
 		//是否配置的service
 		if cluster.GetCluster().IsConfigService(s.GetName()) == false {
 			continue
 		}
 		service.Setup(s)
+	}
+
+	//4.init service
+	for _,s := range preSetupService {
+		pServiceCfg := cluster.GetCluster().GetServiceCfg(s.GetName())
+		s.Init(s,cluster.GetRpcClient,cluster.GetRpcServer,pServiceCfg)
 	}
 }
 
