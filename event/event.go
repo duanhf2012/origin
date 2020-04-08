@@ -38,6 +38,9 @@ type EventProcessor struct {
 }
 
 func (slf *EventProcessor) RegEventReciverFunc(eventType EventType,reciverFunc EventReciverFunc){
+	if slf.mapEventReciverFunc == nil {
+		slf.mapEventReciverFunc = map[EventType]EventReciverFunc{}
+	}
 	slf.mapEventReciverFunc[eventType] = reciverFunc
 }
 
