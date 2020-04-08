@@ -1,6 +1,7 @@
 package GateService
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/network"
@@ -25,7 +26,8 @@ func (slf *GateService) OnInit() error{
 	slf.httpRouter = sysservice.NewHttpHttpRouter(slf)
 	httpervice.SetHttpRouter(slf.httpRouter)
 
-	slf.httpRouter.RegRouter(sysservice.METHOD_GET,"/get/query",slf.HttpTest)
+	slf.httpRouter.GET("/get/query", slf.HttpTest)
+	slf.httpRouter.POST("/post/query", slf.HttpTestPost)
 	slf.httpRouter.SetServeFile(sysservice.METHOD_GET,"/img/head/","d:/img")
 	return nil
 }
@@ -36,6 +38,26 @@ func (slf *GateService) HttpTest(session *sysservice.HttpSession) {
 	v,_:=session.Query("a")
 	v2,_:=session.Query("b")
 	fmt.Print(string(session.GetBody()),"\n",v,"\n",v2)
+}
+
+func (slf *GateService) HttpTestPost(session *sysservice.HttpSession) {
+	session.SetHeader("a","b")
+	v,_:=session.Query("a")
+	v2,_:=session.Query("b")
+
+	byteBody := session.GetBody()
+	fmt.Print(string(session.GetBody()),"\n",v,"\n",v2)
+
+	testa := struct {
+		AA int `json:"aa"`
+		BB string `json:"bb"`
+	}{}
+	json.Unmarshal(byteBody, &testa)
+	fmt.Println(testa)
+
+	testa.AA = 100
+	testa.BB = "this is a test"
+	session.WriteJson("asdasda")
 }
 
 func (slf *GateService) OnEventHandler(ev *event.Event) error{

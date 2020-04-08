@@ -1,6 +1,7 @@
 package sysservice
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/network"
@@ -51,7 +52,9 @@ type routerServeFileData struct {
 }
 
 type IHttpRouter interface {
-	RegRouter(method HTTP_METHOD, url string, handle HttpHandle) bool
+	//RegRouter(method HTTP_METHOD, url string, handle HttpHandle) bool
+	GET(url string, handle HttpHandle) bool
+	POST(url string, handle HttpHandle) bool
 	Router(session *HttpSession)
 
 	PutHttpSession(httpSession *HttpSession)
@@ -163,6 +166,15 @@ func (slf *HttpSession) Write(msg []byte) {
 	slf.msg = msg
 }
 
+func (slf *HttpSession) WriteJson(msgJson interface{}) error {
+	msg, err := json.Marshal(msgJson)
+	if err == nil {
+		slf.Write(msg)
+	}
+
+	return err
+}
+
 func (slf *HttpSession) flush() {
 	slf.w.WriteHeader(slf.statusCode)
 	if slf.msg!=nil {
@@ -215,7 +227,15 @@ func (slf *HttpRouter) PutHttpSession(httpSession *HttpSession){
 	slf.eventReciver.NotifyEvent(&event.Event{Type:event.Sys_Event_Http_Event,Data:httpSession})
 }
 
-func (slf *HttpRouter) RegRouter(method HTTP_METHOD, url string, handle HttpHandle) bool{
+func (slf *HttpRouter) GET(url string, handle HttpHandle) bool {
+	return slf.regRouter(METHOD_GET, url, handle)
+}
+
+func (slf *HttpRouter) POST(url string, handle HttpHandle) bool {
+	return slf.regRouter(METHOD_POST, url, handle)
+}
+
+func (slf *HttpRouter) regRouter(method HTTP_METHOD, url string, handle HttpHandle) bool{
 	mapRouter,ok := slf.pathRouter[method]
 	if ok == false{
 		return false
