@@ -145,3 +145,8 @@ func GetRpcClient(nodeId int,serviceMethod string) ([]*rpc.Client,error) {
 func GetRpcServer() *rpc.Server{
 	return &cluster.rpcServer
 }
+
+func (slf *Cluster) IsNodeConnected (nodeId int) bool {
+	pClient := slf.GetRpcClient(nodeId)
+	return pClient!=nil && pClient.IsConnected()
+}

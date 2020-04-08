@@ -219,3 +219,7 @@ func (slf *Client) Run(){
 
 func (slf *Client) OnClose(){
 }
+
+func (slf *Client) IsConnected() bool {
+	return slf.conn!=nil && slf.conn.IsConnected()==true
+}
