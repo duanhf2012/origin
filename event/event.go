@@ -10,7 +10,7 @@ import (
 const Default_EventChannelLen = 10000
 
 //事件接受器
-type EventReciver func(event *Event) error
+type EventReciverFunc func(event *Event)
 
 type Event struct {
 	Type EventType
@@ -19,10 +19,12 @@ type Event struct {
 
 type IEventProcessor interface {
 	NotifyEvent(*Event)
-	OnEventHandler(event *Event) error
+
 	SetEventReciver(eventProcessor IEventProcessor)
 	GetEventReciver() IEventProcessor
 	SetEventChanNum(num int32) bool
+	RegEventReciverFunc(eventType EventType,reciverFunc EventReciverFunc)
+	UnRegEventReciverFun(eventType EventType)
 }
 
 type EventProcessor struct {
@@ -32,6 +34,15 @@ type EventProcessor struct {
 
 	eventChanNumLocker sync.RWMutex
 	eventChanNum int32
+	mapEventReciverFunc map[EventType]EventReciverFunc
+}
+
+func (slf *EventProcessor) RegEventReciverFunc(eventType EventType,reciverFunc EventReciverFunc){
+	slf.mapEventReciverFunc[eventType] = reciverFunc
+}
+
+func (slf *EventProcessor) UnRegEventReciverFun(eventType EventType){
+	delete(slf.mapEventReciverFunc,eventType)
 }
 
 func (slf *EventProcessor) NotifyEvent(pEvent *Event) {
@@ -41,9 +52,7 @@ func (slf *EventProcessor) NotifyEvent(pEvent *Event) {
 	slf.EventChan <-pEvent
 }
 
-func (slf *EventProcessor) OnEventHandler(event *Event) error{
-	return nil
-}
+
 
 func (slf *EventProcessor) GetEventChan() chan *Event{
 	slf.eventChanNumLocker.Lock()
@@ -85,7 +94,7 @@ type IHttpEventData interface {
 	Handle()
 }
 
-func (slf *EventProcessor) EventHandler(processor IEventProcessor,ev *Event) {
+func (slf *EventProcessor) EventHandler(ev *Event) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -99,7 +108,11 @@ func (slf *EventProcessor) EventHandler(processor IEventProcessor,ev *Event) {
 		return
 	}
 
-	processor.OnEventHandler(ev)
+	if fun,ok := slf.mapEventReciverFunc[ev.Type];ok == false{
+		return
+	}else{
+		fun(ev)
+	}
 }
 
 func (slf *EventProcessor) innerEventHandler(ev *Event) bool {
