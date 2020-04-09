@@ -121,6 +121,7 @@ func NewHttpHttpRouter(eventReciver event.IEventProcessor) IHttpRouter {
 
 
 func (slf *HttpSession) Query(key string) (string, bool) {
+
 	if slf.mapParam == nil {
 		slf.mapParam = make(map[string]string)
 
@@ -157,6 +158,15 @@ func (slf *HttpSession) SetHeader(key, value string) {
 func (slf *HttpSession) AddHeader(key, value string) {
 	slf.w.Header().Add(key,value)
 }
+
+func (slf *HttpSession) GetHeader(key string) string{
+	return slf.r.Header.Get(key)
+}
+
+func (slf *HttpSession) DelHeader(key string) {
+	slf.r.Header.Del(key)
+}
+
 
 func (slf *HttpSession) WriteStatusCode(statusCode int){
 	slf.statusCode = statusCode
