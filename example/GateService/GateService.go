@@ -9,6 +9,8 @@ import (
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/sysservice"
+	"github.com/duanhf2012/origin/util/timer"
+	"net/http"
 )
 
 type GateService struct {
@@ -29,7 +31,15 @@ func (slf *GateService) OnInit() error{
 	slf.httpRouter.GET("/get/query", slf.HttpTest)
 	slf.httpRouter.POST("/post/query", slf.HttpTestPost)
 	slf.httpRouter.SetServeFile(sysservice.METHOD_GET,"/img/head/","d:/img")
+
+	pCronExpr,_ := timer.NewCronExpr("0 * * * * *")
+	slf.CronFunc(pCronExpr,slf.Test)
+
 	return nil
+}
+
+func (slf *GateService) Test(){
+	fmt.Print("xxxxx\n")
 }
 
 func (slf *GateService) HttpTest(session *sysservice.HttpSession) {
@@ -57,10 +67,11 @@ func (slf *GateService) HttpTestPost(session *sysservice.HttpSession) {
 
 	testa.AA = 100
 	testa.BB = "this is a test"
-	session.WriteJson("asdasda")
+	session.WriteJsonDone(http.StatusOK,"asdasda")
 }
 
 func (slf *GateService) OnEventHandler(ev *event.Event) error{
+
 	if ev.Type == event.Sys_Event_Tcp_RecvPack {
 		pPack := ev.Data.(*sysservice.TcpPack)
 		slf.processor.Route(ev.Data,pPack.ClientId)
