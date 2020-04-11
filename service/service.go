@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/rpc"
@@ -130,7 +129,7 @@ func (slf *Service) Run() {
 			if slf.profiler!=nil {
 				analyzer = slf.profiler.Push(fmt.Sprintf("Event_%d", int(ev.Type)))
 			}
-			slf.EventHandler(slf.this.(event.IEventProcessor),ev)
+			slf.EventHandler(ev)
 			if analyzer!=nil {
 				analyzer.Pop()
 				analyzer = nil

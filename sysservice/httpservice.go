@@ -121,6 +121,7 @@ func NewHttpHttpRouter(eventReciver event.IEventProcessor) IHttpRouter {
 
 
 func (slf *HttpSession) Query(key string) (string, bool) {
+
 	if slf.mapParam == nil {
 		slf.mapParam = make(map[string]string)
 
@@ -158,6 +159,14 @@ func (slf *HttpSession) AddHeader(key, value string) {
 	slf.w.Header().Add(key,value)
 }
 
+func (slf *HttpSession) GetHeader(key string) string{
+	return slf.r.Header.Get(key)
+}
+
+func (slf *HttpSession) DelHeader(key string) {
+	slf.r.Header.Del(key)
+}
+
 func (slf *HttpSession) WriteStatusCode(statusCode int){
 	slf.statusCode = statusCode
 }
@@ -166,14 +175,17 @@ func (slf *HttpSession) Write(msg []byte) {
 	slf.msg = msg
 }
 
-func (slf *HttpSession) WriteJson(msgJson interface{}) error {
+func (slf *HttpSession) WriteJsonDone(statusCode int,msgJson interface{}) error {
 	msg, err := json.Marshal(msgJson)
 	if err == nil {
 		slf.Write(msg)
 	}
 
+	slf.Done()
 	return err
 }
+
+
 
 func (slf *HttpSession) flush() {
 	slf.w.WriteHeader(slf.statusCode)
@@ -182,7 +194,7 @@ func (slf *HttpSession) flush() {
 	}
 }
 
-func (slf *HttpSession) done(){
+func (slf *HttpSession) Done(){
 	slf.sessionDone <- slf
 }
 
@@ -249,7 +261,7 @@ func (slf *HttpRouter) Router(session *HttpSession){
 	if slf.httpFiltrateList!=nil {
 		for _,fun := range slf.httpFiltrateList{
 			if fun(session) == false {
-				session.done()
+				//session.done()
 				return
 			}
 		}
@@ -268,7 +280,7 @@ func (slf *HttpRouter) Router(session *HttpSession){
 		}
 
 		v.httpHandle(session)
-		session.done()
+		//session.done()
 		return
 	}
 
@@ -276,13 +288,13 @@ func (slf *HttpRouter) Router(session *HttpSession){
 		idx := strings.Index(urlPath, k)
 		if idx != -1 {
 			session.fileData = v
-			session.done()
+			session.Done()
 			return
 		}
 	}
 
 	session.WriteStatusCode(http.StatusNotFound)
-	session.done()
+	session.Done()
 }
 
 func (slf *HttpService) SetHttpRouter(httpRouter IHttpRouter) {
