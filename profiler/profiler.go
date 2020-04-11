@@ -167,7 +167,7 @@ func DefaultReportFunction(name string,callNum int,costTime time.Duration,record
 	for elem!=nil {
 		pRecord := elem.Value.(*Record)
 		if  pRecord.RType == MaxOverTime_Type {
-			strTypes = "very slow process"
+			strTypes = "too slow process"
 		}else{
 			strTypes = "slow process"
 		}
