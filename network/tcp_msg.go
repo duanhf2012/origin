@@ -97,8 +97,7 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 	} else if msgLen < p.minMsgLen {
 		return nil, errors.New("message too short")
 	}
-
-	msgLen -= 2
+	
 	// data
 	msgData := make([]byte, msgLen)
 	if _, err := io.ReadFull(conn, msgData); err != nil {
