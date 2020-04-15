@@ -98,7 +98,7 @@ type HttpService struct {
 	postAliasUrl map[HTTP_METHOD] map[string]routerMatchData //url地址，对应本service地址
 	httpRouter IHttpRouter
 	listenAddr string
-	allowOrigin bool
+	corsHeader *CORSHeader
 	processTimeout time.Duration
 }
 
@@ -413,8 +413,8 @@ func (slf *HttpService) OnInit() error {
 	return nil
 }
 
-func (slf *HttpService) SetAlowOrigin(allowOrigin bool) {
-	slf.allowOrigin = allowOrigin
+func (slf *HttpService) SetAllowCORS(corsHeader *CORSHeader) {
+	slf.corsHeader = corsHeader
 }
 
 func (slf *HttpService) ProcessFile(session *HttpSession){
@@ -471,13 +471,37 @@ func (slf *HttpService) ProcessFile(session *HttpSession){
 	}
 }
 
+
+type CORSHeader struct {
+	AllowCORSHeader map[string][]string
+}
+
+func NewAllowCORSHeader() *CORSHeader{
+	header := &CORSHeader{}
+	header.AllowCORSHeader = map[string][]string{}
+	header.AllowCORSHeader["Access-Control-Allow-Origin"] = []string{"*"}
+	header.AllowCORSHeader["Access-Control-Allow-Methods"] =[]string{ "POST, GET, OPTIONS, PUT, DELETE"}
+	header.AllowCORSHeader["Access-Control-Allow-Headers"] = []string{"Content-Type"}
+
+	return header
+}
+
+func (slf *CORSHeader) AddAllowHeader(key string,val string){
+	slf.AllowCORSHeader["Access-Control-Allow-Headers"] = append(slf.AllowCORSHeader["Access-Control-Allow-Headers"],fmt.Sprintf("%s,%s",key,val))
+}
+
+func (slf *CORSHeader) copyTo(header http.Header){
+	for k,v := range slf.AllowCORSHeader{
+		for _,val := range  v{
+			header.Add(k,val)
+		}
+	}
+}
+
 func (slf *HttpService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if slf.allowOrigin == true {
+	if slf.corsHeader != nil {
 		if origin := r.Header.Get("Origin"); origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-			w.Header().Set("Access-Control-Allow-Headers",
-				"Action, Module") //有使用自定义头 需要这个,Action, Module是例子
+			slf.corsHeader.copyTo(w.Header())
 		}
 	}
 	if r.Method == "OPTIONS" {
