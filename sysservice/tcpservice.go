@@ -20,13 +20,26 @@ type TcpService struct {
 	process         network.Processor
 }
 
+type TcpPackType int8
+const(
+	TPT_Connected TcpPackType = 0
+	TPT_DisConnected TcpPackType = 1
+	TPT_Pack TcpPackType = 2
+	TPT_UnknownPack TcpPackType = 3
+)
+
+type TcpPack struct {
+	Type TcpPackType //0表示连接 1表示断开 2表示数据
+	MsgProcessor network.Processor
+	ClientId uint64
+	Data interface{}
+}
+
 const Default_MaxConnNum = 3000
 const Default_PendingWriteNum = 10000
 const Default_LittleEndian = false
 const Default_MinMsgLen = 2
 const Default_MaxMsgLen = 65535
-
-
 
 func (slf *TcpService) OnInit() error{
 	iConfig := slf.GetServiceCfg()
@@ -67,40 +80,21 @@ func (slf *TcpService) OnInit() error{
 	slf.mapClient = make( map[uint64] *Client,slf.tcpServer.MaxConnNum)
 	slf.tcpServer.NewAgent =slf.NewClient
 	slf.tcpServer.Start()
-	//加载配置
 	return nil
 }
 
-
-
-
-type TcpPackType int8
-const(
-	TPT_Connected TcpPackType = 0
-	TPT_DisConnected TcpPackType = 1
-	TPT_Pack TcpPackType = 2
-	TPT_UnknownPack TcpPackType = 3
-)
-
-type TcpPack struct {
-	Type TcpPackType //0表示连接 1表示断开 2表示数据
-	MsgProcessor network.Processor
-	ClientId uint64
-	Data interface{}
-}
-
-
 func (slf *TcpService) TcpEventHandler(ev *event.Event) {
-		pack := ev.Data.(*TcpPack)
-		if pack.Type == TPT_Connected {
-			pack.MsgProcessor.ConnectedRoute(pack.ClientId)
-		}else if pack.Type == TPT_DisConnected {
-			pack.MsgProcessor.DisConnectedRoute(pack.ClientId)
-		} else if pack.Type == TPT_UnknownPack{
-			pack.MsgProcessor.UnknownMsgRoute(pack.Data,pack.ClientId)
-		} else if pack.Type == TPT_Pack {
-			pack.MsgProcessor.MsgRoute(pack.Data, pack.ClientId)
-		}
+	pack := ev.Data.(*TcpPack)
+	switch pack.Type {
+	case TPT_Connected:
+		pack.MsgProcessor.ConnectedRoute(pack.ClientId)
+	case TPT_DisConnected:
+		pack.MsgProcessor.DisConnectedRoute(pack.ClientId)
+	case TPT_UnknownPack:
+		pack.MsgProcessor.UnknownMsgRoute(pack.Data,pack.ClientId)
+	case TPT_Pack:
+		pack.MsgProcessor.MsgRoute(pack.Data, pack.ClientId)
+	}
 }
 
 func (slf *TcpService) SetProcessor(process network.Processor,handler event.IEventHandler){
@@ -128,15 +122,11 @@ func (slf *TcpService) NewClient(conn *network.TCPConn) network.Agent {
 	return nil
 }
 
-
-
 type Client struct {
 	id uint64
 	tcpConn *network.TCPConn
 	tcpService *TcpService
 }
-
-
 
 func (slf *Client) GetId() uint64 {
 	return slf.id
@@ -183,7 +173,6 @@ func (slf *TcpService) SendMsg(clientid uint64,msg interface{}) error{
 }
 
 func (slf *TcpService) Close(clientid uint64) {
-	//
 	slf.mapClientLocker.Lock()
 	defer slf.mapClientLocker.Unlock()
 
@@ -199,6 +188,3 @@ func (slf *TcpService) Close(clientid uint64) {
 	return
 }
 
-func (slf *TcpService) OnRelease() {
-
-}

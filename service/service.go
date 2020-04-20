@@ -39,7 +39,6 @@ type Service struct {
 	name string    //service name
 	closeSig chan bool
 	wg      sync.WaitGroup
-	this    IService
 	serviceCfg interface{}
 	gorouterNum int32
 	startStatus bool
@@ -62,9 +61,9 @@ func (slf *Service) OpenProfiler()  {
 
 func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
 	slf.dispatcher =timer.NewDispatcher(timerDispatcherLen)
-	slf.this = iservice
-	slf.InitRpcHandler(iservice.(rpc.IRpcHandler),getClientFun,getServerFun)
 
+	slf.InitRpcHandler(iservice.(rpc.IRpcHandler),getClientFun,getServerFun)
+	slf.self = iservice.(IModule)
 	//初始化祖先
 	slf.ancestor = iservice.(IModule)
 	slf.seedModuleId =InitModuleId
@@ -72,7 +71,7 @@ func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getSer
 	slf.serviceCfg = serviceCfg
 	slf.gorouterNum = 1
 	slf.eventHandler.Init(&slf.eventProcessor)
-	slf.this.OnInit()
+	slf.self.OnInit()
 }
 
 func (slf *Service) SetGoRouterNum(gorouterNum int32) bool {
@@ -171,7 +170,7 @@ func (slf *Service) Release(){
 			log.Error("core dump info:%+v\n",err)
 		}
 	}()
-	slf.this.OnRelease()
+	slf.self.OnRelease()
 	log.Debug("Release Service %s.",slf.GetName())
 }
 
@@ -182,7 +181,6 @@ func (slf *Service) OnInit() error {
 	return nil
 }
 
-
 func (slf *Service) Wait(){
 	slf.wg.Wait()
 }
@@ -191,12 +189,9 @@ func (slf *Service) GetServiceCfg()interface{}{
 	return slf.serviceCfg
 }
 
-
 func (slf *Service) GetProfiler() *profiler.Profiler{
 	return slf.profiler
 }
-
-
 
 func (slf *Service) RegEventReciverFunc(eventType event.EventType,reciver event.IEventHandler,callback event.EventCallBack){
 	slf.eventProcessor.RegEventReciverFunc(eventType,reciver,callback)

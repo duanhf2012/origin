@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const InitModuleId = 1e18
+const InitModuleId = 1e17
 
 
 type IModule interface {
@@ -53,7 +53,6 @@ type Module struct {
 	//事件管道
 	moduleName string
 	eventHandler event.EventHandler
-	//eventChan chan *SEvent
 }
 
 
@@ -79,6 +78,10 @@ func (slf *Module) OnInit() error{
 }
 
 func (slf *Module) AddModule(module IModule) (int64,error){
+	//没有事件处理器不允许加入其他模块
+	if slf.GetEventProcessor() == nil {
+		return 0,fmt.Errorf("module %+v is not Event Processor is nil",slf.self)
+	}
 	pAddModule := module.getBaseModule().(*Module)
 	if pAddModule.GetModuleId()==0 {
 		pAddModule.moduleId = slf.NewModuleId()
@@ -111,13 +114,14 @@ func (slf *Module) AddModule(module IModule) (int64,error){
 }
 
 func (slf *Module) ReleaseModule(moduleId int64){
-	//pBaseModule :=  slf.GetModule(moduleId).getBaseModule().(*Module)
 	pModule := slf.GetModule(moduleId).getBaseModule().(*Module)
 
 	//释放子孙
 	for id,_ := range pModule.child {
 		slf.ReleaseModule(id)
 	}
+
+	pModule.GetEventHandler().Desctory()
 	pModule.self.OnRelease()
 	log.Debug("Release module %s.",slf.GetModuleName())
 	for pTimer,_ := range pModule.mapActiveTimer {

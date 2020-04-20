@@ -23,13 +23,17 @@ type IEventHandler interface {
 	GetEventProcessor() IEventProcessor  //获得事件
 	NotifyEvent(*Event)
 
+	Desctory()
+
 	//注册了事件
 	addRegInfo(eventType EventType,eventProcessor IEventProcessor)
 	removeRegInfo(eventType EventType,eventProcessor IEventProcessor)
 
+
 }
 
 type IEventProcessor interface {
+	//同一个IEventHandler，只能接受一个EventType类型回调
 	RegEventReciverFunc(eventType EventType,reciver IEventHandler,callback EventCallBack)
 	UnRegEventReciverFun(eventType EventType,reciver IEventHandler)
 	SetEventChannel(channelNum int) bool
@@ -172,7 +176,7 @@ func (slf *EventProcessor) UnRegEventReciverFun(eventType EventType,reciver IEve
 	reciver.removeRegInfo(eventType,slf)
 }
 
-func (slf *EventHandler) desctory(){
+func (slf *EventHandler) Desctory(){
 	for eventTyp,mapEventProcess := range slf.mapRegEvent {
 		if mapEventProcess == nil {
 			continue

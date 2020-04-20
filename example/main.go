@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/example/GateService"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/node"
@@ -51,27 +52,60 @@ var moduleid4 int64
 
 func (slf *Module1) OnInit() error {
 	fmt.Printf("I'm Module1:%d\n",slf.GetModuleId())
+	slf.AfterFunc(time.Second*5,func(){
+		slf.NotifyEvent(&event.Event{
+			Type: Event1,
+			Data: "xxxxxxxxxxx",
+		})
+	})
 	return nil
 }
 
 func (slf *Module2) OnInit() error {
 	fmt.Printf("I'm Module2:%d\n",slf.GetModuleId())
+	slf.GetEventProcessor().RegEventReciverFunc(Event1,slf.GetEventHandler(),slf.Module2Test)
+
+
 	moduleid3,_ = slf.AddModule(&Module3{})
+	slf.AfterFunc(time.Second*3, func() {
+		slf.ReleaseModule(moduleid3)
+	})
 	return nil
 }
+
+
+func (slf *Module2) Module2Test(ev *event.Event){
+	fmt.Print("\n>>>>>>>>Module2:",ev)
+}
+
+
 func (slf *Module3) OnInit() error {
+	slf.GetParent().GetParent().GetEventProcessor().RegEventReciverFunc(Event1,slf.GetEventHandler(),slf.Module3Test)
+
 	fmt.Printf("I'm Module3:%d\n",slf.GetModuleId())
 	moduleid4,_ = slf.AddModule(&Module4{})
 
 	return nil
 }
 
+func (slf *Module3) Module3Test(ev *event.Event){
+	fmt.Print("\n>>>>>>>>Module3:",ev)
+}
+
+const (
+	Event1 event.EventType = 10002
+)
 func (slf *Module4) OnInit() error {
 	fmt.Printf("I'm Module4:%d\n",slf.GetModuleId())
 	//pService := slf.GetService().(*TestServiceCall)
 	//pService.RPC_Test(nil,nil)
 	slf.AfterFunc(time.Second*10,slf.TimerTest)
+	slf.GetParent().GetParent().GetParent().GetEventProcessor().RegEventReciverFunc(Event1,slf.GetEventHandler(),slf.Module4Test)
 	return nil
+}
+
+func (slf *Module4) Module4Test(ev *event.Event){
+	fmt.Print("\n>>>>>>>>>>>Module4:",ev)
 }
 
 func (slf *Module4) TimerTest(){
@@ -95,7 +129,7 @@ func (slf *TestServiceCall) OnInit() error {
 	slf.OpenProfiler()
 
 	//slf.AfterFunc(time.Second*1,slf.Run)
-	slf.AfterFunc(time.Second*1,slf.Test)
+	//slf.AfterFunc(time.Second*1,slf.Test)
 	moduleid1,_ = slf.AddModule(&Module1{})
 	moduleid2,_ = slf.AddModule(&Module2{})
 	fmt.Print(moduleid1,moduleid2)
@@ -111,8 +145,8 @@ func (slf *TestServiceCall) OnInit() error {
 }
 
 func  (slf *TestServiceCall) Release(){
-	slf.ReleaseModule(moduleid1)
-	slf.ReleaseModule(moduleid2)
+	/*slf.ReleaseModule(moduleid1)
+	slf.ReleaseModule(moduleid2)*/
 }
 
 
