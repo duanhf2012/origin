@@ -235,7 +235,7 @@ func main(){
 
 	tcpService := &sysservice.TcpService{}
 	gateService := &GateService.GateService{}
-	tcpService.SetEventReciver(gateService)
+
 
 	httpService := &sysservice.HttpService{}
 

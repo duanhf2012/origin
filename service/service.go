@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/rpc"
@@ -42,7 +43,7 @@ type Service struct {
 	serviceCfg interface{}
 	gorouterNum int32
 	startStatus bool
-
+	eventProcessor event.EventProcessor //事件接收者
 	profiler *profiler.Profiler //性能分析器
 }
 
@@ -70,6 +71,7 @@ func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getSer
 	slf.descendants = map[int64]IModule{}
 	slf.serviceCfg = serviceCfg
 	slf.gorouterNum = 1
+	slf.eventHandler.Init(&slf.eventProcessor)
 	slf.this.OnInit()
 }
 
@@ -101,7 +103,7 @@ func (slf *Service) Run() {
 	for{
 		rpcRequestChan := slf.GetRpcRequestChan()
 		rpcResponeCallBack := slf.GetRpcResponeChan()
-		eventChan := slf.GetEventChan()
+		eventChan := slf.eventProcessor.GetEventChan()
 		var analyzer *profiler.Analyzer
 		select {
 		case <- closeSig:
@@ -129,7 +131,7 @@ func (slf *Service) Run() {
 			if slf.profiler!=nil {
 				analyzer = slf.profiler.Push(fmt.Sprintf("Event_%d", int(ev.Type)))
 			}
-			slf.EventHandler(ev)
+			slf.eventProcessor.EventHandler(ev)
 			if analyzer!=nil {
 				analyzer.Pop()
 				analyzer = nil
@@ -195,3 +197,11 @@ func (slf *Service) GetProfiler() *profiler.Profiler{
 }
 
 
+
+func (slf *Service) RegEventReciverFunc(eventType event.EventType,reciver event.IEventHandler,callback event.EventCallBack){
+	slf.eventProcessor.RegEventReciverFunc(eventType,reciver,callback)
+}
+
+func (slf *Service) UnRegEventReciverFun(eventType event.EventType,reciver event.IEventHandler){
+	slf.eventProcessor.UnRegEventReciverFun(eventType,reciver)
+}

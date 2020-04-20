@@ -3,8 +3,6 @@ package GateService
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/duanhf2012/origin/event"
-	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/network/processor"
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
@@ -15,18 +13,20 @@ import (
 
 type GateService struct {
 	service.Service
-	processor network.Processor
+	processor *processor.PBProcessor
 	httpRouter sysservice.IHttpRouter
 }
 
 func (slf *GateService) OnInit() error{
 	tcpervice := node.GetService("TcpService").(*sysservice.TcpService)
 	slf.processor = &processor.PBProcessor{}
-	tcpervice.SetProcessor(slf.processor)
+	slf.processor.RegisterDisConnected(slf.OnDisconnected)
+	slf.processor.RegisterConnected(slf.OnConnected)
+	tcpervice.SetProcessor(slf.processor,slf.GetEventHandler())
 
 	httpervice := node.GetService("HttpService").(*sysservice.HttpService)
-	slf.httpRouter = sysservice.NewHttpHttpRouter(slf)
-	httpervice.SetHttpRouter(slf.httpRouter)
+	slf.httpRouter = sysservice.NewHttpHttpRouter()
+	httpervice.SetHttpRouter(slf.httpRouter,slf.GetEventHandler())
 
 	slf.httpRouter.GET("/get/query", slf.HttpTest)
 	slf.httpRouter.POST("/post/query", slf.HttpTestPost)
@@ -68,21 +68,6 @@ func (slf *GateService) HttpTestPost(session *sysservice.HttpSession) {
 	testa.AA = 100
 	testa.BB = "this is a test"
 	session.WriteJsonDone(http.StatusOK,"asdasda")
-}
-
-func (slf *GateService) OnEventHandler(ev *event.Event) error{
-
-	if ev.Type == event.Sys_Event_Tcp_RecvPack {
-		pPack := ev.Data.(*sysservice.TcpPack)
-		slf.processor.Route(ev.Data,pPack.ClientId)
-	}else if ev.Type == event.Sys_Event_Tcp_Connected {
-		pPack := ev.Data.(*sysservice.TcpPack)
-		slf.OnConnected(pPack.ClientId)
-	}else if ev.Type == event.Sys_Event_Tcp_DisConnected {
-		pPack := ev.Data.(*sysservice.TcpPack)
-		slf.OnDisconnected(pPack.ClientId)
-	}
-	return nil
 }
 
 func (slf *GateService) OnConnected(clientid uint64){

@@ -26,8 +26,9 @@ type IModule interface {
 	OnRelease()
 	getBaseModule() IModule
 	GetService() IService
-	GetEventChan() chan *event.Event
 	GetModuleName() string
+	GetEventProcessor()event.IEventProcessor
+	NotifyEvent(ev *event.Event)
 }
 
 
@@ -50,8 +51,8 @@ type Module struct {
 	descendants map[int64]IModule//始祖的后裔们
 
 	//事件管道
-	event.EventProcessor
 	moduleName string
+	eventHandler event.EventHandler
 	//eventChan chan *SEvent
 }
 
@@ -96,6 +97,7 @@ func (slf *Module) AddModule(module IModule) (int64,error){
 	pAddModule.dispatcher = slf.GetAncestor().getBaseModule().(*Module).dispatcher
 	pAddModule.ancestor = slf.ancestor
 	pAddModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
+	pAddModule.eventHandler.Init(slf.eventHandler.GetEventProcessor())
 	err := module.OnInit()
 	if err != nil {
 		return 0,err
@@ -202,3 +204,14 @@ func (slf *Module) GetService() IService {
 	return slf.GetAncestor().(IService)
 }
 
+func (slf *Module) GetEventProcessor() event.IEventProcessor{
+	return slf.eventHandler.GetEventProcessor()
+}
+
+func (slf *Module) NotifyEvent(ev *event.Event){
+	slf.eventHandler.NotifyEvent(ev)
+}
+
+func (slf *Module) GetEventHandler() event.IEventHandler{
+	return &slf.eventHandler
+}

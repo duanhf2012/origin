@@ -13,10 +13,17 @@ type MessageInfo struct {
 }
 
 type MessageHandler func(clientid uint64,msg proto.Message)
+type ConnectHandler func(clientid uint64)
+type UnknownMessageHandler func(clientid uint64,msg []byte)
+
 const MsgTypeSize = 2
 type PBProcessor struct {
 	mapMsg map[uint16]MessageInfo
 	LittleEndian bool
+
+	unknownMessageHandler UnknownMessageHandler
+	connectHandler ConnectHandler
+	disconnectHandler ConnectHandler
 }
 
 func NewPBProcessor() *PBProcessor {
@@ -44,7 +51,7 @@ func (slf *PBPackInfo) GetMsg() proto.Message {
 }
 
 // must goroutine safe
-func (slf *PBProcessor ) Route(msg interface{},userdata interface{}) error{
+func (slf *PBProcessor ) MsgRoute(msg interface{},userdata interface{}) error{
 	pPackInfo := msg.(*PBPackInfo)
 	v,ok := slf.mapMsg[pPackInfo.typ]
 	if ok == false {
@@ -117,3 +124,31 @@ func (slf *PBProcessor) MakeMsg(msgType uint16,protoMsg proto.Message) *PBPackIn
 func (slf *PBProcessor) MakeRawMsg(msgType uint16,msg []byte) *PBPackInfo {
 	return &PBPackInfo{typ:msgType,rawMsg:msg}
 }
+
+func (slf *PBProcessor) UnknownMsgRoute(msg interface{}, userData interface{}){
+	slf.unknownMessageHandler(userData.(uint64),msg.([]byte))
+}
+
+// connect event
+func (slf *PBProcessor) ConnectedRoute(userData interface{}){
+	slf.connectHandler(userData.(uint64))
+}
+
+func (slf *PBProcessor) DisConnectedRoute(userData interface{}){
+	slf.disconnectHandler(userData.(uint64))
+}
+
+func (slf *PBProcessor) RegisterUnknownMsg(unknownMessageHandler UnknownMessageHandler){
+	slf.unknownMessageHandler = unknownMessageHandler
+}
+
+func (slf *PBProcessor) RegisterConnected(connectHandler ConnectHandler){
+	slf.connectHandler = connectHandler
+}
+
+func (slf *PBProcessor) RegisterDisConnected(disconnectHandler ConnectHandler){
+	slf.disconnectHandler = disconnectHandler
+}
+
+
+

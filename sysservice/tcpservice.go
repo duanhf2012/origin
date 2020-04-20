@@ -71,8 +71,41 @@ func (slf *TcpService) OnInit() error{
 	return nil
 }
 
-func (slf *TcpService) SetProcessor(process network.Processor){
+
+
+
+type TcpPackType int8
+const(
+	TPT_Connected TcpPackType = 0
+	TPT_DisConnected TcpPackType = 1
+	TPT_Pack TcpPackType = 2
+	TPT_UnknownPack TcpPackType = 3
+)
+
+type TcpPack struct {
+	Type TcpPackType //0表示连接 1表示断开 2表示数据
+	MsgProcessor network.Processor
+	ClientId uint64
+	Data interface{}
+}
+
+
+func (slf *TcpService) TcpEventHandler(ev *event.Event) {
+		pack := ev.Data.(*TcpPack)
+		if pack.Type == TPT_Connected {
+			pack.MsgProcessor.ConnectedRoute(pack.ClientId)
+		}else if pack.Type == TPT_DisConnected {
+			pack.MsgProcessor.DisConnectedRoute(pack.ClientId)
+		} else if pack.Type == TPT_UnknownPack{
+			pack.MsgProcessor.UnknownMsgRoute(pack.Data,pack.ClientId)
+		} else if pack.Type == TPT_Pack {
+			pack.MsgProcessor.MsgRoute(pack.Data, pack.ClientId)
+		}
+}
+
+func (slf *TcpService) SetProcessor(process network.Processor,handler event.IEventHandler){
 	slf.process = process
+	slf.RegEventReciverFunc(event.Sys_Event_Tcp,handler,slf.TcpEventHandler)
 }
 
 func (slf *TcpService) NewClient(conn *network.TCPConn) network.Agent {
@@ -103,17 +136,14 @@ type Client struct {
 	tcpService *TcpService
 }
 
-type TcpPack struct {
-	ClientId uint64
-	Data interface{}
-}
+
 
 func (slf *Client) GetId() uint64 {
 	return slf.id
 }
 
 func (slf *Client) Run() {
-	slf.tcpService.GetEventReciver().NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp_Connected,Data:&TcpPack{ClientId:slf.id}})
+	slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_Connected,MsgProcessor:slf.tcpService.process}})
 	for{
 		bytes,err := slf.tcpConn.ReadMsg()
 		if err != nil {
@@ -122,17 +152,15 @@ func (slf *Client) Run() {
 		}
 		data,err:=slf.tcpService.process.Unmarshal(bytes)
 		if err != nil {
-			slf.tcpService.GetEventReciver().NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp_PackException,Data:&TcpPack{ClientId:slf.id,Data:bytes}})
-			//log.Debug("process.Unmarshal is error:%+v",err)
+			slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_UnknownPack,Data:bytes,MsgProcessor:slf.tcpService.process}})
 			continue
 		}
-
-		slf.tcpService.GetEventReciver().NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp_RecvPack,Data:&TcpPack{ClientId:slf.id,Data:data}})
+		slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_Pack,Data:data,MsgProcessor:slf.tcpService.process}})
 	}
 }
 
 func (slf *Client) OnClose(){
-	slf.tcpService.GetEventReciver().NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp_DisConnected,Data:&TcpPack{ClientId:slf.id}})
+	slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_DisConnected,MsgProcessor:slf.tcpService.process}})
 	slf.tcpService.mapClientLocker.Lock()
 	defer slf.tcpService.mapClientLocker.Unlock()
 	delete (slf.tcpService.mapClient,slf.GetId())

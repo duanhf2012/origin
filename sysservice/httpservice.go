@@ -57,7 +57,6 @@ type IHttpRouter interface {
 	POST(url string, handle HttpHandle) bool
 	Router(session *HttpSession)
 
-	PutHttpSession(httpSession *HttpSession)
 	SetServeFile(method HTTP_METHOD, urlpath string, dirname string) error
 	SetFormFileKey(formFileKey string)
 	GetFormFileKey()string
@@ -67,7 +66,7 @@ type IHttpRouter interface {
 type HttpRouter struct {
 	pathRouter map[HTTP_METHOD] map[string] routerMatchData //url地址，对应本service地址
 	serveFileData  map[string] *routerServeFileData
-	eventReciver event.IEventProcessor
+	//eventReciver event.IEventHandler
 	httpFiltrateList [] HttpFiltrate
 
 	formFileKey string
@@ -104,9 +103,9 @@ type HttpService struct {
 
 
 
-func NewHttpHttpRouter(eventReciver event.IEventProcessor) IHttpRouter {
+func NewHttpHttpRouter() IHttpRouter {
 	httpRouter := &HttpRouter{}
-	httpRouter.eventReciver = eventReciver
+	//httpRouter.eventReciver = eventHandler
 	httpRouter.pathRouter =map[HTTP_METHOD] map[string] routerMatchData{}
 	httpRouter.serveFileData = map[string] *routerServeFileData{}
 	httpRouter.formFileKey = "file"
@@ -185,8 +184,6 @@ func (slf *HttpSession) WriteJsonDone(statusCode int,msgJson interface{}) error 
 	return err
 }
 
-
-
 func (slf *HttpSession) flush() {
 	slf.w.WriteHeader(slf.statusCode)
 	if slf.msg!=nil {
@@ -235,9 +232,6 @@ func (slf *HttpRouter) GetFormFileKey()string{
 	return slf.formFileKey
 }
 
-func (slf *HttpRouter) PutHttpSession(httpSession *HttpSession){
-	slf.eventReciver.NotifyEvent(&event.Event{Type:event.Sys_Event_Http_Event,Data:httpSession})
-}
 
 func (slf *HttpRouter) GET(url string, handle HttpHandle) bool {
 	return slf.regRouter(METHOD_GET, url, handle)
@@ -297,8 +291,14 @@ func (slf *HttpRouter) Router(session *HttpSession){
 	session.Done()
 }
 
-func (slf *HttpService) SetHttpRouter(httpRouter IHttpRouter) {
+
+func (slf *HttpService) HttpEventHandler(ev *event.Event)  {
+	ev.Data.(*HttpSession).Handle()
+}
+
+func (slf *HttpService) SetHttpRouter(httpRouter IHttpRouter,eventHandler event.IEventHandler) {
 	slf.httpRouter = httpRouter
+	slf.RegEventReciverFunc(event.Sys_Event_Http_Event,eventHandler,slf.HttpEventHandler)
 }
 
 
@@ -521,7 +521,7 @@ func (slf *HttpService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	session.body = body
 
-	slf.httpRouter.PutHttpSession(session)
+	slf.GetEventHandler().NotifyEvent(&event.Event{Type:event.Sys_Event_Http_Event,Data:session})
 	ticker := time.NewTicker(slf.processTimeout)
 	select {
 	case <-ticker.C:
