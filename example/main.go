@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/example/GateService"
-	"github.com/duanhf2012/origin/example/msgpb"
+	//"github.com/duanhf2012/origin/example/msgpb"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/sysmodule"
 	"github.com/duanhf2012/origin/sysservice"
-	"github.com/golang/protobuf/proto"
+	//"github.com/golang/protobuf/proto"
 	"time"
 )
 
@@ -249,12 +249,12 @@ func (slf *TestService1) RPC_Test(a *Param,b *Param) error {
 	return nil
 }
 
-func (slf *TestService1) RPC_TestPB(a *msgpb.InputRpc,b *msgpb.OutputRpc) error {
+/*func (slf *TestService1) RPC_TestPB(a *msgpb.InputRpc,b *msgpb.OutputRpc) error {
 	b.Msg = proto.String(a.GetMsg())
 	b.Tag = proto.Int32(a.GetTag())
 
 	return nil
-}
+}*/
 
 
 func (slf *TestService1) OnInit() error {

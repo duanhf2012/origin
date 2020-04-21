@@ -725,6 +725,57 @@ func (slf *RedisModule) GetHashValueByKey(redisKey string, fieldKey string) (str
 	return string(str), nil
 }
 
+//GetHashValueByHashKeyList ...
+func (slf *RedisModule) GetHashValueByHashKeyList(fieldKey ...interface{}) ([]string, error) {
+	if len(fieldKey) < 2 {
+		log.Error("GetHashValueByHashKeyList key len less than two!")
+		return nil, errors.New("Key Is Empty")
+	}
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	value, err := conn.Do("HMGET", fieldKey...)
+	if err != nil {
+		log.Error("GetHashValueByKey fail,reason:%v", err)
+		return nil, err
+	}
+	if value == nil {
+		return nil, errors.New("Reids Get Hash nil")
+	}
+
+	valueList := value.([]interface{})
+	retList := []string{}
+	for _, valueItem := range valueList{
+		valueByte, ok := valueItem.([]byte)
+		if !ok {
+			retList = append(retList, "")
+		} else {
+			retList = append(retList, string(valueByte))
+		}
+	}
+
+	return retList, nil
+}
+
+/*func (slf *RedisModule) ScanMatchKeys(cursorValue int, redisKey string, count int) ([]string, error) {
+	retKeys := []string{}
+	if redisKey == "" {
+		log.Error("ScanMatchKeys key is empty!")
+		return nil, errors.New("Key Is Empty")
+	}
+
+	conn, err := slf.getConn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	return retKeys, nil
+}*/
+
 //SetRedisHashJSON ...
 func (slf *RedisModule) SetHashJSON(redisKey, hsahKey string, value interface{}) error {
 	temp, err := json.Marshal(value)
