@@ -85,7 +85,7 @@ func initNode(id int){
 
 	//4.init service
 	for _,s := range preSetupService {
-		pServiceCfg := cluster.GetCluster().GetServiceCfg(s.GetName())
+		pServiceCfg := cluster.GetCluster().GetServiceCfg(nodeId,s.GetName())
 		s.Init(s,cluster.GetRpcClient,cluster.GetRpcServer,pServiceCfg)
 	}
 }
