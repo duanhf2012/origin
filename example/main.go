@@ -305,8 +305,9 @@ func main(){
 
 
 	httpService := &sysservice.HttpService{}
+	wsService := &sysservice.WSService{}
 
-	node.Setup(tcpService,gateService,httpService)
+	node.Setup(tcpService,gateService,httpService,wsService)
 	node.OpenProfilerReport(time.Second*10)
 	node.Start()
 }

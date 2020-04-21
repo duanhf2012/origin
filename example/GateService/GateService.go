@@ -14,6 +14,7 @@ import (
 type GateService struct {
 	service.Service
 	processor *processor.PBProcessor
+	processor2 *processor.PBProcessor
 	httpRouter sysservice.IHttpRouter
 }
 
@@ -23,6 +24,15 @@ func (slf *GateService) OnInit() error{
 	slf.processor.RegisterDisConnected(slf.OnDisconnected)
 	slf.processor.RegisterConnected(slf.OnConnected)
 	tcpervice.SetProcessor(slf.processor,slf.GetEventHandler())
+
+
+	wsService := node.GetService("WSService").(*sysservice.WSService)
+	slf.processor2 = &processor.PBProcessor{}
+	slf.processor2.RegisterDisConnected(slf.OnWSDisconnected)
+	slf.processor2.RegisterConnected(slf.OnWSConnected)
+	slf.processor2.Register()
+	wsService.SetProcessor(slf.processor2,slf.GetEventHandler())
+
 
 	httpervice := node.GetService("HttpService").(*sysservice.HttpService)
 	slf.httpRouter = sysservice.NewHttpHttpRouter()
@@ -76,5 +86,14 @@ func (slf *GateService) OnConnected(clientid uint64){
 
 
 func (slf *GateService) OnDisconnected(clientid uint64){
+	fmt.Printf("client id %d disconnected",clientid)
+}
+
+func (slf *GateService) OnWSConnected(clientid uint64){
+	fmt.Printf("client id %d connected",clientid)
+}
+
+
+func (slf *GateService) OnWSDisconnected(clientid uint64){
 	fmt.Printf("client id %d disconnected",clientid)
 }

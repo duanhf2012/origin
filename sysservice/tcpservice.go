@@ -13,7 +13,6 @@ type TcpService struct {
 	tcpServer network.TCPServer
 	service.Service
 
-	tcpService      *TcpService
 	mapClientLocker sync.RWMutex
 	mapClient       map[uint64] *Client
 	initClientId    uint64
