@@ -3,6 +3,7 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/duanhf2012/origin/log"
 	"io/ioutil"
 	"strings"
 )
@@ -22,20 +23,39 @@ func (slf *Cluster) ReadClusterConfig(filepath string) (*SubNet,error) {
 }
 
 
-func (slf *Cluster) ReadServiceConfig(filepath string)  (map[string]interface{},error) {
+func (slf *Cluster) ReadServiceConfig(filepath string)  (map[string]interface{},map[int]map[string]interface{},error) {
+
 	c := map[string]interface{}{}
 
 	d, err := ioutil.ReadFile(filepath)
 	if err != nil {
-		return nil, err
+		return nil,nil, err
 	}
 	err = json.Unmarshal(d, &c)
 	if err != nil {
-		return nil, err
+		return nil,nil, err
 	}
 
-	return c,nil
+	serviceConfig := map[string]interface{}{}
+	serviceCfg,ok  := c["Service"]
+	if ok == true {
+		serviceConfig = serviceCfg.(map[string]interface{})
+	}
 
+	mapNodeService := map[int]map[string]interface{}{}
+	nodeServiceCfg,ok  := c["NodeService"]
+	if ok == true {
+		nodeServiceList := nodeServiceCfg.([]interface{})
+		for _,v := range nodeServiceList{
+			serviceCfg :=v.(map[string]interface{})
+			nodeid,ok := serviceCfg["NodeId"]
+			if ok == false {
+				log.Fatal("nodeservice list not find nodeid field: %+v",nodeServiceList)
+			}
+			mapNodeService[int(nodeid.(float64))] = serviceCfg
+		}
+	}
+	return serviceConfig,mapNodeService,nil
 }
 
 func (slf *Cluster) ReadAllSubNetConfig() error {
@@ -71,10 +91,11 @@ func (slf *Cluster) ReadLocalSubNetServiceConfig(subnet string) error {
 	for _,f := range fileInfoList{
 		if f.IsDir() == true && f.Name()==subnet{ //同一子网
 			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()+"/"+"service.json"
-			localNodeServiceCfg,err:=slf.ReadServiceConfig(filePath)
+			localServiceCfg,localNodeServiceCfg,err:=slf.ReadServiceConfig(filePath)
 			if err != nil {
 				return fmt.Errorf("Read file %s is fail :%+v",filePath,err)
 			}
+			slf.localServiceCfg = localServiceCfg
 			slf.localNodeServiceCfg =localNodeServiceCfg
 		}
 	}
@@ -186,10 +207,24 @@ func (slf *Cluster) GetNodeIdByService(servicename string) []int{
 	return nodelist
 }
 
-func (slf *Cluster) GetServiceCfg(servicename string) interface{}{
-	v,ok := slf.localNodeServiceCfg[servicename]
-	if ok == false{
+func (slf *Cluster) getServiceCfg(servicename string) interface{}{
+	v,ok := slf.localServiceCfg[servicename]
+	if ok == false {
 		return nil
+	}
+
+	return v
+}
+
+func (slf *Cluster) GetServiceCfg(nodeid int,servicename string) interface{}{
+	nodeService,ok := slf.localNodeServiceCfg[nodeid]
+	if ok == false {
+		return slf.getServiceCfg(servicename)
+	}
+
+	v,ok := nodeService[servicename]
+	if ok == false{
+		return slf.getServiceCfg(servicename)
 	}
 
 	return v

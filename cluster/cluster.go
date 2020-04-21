@@ -41,7 +41,8 @@ type Cluster struct {
 	localNodeMapService map[string]interface{}    //本Node支持的服务
 	localNodeInfo NodeInfo
 
-	localNodeServiceCfg map[string]interface{} //map[servicename]数据
+	localServiceCfg map[string]interface{} //map[servicename]数据
+	localNodeServiceCfg map[int]map[string]interface{}  //map[nodeid]map[servicename]数据
 
 	mapRpc map[int] NodeRpcInfo//nodeid
 
