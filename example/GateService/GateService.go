@@ -30,7 +30,7 @@ func (slf *GateService) OnInit() error{
 	slf.processor2 = &processor.PBProcessor{}
 	slf.processor2.RegisterDisConnected(slf.OnWSDisconnected)
 	slf.processor2.RegisterConnected(slf.OnWSConnected)
-	slf.processor2.Register()
+	
 	wsService.SetProcessor(slf.processor2,slf.GetEventHandler())
 
 
