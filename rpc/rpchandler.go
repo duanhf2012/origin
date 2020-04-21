@@ -16,9 +16,12 @@ var NilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
 type RpcError string
 
+func (e *RpcError) Error() string {
+	if e == nil {
+		return ""
+	}
 
-func (e RpcError) Error() string {
-	return string(e)
+	return string(*e)
 }
 
 func ConvertError(e error) *RpcError{
@@ -193,7 +196,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 				buf := make([]byte, 4096)
 				l := runtime.Stack(buf, false)
 				err := fmt.Errorf("%v: %s", r, buf[:l])
-				log.Error("Handler Rpc %s Core dump info:%+v\n",request.ServiceMethod,err)
+				log.Error("Handler Rpc %s Core dump info:%+v\n",request.RpcRequestData.GetServiceMethod(),err)
 				rpcErr := RpcError("call error : core dumps")
 				if request.requestHandle!=nil {
 					request.requestHandle(nil,&rpcErr)
@@ -201,9 +204,9 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}()
 
-	v,ok := slf.mapfunctons[request.ServiceMethod]
+	v,ok := slf.mapfunctons[request.RpcRequestData.GetServiceMethod()]
 	if ok == false {
-		err := Errorf("RpcHandler %s cannot find %s",slf.rpcHandler.GetName(),request.ServiceMethod)
+		err := Errorf("RpcHandler %s cannot find %s",slf.rpcHandler.GetName(),request.RpcRequestData.GetServiceMethod())
 		log.Error("%s",err.Error())
 		if request.requestHandle!=nil {
 			request.requestHandle(nil,err)
@@ -215,9 +218,9 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	var paramList []reflect.Value
 	var err error
 	if request.localParam==nil{
-		err = processor.Unmarshal(request.InParam,&v.iparam)
+		err = processor.Unmarshal(request.RpcRequestData.GetInParam(),v.iparam)
 		if err!=nil {
-			rerr := Errorf("Call Rpc %s Param error %+v",request.ServiceMethod,err)
+			rerr := Errorf("Call Rpc %s Param error %+v",request.RpcRequestData.GetServiceMethod(),err)
 			log.Error("%s",rerr.Error())
 			if request.requestHandle!=nil {
 				request.requestHandle(nil, rerr)

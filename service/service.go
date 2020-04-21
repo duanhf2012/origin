@@ -109,7 +109,7 @@ func (slf *Service) Run() {
 			bStop = true
 		case rpcRequest :=<- rpcRequestChan:
 			if slf.profiler!=nil {
-				analyzer = slf.profiler.Push("Req_"+rpcRequest.ServiceMethod)
+				analyzer = slf.profiler.Push("Req_"+rpcRequest.RpcRequestData.GetServiceMethod())
 			}
 
 			slf.GetRpcHandler().HandlerRpcRequest(rpcRequest)

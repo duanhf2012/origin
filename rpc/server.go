@@ -10,8 +10,10 @@ import (
 	"strings"
 )
 
-var processor iprocessor = &JsonProcessor{}
+var processor IRpcProcessor = &JsonProcessor{}
 var LittleEndian bool
+
+
 
 type Call struct {
 	Seq uint64
@@ -30,10 +32,7 @@ func (slf *Call) Done() *Call{
 	return <-slf.done
 }
 
-type iprocessor interface {
-	Marshal(v interface{}) ([]byte, error)
-	Unmarshal(data []byte, v interface{}) error
-}
+
 
 type Server struct {
 	functions map[interface{}]interface{}
@@ -47,6 +46,10 @@ type Server struct {
 
 type RpcHandleFinder interface {
 	FindRpcHandler(serviceMethod string) IRpcHandler
+}
+
+func SetProcessor(proc IRpcProcessor) {
+	processor = proc
 }
 
 func (slf *Server) Init(rpcHandleFinder RpcHandleFinder) {
@@ -80,17 +83,20 @@ type RpcAgent struct {
 
 func (agent *RpcAgent) WriteRespone(serviceMethod string,seq uint64,reply interface{},err *RpcError) {
 	var rpcRespone RpcResponse
-	rpcRespone.Seq = seq
-	rpcRespone.Err = err
+
+	//rpcRespone.Seq = seq
+	//rpcRespone.Err = err
+	var mReply []byte
+	var rpcError *RpcError
 	var errM error
 	if reply!=nil {
-		rpcRespone.Reply,errM = processor.Marshal(reply)
+		mReply,errM = processor.Marshal(reply)
 		if errM != nil {
-			rpcRespone.Err = ConvertError(errM)
+			rpcError = ConvertError(errM)
 		}
 	}
-
-	bytes,errM :=  processor.Marshal(&rpcRespone)
+	rpcRespone.RpcResponeData = processor.MakeRpcResponse(seq,rpcError,mReply)
+	bytes,errM :=  processor.Marshal(rpcRespone.RpcResponeData)
 	if errM != nil {
 		log.Error("service method %s %+v Marshal error:%+v!", serviceMethod,rpcRespone,errM)
 		return
@@ -114,11 +120,12 @@ func (agent *RpcAgent) Run() {
 
 		//解析head
 		var req RpcRequest
-		err = processor.Unmarshal(data,&req)
+		req.RpcRequestData = processor.MakeRpcRequest(0,"",false,nil)
+		err = processor.Unmarshal(data,req.RpcRequestData)
 		if err != nil {
-			if req.Seq>0 {
+			if req.RpcRequestData.GetSeq()>0 {
 				rpcError := RpcError("rpc Unmarshal request is error")
-				agent.WriteRespone(req.ServiceMethod,req.Seq,nil,&rpcError)
+				agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
 				continue
 			}else{
 				log.Error("rpc Unmarshal request is error: %v", err)
@@ -128,25 +135,25 @@ func (agent *RpcAgent) Run() {
 		}
 
 		//交给程序处理
-		serviceMethod := strings.Split(req.ServiceMethod,".")
+		serviceMethod := strings.Split(req.RpcRequestData.GetServiceMethod(),".")
 		if len(serviceMethod)!=2 {
 			rpcError := RpcError("rpc request req.ServiceMethod is error")
-			agent.WriteRespone(req.ServiceMethod,req.Seq,nil,&rpcError)
+			agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
 			log.Debug("rpc request req.ServiceMethod is error")
 			continue
 		}
 
 		rpcHandler := agent.rpcserver.rpcHandleFinder.FindRpcHandler(serviceMethod[0])
 		if rpcHandler== nil {
-			rpcError := RpcError(fmt.Sprintf("service method %s not config!", req.ServiceMethod))
-			agent.WriteRespone(req.ServiceMethod,req.Seq,nil,&rpcError)
-			log.Error("service method %s not config!", req.ServiceMethod)
+			rpcError := RpcError(fmt.Sprintf("service method %s not config!", req.RpcRequestData.GetServiceMethod()))
+			agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+			log.Error("service method %s not config!", req.RpcRequestData.GetServiceMethod())
 			continue
 		}
 
-		if req.NoReply == false {
+		if req.RpcRequestData.IsReply()== false {
 			req.requestHandle = func(Returns interface{},Err *RpcError){
-				agent.WriteRespone(req.ServiceMethod,req.Seq,Returns,Err)
+				agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),Returns,Err)
 			}
 		}
 
@@ -206,11 +213,12 @@ func (slf *Server) rpcHandlerGo(noReply bool,handlerName string,methodName strin
 		return pCall
 	}
 	var req RpcRequest
-	req.ServiceMethod = fmt.Sprintf("%s.%s",handlerName,methodName)
+
+	//req.ServiceMethod = fmt.Sprintf("%s.%s",handlerName,methodName)
 	req.localParam = args
 	req.localReply = reply
-	req.NoReply = noReply
-
+	//req.NoReply = noReply
+	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil)
 	if noReply == false {
 		req.requestHandle = func(Returns interface{},Err *RpcError){
 			if Err!=nil {
@@ -243,11 +251,11 @@ func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,h
 	}
 
 	var req RpcRequest
-	req.ServiceMethod = fmt.Sprintf("%s.%s",handlerName,methodName)
+	//req.ServiceMethod = fmt.Sprintf("%s.%s",handlerName,methodName)
 	req.localParam = args
 	req.localReply = reply
-	req.NoReply = noReply
-
+	//req.NoReply = noReply
+	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil)
 	if noReply == false {
 		req.requestHandle = func(Returns interface{},Err *RpcError){
 			if Err == nil {

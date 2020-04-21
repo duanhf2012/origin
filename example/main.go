@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/example/GateService"
+	"github.com/duanhf2012/origin/example/msgpb"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/sysmodule"
 	"github.com/duanhf2012/origin/sysservice"
+	"github.com/golang/protobuf/proto"
 	"time"
 )
 
@@ -125,9 +127,32 @@ func (slf *Module4) OnRelease() {
 	fmt.Printf("Release Module4:%d\n",slf.GetModuleId())
 }
 
+func (slf *TestServiceCall) TestProtobufRpc(){
+/*	input := msgpb.InputRpc{}
+	input.Tag = proto.Int32(33333)
+	input.Msg = proto.String("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+
+	slf.AsyncCall("TestService1.RPC_TestPB",&input, func(b *msgpb.OutputRpc,err error) {
+		fmt.Print(*b,err)
+	})
+
+ */
+	//(a *Param,b *Param)
+	var input Param
+	input.Index = 1111
+	input.Pa = []string{"sadfsdf","cccccc"}
+	input.A = 33333
+	input.B ="asfasfasfd"
+
+	slf.AsyncCall("TestService1.RPC_Test",&input, func(b *Param,err error) {
+		fmt.Print(*b,err)
+	})
+}
+
 func (slf *TestServiceCall) OnInit() error {
 	slf.OpenProfiler()
 
+	slf.AfterFunc(time.Second*5,slf.TestProtobufRpc)
 	//slf.AfterFunc(time.Second*1,slf.Run)
 	//slf.AfterFunc(time.Second*1,slf.Test)
 	moduleid1,_ = slf.AddModule(&Module1{})
@@ -224,6 +249,14 @@ func (slf *TestService1) RPC_Test(a *Param,b *Param) error {
 	return nil
 }
 
+func (slf *TestService1) RPC_TestPB(a *msgpb.InputRpc,b *msgpb.OutputRpc) error {
+	b.Msg = proto.String(a.GetMsg())
+	b.Tag = proto.Int32(a.GetTag())
+
+	return nil
+}
+
+
 func (slf *TestService1) OnInit() error {
 	slf.OpenProfiler()
 	return nil
@@ -263,7 +296,7 @@ func (slf *TestService2) OnInit() error {
 
 
 func main(){
-
+	//rpc.SetProcessor(&rpc.PBProcessor{})
 	//data := P{3, 4, 5, "CloudGeek"}
 	//buf := encode(data)
 

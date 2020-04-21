@@ -62,23 +62,26 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback r
 	call.rpcHandler = rpcHandler
 	call.ServiceMethod = serviceMethod
 
-	request := &RpcRequest{}
-	request.NoReply = false
-	call.Arg = args
-	slf.pendingLock.Lock()
-	slf.startSeq += 1
-	call.Seq = slf.startSeq
-	request.Seq = slf.startSeq
-	slf.pending[call.Seq] = call
-	slf.pendingLock.Unlock()
-	request.ServiceMethod = serviceMethod
-	var herr error
-	request.InParam,herr = processor.Marshal(args)
+	InParam,herr := processor.Marshal(args)
 	if herr != nil {
 		return herr
 	}
 
-	bytes,err := processor.Marshal(request)
+	request := &RpcRequest{}
+	call.Arg = args
+	slf.pendingLock.Lock()
+	slf.startSeq += 1
+	call.Seq = slf.startSeq
+	//request.Seq = slf.startSeq
+	//request.NoReply = false
+	//request.ServiceMethod = serviceMethod
+	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,false,InParam)
+	slf.pending[call.Seq] = call
+	slf.pendingLock.Unlock()
+
+
+
+	bytes,err := processor.Marshal(request.RpcRequestData)
 	if err != nil {
 		return err
 	}
@@ -98,25 +101,27 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 	call.done = make(chan *Call,1)
 	call.Reply = reply
 	call.ServiceMethod = serviceMethod
+
+	InParam,err := processor.Marshal(args)
+	if err != nil {
+		call.Err = err
+		return call
+	}
+
 	request := &RpcRequest{}
-	request.NoReply = noReply
+	//request.NoReply = noReply
 	call.Arg = args
 	slf.pendingLock.Lock()
 	slf.startSeq += 1
 	call.Seq = slf.startSeq
-	request.Seq = slf.startSeq
+	//request.Seq = slf.startSeq
+	//	request.ServiceMethod = serviceMethod
+	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,noReply,InParam)
 	slf.pending[call.Seq] = call
 	slf.pendingLock.Unlock()
 
-	request.ServiceMethod = serviceMethod
-	var herr error
-	request.InParam,herr = processor.Marshal(args)
-	if herr != nil {
-		call.Err = herr
-		return call
-	}
 
-	bytes,err := processor.Marshal(request)
+	bytes,err := processor.Marshal(request.RpcRequestData)
 	if err != nil {
 		call.Err = err
 		return call
@@ -138,13 +143,15 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 type RequestHandler func(Returns interface{},Err *RpcError)
 
 type RpcRequest struct {
+	RpcRequestData IRpcRequestData
+
 	//packhead
-	Seq uint64             // sequence number chosen by client
+	/*Seq uint64             // sequence number chosen by client
 	ServiceMethod string   // format: "Service.Method"
 	NoReply bool           //是否需要返回
 	//packbody
 	InParam []byte
-
+*/
 	//other data
 	localReply interface{}
 	localParam interface{} //本地调用的参数列表
@@ -153,12 +160,14 @@ type RpcRequest struct {
 }
 
 type RpcResponse struct {
+	RpcResponeData IRpcResponseData
+	/*
 	//head
 	Seq           uint64   // sequence number chosen by client
 	Err *RpcError
 
 	//returns
-	Reply []byte
+	Reply []byte*/
 }
 
 
@@ -180,32 +189,33 @@ func (slf *Client) Run(){
 		}
 		//1.解析head
 		respone := &RpcResponse{}
-		err = processor.Unmarshal(bytes,respone)
+		respone.RpcResponeData =processor.MakeRpcResponse(0,nil,nil)
+		err = processor.Unmarshal(bytes,respone.RpcResponeData)
 		if err != nil {
 			log.Error("rpcClient Unmarshal head error,error:%+v",err)
 			continue
 		}
 
 		slf.pendingLock.Lock()
-		v,ok := slf.pending[respone.Seq]
+		v,ok := slf.pending[respone.RpcResponeData.GetSeq()]
 		if ok == false {
-			log.Error("rpcClient cannot find seq %d in pending",respone.Seq)
+			log.Error("rpcClient cannot find seq %d in pending",respone.RpcResponeData.GetSeq())
 			slf.pendingLock.Unlock()
 		}else  {
-			delete(slf.pending,respone.Seq)
+			delete(slf.pending,respone.RpcResponeData.GetSeq())
 			slf.pendingLock.Unlock()
 			v.Err = nil
 
-			if len(respone.Reply) >0 {
-				err = processor.Unmarshal(respone.Reply,v.Reply)
+			if len(respone.RpcResponeData.GetReply()) >0 {
+				err = processor.Unmarshal(respone.RpcResponeData.GetReply(),v.Reply)
 				if err != nil {
 					log.Error("rpcClient Unmarshal body error,error:%+v",err)
 					v.Err = err
 				}
 			}
 
-			if respone.Err != nil {
-				v.Err= respone.Err
+			if respone.RpcResponeData.GetErr() != nil {
+				v.Err= respone.RpcResponeData.GetErr()
 			}
 
 			if v.callback!=nil && v.callback.IsValid() {
