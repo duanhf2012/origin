@@ -73,8 +73,9 @@ func (slf *GateService) Test(){
 }
 
 func (slf *GateService) TestRedis() {
-	slf.redisModule.GetHashValueByHashKeyList("BITGET_2160_LastSetLevelInfo", "SBTC_USD_1", "BTC_SUSDT_1", "SBTC_USD_3")
+	//slf.redisModule.GetHashValueByHashKeyList("BITGET_2160_LastSetLevelInfo", "SBTC_USD_1", "BTC_SUSDT_1", "SBTC_USD_3")
 	//slf.redisModule.GetHashValueByKey("BITGET_2160_LastSetLevelInfo", "SBTC_USD_1")
+	slf.redisModule.ScanMatchKeys(192, "ZC*", 100)
 }
 
 func (slf *GateService) HttpTest(session *sysservice.HttpSession) {

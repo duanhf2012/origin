@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/duanhf2012/origin/log"
+	"strconv"
 	"time"
 
 	"github.com/duanhf2012/origin/service"
@@ -760,21 +761,38 @@ func (slf *RedisModule) GetHashValueByHashKeyList(fieldKey ...interface{}) ([]st
 	return retList, nil
 }
 
-/*func (slf *RedisModule) ScanMatchKeys(cursorValue int, redisKey string, count int) ([]string, error) {
+func (slf *RedisModule) ScanMatchKeys(cursorValue int, redisKey string, count int) (int, []string, error) {
 	retKeys := []string{}
+	nextCursorValue := 0
 	if redisKey == "" {
 		log.Error("ScanMatchKeys key is empty!")
-		return nil, errors.New("Key Is Empty")
+		return nextCursorValue, nil, errors.New("Key Is Empty")
 	}
 
 	conn, err := slf.getConn()
 	if err != nil {
-		return nil, err
+		return nextCursorValue, nil, err
 	}
 	defer conn.Close()
 
-	return retKeys, nil
-}*/
+	value, err := conn.Do("SCAN", cursorValue, "match", redisKey, "count", count)
+	if err != nil {
+		log.Error("GetHashValueByKey fail,reason:%v", err)
+		return nextCursorValue, nil, err
+	}
+	if value == nil {
+		return nextCursorValue, nil, errors.New("Reids Get Hash nil")
+	}
+
+	valueList := value.([]interface{})
+	nextCursorValue, _ = strconv.Atoi(string(valueList[0].([]byte)))
+	keysList := valueList[1].([]interface{})
+	for _, keysItem := range keysList {
+		retKeys = append(retKeys, string(keysItem.([]byte)))
+	}
+
+	return nextCursorValue, retKeys, nil
+}
 
 //SetRedisHashJSON ...
 func (slf *RedisModule) SetHashJSON(redisKey, hsahKey string, value interface{}) error {
