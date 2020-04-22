@@ -377,6 +377,82 @@ too slow process:Timer_orginserver/simple_service.(*TestService1).Loop-fm is tak
 
 
 
+第三章：Module使用:
+---------------
+
+Module创建与销毁:
+---------------
+可以认为Service就是一种Module，它有Module所有的功能。在示例代码中可以参考originserver/simple_module。
+```
+package simple_module
+
+import (
+	"fmt"
+	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/service"
+)
+
+func init(){
+	node.Setup(&TestService3{})
+}
+
+type TestService3 struct {
+	service.Service
+}
+
+type Module1 struct {
+	service.Module
+}
+
+type Module2 struct {
+	service.Module
+}
+
+func (slf *Module1) OnInit()error{
+	fmt.Printf("Module1 OnInit.\n")
+	return nil
+}
+
+func (slf *Module1) OnRelease(){
+	fmt.Printf("Module1 Release.\n")
+}
+
+func (slf *Module2) OnInit()error{
+	fmt.Printf("Module2 OnInit.\n")
+	return nil
+}
+
+func (slf *Module2) OnRelease(){
+	fmt.Printf("Module2 Release.\n")
+}
+
+
+func (slf *TestService3) OnInit() error {
+	//新建两个Module对象
+	module1 := &Module1{}
+	module2 := &Module2{}
+	//将module1添加到服务中
+	module1Id,_ := slf.AddModule(module1)
+	//在module1中添加module2模块
+	module1.AddModule(module2)
+	fmt.Printf("module1 id is %d, module2 id is %d",module1Id,module2.GetModuleId())
+
+	//释放模块module1
+	slf.ReleaseModule(module1Id)
+	fmt.Printf("xxxxxxxxxxx")
+	return nil
+}
+
+```
+在OnInit中创建了一条线型的模块关系TestService3->module1->module2，调用AddModule后会返回Module的Id，自动生成的Id从10e17开始,内部的id，您可以自己设置Id。当调用ReleaseModule释放时module1时，同样会将module2释放。会自动调用OnRelease函数，日志顺序如下：
+```
+Module1 OnInit.
+Module2 OnInit.
+module1 id is 100000000000000001, module2 id is 100000000000000002
+Module2 Release.
+Module1 Release.
+```
+在Module中同样可以使用定时器功能。
 
 
 
