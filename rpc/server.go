@@ -64,7 +64,7 @@ func (slf *Server) Start(listenAddr string) {
 	 	log.Fatal("listen addr is error :%s",listenAddr)
 	 }
 
-	slf.listenAddr = splitAddr[1]
+	slf.listenAddr = ":"+splitAddr[1]
 	slf.rpcserver.Addr = listenAddr
 	slf.rpcserver.LenMsgLen = 2 //uint16
 	slf.rpcserver.MinMsgLen = 2
