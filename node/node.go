@@ -85,6 +85,10 @@ func initNode(id int){
 
 	//4.init service
 	for _,s := range preSetupService {
+		//是否配置的service
+		if cluster.GetCluster().IsConfigService(s.GetName()) == false {
+			continue
+		}
 		pServiceCfg := cluster.GetCluster().GetServiceCfg(nodeId,s.GetName())
 		s.Init(s,cluster.GetRpcClient,cluster.GetRpcServer,pServiceCfg)
 	}
