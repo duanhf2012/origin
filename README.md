@@ -687,8 +687,10 @@ func (slf *TestService7) GoTest(){
 第八章：其他系统模块介绍
 ---------------
 
-备注
+备注:
 ---------------
-感觉不错请star, 谢谢!
+**感觉不错请star, 谢谢!**
+
+**欢迎加入origin服务器开发交流群：168306674**
+
 提交bug及特性: https://github.com/duanhf2012/origin/issues
-欢迎加入origin服务器开发交流群：168306674
