@@ -59,7 +59,12 @@ func (slf *Server) Init(rpcHandleFinder RpcHandleFinder) {
 }
 
 func (slf *Server) Start(listenAddr string) {
-	slf.listenAddr = listenAddr
+	 splitAddr := strings.Split(listenAddr,":")
+	 if len(splitAddr)!=2{
+	 	log.Fatal("listen addr is error :%s",listenAddr)
+	 }
+
+	slf.listenAddr = splitAddr[1]
 	slf.rpcserver.Addr = listenAddr
 	slf.rpcserver.LenMsgLen = 2 //uint16
 	slf.rpcserver.MinMsgLen = 2
