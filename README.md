@@ -677,3 +677,12 @@ func (slf *TestService7) GoTest(){
 ```
 您可以把TestService6配置到其他的Node中，比如NodeId为2中。只要在一个子网，origin引擎可以无差别调用。开发者只需要关注Service关系。同样它也是您服务器架构设计的核心需要思考的部分。
 
+
+第六章：HttpService使用
+---------------
+
+第七章：TcpService服务使用
+---------------
+
+第八章：其他系统模块介绍
+---------------
