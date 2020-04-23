@@ -694,3 +694,6 @@ func (slf *TestService7) GoTest(){
 **欢迎加入origin服务器开发交流群：168306674**
 
 提交bug及特性: https://github.com/duanhf2012/origin/issues
+
+生活不易，且行且珍惜，感谢！
+![](https://github.com/duanhf2012/origin/doc/pay.png)
