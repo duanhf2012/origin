@@ -455,7 +455,7 @@ Module1 Release.
 在Module中同样可以使用定时器功能，请参照第二章节的定时器部分。
 
 
-第四章：事件使用:
+第四章：事件使用
 ---------------
 事件是origin中一个重要的组成部分，可以在同一个node中的service与service或者与module之间进行事件通知。系统内置的几个服务，如：TcpService/HttpService等都是通过事件功能实现。他也是一个典型的观察者设计模型。在event中有两个类型的interface，一个是event.IEventProcessor它提供注册与卸载功能，另一个是event.IEventHandler提供消息广播等功能。
 
@@ -561,4 +561,119 @@ func (slf *TestService5) OnServiceEvent(ev *event.Event){
 OnServiceEvent type :1001 data:event data.
 OnModuleEvent type :1001 data:event data.
 ```
+在上面的TestModule中监听的事情，当这个Module被Release时监听会自动卸载。
+
+第五章：RPC使用
+---------------
+RPC是service与service间通信的重要方式，它允许跨进程node互相访问，当然也可以指定nodeid进行调用。如下示例：
+
+TestService6.go文件如下：
+```
+package simple_rpc
+
+import (
+	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/service"
+)
+
+func init(){
+	node.Setup(&TestService6{})
+}
+
+type TestService6 struct {
+	service.Service
+}
+
+func (slf *TestService6) OnInit() error {
+	return nil
+}
+
+type InputData struct {
+	A int
+	B int
+}
+
+func (slf *TestService6) RPC_Sum(input *InputData,output *int) error{
+	*output = input.A+input.B
+	return nil
+}
+
+```
+
+TestService7.go文件如下：
+```
+package simple_rpc
+
+import (
+	"fmt"
+	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/service"
+	"time"
+)
+
+func init(){
+	node.Setup(&TestService7{})
+}
+
+type TestService7 struct {
+	service.Service
+}
+
+func (slf *TestService7) OnInit() error {
+	slf.AfterFunc(time.Second*2,slf.CallTest)
+	slf.AfterFunc(time.Second*2,slf.AsyncCallTest)
+	slf.AfterFunc(time.Second*2,slf.GoTest)
+	return nil
+}
+
+func (slf *TestService7) CallTest(){
+	var input InputData
+	input.A = 300
+	input.B = 600
+	var output int
+
+	//同步调用其他服务的rpc,input为传入的rpc,output为输出参数
+	err := slf.Call("TestService6.RPC_Sum",&input,&output)
+	if err != nil {
+		fmt.Printf("Call error :%+v\n",err)
+	}else{
+		fmt.Printf("Call output %d\n",output)
+	}
+}
+
+
+func (slf *TestService7) AsyncCallTest(){
+	var input InputData
+	input.A = 300
+	input.B = 600
+	/*slf.AsyncCallNode(1,"TestService6.RPC_Sum",&input,func(output *int,err error){
+	})*/
+	//异步调用，在数据返回时，会回调传入函数
+	//注意函数的第一个参数一定是RPC_Sum函数的第二个参数，err error为RPC_Sum返回值
+	slf.AsyncCall("TestService6.RPC_Sum",&input,func(output *int,err error){
+		if err != nil {
+			fmt.Printf("AsyncCall error :%+v\n",err)
+		}else{
+			fmt.Printf("AsyncCall output %d\n",*output)
+		}
+	})
+}
+
+func (slf *TestService7) GoTest(){
+	var input InputData
+	input.A = 300
+	input.B = 600
+
+	//在某些应用场景下不需要数据返回可以使用Go，它是不阻塞的,只需要填入输入参数
+	err := slf.Go("TestService6.RPC_Sum",&input)
+	if err != nil {
+		fmt.Printf("Go error :%+v\n",err)
+	}
+
+	//以下是广播方式，如果在同一个子网中有多个同名的服务名，CastGo将会广播给所有的node
+	//slf.CastGo("TestService6.RPC_Sum",&input)
+}
+
+```
+您可以把TestService6配置到其他的Node中，比如NodeId为2中。只要在一个子网，origin引擎可以无差别调用。开发者只需要关注Service关系。同样它也是您服务器架构设计的核心需要思考的部分。
 
