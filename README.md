@@ -696,4 +696,5 @@ func (slf *TestService7) GoTest(){
 提交bug及特性: https://github.com/duanhf2012/origin/issues
 
 生活不易，且行且珍惜，感谢！
-![](https://github.com/duanhf2012/origin/doc/pay.png)
+
+![Image text](https://github.com/duanhf2012/origin/blob/master/doc/pay.png)
