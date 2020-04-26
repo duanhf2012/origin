@@ -1,5 +1,7 @@
 package service
 
+import "github.com/duanhf2012/origin/log"
+
 //本地所有的service
 var mapServiceName map[string]IService
 
@@ -11,7 +13,10 @@ func Init(chanCloseSig chan bool) {
 	closeSig=chanCloseSig
 
 	for _,s := range mapServiceName {
-		s.OnInit()
+		err := s.OnInit()
+		if err!=nil {
+			log.Fatal("start server fail :%+v.....",err)
+		}
 	}
 }
 
