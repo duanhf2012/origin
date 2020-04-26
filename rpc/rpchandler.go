@@ -41,7 +41,7 @@ func Errorf(format string, a ...interface{}) *RpcError {
 
 type RpcMethodInfo struct {
 	method reflect.Method
-	iparam interface{}
+	iparam reflect.Value
 	oParam reflect.Value
 }
 
@@ -133,7 +133,7 @@ func (slf *RpcHandler) suitableMethods(method reflect.Method) error {
 		return fmt.Errorf("%s Unsupported parameter types!",method.Name)
 	}
 
-	rpcMethodInfo.iparam = reflect.New(typ.In(1).Elem()).Interface() //append(rpcMethodInfo.iparam,)
+	rpcMethodInfo.iparam = reflect.New(typ.In(1).Elem()) //append(rpcMethodInfo.iparam,)
 	rpcMethodInfo.oParam = reflect.New(typ.In(2).Elem())
 
 	rpcMethodInfo.method = method
@@ -215,10 +215,13 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		return
 	}
 
+
 	var paramList []reflect.Value
 	var err error
+	iparam := reflect.New(v.iparam.Type().Elem()).Interface()
+
 	if request.localParam==nil{
-		err = processor.Unmarshal(request.RpcRequestData.GetInParam(),v.iparam)
+		err = processor.Unmarshal(request.RpcRequestData.GetInParam(),iparam)
 		if err!=nil {
 			rerr := Errorf("Call Rpc %s Param error %+v",request.RpcRequestData.GetServiceMethod(),err)
 			log.Error("%s",rerr.Error())
@@ -227,7 +230,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 			}
 		}
 	}else {
-		v.iparam = request.localParam
+		iparam = request.localParam
 	}
 
 	var oParam reflect.Value
@@ -235,7 +238,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	oParam = reflect.New(v.oParam.Type().Elem())
 
 
-	paramList = append(paramList,reflect.ValueOf(v.iparam))
+	paramList = append(paramList,reflect.ValueOf(iparam))
 	paramList = append(paramList,oParam) //输出参数
 
 	returnValues := v.method.Func.Call(paramList)
