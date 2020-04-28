@@ -36,7 +36,6 @@ func (slf *Call) Done() *Call{
 
 type Server struct {
 	functions map[interface{}]interface{}
-	listenAddr string //ip:port
 
 	cmdchannel chan *Call
 
@@ -63,9 +62,7 @@ func (slf *Server) Start(listenAddr string) {
 	 if len(splitAddr)!=2{
 	 	log.Fatal("listen addr is error :%s",listenAddr)
 	 }
-
-	slf.listenAddr = ":"+splitAddr[1]
-	slf.rpcserver.Addr = listenAddr
+	slf.rpcserver.Addr = ":"+splitAddr[1]
 	slf.rpcserver.LenMsgLen = 2 //uint16
 	slf.rpcserver.MinMsgLen = 2
 	slf.rpcserver.MaxMsgLen = math.MaxUint16
