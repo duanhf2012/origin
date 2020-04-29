@@ -48,7 +48,7 @@ func (t *Timer) Cb() {
 
 	if t.cbex!=nil {
 		t.cbex(t)
-	}else{
+	}else if t.cb!= nil {
 		t.cb()
 	}
 

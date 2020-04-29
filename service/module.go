@@ -194,7 +194,6 @@ func (slf *Module) CronFunc(cronExpr *timer.CronExpr, cb func()) *timer.Cron {
 
 	cron := slf.dispatcher.CronFuncEx(cronExpr, func(cron *timer.Cron) {
 		cb()
-		delete(slf.mapActiveCron,cron)
 	})
 
 	slf.mapActiveCron[cron] = nil
