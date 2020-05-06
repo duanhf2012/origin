@@ -71,6 +71,10 @@ func (tcpConn *TCPConn) Close() {
 	tcpConn.closeFlag = true
 }
 
+func (tcpConn *TCPConn) GetRemoteIp() string {
+	return tcpConn.conn.RemoteAddr().String()
+}
+
 func (tcpConn *TCPConn) doWrite(b []byte) {
 	if len(tcpConn.writeChan) == cap(tcpConn.writeChan) {
 		log.Debug("close conn: channel full")

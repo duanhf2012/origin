@@ -187,3 +187,13 @@ func (slf *TcpService) Close(clientid uint64) {
 	return
 }
 
+func (slf *TcpService) GetClientIp(clientid uint64) string{
+	slf.mapClientLocker.Lock()
+	defer slf.mapClientLocker.Unlock()
+	pClient,ok := slf.mapClient[clientid]
+	if ok == false{
+		return ""
+	}
+
+	return pClient.tcpConn.GetRemoteIp()
+}
