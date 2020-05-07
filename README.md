@@ -842,7 +842,7 @@ func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
 ---------------
 **感觉不错请star, 谢谢!**
 
-**欢迎加入origin服务器开发交流群，有任何疑问我都会及时解答：168306674**
+**欢迎加入origin服务器开发QQ交流群:168306674，有任何疑问我都会及时解答**
 
 提交bug及特性: https://github.com/duanhf2012/origin/issues
 
