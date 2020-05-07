@@ -829,13 +829,13 @@ func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
 
 第八章：其他系统模块介绍
 ---------------
-sysservice/wsservice.go:支持了WebSocket协议，使用方法与TcpService类似
-sysmodule/DBModule.go:对mysql数据库操作
-sysmodule/RedisModule.go:对Redis数据进行操作
-sysmodule/HttpClientPoolModule.go:Http客户端请求封装
-log/log.go:日志的封装，可以使用它构建对象记录业务文件日志
-util:在该目录下，有常用的uuid,hash,md5,协程封装等工具库
-https://github.com/duanhf2012/originservice: 其他扩展支持的服务可以在该工程上看到，目前支持firebase推送的封装。
+* sysservice/wsservice.go:支持了WebSocket协议，使用方法与TcpService类似
+* sysmodule/DBModule.go:对mysql数据库操作
+* sysmodule/RedisModule.go:对Redis数据进行操作
+* sysmodule/HttpClientPoolModule.go:Http客户端请求封装
+* log/log.go:日志的封装，可以使用它构建对象记录业务文件日志
+* util:在该目录下，有常用的uuid,hash,md5,协程封装等工具库
+* https://github.com/duanhf2012/originservice: 其他扩展支持的服务可以在该工程上看到，目前支持firebase推送的封装。
 
 
 备注:
