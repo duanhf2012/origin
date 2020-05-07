@@ -179,7 +179,7 @@ service.json如下：
 ---------------
 查看github.com/duanhf2012/originserver中的simple_service中新建两个服务，分别是TestService1.go与CTestService2.go。
 
-TestService1.go如下：
+simple_service/TestService1.go如下：
 ```
 package simple_service
 
@@ -209,7 +209,7 @@ func (slf *TestService1) OnInit() error {
 
 
 ```
-TestService1.go如下：
+simple_service/TestService2.go如下：
 ```
 import (
 	"github.com/duanhf2012/origin/node"
@@ -277,7 +277,7 @@ TestService2 OnInit.
 ---------------
 在开发中最常用的功能有定时任务，origin提供两种定时方式：
 
-一种AfterFunc函数，可以间隔一定时间触发回调，如下：
+一种AfterFunc函数，可以间隔一定时间触发回调，参照simple_service/TestService2.go,实现如下：
 ```
 func (slf *TestService2) OnInit() error {
 	fmt.Printf("TestService2 OnInit.\n")
@@ -382,7 +382,7 @@ too slow process:Timer_orginserver/simple_service.(*TestService1).Loop-fm is tak
 
 Module创建与销毁:
 ---------------
-可以认为Service就是一种Module，它有Module所有的功能。在示例代码中可以参考originserver/simple_module。
+可以认为Service就是一种Module，它有Module所有的功能。在示例代码中可以参考originserver/simple_module/TestService3.go。
 ```
 package simple_module
 
@@ -567,7 +567,7 @@ OnModuleEvent type :1001 data:event data.
 ---------------
 RPC是service与service间通信的重要方式，它允许跨进程node互相访问，当然也可以指定nodeid进行调用。如下示例：
 
-TestService6.go文件如下：
+simple_rpc/TestService6.go文件如下：
 ```
 package simple_rpc
 
@@ -600,7 +600,7 @@ func (slf *TestService6) RPC_Sum(input *InputData,output *int) error{
 
 ```
 
-TestService7.go文件如下：
+simple_rpc/TestService7.go文件如下：
 ```
 package simple_rpc
 
@@ -680,20 +680,171 @@ func (slf *TestService7) GoTest(){
 
 第六章：HttpService使用
 ---------------
+HttpService是origin引擎中系统实现的http服务，http接口中常用的GET,POST以及url路由处理。
+
+simple_http/TestHttpService.go文件如下：
+```
+package simple_http
+
+import (
+	"fmt"
+	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysservice"
+	"net/http"
+)
+
+func init(){
+	node.Setup(&sysservice.HttpService{})
+	node.Setup(&TestHttpService{})
+}
+
+//新建自定义服务TestService1
+type TestHttpService struct {
+	service.Service
+}
+
+func (slf *TestHttpService) OnInit() error {
+	//获取系统httpservice服务
+	httpervice := node.GetService("HttpService").(*sysservice.HttpService)
+
+	//新建并设置路由对象
+	httpRouter := sysservice.NewHttpHttpRouter()
+	httpervice.SetHttpRouter(httpRouter,slf.GetEventHandler())
+
+	//GET方法，请求url:http://127.0.0.1:9402/get/query?nickname=boyce
+	//并header中新增key为uid,value为1000的头,则用postman测试返回结果为：
+	//head uid:1000, nickname:boyce
+	httpRouter.GET("/get/query", slf.HttpGet)
+
+	//POST方法 请求url:http://127.0.0.1:9402/post/query
+	//返回结果为：{"msg":"hello world"}
+	httpRouter.POST("/post/query", slf.HttpPost)
+
+	//GET方式获取目录下的资源，http://127.0.0.1:port/img/head/a.jpg
+	httpRouter.SetServeFile(sysservice.METHOD_GET,"/img/head/","d:/img")
+
+	return nil
+}
+
+func (slf *TestHttpService) HttpGet(session *sysservice.HttpSession){
+	//从头中获取key为uid对应的值
+	uid := session.GetHeader("uid")
+	//从url参数中获取key为nickname对应的值
+	nickname,_ := session.Query("nickname")
+	//向body部分写入数据
+	session.Write([]byte(fmt.Sprintf("head uid:%s, nickname:%s",uid,nickname)))
+	//写入http状态
+	session.WriteStatusCode(http.StatusOK)
+	//完成返回
+	session.Done()
+}
+
+type HttpRespone struct {
+	Msg string `json:"msg"`
+}
+
+func (slf *TestHttpService) HttpPost(session *sysservice.HttpSession){
+	//也可以采用直接返回数据对象方式，如下：
+	session.WriteJsonDone(http.StatusOK,&HttpRespone{Msg: "hello world"})
+}
+
+```
+注意，要在main.go中加入import _ "orginserver/simple_service"，并且在config/cluster/subnet/cluster.json中的ServiceList加入服务。
+
+
 
 第七章：TcpService服务使用
 ---------------
+TcpService是origin引擎中系统实现的Tcp服务，可以支持自定义消息格式处理器。只要重新实现network.Processor接口。目前内置已经实现最常用的protobuf处理器。
+
+simple_tcp/TestTcpService.go文件如下：
+```
+package simple_tcp
+
+import (
+	"fmt"
+	"github.com/duanhf2012/origin/network/processor"
+	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/sysservice"
+	"github.com/golang/protobuf/proto"
+	"orginserver/simple_tcp/msgpb"
+)
+
+func init(){
+	node.Setup(&sysservice.TcpService{})
+	node.Setup(&TestTcpService{})
+}
+
+//新建自定义服务TestService1
+type TestTcpService struct {
+	service.Service
+	processor *processor.PBProcessor
+	tcpService *sysservice.TcpService
+}
+
+func (slf *TestTcpService) OnInit() error {
+	//获取安装好了的TcpService对象
+	slf.tcpService =  node.GetService("TcpService").(*sysservice.TcpService)
+
+	//新建内置的protobuf处理器，您也可以自定义路由器，比如json，后续会补充
+	slf.processor = processor.NewPBProcessor()
+
+	//注册监听客户连接断开事件
+	slf.processor.RegisterDisConnected(slf.OnDisconnected)
+	//注册监听客户连接事件
+	slf.processor.RegisterConnected(slf.OnConnected)
+	//注册监听消息类型MsgType_MsgReq，并注册回调
+	slf.processor.Register(uint16(msgpb.MsgType_MsgReq),&msgpb.Req{},slf.OnRequest)
+	//将protobuf消息处理器设置到TcpService服务中
+	slf.tcpService.SetProcessor(slf.processor,slf.GetEventHandler())
+
+	return nil
+}
+
+
+func (slf *TestTcpService) OnConnected(clientid uint64){
+	fmt.Printf("client id %d connected\n",clientid)
+}
+
+
+func (slf *TestTcpService) OnDisconnected(clientid uint64){
+	fmt.Printf("client id %d disconnected\n",clientid)
+}
+
+func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
+	//解析客户端发过来的数据
+	pReq := msg.(*msgpb.Req)
+	//发送数据给客户端
+	err := slf.tcpService.SendMsg(clientid,&msgpb.Req{
+		Msg: proto.String(pReq.GetMsg()),
+	})
+	if err != nil {
+		fmt.Printf("send msg is fail %+v!",err)
+	}
+}
+```
+
 
 第八章：其他系统模块介绍
 ---------------
+sysservice/wsservice.go:支持了WebSocket协议，使用方法与TcpService类似
+sysmodule/DBModule.go:对mysql数据库操作
+sysmodule/RedisModule.go:对Redis数据进行操作
+sysmodule/HttpClientPoolModule.go:Http客户端请求封装
+log/log.go:日志的封装，可以使用它构建对象记录业务文件日志
+util:在该目录下，有常用的uuid,hash,md5,协程封装等工具库
+https://github.com/duanhf2012/originservice: 其他扩展支持的服务可以在该工程上看到，目前支持firebase推送的封装。
+
 
 备注:
 ---------------
 **感觉不错请star, 谢谢!**
 
-**欢迎加入origin服务器开发交流群：168306674**
+**欢迎加入origin服务器开发交流群，有任何疑问我都会及时解答：168306674**
 
 提交bug及特性: https://github.com/duanhf2012/origin/issues
 
-[生活不易，且行且珍惜，感谢！](https://github.com/duanhf2012/other/blob/master/pay.png "Thanks!")
+[因服务器是由个人维护，如果这个项目对您有帮助，您可以点我进行捐赠，感谢！](https://github.com/duanhf2012/other/blob/master/pay.png "Thanks!")
 
