@@ -57,7 +57,7 @@ type Module struct {
 
 
 func (slf *Module) SetModuleId(moduleId int64) bool{
-	if moduleId > 0 {
+	if slf.moduleId > 0 {
 		return false
 	}
 
