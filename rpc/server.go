@@ -91,12 +91,17 @@ func (agent *RpcAgent) WriteRespone(serviceMethod string,seq uint64,reply interf
 	var mReply []byte
 	var rpcError *RpcError
 	var errM error
-	if reply!=nil {
-		mReply,errM = processor.Marshal(reply)
-		if errM != nil {
-			rpcError = ConvertError(errM)
+	if err != nil {
+		rpcError = err
+	} else {
+		if reply!=nil {
+			mReply,errM = processor.Marshal(reply)
+			if errM != nil {
+				rpcError = ConvertError(errM)
+			}
 		}
 	}
+
 	rpcRespone.RpcResponeData = processor.MakeRpcResponse(seq,rpcError,mReply)
 	bytes,errM :=  processor.Marshal(rpcRespone.RpcResponeData)
 	if errM != nil {
