@@ -60,6 +60,7 @@ type IHttpRouter interface {
 	SetServeFile(method HTTP_METHOD, urlpath string, dirname string) error
 	SetFormFileKey(formFileKey string)
 	GetFormFileKey()string
+	AddHttpFiltrate(FiltrateFun HttpFiltrate) bool
 }
 
 
@@ -101,7 +102,9 @@ type HttpService struct {
 	processTimeout time.Duration
 }
 
-
+func (slf *HttpService) AddFiltrate(FiltrateFun HttpFiltrate) bool {
+	return slf.httpRouter.AddHttpFiltrate(FiltrateFun)
+}
 
 func NewHttpHttpRouter() IHttpRouter {
 	httpRouter := &HttpRouter{}
