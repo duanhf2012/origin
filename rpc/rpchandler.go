@@ -362,6 +362,9 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 
 	//跨node调用
 	pCall := pClient.Go(false,serviceMethod,args,reply)
+	if pCall.Err != nil {
+		return pCall.Err
+	}
 	pResult := pCall.Done()
 	return pResult.Err
 }
