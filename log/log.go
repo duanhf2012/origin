@@ -26,9 +26,12 @@ const (
 )
 
 type Logger struct {
+	filePath   string
+	logTime    time.Time
 	level      int
 	baseLogger *log.Logger
 	baseFile   *os.File
+	flag       int
 }
 
 func New(strLevel string, pathname string, flag int) (*Logger, error) {
@@ -50,9 +53,8 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 	// logger
 	var baseLogger *log.Logger
 	var baseFile *os.File
+	now := time.Now()
 	if pathname != "" {
-		now := time.Now()
-
 		filename := fmt.Sprintf("%d%02d%02d_%02d_%02d_%02d.log",
 			now.Year(),
 			now.Month(),
@@ -77,6 +79,9 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 	logger.level = level
 	logger.baseLogger = baseLogger
 	logger.baseFile = baseFile
+	logger.logTime = now
+	logger.filePath = pathname
+	logger.flag = flag
 
 	return logger, nil
 }
@@ -97,6 +102,27 @@ func (logger *Logger) doPrintf(level int, printLevel string, format string, a ..
 	}
 	if logger.baseLogger == nil {
 		panic("logger closed")
+	}
+
+	if logger.baseFile != nil {
+		now := time.Now()
+		if now.Day() != logger.logTime.Day() {
+			filename := fmt.Sprintf("%d%02d%02d_%02d_%02d_%02d.log",
+				now.Year(),
+				now.Month(),
+				now.Day(),
+				now.Hour(),
+				now.Minute(),
+				now.Second())
+
+			file, err := os.Create(path.Join(logger.filePath, filename))
+			if err == nil {
+				logger.baseFile.Close()
+				logger.baseLogger = log.New(file, "", logger.flag)
+				logger.baseFile = file
+				logger.logTime = now
+			}
+		}
 	}
 
 	format = printLevel + format
