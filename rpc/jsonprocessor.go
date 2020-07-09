@@ -44,6 +44,13 @@ func (slf *JsonProcessor) MakeRpcResponse(seq uint64,err *RpcError,reply []byte)
 	}
 }
 
+func (slf *JsonProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
+
+}
+func (slf *JsonProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
+
+}
+
 func (slf *JsonRpcRequestData) IsReply() bool{
 	return slf.NoReply
 }

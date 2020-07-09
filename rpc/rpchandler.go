@@ -186,7 +186,7 @@ func (slf *RpcHandler) HandlerRpcResponeCB(call *Call){
 	}else{
 		call.callback.Call([]reflect.Value{reflect.ValueOf(call.Reply),reflect.ValueOf(call.Err)})
 	}
-
+	ReleaseCall(call)
 }
 
 
@@ -203,6 +203,8 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 				}
 		}
 	}()
+	defer processor.ReleaseRpcRequest(request.RpcRequestData)
+	defer ReleaseRpcRequest(request)
 
 	v,ok := slf.mapfunctons[request.RpcRequestData.GetServiceMethod()]
 	if ok == false {
@@ -309,6 +311,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args int
 			}
 			//其他的rpcHandler的处理器
 			pCall := pLocalRpcServer.rpcHandlerGo(true,sMethod[0],sMethod[1],args,nil)
+			defer ReleaseCall(pCall)
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
@@ -316,11 +319,11 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args int
 		}
 
 		//跨node调用
-		pCall := pClient.Go(true,serviceMethod,args,nil)
+		pCall := pClient.Go(false,serviceMethod,args,nil)
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
-
+		ReleaseCall(pCall)
 	}
 
 	return err
@@ -356,8 +359,9 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 		}
 		//其他的rpcHandler的处理器
 		pCall := pLocalRpcServer.rpcHandlerGo(false,sMethod[0],sMethod[1],args,reply)
-		pResult := pCall.Done()
-		return pResult.Err
+		err = pCall.Done().Err
+		ReleaseCall(pCall)
+		return err
 	}
 
 	//跨node调用
@@ -365,8 +369,9 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 	if pCall.Err != nil {
 		return pCall.Err
 	}
-	pResult := pCall.Done()
-	return pResult.Err
+	err = pCall.Done().Err
+	ReleaseCall(pCall)
+	return err
 }
 
 func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interface{},callback interface{}) error {
@@ -437,6 +442,8 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 			return nil
 		}
 		pCall := pLocalRpcServer.rpcHandlerGo(false,sMethod[0],sMethod[1],args,reply)
+		defer ReleaseCall(pCall)
+
 		pResult := pCall.Done()
 		return pResult.Err
 	}

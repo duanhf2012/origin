@@ -22,6 +22,16 @@ func (slf *PBRpcResponseData) MakeRespone(seq uint64,err *RpcError,reply []byte)
 
 	return slf
 }
+
+func (slf *PBRpcRequestData) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
+	
+}
+
+func (slf *PBRpcRequestData) ReleaseRpcRespose(rpcRequestData IRpcRequestData){
+
+}
+
+
 func (slf *PBProcessor) Marshal(v interface{}) ([]byte, error){
 	return proto.Marshal(v.(proto.Message))
 }

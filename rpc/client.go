@@ -56,7 +56,7 @@ func (slf *Client) Connect(addr string) error {
 }
 
 func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
-	call := new(Call)
+	call := MakeCall()
 	call.Reply = replyParam
 	call.callback = &callback
 	call.rpcHandler = rpcHandler
@@ -72,16 +72,13 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback r
 	slf.pendingLock.Lock()
 	slf.startSeq += 1
 	call.Seq = slf.startSeq
-	//request.Seq = slf.startSeq
-	//request.NoReply = false
-	//request.ServiceMethod = serviceMethod
 	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,false,InParam)
-	slf.pending[call.Seq] = call
+	slf.pending[call.Seq] = call//如果下面发送失败，将会一一直存在这里
 	slf.pendingLock.Unlock()
 
-
-
 	bytes,err := processor.Marshal(request.RpcRequestData)
+	processor.ReleaseRpcRequest(request.RpcRequestData)
+
 	if err != nil {
 		return err
 	}
@@ -97,8 +94,7 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback r
 }
 
 func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply interface{}) *Call {
-	call := new(Call)
-	call.done = make(chan *Call,1)
+	call := MakeCall()
 	call.Reply = reply
 	call.ServiceMethod = serviceMethod
 
@@ -109,19 +105,15 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 	}
 
 	request := &RpcRequest{}
-	//request.NoReply = noReply
 	call.Arg = args
 	slf.pendingLock.Lock()
 	slf.startSeq += 1
 	call.Seq = slf.startSeq
-	//request.Seq = slf.startSeq
-	//	request.ServiceMethod = serviceMethod
 	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,noReply,InParam)
-	slf.pending[call.Seq] = call
+	//slf.pending[call.Seq] = call
 	slf.pendingLock.Unlock()
-
-
 	bytes,err := processor.Marshal(request.RpcRequestData)
+	processor.ReleaseRpcRequest(request.RpcRequestData)
 	if err != nil {
 		call.Err = err
 		return call
@@ -139,37 +131,6 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 
 	return call
 }
-
-type RequestHandler func(Returns interface{},Err *RpcError)
-
-type RpcRequest struct {
-	RpcRequestData IRpcRequestData
-
-	//packhead
-	/*Seq uint64             // sequence number chosen by client
-	ServiceMethod string   // format: "Service.Method"
-	NoReply bool           //是否需要返回
-	//packbody
-	InParam []byte
-*/
-	//other data
-	localReply interface{}
-	localParam interface{} //本地调用的参数列表
-	requestHandle RequestHandler
-	callback *reflect.Value
-}
-
-type RpcResponse struct {
-	RpcResponeData IRpcResponseData
-	/*
-	//head
-	Seq           uint64   // sequence number chosen by client
-	Err *RpcError
-
-	//returns
-	Reply []byte*/
-}
-
 
 func (slf *Client) Run(){
 	defer func() {
@@ -190,6 +151,7 @@ func (slf *Client) Run(){
 		//1.解析head
 		respone := &RpcResponse{}
 		respone.RpcResponeData =processor.MakeRpcResponse(0,nil,nil)
+		defer processor.ReleaseRpcRespose(respone.RpcResponeData)
 		err = processor.Unmarshal(bytes,respone.RpcResponeData)
 		if err != nil {
 			log.Error("rpcClient Unmarshal head error,error:%+v",err)

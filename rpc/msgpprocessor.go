@@ -1,11 +1,27 @@
 package rpc
 
+import "sync"
+
 type IMsgp interface {
 	UnmarshalMsg(bts []byte) (o []byte, err error)
 	MarshalMsg(b []byte) (o []byte, err error)
 }
 
+var rpcResponeDataPool sync.Pool
+var rpcRequestDataPool sync.Pool
+
 type MsgpProcessor struct {
+
+}
+
+func init(){
+	rpcResponeDataPool.New = func()interface{}{
+		return &MsgpRpcResponseData{}
+	}
+
+	rpcRequestDataPool.New = func()interface{}{
+		return &MsgpRpcRequestData{}
+	}
 }
 
 //go:generate msgp
@@ -31,6 +47,7 @@ type MsgpRpcResponseData struct {
 
 func (slf *MsgpProcessor) Marshal(v interface{}) ([]byte, error){
 	msgp := v.(IMsgp)
+
 	return msgp.MarshalMsg(nil)
 }
 
@@ -41,15 +58,30 @@ func (slf *MsgpProcessor) Unmarshal(data []byte, v interface{}) error{
 }
 
 func (slf *MsgpProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) IRpcRequestData{
-	return &MsgpRpcRequestData{Seq:seq,ServiceMethod:serviceMethod,NoReply:noReply,InParam:inParam}
+	rpcRequestData := rpcRequestDataPool.Get().(*MsgpRpcRequestData)
+	rpcRequestData.Seq = seq
+	rpcRequestData.ServiceMethod = serviceMethod
+	rpcRequestData.NoReply = noReply
+	rpcRequestData.InParam = inParam
+
+	return rpcRequestData//&MsgpRpcRequestData{Seq:seq,ServiceMethod:serviceMethod,NoReply:noReply,InParam:inParam}
 }
 
 func (slf *MsgpProcessor) MakeRpcResponse(seq uint64,err *RpcError,reply []byte) IRpcResponseData {
-	return &MsgpRpcResponseData{
-		Seq:   seq,
-		Err:   err.Error(),
-		Reply: reply,
-	}
+	rpcRequestData := rpcResponeDataPool.Get().(*MsgpRpcResponseData)
+	rpcRequestData.Seq = seq
+	rpcRequestData.Err = err.Error()
+	rpcRequestData.Reply = reply
+
+	return rpcRequestData
+}
+
+func (slf *MsgpProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
+	rpcRequestDataPool.Put(rpcRequestData)
+}
+
+func (slf *MsgpProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
+	rpcResponeDataPool.Put(rpcRequestData)
 }
 
 func (slf *MsgpRpcRequestData) IsReply() bool{
