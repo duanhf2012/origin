@@ -105,7 +105,7 @@ func (slf *Client) generateSeq() uint64{
 	return atomic.AddUint64(&slf.startSeq,1)
 }
 
-func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
+func (slf *Client) AsycCall(rpcHandler IRpcHandler,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
 	call := MakeCall()
 	call.Reply = replyParam
 	call.callback = &callback
@@ -161,21 +161,27 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 	request := &RpcRequest{}
 	call.Arg = args
 	call.Seq = slf.generateSeq()
+	if noReply == false {
+		slf.AddPending(call)
+	}
 	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,noReply,InParam)
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	processor.ReleaseRpcRequest(request.RpcRequestData)
 	if err != nil {
 		call.Err = err
+		slf.RemovePending(call.Seq)
 		return call
 	}
 
 	if slf.conn == nil {
 		call.Err = fmt.Errorf("call %s is fail,rpc client is disconnect.",serviceMethod)
+		slf.RemovePending(call.Seq)
 		return call
 	}
 	
 	err = slf.conn.WriteMsg(bytes)
 	if err != nil {
+		slf.RemovePending(call.Seq)
 		call.Err = err
 	}
 

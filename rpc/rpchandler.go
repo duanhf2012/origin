@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 )
 
-type FuncRpcClient func(nodeid int,serviceMethod string) ([]*Client,error)
+type FuncRpcClient func(nodeid int,serviceMethod string,client *[]*Client) error
 type FuncRpcServer func() (*Server)
 var NilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
@@ -279,7 +279,8 @@ func (slf *RpcHandler) CallMethod(ServiceMethod string,param interface{},reply i
 }
 
 func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args interface{}) error {
-	pClientList,err := slf.funcRpcClient(nodeId,serviceMethod)
+	var pClientList []*Client
+	err := slf.funcRpcClient(nodeId,serviceMethod,&pClientList)
 	if err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
@@ -319,7 +320,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args int
 		}
 
 		//跨node调用
-		pCall := pClient.Go(false,serviceMethod,args,nil)
+		pCall := pClient.Go(true,serviceMethod,args,nil)
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
@@ -330,7 +331,8 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args int
 }
 
 func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
-	pClientList,err := slf.funcRpcClient(nodeId,serviceMethod)
+	var pClientList []*Client
+	err := slf.funcRpcClient(nodeId,serviceMethod,&pClientList)
 	if err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
@@ -367,6 +369,7 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 	//跨node调用
 	pCall := pClient.Go(false,serviceMethod,args,reply)
 	if pCall.Err != nil {
+		ReleaseCall(pCall)
 		return pCall.Err
 	}
 	err = pCall.Done().Err
@@ -395,14 +398,15 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 	}
 
 	reply := reflect.New(fVal.Type().In(0).Elem()).Interface()
-	pClientList,err := slf.funcRpcClient(nodeid,serviceMethod)
+	var pClientList []*Client
+	err := slf.funcRpcClient(nodeid,serviceMethod,&pClientList)
 	if err != nil {
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return nil
 	}
 
-	if len(pClientList) > 1 {
+	if pClientList== nil || len(pClientList) > 1 {
 		err := fmt.Errorf("Cannot call more then 1 node!")
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 		log.Error("Cannot call more then 1 node!")
@@ -449,7 +453,7 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 	}
 
 	//跨node调用
-	err =  pClient.AsycGo(slf,serviceMethod,fVal,args,reply)
+	err =  pClient.AsycCall(slf,serviceMethod,fVal,args,reply)
 	if err != nil {
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 	}

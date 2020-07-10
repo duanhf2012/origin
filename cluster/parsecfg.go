@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/rpc"
 	"io/ioutil"
 	"strings"
 )
@@ -195,17 +196,22 @@ func (slf *Cluster) IsConfigService(servicename string) bool {
 	return ok
 }
 
-func (slf *Cluster) GetNodeIdByService(servicename string) []int{
-	var nodelist []int
+
+
+func (slf *Cluster) GetNodeIdByService(servicename string,rpcClientList *[]*rpc.Client) {
 	nodeInfoList,ok := slf.localSubNetMapService[servicename]
 	if ok == true {
 		for _,node := range nodeInfoList {
-			nodelist = append(nodelist,node.NodeId)
+			pClient := GetCluster().GetRpcClient(node.NodeId)
+			if pClient==nil {
+				log.Error("Cannot connect node id %d",node.NodeId)
+				continue
+			}
+			*rpcClientList = append(*rpcClientList,pClient)
 		}
 	}
-
-	return nodelist
 }
+
 
 func (slf *Cluster) getServiceCfg(servicename string) interface{}{
 	v,ok := slf.localServiceCfg[servicename]

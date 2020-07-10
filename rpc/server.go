@@ -140,7 +140,7 @@ func (agent *RpcAgent) Run() {
 			continue
 		}
 
-		if req.RpcRequestData.IsReply()== false {
+		if req.RpcRequestData.IsNoReply()==false {
 			req.requestHandle = func(Returns interface{},Err *RpcError){
 				agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),Returns,Err)
 			}
@@ -149,7 +149,11 @@ func (agent *RpcAgent) Run() {
 		err = rpcHandler.PushRequest(req)
 		if err != nil {
 			rpcError := RpcError(err.Error())
-			agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+
+			if req.RpcRequestData.IsNoReply() {
+				agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+			}
+
 			processor.ReleaseRpcRequest(req.RpcRequestData)
 			ReleaseRpcRequest(req)
 		}

@@ -22,7 +22,7 @@ type IRpcRequestData interface {
 	GetSeq() uint64
 	GetServiceMethod() string
 	GetInParam() []byte
-	IsReply() bool
+	IsNoReply() bool
 }
 
 type IRpcResponseData interface {

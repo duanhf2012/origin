@@ -69,7 +69,7 @@ func (slf *PBProcessor) ReleaseRpcRespose(rpcRequestData IRpcRequestData){
 }
 
 
-func (slf *PBRpcRequestData) IsReply() bool{
+func (slf *PBRpcRequestData) IsNoReply() bool{
 	return slf.GetNoReply()
 }
 

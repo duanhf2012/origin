@@ -77,7 +77,7 @@ func (slf *JsonProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
 	rpcJsonResponeDataPool.Put(rpcRequestData)
 }
 
-func (slf *JsonRpcRequestData) IsReply() bool{
+func (slf *JsonRpcRequestData) IsNoReply() bool{
 	return slf.NoReply
 }
 

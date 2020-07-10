@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/service"
 	"strings"
@@ -108,39 +107,24 @@ func (slf *Cluster) GetRpcClient(nodeid int) *rpc.Client {
 	return c.client
 }
 
-func GetRpcClient(nodeId int,serviceMethod string) ([]*rpc.Client,error) {
-	var rpcClientList []*rpc.Client
+func GetRpcClient(nodeId int,serviceMethod string,clientList *[]*rpc.Client) error {
 	if nodeId>0 {
 		pClient := GetCluster().GetRpcClient(nodeId)
 		if pClient==nil {
-			return rpcClientList,fmt.Errorf("cannot find  nodeid %d!",nodeId)
+			return fmt.Errorf("cannot find  nodeid %d!",nodeId)
 		}
-		rpcClientList = append(rpcClientList,pClient)
-		return rpcClientList,nil
+		*clientList = append(*clientList,pClient)
+		return nil
 	}
 
 	serviceAndMethod := strings.Split(serviceMethod,".")
 	if len(serviceAndMethod)!=2 {
-		return nil,fmt.Errorf("servicemethod param  %s is error!",serviceMethod)
+		return fmt.Errorf("servicemethod param  %s is error!",serviceMethod)
 	}
 
 	//1.找到对应的rpcnodeid
-
-	nodeidList := GetCluster().GetNodeIdByService(serviceAndMethod[0])
-	if len(nodeidList) ==0 {
-		return rpcClientList,fmt.Errorf("Cannot Find %s nodeid",serviceMethod)
-	}
-
-	for _,nodeid:= range nodeidList {
-		pClient := GetCluster().GetRpcClient(nodeid)
-		if pClient==nil {
-			log.Error("Cannot connect node id %d",nodeid)
-			continue
-		}
-		rpcClientList = append(rpcClientList,pClient)
-	}
-
-	return rpcClientList,nil
+	GetCluster().GetNodeIdByService(serviceAndMethod[0],clientList)
+	return nil
 }
 
 func GetRpcServer() *rpc.Server{

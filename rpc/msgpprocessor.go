@@ -84,7 +84,7 @@ func (slf *MsgpProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
 	rpcResponeDataPool.Put(rpcRequestData)
 }
 
-func (slf *MsgpRpcRequestData) IsReply() bool{
+func (slf *MsgpRpcRequestData) IsNoReply() bool{
 	return slf.NoReply
 }
 
