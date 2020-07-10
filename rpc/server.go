@@ -104,14 +104,14 @@ func (agent *RpcAgent) Run() {
 		req.RpcRequestData = processor.MakeRpcRequest(0,"",false,nil)
 		err = processor.Unmarshal(data,req.RpcRequestData)
 		if err != nil {
+			log.Error("rpc Unmarshal request is error: %v", err)
 			if req.RpcRequestData.GetSeq()>0 {
-				rpcError := RpcError("rpc Unmarshal request is error")
+				rpcError := RpcError(err.Error())
 				agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
 				processor.ReleaseRpcRequest(req.RpcRequestData)
 				ReleaseRpcRequest(req)
 				continue
 			}else{
-				log.Error("rpc Unmarshal request is error: %v", err)
 				//will close tcpconn
 				processor.ReleaseRpcRequest(req.RpcRequestData)
 				ReleaseRpcRequest(req)

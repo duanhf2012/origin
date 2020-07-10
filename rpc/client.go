@@ -114,6 +114,7 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback r
 
 	InParam,herr := processor.Marshal(args)
 	if herr != nil {
+		ReleaseCall(call)
 		return herr
 	}
 
@@ -125,19 +126,25 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback r
 
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	processor.ReleaseRpcRequest(request.RpcRequestData)
-
 	if err != nil {
+		slf.RemovePending(call.Seq)
+		ReleaseCall(call)
 		return err
 	}
+
 	if slf.conn == nil {
+		slf.RemovePending(call.Seq)
+		ReleaseCall(call)
 		return fmt.Errorf("Rpc server is disconnect,call %s is fail!",serviceMethod)
 	}
+
 	err = slf.conn.WriteMsg(bytes)
 	if err != nil {
-		call.Err = err
+		slf.RemovePending(call.Seq)
+		ReleaseCall(call)
 	}
 
-	return call.Err
+	return err
 }
 
 func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply interface{}) *Call {
@@ -200,7 +207,6 @@ func (slf *Client) Run(){
 			log.Error("rpcClient Unmarshal head error,error:%+v",err)
 			continue
 		}
-
 
 		v := slf.FindPending(respone.RpcResponeData.GetSeq())
 		if v == nil {

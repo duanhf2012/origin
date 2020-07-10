@@ -203,8 +203,8 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 				}
 		}
 	}()
-	defer processor.ReleaseRpcRequest(request.RpcRequestData)
 	defer ReleaseRpcRequest(request)
+	defer processor.ReleaseRpcRequest(request.RpcRequestData)
 
 	v,ok := slf.mapfunctons[request.RpcRequestData.GetServiceMethod()]
 	if ok == false {
