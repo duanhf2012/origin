@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"container/list"
 	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -19,12 +21,14 @@ type Client struct {
 
 	pendingLock sync.RWMutex
 	startSeq uint64
-	pending map[uint64]*Call
+	pending map[uint64]*list.Element
+	pendingTimer *list.List
 }
 
 func (slf *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 	slf.conn = conn
-	slf.pending = map[uint64]*Call{}
+	slf.ResetPending()
+
 	return slf
 }
 
@@ -38,21 +42,67 @@ func (slf *Client) Connect(addr string) error {
 	slf.ConnectInterval = time.Second*2
 	slf.PendingWriteNum = 10000
 	slf.AutoReconnect = true
-	slf.LenMsgLen =2
+	slf.LenMsgLen = 2
 	slf.MinMsgLen = 2
 	slf.MaxMsgLen = math.MaxUint16
-	slf.NewAgent =slf.NewClientAgent
+	slf.NewAgent = slf.NewClientAgent
 	slf.LittleEndian = LittleEndian
-
-	slf.pendingLock.Lock()
-	for _,v := range slf.pending {
-		v.Err = fmt.Errorf("node is disconnect.")
-		v.done <- v
-	}
-	slf.pending = map[uint64]*Call{}
-	slf.pendingLock.Unlock()
+	slf.ResetPending()
 	slf.Start()
 	return nil
+}
+
+func (slf *Client) ResetPending(){
+	slf.pendingLock.Lock()
+	if slf.pending != nil {
+		for _,v := range slf.pending {
+			v.Value.(*Call).Err = fmt.Errorf("node is disconnect.")
+			v.Value.(*Call).done <- v.Value.(*Call)
+		}
+	}
+
+	slf.pending = map[uint64]*list.Element{}
+	slf.pendingTimer = list.New()
+	slf.pendingLock.Unlock()
+}
+
+func (slf *Client) AddPending(call *Call){
+	slf.pendingLock.Lock()
+	elemTimer := slf.pendingTimer.PushBack(call)
+	slf.pending[call.Seq] = elemTimer//如果下面发送失败，将会一一直存在这里
+	slf.pendingLock.Unlock()
+}
+
+func (slf *Client) RemovePending(seq uint64){
+	slf.pendingLock.Lock()
+
+	v,ok := slf.pending[seq]
+	if ok == false{
+		slf.pendingLock.Unlock()
+		return
+	}
+	slf.pendingTimer.Remove(v)
+	delete(slf.pending,seq)
+
+	slf.pendingLock.Unlock()
+}
+
+func (slf *Client) FindPending(seq uint64) *Call{
+	slf.pendingLock.Lock()
+	v,ok := slf.pending[seq]
+	if ok == false {
+		slf.pendingLock.Unlock()
+		return nil
+	}
+
+	pCall := v.Value.(*Call)
+	slf.pendingLock.Unlock()
+
+	return pCall
+}
+
+func (slf *Client) generateSeq() uint64{
+	return atomic.AddUint64(&slf.startSeq,1)
 }
 
 func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
@@ -69,12 +119,9 @@ func (slf *Client) AsycGo(rpcHandler IRpcHandler,serviceMethod string,callback r
 
 	request := &RpcRequest{}
 	call.Arg = args
-	slf.pendingLock.Lock()
-	slf.startSeq += 1
-	call.Seq = slf.startSeq
+	call.Seq = slf.generateSeq()
 	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,false,InParam)
-	slf.pending[call.Seq] = call//如果下面发送失败，将会一一直存在这里
-	slf.pendingLock.Unlock()
+	slf.AddPending(call)
 
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	processor.ReleaseRpcRequest(request.RpcRequestData)
@@ -106,12 +153,8 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 
 	request := &RpcRequest{}
 	call.Arg = args
-	slf.pendingLock.Lock()
-	slf.startSeq += 1
-	call.Seq = slf.startSeq
+	call.Seq = slf.generateSeq()
 	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,noReply,InParam)
-	//slf.pending[call.Seq] = call
-	slf.pendingLock.Unlock()
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	processor.ReleaseRpcRequest(request.RpcRequestData)
 	if err != nil {
@@ -158,14 +201,12 @@ func (slf *Client) Run(){
 			continue
 		}
 
-		slf.pendingLock.Lock()
-		v,ok := slf.pending[respone.RpcResponeData.GetSeq()]
-		if ok == false {
+
+		v := slf.FindPending(respone.RpcResponeData.GetSeq())
+		if v == nil {
 			log.Error("rpcClient cannot find seq %d in pending",respone.RpcResponeData.GetSeq())
-			slf.pendingLock.Unlock()
 		}else  {
-			delete(slf.pending,respone.RpcResponeData.GetSeq())
-			slf.pendingLock.Unlock()
+			slf.RemovePending(respone.RpcResponeData.GetSeq())
 			v.Err = nil
 
 			if len(respone.RpcResponeData.GetReply()) >0 {

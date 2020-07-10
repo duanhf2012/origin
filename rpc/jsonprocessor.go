@@ -1,6 +1,9 @@
 package rpc
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sync"
+)
 
 type JsonProcessor struct {
 }
@@ -24,6 +27,22 @@ type JsonRpcResponseData struct {
 }
 
 
+
+var rpcJsonResponeDataPool sync.Pool
+var rpcJsonRequestDataPool sync.Pool
+
+
+
+func init(){
+	rpcJsonResponeDataPool.New = func()interface{}{
+		return &JsonRpcResponseData{}
+	}
+
+	rpcJsonRequestDataPool.New = func()interface{}{
+		return &JsonRpcRequestData{}
+	}
+}
+
 func (slf *JsonProcessor) Marshal(v interface{}) ([]byte, error){
 	return json.Marshal(v)
 }
@@ -33,22 +52,29 @@ func (slf *JsonProcessor) Unmarshal(data []byte, v interface{}) error{
 }
 
 func (slf *JsonProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) IRpcRequestData{
-	return &JsonRpcRequestData{Seq:seq,ServiceMethod:serviceMethod,NoReply:noReply,InParam:inParam}
+	jsonRpcRequestData := rpcJsonRequestDataPool.Get().(*JsonRpcRequestData)
+	jsonRpcRequestData.Seq = seq
+	jsonRpcRequestData.ServiceMethod = serviceMethod
+	jsonRpcRequestData.NoReply = noReply
+	jsonRpcRequestData.InParam = inParam
+
+	return jsonRpcRequestData
 }
 
 func (slf *JsonProcessor) MakeRpcResponse(seq uint64,err *RpcError,reply []byte) IRpcResponseData {
-	return &JsonRpcResponseData{
-		Seq:   seq,
-		Err:   err.Error(),
-		Reply: reply,
-	}
+	jsonRpcResponseData := rpcJsonResponeDataPool.Get().(*JsonRpcResponseData)
+	jsonRpcResponseData.Seq = seq
+	jsonRpcResponseData.Err = err.Error()
+	jsonRpcResponseData.Reply = reply
+	return jsonRpcResponseData
 }
 
 func (slf *JsonProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
-
+	rpcJsonRequestDataPool.Put(rpcRequestData)
 }
-func (slf *JsonProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
 
+func (slf *JsonProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
+	rpcJsonResponeDataPool.Put(rpcRequestData)
 }
 
 func (slf *JsonRpcRequestData) IsReply() bool{

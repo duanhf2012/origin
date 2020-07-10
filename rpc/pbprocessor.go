@@ -2,9 +2,24 @@ package rpc
 
 import (
 	"github.com/golang/protobuf/proto"
+	"sync"
 )
 
 type PBProcessor struct {
+}
+
+var rpcPbResponeDataPool sync.Pool
+var rpcPbRequestDataPool sync.Pool
+
+
+func init(){
+	rpcPbResponeDataPool.New = func()interface{}{
+		return &JsonRpcResponseData{}
+	}
+
+	rpcPbRequestDataPool.New = func()interface{}{
+		return &JsonRpcRequestData{}
+	}
 }
 
 func (slf *PBRpcRequestData) MakeRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) *PBRpcRequestData{
@@ -23,15 +38,6 @@ func (slf *PBRpcResponseData) MakeRespone(seq uint64,err *RpcError,reply []byte)
 	return slf
 }
 
-func (slf *PBRpcRequestData) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
-	
-}
-
-func (slf *PBRpcRequestData) ReleaseRpcRespose(rpcRequestData IRpcRequestData){
-
-}
-
-
 func (slf *PBProcessor) Marshal(v interface{}) ([]byte, error){
 	return proto.Marshal(v.(proto.Message))
 }
@@ -43,12 +49,25 @@ func (slf *PBProcessor) Unmarshal(data []byte, msg interface{}) error{
 
 
 func (slf *PBProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) IRpcRequestData{
-	return (&PBRpcRequestData{}).MakeRequest(seq,serviceMethod,noReply,inParam)
+	pPbRpcRequestData := rpcPbRequestDataPool.Get().(*PBRpcRequestData)
+	pPbRpcRequestData.MakeRequest(seq,serviceMethod,noReply,inParam)
+	return pPbRpcRequestData
 }
 
 func (slf *PBProcessor) MakeRpcResponse(seq uint64,err *RpcError,reply []byte) IRpcResponseData {
-	return (&PBRpcResponseData{}).MakeRespone(seq,err,reply)
+	pPBRpcResponseData := rpcPbResponeDataPool.Get().(*PBRpcResponseData)
+	pPBRpcResponseData.MakeRespone(seq,err,reply)
+	return pPBRpcResponseData
 }
+
+func (slf *PBProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
+	rpcPbRequestDataPool.Put(rpcRequestData)
+}
+
+func (slf *PBProcessor) ReleaseRpcRespose(rpcRequestData IRpcRequestData){
+	rpcPbResponeDataPool.Put(rpcRequestData)
+}
+
 
 func (slf *PBRpcRequestData) IsReply() bool{
 	return slf.GetNoReply()

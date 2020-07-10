@@ -75,12 +75,14 @@ func (agent *RpcAgent) WriteRespone(serviceMethod string,seq uint64,reply interf
 	var rpcResponse RpcResponse
 	rpcResponse.RpcResponeData = processor.MakeRpcResponse(seq,rpcError,mReply)
 	bytes,errM :=  processor.Marshal(rpcResponse.RpcResponeData)
+	defer processor.ReleaseRpcRespose(rpcResponse.RpcResponeData)
+
 	if errM != nil {
 		log.Error("service method %s %+v Marshal error:%+v!", serviceMethod,rpcResponse,errM)
 		return
 	}
 
-	processor.ReleaseRpcRespose(rpcResponse.RpcResponeData)
+
 	errM = agent.conn.WriteMsg(bytes)
 	if errM != nil {
 		log.Error("Rpc %s return is error:%+v",serviceMethod,errM)
