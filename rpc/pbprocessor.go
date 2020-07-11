@@ -66,7 +66,7 @@ func (slf *PBProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
 	rpcPbRequestDataPool.Put(rpcRequestData)
 }
 
-func (slf *PBProcessor) ReleaseRpcRespose(rpcRequestData IRpcRequestData){
+func (slf *PBProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
 	rpcPbResponeDataPool.Put(rpcRequestData)
 }
 
