@@ -80,8 +80,8 @@ func (slf *RpcHandler) GetRpcHandler() IRpcHandler{
 }
 
 func (slf *RpcHandler) InitRpcHandler(rpcHandler IRpcHandler,getClientFun FuncRpcClient,getServerFun FuncRpcServer) {
-	slf.callRequest = make(chan *RpcRequest,100000)
-	slf.callResponeCallBack = make(chan *Call,100000)
+	slf.callRequest = make(chan *RpcRequest,1000000)
+	slf.callResponeCallBack = make(chan *Call,1000000)
 
 	slf.rpcHandler = rpcHandler
 	slf.mapfunctons = map[string]RpcMethodInfo{}

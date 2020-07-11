@@ -36,10 +36,10 @@ func (slf *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 func (slf *Client) Connect(addr string) error {
 	slf.Addr = addr
 	slf.maxCheckCallRpcCount = 100
-	slf.callRpcTimerout = 10*time.Second
+	slf.callRpcTimerout = 15*time.Second
 	slf.ConnNum = 1
 	slf.ConnectInterval = time.Second*2
-	slf.PendingWriteNum = 10000
+	slf.PendingWriteNum = 2000000
 	slf.AutoReconnect = true
 	slf.LenMsgLen = 2
 	slf.MinMsgLen = 2

@@ -40,7 +40,7 @@ func (slf *Server) Start(listenAddr string) {
 	slf.rpcserver.MinMsgLen = 2
 	slf.rpcserver.MaxMsgLen = math.MaxUint16
 	slf.rpcserver.MaxConnNum = 10000
-	slf.rpcserver.PendingWriteNum = 10000
+	slf.rpcserver.PendingWriteNum = 2000000
 	slf.rpcserver.NewAgent =slf.NewAgent
 	slf.rpcserver.LittleEndian = LittleEndian
 	slf.rpcserver.Start()
