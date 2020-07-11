@@ -8,14 +8,13 @@ import (
 	"math"
 	"reflect"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
 type Client struct {
-	blocalhost bool
+	bSelfNode bool
 	network.TCPClient
 	conn *network.TCPConn
 
@@ -23,6 +22,8 @@ type Client struct {
 	startSeq uint64
 	pending map[uint64]*list.Element
 	pendingTimer *list.List
+	callRpcTimerout time.Duration
+	maxCheckCallRpcCount int
 }
 
 func (slf *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
@@ -34,10 +35,8 @@ func (slf *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 
 func (slf *Client) Connect(addr string) error {
 	slf.Addr = addr
-	if strings.Index(addr,"localhost") == 0 {
-		slf.blocalhost = true
-		return nil
-	}
+	slf.maxCheckCallRpcCount = 100
+	slf.callRpcTimerout = 10*time.Second
 	slf.ConnNum = 1
 	slf.ConnectInterval = time.Second*2
 	slf.PendingWriteNum = 10000
@@ -48,8 +47,57 @@ func (slf *Client) Connect(addr string) error {
 	slf.NewAgent = slf.NewClientAgent
 	slf.LittleEndian = LittleEndian
 	slf.ResetPending()
+	go slf.startCheckRpcCallTimer()
+	if addr == "" {
+		slf.bSelfNode = true
+		return nil
+	}
+
 	slf.Start()
 	return nil
+}
+
+func (slf *Client) startCheckRpcCallTimer(){
+	tick :=time.NewTicker( 3 * time.Second)
+
+	for{
+		select {
+			case <- tick.C:
+				slf.checkRpcCallTimerout()
+		}
+	}
+	tick.Stop()
+}
+
+func (slf *Client) makeCallFail(call *Call){
+	if call.callback!=nil && call.callback.IsValid() {
+		call.rpcHandler.(*RpcHandler).callResponeCallBack<-call
+	}else{
+		call.done <- call
+	}
+	slf.removePending(call.Seq)
+}
+
+func (slf *Client) checkRpcCallTimerout(){
+	tnow := time.Now()
+
+	for i:=0;i<slf.maxCheckCallRpcCount;i++ {
+		slf.pendingLock.Lock()
+		pElem := slf.pendingTimer.Front()
+		if pElem == nil {
+			slf.pendingLock.Unlock()
+			break
+		}
+		pCall := pElem.Value.(*Call)
+		if tnow.Sub(pCall.calltime) > slf.callRpcTimerout {
+			pCall.Err = fmt.Errorf("RPC call takes more than %d seconds!",slf.callRpcTimerout/time.Second)
+			slf.makeCallFail(pCall)
+			slf.pendingLock.Unlock()
+			continue
+		}
+		slf.pendingLock.Unlock()
+	}
+
 }
 
 func (slf *Client) ResetPending(){
@@ -68,6 +116,7 @@ func (slf *Client) ResetPending(){
 
 func (slf *Client) AddPending(call *Call){
 	slf.pendingLock.Lock()
+	call.calltime = time.Now()
 	elemTimer := slf.pendingTimer.PushBack(call)
 	slf.pending[call.Seq] = elemTimer//如果下面发送失败，将会一一直存在这里
 	slf.pendingLock.Unlock()
@@ -75,17 +124,19 @@ func (slf *Client) AddPending(call *Call){
 
 func (slf *Client) RemovePending(seq uint64){
 	slf.pendingLock.Lock()
+	slf.removePending(seq)
+	slf.pendingLock.Unlock()
+}
 
+func (slf *Client) removePending(seq uint64){
 	v,ok := slf.pending[seq]
 	if ok == false{
-		slf.pendingLock.Unlock()
 		return
 	}
 	slf.pendingTimer.Remove(v)
 	delete(slf.pending,seq)
-
-	slf.pendingLock.Unlock()
 }
+
 
 func (slf *Client) FindPending(seq uint64) *Call{
 	slf.pendingLock.Lock()

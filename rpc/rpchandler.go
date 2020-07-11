@@ -237,12 +237,13 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 
 	var oParam reflect.Value
 	paramList = append(paramList,reflect.ValueOf(slf.GetRpcHandler())) //接受者
-	oParam = reflect.New(v.oParam.Type().Elem())
-
-
 	paramList = append(paramList,reflect.ValueOf(iparam))
+	if request.localReply!=nil {
+		oParam = reflect.ValueOf(request.localReply) //输出参数
+	}else{
+		oParam = reflect.New(v.oParam.Type().Elem())
+	}
 	paramList = append(paramList,oParam) //输出参数
-
 	returnValues := v.method.Func.Call(paramList)
 	errInter := returnValues[0].Interface()
 	if errInter != nil {
@@ -293,7 +294,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args int
 	//2.rpcclient调用
 	//如果调用本结点服务
 	for _,pClient := range pClientList {
-		if pClient.blocalhost == true {
+		if pClient.bSelfNode == true {
 			pLocalRpcServer:=slf.funcRpcServer()
 			//判断是否是同一服务
 			sMethod := strings.Split(serviceMethod,".")
@@ -311,11 +312,11 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args int
 				return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,nil)
 			}
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.rpcHandlerGo(true,sMethod[0],sMethod[1],args,nil)
-			defer ReleaseCall(pCall)
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(pClient,true,sMethod[0],sMethod[1],args,nil)
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
+			ReleaseCall(pCall)
 			continue
 		}
 
@@ -345,7 +346,7 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 	//2.rpcclient调用
 	//如果调用本结点服务
 	pClient := pClientList[0]
-	if pClient.blocalhost == true {
+	if pClient.bSelfNode == true {
 		pLocalRpcServer:=slf.funcRpcServer()
 		//判断是否是同一服务
 		sMethod := strings.Split(serviceMethod,".")
@@ -360,8 +361,9 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 			return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,reply)
 		}
 		//其他的rpcHandler的处理器
-		pCall := pLocalRpcServer.rpcHandlerGo(false,sMethod[0],sMethod[1],args,reply)
+		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(pClient,false,sMethod[0],sMethod[1],args,reply)
 		err = pCall.Done().Err
+		pClient.RemovePending(pCall.Seq)
 		ReleaseCall(pCall)
 		return err
 	}
@@ -416,7 +418,7 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 	//2.rpcclient调用
 	//如果调用本结点服务
 	pClient := pClientList[0]
-	if pClient.blocalhost == true {
+	if pClient.bSelfNode == true {
 		pLocalRpcServer:=slf.funcRpcServer()
 		//判断是否是同一服务
 		sMethod := strings.Split(serviceMethod,".")
@@ -439,17 +441,18 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 
 		//其他的rpcHandler的处理器
 		if callback!=nil {
-			err =  pLocalRpcServer.rpcHandlerAsyncGo(slf,false,sMethod[0],sMethod[1],args,reply,fVal)
+			err =  pLocalRpcServer.selfNodeRpcHandlerAsyncGo(pClient,slf,false,sMethod[0],sMethod[1],args,reply,fVal)
 			if err != nil {
 				fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 			}
 			return nil
 		}
-		pCall := pLocalRpcServer.rpcHandlerGo(false,sMethod[0],sMethod[1],args,reply)
-		defer ReleaseCall(pCall)
+		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(pClient,false,sMethod[0],sMethod[1],args,reply)
+		err = pCall.Done().Err
+		pClient.RemovePending(pCall.Seq)
+		ReleaseCall(pCall)
 
-		pResult := pCall.Done()
-		return pResult.Err
+		return err
 	}
 
 	//跨node调用

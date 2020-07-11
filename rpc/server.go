@@ -201,9 +201,10 @@ func (slf *Server) myselfRpcHandlerGo(handlerName string,methodName string, args
 }
 
 
-func (slf *Server) rpcHandlerGo(noReply bool,handlerName string,methodName string, args interface{},reply interface{}) *Call {
-	pCall := MakeCall()//&Call{}
-	//pCall.done = make( chan *Call,1)
+func (slf *Server) selfNodeRpcHandlerGo(client *Client,noReply bool,handlerName string,methodName string, args interface{},reply interface{}) *Call {
+	pCall := MakeCall()
+	pCall.Seq = client.generateSeq()
+
 	rpcHandler := slf.rpcHandleFinder.FindRpcHandler(handlerName)
 	if rpcHandler== nil {
 		pCall.Err = fmt.Errorf("service method %s.%s not config!", handlerName,methodName)
@@ -217,7 +218,15 @@ func (slf *Server) rpcHandlerGo(noReply bool,handlerName string,methodName strin
 	req.localReply = reply
 	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil)
 	if noReply == false {
+		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{},Err *RpcError){
+			v := client.FindPending(pCall.Seq)
+			if v == nil {
+				log.Error("rpcClient cannot find seq %d in pending",pCall.Seq)
+				ReleaseCall(pCall)
+				return
+			}
+
 			if Err!=nil {
 				pCall.Err = Err
 			}else{
@@ -239,8 +248,9 @@ func (slf *Server) rpcHandlerGo(noReply bool,handlerName string,methodName strin
 	return pCall
 }
 
-func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,handlerName string,methodName string,args interface{},reply interface{},callback reflect.Value) error {
+func (slf *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler IRpcHandler,noReply bool,handlerName string,methodName string,args interface{},reply interface{},callback reflect.Value) error {
 	pCall := MakeCall()
+	pCall.Seq = client.generateSeq()
 	pCall.rpcHandler = callerRpcHandler
 	pCall.callback = &callback
 	pCall.Reply = reply
@@ -256,7 +266,18 @@ func (slf *Server) rpcHandlerAsyncGo(callerRpcHandler IRpcHandler,noReply bool,h
 	req.localReply = reply
 	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil)
 	if noReply == false {
+		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{},Err *RpcError){
+			//processor.ReleaseRpcRequest(req.RpcRequestData)
+			//ReleaseRpcRequest(req)
+			v := client.FindPending(pCall.Seq)
+			if v == nil {
+				log.Error("rpcClient cannot find seq %d in pending",pCall.Seq)
+
+				ReleaseCall(pCall)
+				return
+			}
+
 			if Err == nil {
 				pCall.Err = nil
 			}else{

@@ -37,7 +37,6 @@ type Service struct {
 	Module
 	rpc.RpcHandler   //rpc
 	name string    //service name
-	closeSig chan bool
 	wg      sync.WaitGroup
 	serviceCfg interface{}
 	gorouterNum int32

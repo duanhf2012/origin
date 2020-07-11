@@ -3,6 +3,7 @@ package rpc
 import (
 	"reflect"
 	"sync"
+	"time"
 )
 
 type RpcRequest struct {
@@ -45,6 +46,7 @@ type Call struct {
 	connid int
 	callback *reflect.Value
 	rpcHandler IRpcHandler
+	calltime time.Time
 }
 
 func (slf *Call) Clear(){
