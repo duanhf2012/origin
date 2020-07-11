@@ -220,7 +220,7 @@ func (slf *Server) selfNodeRpcHandlerGo(client *Client,noReply bool,handlerName 
 	if noReply == false {
 		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{},Err *RpcError){
-			v := client.FindPending(pCall.Seq)
+			v := client.RemovePending(pCall.Seq)
 			if v == nil {
 				log.Error("rpcClient cannot find seq %d in pending",pCall.Seq)
 				ReleaseCall(pCall)
@@ -258,6 +258,7 @@ func (slf *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler IRp
 	if rpcHandler== nil {
 		err := fmt.Errorf("service method %s.%s not config!", handlerName,methodName)
 		log.Error("%+v",err)
+		ReleaseCall(pCall)
 		return err
 	}
 
@@ -268,13 +269,12 @@ func (slf *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler IRp
 	if noReply == false {
 		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{},Err *RpcError){
-			//processor.ReleaseRpcRequest(req.RpcRequestData)
-			//ReleaseRpcRequest(req)
-			v := client.FindPending(pCall.Seq)
+			v := client.RemovePending(pCall.Seq)
 			if v == nil {
 				log.Error("rpcClient cannot find seq %d in pending",pCall.Seq)
-
 				ReleaseCall(pCall)
+				processor.ReleaseRpcRequest(req.RpcRequestData)
+				ReleaseRpcRequest(req)
 				return
 			}
 

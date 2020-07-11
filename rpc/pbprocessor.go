@@ -14,11 +14,11 @@ var rpcPbRequestDataPool sync.Pool
 
 func init(){
 	rpcPbResponeDataPool.New = func()interface{}{
-		return &JsonRpcResponseData{}
+		return &PBRpcResponseData{}
 	}
 
 	rpcPbRequestDataPool.New = func()interface{}{
-		return &JsonRpcRequestData{}
+		return &PBRpcRequestData{}
 	}
 }
 

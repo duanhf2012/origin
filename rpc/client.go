@@ -97,7 +97,6 @@ func (slf *Client) checkRpcCallTimerout(){
 		}
 		slf.pendingLock.Unlock()
 	}
-
 }
 
 func (slf *Client) ResetPending(){
@@ -122,19 +121,21 @@ func (slf *Client) AddPending(call *Call){
 	slf.pendingLock.Unlock()
 }
 
-func (slf *Client) RemovePending(seq uint64){
+func (slf *Client) RemovePending(seq uint64)  *Call{
 	slf.pendingLock.Lock()
-	slf.removePending(seq)
+	call := slf.removePending(seq)
 	slf.pendingLock.Unlock()
+	return call
 }
 
-func (slf *Client) removePending(seq uint64){
+func (slf *Client) removePending(seq uint64) *Call{
 	v,ok := slf.pending[seq]
 	if ok == false{
-		return
+		return nil
 	}
 	slf.pendingTimer.Remove(v)
 	delete(slf.pending,seq)
+	return v.Value.(*Call)
 }
 
 
@@ -258,20 +259,19 @@ func (slf *Client) Run(){
 		//1.解析head
 		respone := &RpcResponse{}
 		respone.RpcResponeData =processor.MakeRpcResponse(0,nil,nil)
-		defer processor.ReleaseRpcRespose(respone.RpcResponeData)
+
 		err = processor.Unmarshal(bytes,respone.RpcResponeData)
 		if err != nil {
+			processor.ReleaseRpcRespose(respone.RpcResponeData)
 			log.Error("rpcClient Unmarshal head error,error:%+v",err)
 			continue
 		}
 
-		v := slf.FindPending(respone.RpcResponeData.GetSeq())
+		v := slf.RemovePending(respone.RpcResponeData.GetSeq())
 		if v == nil {
 			log.Error("rpcClient cannot find seq %d in pending",respone.RpcResponeData.GetSeq())
 		}else  {
-			slf.RemovePending(respone.RpcResponeData.GetSeq())
 			v.Err = nil
-
 			if len(respone.RpcResponeData.GetReply()) >0 {
 				err = processor.Unmarshal(respone.RpcResponeData.GetReply(),v.Reply)
 				if err != nil {
@@ -290,6 +290,8 @@ func (slf *Client) Run(){
 				v.done <- v
 			}
 		}
+
+		processor.ReleaseRpcRespose(respone.RpcResponeData)
 	}
 }
 

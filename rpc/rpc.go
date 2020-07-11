@@ -19,6 +19,20 @@ type RpcResponse struct {
 	RpcResponeData IRpcResponseData
 }
 
+func (slf *RpcRequest) Clear() *RpcRequest{
+	slf.RpcRequestData = nil
+	slf.localReply = nil
+	slf.localParam = nil
+	slf.requestHandle = nil
+	slf.callback = nil
+	return slf
+}
+
+func (slf *RpcResponse) Clear() *RpcResponse{
+	slf.RpcResponeData = nil
+	return slf
+}
+
 type IRpcRequestData interface {
 	GetSeq() uint64
 	GetServiceMethod() string
@@ -49,7 +63,7 @@ type Call struct {
 	calltime time.Time
 }
 
-func (slf *Call) Clear(){
+func (slf *Call) Clear() *Call{
 	slf.Seq = 0
 	slf.ServiceMethod = ""
 	slf.Arg = nil
@@ -59,6 +73,7 @@ func (slf *Call) Clear(){
 	slf.connid = 0
 	slf.callback = nil
 	slf.rpcHandler = nil
+	return slf
 }
 
 func (slf *Call) Done() *Call{
@@ -73,6 +88,8 @@ type RpcHandleFinder interface {
 var rpcResponePool sync.Pool
 var rpcRequestPool sync.Pool
 var rpcCallPool sync.Pool
+
+
 
 func init(){
 	rpcResponePool.New = func()interface{}{
@@ -89,17 +106,15 @@ func init(){
 }
 
 func MakeRpcResponse() *RpcResponse{
-	return rpcResponePool.Get().(*RpcResponse)
+	return rpcResponePool.Get().(*RpcResponse).Clear()
 }
 
 func MakeRpcRequest() *RpcRequest{
-	return rpcRequestPool.Get().(*RpcRequest)
+	return rpcRequestPool.Get().(*RpcRequest).Clear()
 }
 
 func MakeCall() *Call {
-	call := rpcCallPool.Get().(*Call)
-
-	return call
+	return rpcCallPool.Get().(*Call).Clear()
 }
 
 func ReleaseRpcResponse(rpcRespone *RpcResponse){

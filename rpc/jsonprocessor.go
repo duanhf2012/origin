@@ -17,6 +17,7 @@ type JsonRpcRequestData struct {
 	InParam []byte
 }
 
+
 type JsonRpcResponseData struct {
 	//head
 	Seq           uint64   // sequence number chosen by client
@@ -25,7 +26,6 @@ type JsonRpcResponseData struct {
 	//returns
 	Reply []byte
 }
-
 
 
 var rpcJsonResponeDataPool sync.Pool
@@ -51,13 +51,14 @@ func (slf *JsonProcessor) Unmarshal(data []byte, v interface{}) error{
 	return json.Unmarshal(data,v)
 }
 
+
+
 func (slf *JsonProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) IRpcRequestData{
 	jsonRpcRequestData := rpcJsonRequestDataPool.Get().(*JsonRpcRequestData)
 	jsonRpcRequestData.Seq = seq
 	jsonRpcRequestData.ServiceMethod = serviceMethod
 	jsonRpcRequestData.NoReply = noReply
 	jsonRpcRequestData.InParam = inParam
-
 	return jsonRpcRequestData
 }
 
