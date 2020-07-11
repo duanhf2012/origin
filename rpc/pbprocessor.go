@@ -32,7 +32,9 @@ func (slf *PBRpcRequestData) MakeRequest(seq uint64,serviceMethod string,noReply
 
 func (slf *PBRpcResponseData) MakeRespone(seq uint64,err *RpcError,reply []byte) *PBRpcResponseData{
 	slf.Seq = proto.Uint64(seq)
-	slf.Error = proto.String(err.Error())
+	if err != nil {
+		slf.Error = proto.String(err.Error())
+	}
 	slf.Reply = reply
 
 	return slf
@@ -74,6 +76,9 @@ func (slf *PBRpcRequestData) IsNoReply() bool{
 }
 
 func (slf *PBRpcResponseData)		GetErr() *RpcError {
+	if slf.GetError() == "" {
+		return nil
+	}
 	return Errorf(slf.GetError())
 }
 
