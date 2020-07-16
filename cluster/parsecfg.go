@@ -1,13 +1,15 @@
 package cluster
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/rpc"
+	jsoniter "github.com/json-iterator/go"
 	"io/ioutil"
 	"strings"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 func (slf *Cluster) ReadClusterConfig(filepath string) (*SubNet,error) {
 	c := &SubNet{}

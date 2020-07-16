@@ -1,12 +1,12 @@
 package sysservice
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/util/uuid"
+	jsoniter "github.com/json-iterator/go"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var Default_ReadTimeout time.Duration = time.Second*10
 var Default_WriteTimeout time.Duration = time.Second*10

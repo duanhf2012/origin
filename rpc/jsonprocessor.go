@@ -1,9 +1,11 @@
 package rpc
 
 import (
-	"encoding/json"
+	jsoniter "github.com/json-iterator/go"
 	"sync"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type JsonProcessor struct {
 }
