@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -99,7 +100,7 @@ func Start() {
 }
 
 
-func stopNode(arg interface{}) error {
+func stopNode(args []string) error {
 	processid,err := getRunProcessPid()
 	if err != nil {
 		return err
@@ -109,22 +110,35 @@ func stopNode(arg interface{}) error {
 	return nil
 }
 
-func startNode(paramNodeId interface{}) error {
+func startNode(args []string) error {
+	//1.解析参数
+	param := args[2]
+	sparam := strings.Split(param,"=")
+	if len(sparam) != 2 {
+		return fmt.Errorf("invalid option %s",param)
+	}
+	if sparam[0]!="nodeid" {
+		return fmt.Errorf("invalid option %s",param)
+	}
+	nodeId,err:= strconv.Atoi(sparam[1])
+	if err != nil {
+		return fmt.Errorf("invalid option %s",param)
+	}
+
 	log.Release("Start running server.")
+	//2.初始化node
+	initNode(nodeId)
 
-	//1.初始化node
-	initNode(paramNodeId.(int))
-
-	//2.运行集群
+	//3.运行集群
 	cluster.GetCluster().Start()
 
-	//3.运行service
+	//4.运行service
 	service.Start()
 
-	//4.记录进程id号
+	//5.记录进程id号
 	writeProcessPid()
 
-	//5.监听程序退出信号&性能报告
+	//6.监听程序退出信号&性能报告
 	bRun := true
 	var pProfilerTicker *time.Ticker = &time.Ticker{}
 	if profilerInterval>0 {
@@ -140,7 +154,7 @@ func startNode(paramNodeId interface{}) error {
 		}
 	}
 
-	//6.退出
+	//7.退出
 	close(closeSig)
 	service.WaitStop()
 
