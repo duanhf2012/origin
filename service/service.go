@@ -70,7 +70,6 @@ func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getSer
 	slf.serviceCfg = serviceCfg
 	slf.gorouterNum = 1
 	slf.eventHandler.Init(&slf.eventProcessor)
-	slf.self.OnInit()
 }
 
 func (slf *Service) SetGoRouterNum(gorouterNum int32) bool {

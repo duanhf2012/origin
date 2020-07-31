@@ -64,34 +64,28 @@ func GetNodeId() int {
 }
 
 func initNode(id int){
-	nodeId = id
 	//1.初始化集群
+	nodeId = id
 	err := cluster.GetCluster().Init(GetNodeId())
 	if err != nil {
 		log.Fatal("read system config is error %+v",err)
 	}
 
-	//2.service模块初始化
-	service.Init(closeSig)
-
-	//3.setup service
+	//2.setup service
 	for _,s := range preSetupService {
 		//是否配置的service
 		if cluster.GetCluster().IsConfigService(s.GetName()) == false {
 			continue
 		}
+
+		pServiceCfg := cluster.GetCluster().GetServiceCfg(nodeId,s.GetName())
+		s.Init(s,cluster.GetRpcClient,cluster.GetRpcServer,pServiceCfg)
+
 		service.Setup(s)
 	}
 
-	//4.init service
-	for _,s := range preSetupService {
-		//是否配置的service
-		if cluster.GetCluster().IsConfigService(s.GetName()) == false {
-			continue
-		}
-		pServiceCfg := cluster.GetCluster().GetServiceCfg(nodeId,s.GetName())
-		s.Init(s,cluster.GetRpcClient,cluster.GetRpcServer,pServiceCfg)
-	}
+	//3.service初始化
+	service.Init(closeSig)
 }
 
 func Start() {
@@ -117,16 +111,25 @@ func stopNode(arg interface{}) error {
 
 func startNode(paramNodeId interface{}) error {
 	log.Release("Start running server.")
+
+	//1.初始化node
 	initNode(paramNodeId.(int))
+
+	//2.运行集群
 	cluster.GetCluster().Start()
+
+	//3.运行service
 	service.Start()
+
+	//4.记录进程id号
 	writeProcessPid()
+
+	//5.监听程序退出信号&性能报告
 	bRun := true
 	var pProfilerTicker *time.Ticker = &time.Ticker{}
 	if profilerInterval>0 {
 		pProfilerTicker = time.NewTicker(profilerInterval)
 	}
-
 	for bRun {
 		select {
 		case <-sigs:
@@ -137,6 +140,7 @@ func startNode(paramNodeId interface{}) error {
 		}
 	}
 
+	//6.退出
 	close(closeSig)
 	service.WaitStop()
 
