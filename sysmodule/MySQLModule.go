@@ -34,7 +34,7 @@ type PingExecute struct {
 }
 
 // DBModule ...
-type DBModule struct {
+type MySQLModule struct {
 	service.Module
 	db               *sql.DB
 	url              string
@@ -127,7 +127,7 @@ func (slf *SyncExecuteDBResult) Get(timeoutMs int) (*DBResultEx, error) {
 	return nil, fmt.Errorf("Getting the return result timeout [%d]ms", timeoutMs)
 }
 
-func (slf *DBModule) RunPing() {
+func (slf *MySQLModule) RunPing() {
 	for {
 		select {
 		case <-slf.pingCoroutine.pintExit:
@@ -141,7 +141,7 @@ func (slf *DBModule) RunPing() {
 	}
 }
 
-func (slf *DBModule) Init(maxConn, executeNum int, url string, userName string, password string, dbname string) error {
+func (slf *MySQLModule) Init(maxConn, executeNum int, url string, userName string, password string, dbname string) error {
 	slf.url = url
 	slf.maxconn = maxConn
 	slf.username = userName
@@ -165,7 +165,7 @@ func (slf *DBModule) Init(maxConn, executeNum int, url string, userName string, 
 	return slf.Connect(slf.maxconn)
 }
 
-func (slf *DBModule) OnInit() error {
+func (slf *MySQLModule) OnInit() error {
 	for i := 0; i < slf.syncCoroutineNum; i++ {
 		go slf.RunExecuteDBCoroutine(i)
 	}
@@ -174,7 +174,7 @@ func (slf *DBModule) OnInit() error {
 	return nil
 }
 
-func (slf *DBModule) OnRelease() {
+func (slf *MySQLModule) OnRelease() {
 	for i := 0; i < slf.syncCoroutineNum; i++ {
 		close(slf.executeList[i].syncExecuteExit)
 	}
@@ -326,11 +326,11 @@ func (slf *DBResult) mapSingle2interface(m map[string]string, v reflect.Value) e
 	return nil
 }
 
-func (slf *DBModule) SetQuerySlowTime(Time time.Duration) {
+func (slf *MySQLModule) SetQuerySlowTime(Time time.Duration) {
 	slf.PrintTime = Time
 }
 
-func (slf *DBModule) IsPrintTimeLog(Time time.Duration) bool {
+func (slf *MySQLModule) IsPrintTimeLog(Time time.Duration) bool {
 	if slf.PrintTime != 0 && Time >= slf.PrintTime {
 		return true
 	}
@@ -365,7 +365,7 @@ func (slf *DBResult) mapSlice2interface(data []map[string]string, in interface{}
 }
 
 // Connect ...
-func (slf *DBModule) Connect(maxConn int) error {
+func (slf *MySQLModule) Connect(maxConn int) error {
 	cmd := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&parseTime=true&loc=%s&readTimeout=30s&timeout=15s&writeTimeout=30s",
 		slf.username,
 		slf.password,
@@ -404,7 +404,7 @@ func (slf *SyncDBResult) Get(timeoutMs int) DBResult {
 	}
 }
 
-func (slf *DBModule) CheckArgs(args ...interface{}) error {
+func (slf *MySQLModule) CheckArgs(args ...interface{}) error {
 	for _, val := range args {
 		if reflect.TypeOf(val).Kind() == reflect.String {
 			retVal := val.(string)
@@ -448,7 +448,7 @@ func (slf *DBModule) CheckArgs(args ...interface{}) error {
 }
 
 // Query ...
-func (slf *DBModule) Query(query string, args ...interface{}) DBResult {
+func (slf *MySQLModule) Query(query string, args ...interface{}) DBResult {
 	if slf.CheckArgs(args) != nil {
 		ret := DBResult{}
 		log.Error("CheckArgs is error :%s", query)
@@ -475,7 +475,7 @@ func (slf *DBModule) Query(query string, args ...interface{}) DBResult {
 	}
 }
 
-func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, error) {
+func (slf *MySQLModule) QueryEx(query string, args ...interface{}) (*DataSetList, error) {
 	datasetList := DataSetList{}
 	datasetList.tag = "json"
 	datasetList.blur = true
@@ -549,7 +549,7 @@ func (slf *DBModule) QueryEx(query string, args ...interface{}) (*DataSetList, e
 }
 
 // SyncQuery ...
-func (slf *DBModule) SyncQuery(queryHas int, query string, args ...interface{}) SyncQueryDBResultEx {
+func (slf *MySQLModule) SyncQuery(queryHas int, query string, args ...interface{}) SyncQueryDBResultEx {
 	ret := SyncQueryDBResultEx{
 		sres: make(chan *DataSetList, 1),
 		err:  make(chan error, 1),
@@ -577,7 +577,7 @@ func (slf *DBModule) SyncQuery(queryHas int, query string, args ...interface{}) 
 	return ret
 }
 
-func (slf *DBModule) AsyncQuery(call SyncDBResultExCallBack, queryHas int, query string, args ...interface{}) error {
+func (slf *MySQLModule) AsyncQuery(call SyncDBResultExCallBack, queryHas int, query string, args ...interface{}) error {
 	chanIndex := queryHas % len(slf.executeList)
 	if chanIndex < 0 {
 		chanIndex = rand.Intn(len(slf.executeList))
@@ -597,7 +597,7 @@ func (slf *DBModule) AsyncQuery(call SyncDBResultExCallBack, queryHas int, query
 }
 
 // Exec ...
-func (slf *DBModule) Exec(query string, args ...interface{}) (*DBResultEx, error) {
+func (slf *MySQLModule) Exec(query string, args ...interface{}) (*DBResultEx, error) {
 	ret := &DBResultEx{}
 	if slf.db == nil {
 		log.Error("cannot connect database:%s", query)
@@ -628,7 +628,7 @@ func (slf *DBModule) Exec(query string, args ...interface{}) (*DBResultEx, error
 }
 
 // SyncExec ...
-func (slf *DBModule) SyncExec(queryHas int, query string, args ...interface{}) *SyncExecuteDBResult {
+func (slf *MySQLModule) SyncExec(queryHas int, query string, args ...interface{}) *SyncExecuteDBResult {
 	ret := &SyncExecuteDBResult{
 		sres: make(chan *DBResultEx, 1),
 		err:  make(chan error, 1),
@@ -658,7 +658,7 @@ func (slf *DBModule) SyncExec(queryHas int, query string, args ...interface{}) *
 	return ret
 }
 
-func (slf *DBModule) AsyncExec(call SyncDBResultExCallBack, queryHas int, query string, args ...interface{}) error {
+func (slf *MySQLModule) AsyncExec(call SyncDBResultExCallBack, queryHas int, query string, args ...interface{}) error {
 	chanIndex := queryHas % len(slf.executeList)
 	if chanIndex < 0 {
 		chanIndex = rand.Intn(len(slf.executeList))
@@ -681,7 +681,7 @@ func (slf *DBModule) AsyncExec(call SyncDBResultExCallBack, queryHas int, query 
 	return nil
 }
 
-func (slf *DBModule) RunExecuteDBCoroutine(has int) {
+func (slf *MySQLModule) RunExecuteDBCoroutine(has int) {
 	slf.waitGroup.Add(1)
 	defer slf.waitGroup.Done()
 	for {
@@ -843,7 +843,7 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 }
 
 // Begin starts a transaction.
-func (slf *DBModule) Begin() (*Tx, error) {
+func (slf *MySQLModule) Begin() (*Tx, error) {
 	var txDBMoudule Tx
 	txdb, err := slf.db.Begin()
 	if err != nil {
