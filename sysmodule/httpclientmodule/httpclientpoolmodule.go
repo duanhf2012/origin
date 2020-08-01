@@ -1,4 +1,4 @@
-package sysmodule
+package httpclientmodule
 
 import (
 	"bytes"
@@ -13,7 +13,7 @@ import (
 	"github.com/duanhf2012/origin/service"
 )
 
-type HttpClientPoolModule struct {
+type HttpClientModule struct {
 	service.Module
 	client *http.Client
 }
@@ -43,7 +43,7 @@ func (slf *SyncHttpRespone) Get(timeoutMs int) HttpRespone {
 	}
 }
 
-func (slf *HttpClientPoolModule) Init(maxpool int, proxyUrl string) {
+func (slf *HttpClientModule) Init(maxpool int, proxyUrl string) {
 	type ProxyFun func(_ *http.Request) (*url.URL, error)
 	var proxyfun ProxyFun
 	if proxyUrl != "" {
@@ -67,7 +67,7 @@ func (slf *HttpClientPoolModule) Init(maxpool int, proxyUrl string) {
 	}
 }
 
-func (slf *HttpClientPoolModule) SyncRequest(method string, url string, body []byte, header http.Header) SyncHttpRespone {
+func (slf *HttpClientModule) SyncRequest(method string, url string, body []byte, header http.Header) SyncHttpRespone {
 	ret := SyncHttpRespone{
 		resp: make(chan HttpRespone, 1),
 	}
@@ -78,7 +78,7 @@ func (slf *HttpClientPoolModule) SyncRequest(method string, url string, body []b
 	return ret
 }
 
-func (slf *HttpClientPoolModule) Request(method string, url string, body []byte, header http.Header) HttpRespone {
+func (slf *HttpClientModule) Request(method string, url string, body []byte, header http.Header) HttpRespone {
 	if slf.client == nil {
 		panic("Call the init function first")
 	}

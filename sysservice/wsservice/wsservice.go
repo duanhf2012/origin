@@ -1,4 +1,4 @@
-package sysservice
+package wsservice
 
 import (
 	"fmt"

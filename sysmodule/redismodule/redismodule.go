@@ -1,4 +1,4 @@
-package sysmodule
+package redismodule
 
 import (
 	"bytes"
