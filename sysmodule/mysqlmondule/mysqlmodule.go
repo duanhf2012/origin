@@ -393,7 +393,7 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 	typ := t.Elem()
 
 	if !val.IsValid() {
-		return errors.New("数据类型不正确")
+		return errors.New("Incorrect data type!")
 	}
 
 	for i := 0; i < val.NumField(); i++ {
@@ -409,7 +409,7 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 			columnData, ok := m[vtag]
 			if ok == false {
 				if !slf.blur {
-					return fmt.Errorf("Cannot find filed name %s", vtag)
+					return fmt.Errorf("Cannot find filed name %s!", vtag)
 				}
 				continue
 			}
@@ -419,12 +419,12 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 			meta := columnData[rowIdx].(*sql.NullString)
 			if !ok {
 				if !slf.blur {
-					return fmt.Errorf("没有在结果集中找到对应的字段 %s", tag)
+					return fmt.Errorf("No corresponding field was found in the result set %s!", tag)
 				}
 				continue
 			}
 			if !value.CanSet() {
-				return errors.New("结构体字段没有读写权限")
+				return errors.New("Struct fields do not have read or write permissions!")
 			}
 
 			if meta.Valid == false {
@@ -463,7 +463,7 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 				}
 				value.SetBool(b)
 			default:
-				return errors.New("数据库映射存在不识别的数据类型")
+				return errors.New("The database map has unrecognized data types!")
 			}
 		}
 	}
