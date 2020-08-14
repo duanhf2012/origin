@@ -29,6 +29,8 @@ func main() {
 	node.Start()
 }
 ```
+以上只是基础代码，具体运行参数和配置请参照第一章节。
+
 一个origin进程需要创建一个node对象,Start开始运行。您也可以直接下载origin引擎示例:
 ```
 go get -v -u github.com/duanhf2012/originserver
