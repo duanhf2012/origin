@@ -72,6 +72,9 @@ func (disp *Dispatcher) AfterFuncEx(funName string,d time.Duration, cbex func(ti
 	t.name = funName//reflect.TypeOf(cbex).Name()
 	//t.name = runtime.FuncForPC(reflect.ValueOf(cbex).Pointer()).Name()
 	t.t = time.AfterFunc(d, func() {
+		if disp == nil {
+			return
+		}
 		disp.ChanTimer <- t
 	})
 	return t
