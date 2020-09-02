@@ -17,6 +17,7 @@ type JsonRpcRequestData struct {
 	NoReply bool           //是否需要返回
 	//packbody
 	InParam []byte
+	AdditionParam interface{}
 }
 
 
@@ -54,13 +55,13 @@ func (slf *JsonProcessor) Unmarshal(data []byte, v interface{}) error{
 }
 
 
-
-func (slf *JsonProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) IRpcRequestData{
+func (slf *JsonProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte,additionParam interface{}) IRpcRequestData{
 	jsonRpcRequestData := rpcJsonRequestDataPool.Get().(*JsonRpcRequestData)
 	jsonRpcRequestData.Seq = seq
 	jsonRpcRequestData.ServiceMethod = serviceMethod
 	jsonRpcRequestData.NoReply = noReply
 	jsonRpcRequestData.InParam = inParam
+	jsonRpcRequestData.AdditionParam = additionParam
 	return jsonRpcRequestData
 }
 
@@ -95,6 +96,15 @@ func (slf *JsonRpcRequestData) GetServiceMethod() string{
 func (slf *JsonRpcRequestData) GetInParam() []byte{
 	return slf.InParam
 }
+
+func (slf *JsonRpcRequestData) GetParamValue() interface{}{
+	return slf.AdditionParam
+}
+
+func (slf *JsonRpcRequestData) GetAdditionParams() IRawAdditionParam{
+	return slf
+}
+
 
 func (slf *JsonRpcResponseData)	GetSeq() uint64 {
 	return slf.Seq

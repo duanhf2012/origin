@@ -9,8 +9,10 @@ import (
 type RpcRequest struct {
 	RpcRequestData IRpcRequestData
 
+	bLocalRequest bool
 	localReply interface{}
 	localParam interface{} //本地调用的参数列表
+	localRawParam []byte
 	requestHandle RequestHandler
 	callback *reflect.Value
 }
@@ -33,11 +35,16 @@ func (slf *RpcResponse) Clear() *RpcResponse{
 	return slf
 }
 
+type IRawAdditionParam interface {
+	GetParamValue() interface{}
+}
+
 type IRpcRequestData interface {
 	GetSeq() uint64
 	GetServiceMethod() string
 	GetInParam() []byte
 	IsNoReply() bool
+	GetAdditionParams() IRawAdditionParam
 }
 
 type IRpcResponseData interface {
@@ -47,6 +54,13 @@ type IRpcResponseData interface {
 }
 
 type RequestHandler func(Returns interface{},Err *RpcError)
+
+type RawAdditionParamNull struct {
+}
+
+func (slf *RawAdditionParamNull) GetParamValue() interface{}{
+	return nil
+}
 
 
 type Call struct {

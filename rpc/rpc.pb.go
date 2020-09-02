@@ -20,21 +20,216 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
+type AdditionParam struct {
+	// Types that are valid to be assigned to AdditionOneof:
+	//	*AdditionParam_SParam
+	//	*AdditionParam_UParam
+	//	*AdditionParam_StrParam
+	//	*AdditionParam_BParam
+	AdditionOneof        isAdditionParam_AdditionOneof `protobuf_oneof:"addition_oneof"`
+	XXX_NoUnkeyedLiteral struct{}                      `json:"-"`
+	XXX_unrecognized     []byte                        `json:"-"`
+	XXX_sizecache        int32                         `json:"-"`
+}
+
+func (m *AdditionParam) Reset()         { *m = AdditionParam{} }
+func (m *AdditionParam) String() string { return proto.CompactTextString(m) }
+func (*AdditionParam) ProtoMessage()    {}
+func (*AdditionParam) Descriptor() ([]byte, []int) {
+	return fileDescriptor_77a6da22d6a3feb1, []int{0}
+}
+
+func (m *AdditionParam) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_AdditionParam.Unmarshal(m, b)
+}
+func (m *AdditionParam) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_AdditionParam.Marshal(b, m, deterministic)
+}
+func (m *AdditionParam) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_AdditionParam.Merge(m, src)
+}
+func (m *AdditionParam) XXX_Size() int {
+	return xxx_messageInfo_AdditionParam.Size(m)
+}
+func (m *AdditionParam) XXX_DiscardUnknown() {
+	xxx_messageInfo_AdditionParam.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_AdditionParam proto.InternalMessageInfo
+
+type isAdditionParam_AdditionOneof interface {
+	isAdditionParam_AdditionOneof()
+}
+
+type AdditionParam_SParam struct {
+	SParam int64 `protobuf:"varint,10,opt,name=SParam,oneof"`
+}
+
+type AdditionParam_UParam struct {
+	UParam uint64 `protobuf:"varint,11,opt,name=UParam,oneof"`
+}
+
+type AdditionParam_StrParam struct {
+	StrParam string `protobuf:"bytes,12,opt,name=StrParam,oneof"`
+}
+
+type AdditionParam_BParam struct {
+	BParam []byte `protobuf:"bytes,13,opt,name=BParam,oneof"`
+}
+
+func (*AdditionParam_SParam) isAdditionParam_AdditionOneof() {}
+
+func (*AdditionParam_UParam) isAdditionParam_AdditionOneof() {}
+
+func (*AdditionParam_StrParam) isAdditionParam_AdditionOneof() {}
+
+func (*AdditionParam_BParam) isAdditionParam_AdditionOneof() {}
+
+func (m *AdditionParam) GetAdditionOneof() isAdditionParam_AdditionOneof {
+	if m != nil {
+		return m.AdditionOneof
+	}
+	return nil
+}
+
+func (m *AdditionParam) GetSParam() int64 {
+	if x, ok := m.GetAdditionOneof().(*AdditionParam_SParam); ok {
+		return x.SParam
+	}
+	return 0
+}
+
+func (m *AdditionParam) GetUParam() uint64 {
+	if x, ok := m.GetAdditionOneof().(*AdditionParam_UParam); ok {
+		return x.UParam
+	}
+	return 0
+}
+
+func (m *AdditionParam) GetStrParam() string {
+	if x, ok := m.GetAdditionOneof().(*AdditionParam_StrParam); ok {
+		return x.StrParam
+	}
+	return ""
+}
+
+func (m *AdditionParam) GetBParam() []byte {
+	if x, ok := m.GetAdditionOneof().(*AdditionParam_BParam); ok {
+		return x.BParam
+	}
+	return nil
+}
+
+// XXX_OneofFuncs is for the internal use of the proto package.
+func (*AdditionParam) XXX_OneofFuncs() (func(msg proto.Message, b *proto.Buffer) error, func(msg proto.Message, tag, wire int, b *proto.Buffer) (bool, error), func(msg proto.Message) (n int), []interface{}) {
+	return _AdditionParam_OneofMarshaler, _AdditionParam_OneofUnmarshaler, _AdditionParam_OneofSizer, []interface{}{
+		(*AdditionParam_SParam)(nil),
+		(*AdditionParam_UParam)(nil),
+		(*AdditionParam_StrParam)(nil),
+		(*AdditionParam_BParam)(nil),
+	}
+}
+
+func _AdditionParam_OneofMarshaler(msg proto.Message, b *proto.Buffer) error {
+	m := msg.(*AdditionParam)
+	// addition_oneof
+	switch x := m.AdditionOneof.(type) {
+	case *AdditionParam_SParam:
+		b.EncodeVarint(10<<3 | proto.WireVarint)
+		b.EncodeVarint(uint64(x.SParam))
+	case *AdditionParam_UParam:
+		b.EncodeVarint(11<<3 | proto.WireVarint)
+		b.EncodeVarint(uint64(x.UParam))
+	case *AdditionParam_StrParam:
+		b.EncodeVarint(12<<3 | proto.WireBytes)
+		b.EncodeStringBytes(x.StrParam)
+	case *AdditionParam_BParam:
+		b.EncodeVarint(13<<3 | proto.WireBytes)
+		b.EncodeRawBytes(x.BParam)
+	case nil:
+	default:
+		return fmt.Errorf("AdditionParam.AdditionOneof has unexpected type %T", x)
+	}
+	return nil
+}
+
+func _AdditionParam_OneofUnmarshaler(msg proto.Message, tag, wire int, b *proto.Buffer) (bool, error) {
+	m := msg.(*AdditionParam)
+	switch tag {
+	case 10: // addition_oneof.SParam
+		if wire != proto.WireVarint {
+			return true, proto.ErrInternalBadWireType
+		}
+		x, err := b.DecodeVarint()
+		m.AdditionOneof = &AdditionParam_SParam{int64(x)}
+		return true, err
+	case 11: // addition_oneof.UParam
+		if wire != proto.WireVarint {
+			return true, proto.ErrInternalBadWireType
+		}
+		x, err := b.DecodeVarint()
+		m.AdditionOneof = &AdditionParam_UParam{x}
+		return true, err
+	case 12: // addition_oneof.StrParam
+		if wire != proto.WireBytes {
+			return true, proto.ErrInternalBadWireType
+		}
+		x, err := b.DecodeStringBytes()
+		m.AdditionOneof = &AdditionParam_StrParam{x}
+		return true, err
+	case 13: // addition_oneof.BParam
+		if wire != proto.WireBytes {
+			return true, proto.ErrInternalBadWireType
+		}
+		x, err := b.DecodeRawBytes(true)
+		m.AdditionOneof = &AdditionParam_BParam{x}
+		return true, err
+	default:
+		return false, nil
+	}
+}
+
+func _AdditionParam_OneofSizer(msg proto.Message) (n int) {
+	m := msg.(*AdditionParam)
+	// addition_oneof
+	switch x := m.AdditionOneof.(type) {
+	case *AdditionParam_SParam:
+		n += 1 // tag and wire
+		n += proto.SizeVarint(uint64(x.SParam))
+	case *AdditionParam_UParam:
+		n += 1 // tag and wire
+		n += proto.SizeVarint(uint64(x.UParam))
+	case *AdditionParam_StrParam:
+		n += 1 // tag and wire
+		n += proto.SizeVarint(uint64(len(x.StrParam)))
+		n += len(x.StrParam)
+	case *AdditionParam_BParam:
+		n += 1 // tag and wire
+		n += proto.SizeVarint(uint64(len(x.BParam)))
+		n += len(x.BParam)
+	case nil:
+	default:
+		panic(fmt.Sprintf("proto: unexpected type %T in oneof", x))
+	}
+	return n
+}
+
 type PBRpcRequestData struct {
-	Seq                  *uint64  `protobuf:"varint,1,opt,name=Seq" json:"Seq,omitempty"`
-	ServiceMethod        *string  `protobuf:"bytes,2,opt,name=ServiceMethod" json:"ServiceMethod,omitempty"`
-	NoReply              *bool    `protobuf:"varint,3,opt,name=NoReply" json:"NoReply,omitempty"`
-	InParam              []byte   `protobuf:"bytes,4,opt,name=InParam" json:"InParam,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	Seq                  *uint64        `protobuf:"varint,1,opt,name=Seq" json:"Seq,omitempty"`
+	ServiceMethod        *string        `protobuf:"bytes,2,opt,name=ServiceMethod" json:"ServiceMethod,omitempty"`
+	NoReply              *bool          `protobuf:"varint,3,opt,name=NoReply" json:"NoReply,omitempty"`
+	InParam              []byte         `protobuf:"bytes,4,opt,name=InParam" json:"InParam,omitempty"`
+	AddtionParam         *AdditionParam `protobuf:"bytes,5,opt,name=addtionParam" json:"addtionParam,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}       `json:"-"`
+	XXX_unrecognized     []byte         `json:"-"`
+	XXX_sizecache        int32          `json:"-"`
 }
 
 func (m *PBRpcRequestData) Reset()         { *m = PBRpcRequestData{} }
 func (m *PBRpcRequestData) String() string { return proto.CompactTextString(m) }
 func (*PBRpcRequestData) ProtoMessage()    {}
 func (*PBRpcRequestData) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{0}
+	return fileDescriptor_77a6da22d6a3feb1, []int{1}
 }
 
 func (m *PBRpcRequestData) XXX_Unmarshal(b []byte) error {
@@ -83,6 +278,13 @@ func (m *PBRpcRequestData) GetInParam() []byte {
 	return nil
 }
 
+func (m *PBRpcRequestData) GetAddtionParam() *AdditionParam {
+	if m != nil {
+		return m.AddtionParam
+	}
+	return nil
+}
+
 type PBRpcResponseData struct {
 	Seq                  *uint64  `protobuf:"varint,1,opt,name=Seq" json:"Seq,omitempty"`
 	Error                *string  `protobuf:"bytes,2,opt,name=Error" json:"Error,omitempty"`
@@ -96,7 +298,7 @@ func (m *PBRpcResponseData) Reset()         { *m = PBRpcResponseData{} }
 func (m *PBRpcResponseData) String() string { return proto.CompactTextString(m) }
 func (*PBRpcResponseData) ProtoMessage()    {}
 func (*PBRpcResponseData) Descriptor() ([]byte, []int) {
-	return fileDescriptor_77a6da22d6a3feb1, []int{1}
+	return fileDescriptor_77a6da22d6a3feb1, []int{2}
 }
 
 func (m *PBRpcResponseData) XXX_Unmarshal(b []byte) error {
@@ -139,6 +341,7 @@ func (m *PBRpcResponseData) GetReply() []byte {
 }
 
 func init() {
+	proto.RegisterType((*AdditionParam)(nil), "rpc.AdditionParam")
 	proto.RegisterType((*PBRpcRequestData)(nil), "rpc.PBRpcRequestData")
 	proto.RegisterType((*PBRpcResponseData)(nil), "rpc.PBRpcResponseData")
 }
@@ -146,16 +349,23 @@ func init() {
 func init() { proto.RegisterFile("rpc.proto", fileDescriptor_77a6da22d6a3feb1) }
 
 var fileDescriptor_77a6da22d6a3feb1 = []byte{
-	// 173 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe2, 0xe2, 0x2c, 0x2a, 0x48, 0xd6,
-	0x2b, 0x28, 0xca, 0x2f, 0xc9, 0x17, 0x62, 0x2e, 0x2a, 0x48, 0x56, 0xaa, 0xe3, 0x12, 0x08, 0x70,
-	0x0a, 0x2a, 0x48, 0x0e, 0x4a, 0x2d, 0x2c, 0x4d, 0x2d, 0x2e, 0x71, 0x49, 0x2c, 0x49, 0x14, 0x12,
-	0xe0, 0x62, 0x0e, 0x4e, 0x2d, 0x94, 0x60, 0x54, 0x60, 0xd4, 0x60, 0x09, 0x02, 0x31, 0x85, 0x54,
-	0xb8, 0x78, 0x83, 0x53, 0x8b, 0xca, 0x32, 0x93, 0x53, 0x7d, 0x53, 0x4b, 0x32, 0xf2, 0x53, 0x24,
-	0x98, 0x14, 0x18, 0x35, 0x38, 0x83, 0x50, 0x05, 0x85, 0x24, 0xb8, 0xd8, 0xfd, 0xf2, 0x83, 0x52,
-	0x0b, 0x72, 0x2a, 0x25, 0x98, 0x15, 0x18, 0x35, 0x38, 0x82, 0x60, 0x5c, 0x90, 0x8c, 0x67, 0x5e,
-	0x40, 0x62, 0x51, 0x62, 0xae, 0x04, 0x8b, 0x02, 0xa3, 0x06, 0x4f, 0x10, 0x8c, 0xab, 0x14, 0xc8,
-	0x25, 0x08, 0xb5, 0xbf, 0xb8, 0x20, 0x3f, 0xaf, 0x38, 0x15, 0x87, 0x03, 0x44, 0xb8, 0x58, 0x5d,
-	0x8b, 0x8a, 0xf2, 0x8b, 0xa0, 0x16, 0x43, 0x38, 0x20, 0x51, 0x84, 0x75, 0x3c, 0x41, 0x10, 0x0e,
-	0x20, 0x00, 0x00, 0xff, 0xff, 0x84, 0xbc, 0x24, 0x3a, 0xe3, 0x00, 0x00, 0x00,
+	// 274 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x74, 0x90, 0xb1, 0x4e, 0xc3, 0x30,
+	0x10, 0x86, 0x6b, 0xd2, 0x42, 0x7b, 0x4d, 0x50, 0xb0, 0x18, 0x3c, 0x30, 0x58, 0x11, 0x83, 0xa7,
+	0x0e, 0x0c, 0xec, 0x44, 0x20, 0x95, 0x01, 0x54, 0x2e, 0x62, 0x46, 0x56, 0x62, 0x44, 0x24, 0x88,
+	0x5d, 0xc7, 0x20, 0xf1, 0x10, 0xbc, 0x0e, 0xcf, 0x87, 0x0e, 0xa7, 0x45, 0x19, 0xd8, 0xee, 0xbb,
+	0xcf, 0xa7, 0xfb, 0x7d, 0xb0, 0xf0, 0xae, 0x5e, 0x39, 0x6f, 0x83, 0xe5, 0x89, 0x77, 0x75, 0xf1,
+	0xc5, 0x20, 0xbb, 0x6a, 0x9a, 0x36, 0xb4, 0xb6, 0xdb, 0x68, 0xaf, 0xdf, 0xb8, 0x80, 0xc3, 0xea,
+	0xb7, 0x12, 0x20, 0x99, 0x4a, 0xd6, 0x13, 0x1c, 0x98, 0xcc, 0x63, 0x34, 0x4b, 0xc9, 0xd4, 0x94,
+	0x4c, 0x64, 0x7e, 0x06, 0xf3, 0x2a, 0xf8, 0xe8, 0x52, 0xc9, 0xd4, 0x62, 0x3d, 0xc1, 0x7d, 0x87,
+	0xe6, 0xca, 0xe8, 0x32, 0xc9, 0x54, 0x4a, 0x73, 0x91, 0xcb, 0x1c, 0x8e, 0xf5, 0xb0, 0xfc, 0xc9,
+	0x76, 0xc6, 0x3e, 0x17, 0xdf, 0x0c, 0xf2, 0x4d, 0x89, 0xae, 0x46, 0xb3, 0x7d, 0x37, 0x7d, 0xb8,
+	0xd6, 0x41, 0xf3, 0x1c, 0x92, 0xca, 0x6c, 0x05, 0xa3, 0xad, 0x48, 0x25, 0x3f, 0x87, 0xac, 0x32,
+	0xfe, 0xa3, 0xad, 0xcd, 0x9d, 0x09, 0x2f, 0xb6, 0x11, 0x07, 0xb4, 0x15, 0xc7, 0x4d, 0x2e, 0xe0,
+	0xe8, 0xde, 0xa2, 0x71, 0xaf, 0x9f, 0x22, 0x91, 0x4c, 0xcd, 0x71, 0x87, 0x64, 0x6e, 0xe3, 0x7f,
+	0xc5, 0x94, 0x32, 0xe1, 0x0e, 0xf9, 0x25, 0xa4, 0xba, 0x69, 0xf6, 0xe7, 0x10, 0x33, 0xc9, 0xd4,
+	0xf2, 0x82, 0xaf, 0xe8, 0x6e, 0xa3, 0x43, 0xe1, 0xe8, 0x5d, 0xf1, 0x00, 0x27, 0x43, 0xee, 0xde,
+	0xd9, 0xae, 0x37, 0xff, 0x04, 0x3f, 0x85, 0xd9, 0x8d, 0xf7, 0xd6, 0x0f, 0x81, 0x23, 0x50, 0xf7,
+	0x2f, 0x66, 0x8a, 0x11, 0x7e, 0x02, 0x00, 0x00, 0xff, 0xff, 0x00, 0x25, 0x65, 0x17, 0xac, 0x01,
+	0x00, 0x00,
 }

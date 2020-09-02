@@ -173,7 +173,7 @@ func (slf *Client) AsycCall(rpcHandler IRpcHandler,serviceMethod string,callback
 	request := &RpcRequest{}
 	call.Arg = args
 	call.Seq = slf.generateSeq()
-	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,false,InParam)
+	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,false,InParam,nil)
 	slf.AddPending(call)
 
 	bytes,err := processor.Marshal(request.RpcRequestData)
@@ -199,16 +199,10 @@ func (slf *Client) AsycCall(rpcHandler IRpcHandler,serviceMethod string,callback
 	return err
 }
 
-func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply interface{}) *Call {
+func (slf *Client) RawGo(noReply bool,serviceMethod string,args []byte,additionParam interface{},reply interface{}) *Call {
 	call := MakeCall()
-	call.Reply = reply
 	call.ServiceMethod = serviceMethod
-
-	InParam,err := processor.Marshal(args)
-	if err != nil {
-		call.Err = err
-		return call
-	}
+	call.Reply = reply
 
 	request := &RpcRequest{}
 	call.Arg = args
@@ -216,7 +210,7 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 	if noReply == false {
 		slf.AddPending(call)
 	}
-	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,noReply,InParam)
+	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,noReply,args,additionParam)
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	processor.ReleaseRpcRequest(request.RpcRequestData)
 	if err != nil {
@@ -230,7 +224,7 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 		slf.RemovePending(call.Seq)
 		return call
 	}
-	
+
 	err = slf.conn.WriteMsg(bytes)
 	if err != nil {
 		slf.RemovePending(call.Seq)
@@ -238,6 +232,16 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 	}
 
 	return call
+}
+
+func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply interface{}) *Call {
+	InParam,err := processor.Marshal(args)
+	if err != nil {
+		call := MakeCall()
+		call.Err = err
+	}
+
+	return slf.RawGo(noReply,serviceMethod,InParam,nil,reply)
 }
 
 func (slf *Client) Run(){

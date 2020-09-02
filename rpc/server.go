@@ -98,10 +98,9 @@ func (agent *RpcAgent) Run() {
 			//will close tcpconn
 			break
 		}
-
 		//解析head
 		req := MakeRpcRequest()
-		req.RpcRequestData = processor.MakeRpcRequest(0,"",false,nil)
+		req.RpcRequestData = processor.MakeRpcRequest(0,"",false,nil,nil)
 		err = processor.Unmarshal(data,req.RpcRequestData)
 		if err != nil {
 			log.Error("rpc Unmarshal request is error: %v", err)
@@ -201,7 +200,7 @@ func (slf *Server) myselfRpcHandlerGo(handlerName string,methodName string, args
 }
 
 
-func (slf *Server) selfNodeRpcHandlerGo(client *Client,noReply bool,handlerName string,methodName string, args interface{},reply interface{}) *Call {
+func (slf *Server) selfNodeRpcHandlerGo(client *Client,noReply bool,handlerName string,methodName string, args interface{},rawArgs []byte,reply interface{},additionParam interface{}) *Call {
 	pCall := MakeCall()
 	pCall.Seq = client.generateSeq()
 
@@ -214,9 +213,11 @@ func (slf *Server) selfNodeRpcHandlerGo(client *Client,noReply bool,handlerName 
 	}
 	req :=  MakeRpcRequest()
 
+	req.bLocalRequest = true
 	req.localParam = args
 	req.localReply = reply
-	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil)
+	req.localRawParam = rawArgs
+	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil,additionParam)
 	if noReply == false {
 		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{},Err *RpcError){
@@ -265,7 +266,8 @@ func (slf *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler IRp
 	req := MakeRpcRequest()
 	req.localParam = args
 	req.localReply = reply
-	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil)
+	req.bLocalRequest = true
+	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil,nil)
 	if noReply == false {
 		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{},Err *RpcError){
