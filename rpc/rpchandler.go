@@ -76,6 +76,8 @@ type IRpcHandler interface {
 	AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error
 	CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error
 	GoNode(nodeId int,serviceMethod string,args interface{}) error
+	RawGoNode(nodeId int,serviceMethod string,args []byte,additionParam interface{}) error
+	RawCastGo(serviceMethod string,args []byte,additionParam interface{})
 }
 
 var rawAdditionParamValueNull reflect.Value
