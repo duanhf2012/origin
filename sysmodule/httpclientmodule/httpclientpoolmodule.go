@@ -64,7 +64,12 @@ func (slf *HttpClientModule) Init(maxpool int, proxyUrl string) {
 			Proxy:               proxyfun,
 			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		},
+		Timeout:   5 * time.Second,
 	}
+}
+
+func (slf *HttpClientModule) SetTimeOut(value time.Duration) {
+	slf.client.Timeout = value
 }
 
 func (slf *HttpClientModule) SyncRequest(method string, url string, body []byte, header http.Header) SyncHttpRespone {
