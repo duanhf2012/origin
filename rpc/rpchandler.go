@@ -245,6 +245,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 			if request.requestHandle!=nil {
 				request.requestHandle(nil, rerr)
 			}
+			return
 		}
 	}else {
 		if request.localRawParam!=nil {
@@ -255,6 +256,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 				if request.requestHandle!=nil {
 					request.requestHandle(nil, rerr)
 				}
+				return
 			}
 		}else {
 			iparam = request.localParam

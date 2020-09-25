@@ -92,7 +92,7 @@ func (slf *PBProcessor ) Marshal(msg interface{}) ([]byte, error){
 
 	var err error
 	if pMsg.msg!=nil {
-		pMsg.rawMsg,err = proto.Marshal(pMsg.msg.(proto.Message))
+		pMsg.rawMsg,err = proto.Marshal(pMsg.msg)
 		if err != nil {
 			return nil,err
 		}
