@@ -134,25 +134,28 @@ func (slf *RpcHandler) suitableMethods(method reflect.Method) error {
 		return fmt.Errorf("%s The return parameter must be of type error!",method.Name)
 	}
 
-	if typ.NumIn() > 4 {
-		return fmt.Errorf("%s The number of input arguments must be 1!",method.Name)
+	if typ.NumIn() <3  || typ.NumIn() > 4 {
+		return fmt.Errorf("%s Unsupported parameter format!",method.Name)
 	}
 
-	if slf.isExportedOrBuiltinType(typ.In(1)) == false ||   slf.isExportedOrBuiltinType(typ.In(2)) == false{
-		return fmt.Errorf("%s Unsupported parameter types!",method.Name)
+	//1.判断第一个参数
+	var parIdx int = 1
+	if typ.In(parIdx).String() == "rpc.IRawAdditionParam" {
+		parIdx += 1
+		rpcMethodInfo.hashAdditionParam = true
 	}
 
-	parIdx := 1
-	if typ.NumIn() == 4 {
-		if slf.isExportedOrBuiltinType(typ.In(3)) == false {
+	for i:= parIdx ;i<typ.NumIn();i++{
+		if slf.isExportedOrBuiltinType(typ.In(i)) == false {
 			return fmt.Errorf("%s Unsupported parameter types!",method.Name)
 		}
-		rpcMethodInfo.hashAdditionParam = true
-		parIdx++
 	}
+
 	rpcMethodInfo.iparam = reflect.New(typ.In(parIdx).Elem()) //append(rpcMethodInfo.iparam,)
 	parIdx++
-	rpcMethodInfo.oParam = reflect.New(typ.In(parIdx).Elem())
+	if parIdx< typ.NumIn() {
+		rpcMethodInfo.oParam = reflect.New(typ.In(parIdx).Elem())
+	}
 
 	rpcMethodInfo.method = method
 	slf.mapfunctons[slf.rpcHandler.GetName()+"."+method.Name] = rpcMethodInfo
@@ -263,7 +266,6 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}
 
-	var oParam reflect.Value
 	paramList = append(paramList,reflect.ValueOf(slf.GetRpcHandler())) //接受者
 	additionParams := request.RpcRequestData.GetAdditionParams()
 	if v.hashAdditionParam == true{
@@ -276,12 +278,20 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	}
 
 	paramList = append(paramList,reflect.ValueOf(iparam))
-	if request.localReply!=nil {
-		oParam = reflect.ValueOf(request.localReply) //输出参数
-	}else{
-		oParam = reflect.New(v.oParam.Type().Elem())
+	var oParam reflect.Value
+	if v.oParam.IsValid() {
+		if request.localReply!=nil {
+			oParam = reflect.ValueOf(request.localReply) //输出参数
+		}else{
+			oParam = reflect.New(v.oParam.Type().Elem())
+		}
+		paramList = append(paramList,oParam) //输出参数
+	}else if(request.requestHandle!=nil){ //调用方有返回值，但被调用函数没有返回参数
+		rerr := Errorf("Call Rpc %s without return parameter!",request.RpcRequestData.GetServiceMethod())
+		log.Error("%s",rerr.Error())
+		request.requestHandle(nil, rerr)
+		return
 	}
-	paramList = append(paramList,oParam) //输出参数
 	returnValues := v.method.Func.Call(paramList)
 	errInter := returnValues[0].Interface()
 	if errInter != nil {
