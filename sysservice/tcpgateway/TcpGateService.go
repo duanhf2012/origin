@@ -32,12 +32,6 @@ type TcpGateService struct {
 func (slf *TcpGateService) OnInit() error {
 	slf.OnLoad()
 
-	//获取安装好了的TcpService对象
-	slf.tcpService =  node.GetService("TcpService").(*tcpservice.TcpService)
-
-	//新建内置的protobuf处理器，您也可以自定义路由器，比如json，后续会补充
-	slf.processor = processor.NewPBRawProcessor()
-
 	//注册监听客户连接断开事件
 	slf.processor.SetDisConnectedHandler(slf.router.OnDisconnected)
 	//注册监听客户连接事件
@@ -52,19 +46,48 @@ func (slf *TcpGateService) OnInit() error {
 }
 
 func (slf *TcpGateService) OnLoad() {
-	slf.loadBalance = &LoadBalance{}
-	slf.router = NewRouter(slf.loadBalance,slf,slf.GetServiceCfg())
+	//设置默认LoadBalance
+	if slf.loadBalance == nil {
+		slf.loadBalance = &LoadBalance{}
+	}
+
+	//设置默认Router
+	if slf.router == nil {
+		slf.router = NewRouter(slf.loadBalance,slf,slf.GetServiceCfg())
+	}
+
+	//新建内置的protobuf处理器，您也可以自定义路由器，比如json
+	if slf.processor == nil {
+		slf.processor = processor.NewPBRawProcessor()
+	}
 
 	//加载路由
 	slf.router.Load()
+
+	//设置默认的TcpService服务
+	if slf.tcpService == nil {
+		slf.tcpService =  node.GetService("TcpService").(*tcpservice.TcpService)
+	}
+
+	if slf.tcpService == nil {
+		panic("TcpService is not installed!")
+	}
 }
 
-func (slf *TcpGateService) SetupLoadBalance(loadBalance ILoadBalance){
+func (slf *TcpGateService) SetLoadBalance(loadBalance ILoadBalance){
 	slf.loadBalance = loadBalance
 }
 
-func (slf *TcpGateService) SetupRouter(router IRouter){
+func (slf *TcpGateService) SetRouter(router IRouter){
 	slf.router = router
+}
+
+func (slf *TcpGateService) SetRawProcessor(processor processor.IRawProcessor){
+	slf.processor = processor
+}
+
+func (slf *TcpGateService) SetTcpGateService(tcpService *tcpservice.TcpService){
+	slf.tcpService = tcpService
 }
 
 func (slf *TcpGateService) RPC_Dispatch(replyMsg *ReplyMessage) error {
