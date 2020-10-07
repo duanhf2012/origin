@@ -5,6 +5,7 @@ import (
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
+	"github.com/duanhf2012/origin/network/processor"
 	"github.com/duanhf2012/origin/service"
 	"sync"
 )
@@ -16,7 +17,7 @@ type WSService struct {
 	mapClientLocker sync.RWMutex
 	mapClient       map[uint64] *WSClient
 	initClientId    uint64
-	process         network.Processor
+	process         processor.Processor
 }
 
 type WSPackType int8
@@ -28,10 +29,10 @@ const(
 )
 
 type WSPack struct {
-	Type WSPackType //0表示连接 1表示断开 2表示数据
-	MsgProcessor network.Processor
-	ClientId uint64
-	Data interface{}
+	Type         WSPackType //0表示连接 1表示断开 2表示数据
+	MsgProcessor processor.Processor
+	ClientId     uint64
+	Data         interface{}
 }
 
 
@@ -89,7 +90,7 @@ func (slf *WSService) WSEventHandler(ev *event.Event) {
 	}
 }
 
-func (slf *WSService) SetProcessor(process network.Processor,handler event.IEventHandler){
+func (slf *WSService) SetProcessor(process processor.Processor,handler event.IEventHandler){
 	slf.process = process
 	slf.RegEventReciverFunc(event.Sys_Event_WebSocket,handler,slf.WSEventHandler)
 }

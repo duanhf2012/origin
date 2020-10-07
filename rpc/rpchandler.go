@@ -134,7 +134,7 @@ func (slf *RpcHandler) suitableMethods(method reflect.Method) error {
 		return fmt.Errorf("%s The return parameter must be of type error!",method.Name)
 	}
 
-	if typ.NumIn() <3  || typ.NumIn() > 4 {
+	if typ.NumIn() <2  || typ.NumIn() > 4 {
 		return fmt.Errorf("%s Unsupported parameter format!",method.Name)
 	}
 

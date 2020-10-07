@@ -5,8 +5,11 @@ import (
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
+	"github.com/duanhf2012/origin/network/processor"
+	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
 	"sync"
+	"time"
 )
 
 type TcpService struct {
@@ -15,8 +18,8 @@ type TcpService struct {
 
 	mapClientLocker sync.RWMutex
 	mapClient       map[uint64] *Client
-	initClientId    uint64
-	process         network.Processor
+	//initClientId    uint64
+	process processor.IProcessor
 }
 
 type TcpPackType int8
@@ -28,10 +31,10 @@ const(
 )
 
 type TcpPack struct {
-	Type TcpPackType //0表示连接 1表示断开 2表示数据
-	MsgProcessor network.Processor
-	ClientId uint64
-	Data interface{}
+	Type         TcpPackType //0表示连接 1表示断开 2表示数据
+	MsgProcessor processor.IProcessor
+	ClientId     uint64
+	Data         interface{}
 }
 
 const Default_MaxConnNum = 3000
@@ -39,6 +42,31 @@ const Default_PendingWriteNum = 10000
 const Default_LittleEndian = false
 const Default_MinMsgLen = 2
 const Default_MaxMsgLen = 65535
+
+const (
+	MaxNodeId = 1<<10 - 1 //Uint10
+	MaxSeed   = 1<<22 - 1 //MaxUint24
+)
+var seed uint32
+var seedLocker sync.Mutex
+
+func (slf *TcpService) genId() uint64 {
+	if node.GetNodeId()>MaxNodeId{
+		panic("nodeId exceeds the maximum!")
+	}
+
+	seedLocker.Lock()
+	seed = (seed+1)%MaxSeed
+	seedLocker.Unlock()
+
+	nowTime := uint64(time.Now().Second())
+
+	return (uint64(node.GetNodeId())<<54)|(nowTime<<22)|uint64(seed)
+}
+
+func GetNodeId(agentId uint64) int {
+	return int(agentId>>54)
+}
 
 func (slf *TcpService) OnInit() error{
 	iConfig := slf.GetServiceCfg()
@@ -96,7 +124,7 @@ func (slf *TcpService) TcpEventHandler(ev *event.Event) {
 	}
 }
 
-func (slf *TcpService) SetProcessor(process network.Processor,handler event.IEventHandler){
+func (slf *TcpService) SetProcessor(process processor.IProcessor,handler event.IEventHandler){
 	slf.process = process
 	slf.RegEventReciverFunc(event.Sys_Event_Tcp,handler,slf.TcpEventHandler)
 }
@@ -106,15 +134,16 @@ func (slf *TcpService) NewClient(conn *network.TCPConn) network.Agent {
 	defer slf.mapClientLocker.Unlock()
 
 	for {
-		slf.initClientId+=1
-		_,ok := slf.mapClient[slf.initClientId]
+		clientId := slf.genId()
+		_,ok := slf.mapClient[clientId]
 		if ok == true {
 			continue
 		}
 
-		pClient := &Client{tcpConn:conn, id:slf.initClientId}
+		pClient := &Client{tcpConn:conn, id:clientId}
 		pClient.tcpService = slf
-		slf.mapClient[slf.initClientId] = pClient
+		slf.mapClient[clientId] = pClient
+
 		return pClient
 	}
 
@@ -134,6 +163,9 @@ func (slf *Client) GetId() uint64 {
 func (slf *Client) Run() {
 	slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_Connected,MsgProcessor:slf.tcpService.process}})
 	for{
+		if slf.tcpConn == nil {
+			break
+		}
 		bytes,err := slf.tcpConn.ReadMsg()
 		if err != nil {
 			log.Debug("read client id %d is error:%+v",slf.id,err)
@@ -155,12 +187,12 @@ func (slf *Client) OnClose(){
 	delete (slf.tcpService.mapClient,slf.GetId())
 }
 
-func (slf *TcpService) SendMsg(clientid uint64,msg interface{}) error{
+func (slf *TcpService) SendMsg(clientId uint64,msg interface{}) error{
 	slf.mapClientLocker.Lock()
-	client,ok := slf.mapClient[clientid]
+	client,ok := slf.mapClient[clientId]
 	if ok == false{
 		slf.mapClientLocker.Unlock()
-		return fmt.Errorf("client %d is disconnect!",clientid)
+		return fmt.Errorf("client %d is disconnect!",clientId)
 	}
 
 	slf.mapClientLocker.Unlock()
@@ -171,11 +203,11 @@ func (slf *TcpService) SendMsg(clientid uint64,msg interface{}) error{
 	return client.tcpConn.WriteMsg(bytes)
 }
 
-func (slf *TcpService) Close(clientid uint64) {
+func (slf *TcpService) Close(clientId uint64) {
 	slf.mapClientLocker.Lock()
 	defer slf.mapClientLocker.Unlock()
 
-	client,ok := slf.mapClient[clientid]
+	client,ok := slf.mapClient[clientId]
 	if ok == false{
 		return
 	}
@@ -196,4 +228,16 @@ func (slf *TcpService) GetClientIp(clientid uint64) string{
 	}
 
 	return pClient.tcpConn.GetRemoteIp()
+}
+
+
+func (slf *TcpService) SendRawMsg(clientId uint64,msg []byte) error{
+	slf.mapClientLocker.Lock()
+	client,ok := slf.mapClient[clientId]
+	if ok == false{
+		slf.mapClientLocker.Unlock()
+		return fmt.Errorf("client %d is disconnect!",clientId)
+	}
+	slf.mapClientLocker.Unlock()
+	return client.tcpConn.WriteMsg(msg)
 }

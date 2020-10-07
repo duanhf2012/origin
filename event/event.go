@@ -19,20 +19,17 @@ type Event struct {
 }
 
 type IEventHandler interface {
-
+	Init(processor IEventProcessor)
 	GetEventProcessor() IEventProcessor  //获得事件
 	NotifyEvent(*Event)
-
 	Desctory()
-
 	//注册了事件
 	addRegInfo(eventType EventType,eventProcessor IEventProcessor)
 	removeRegInfo(eventType EventType,eventProcessor IEventProcessor)
-
-
 }
 
 type IEventProcessor interface {
+	EventHandler(ev *Event)
 	//同一个IEventHandler，只能接受一个EventType类型回调
 	RegEventReciverFunc(eventType EventType,reciver IEventHandler,callback EventCallBack)
 	UnRegEventReciverFun(eventType EventType,reciver IEventHandler)
@@ -44,6 +41,7 @@ type IEventProcessor interface {
 	addListen(eventType EventType,reciver IEventHandler)
 	removeBindEvent(eventType EventType,reciver IEventHandler)
 	removeListen(eventType EventType,reciver IEventHandler)
+	GetEventChan() chan *Event
 }
 
 type EventHandler struct {
@@ -62,6 +60,21 @@ type EventProcessor struct {
 	locker sync.RWMutex
 	mapListenerEvent map[EventType]map[IEventProcessor]int           //监听者信息
 	mapBindHandlerEvent map[EventType]map[IEventHandler]EventCallBack//收到事件处理
+}
+
+func NewEventHandler() IEventHandler{
+	eh := EventHandler{}
+	eh.mapRegEvent = map[EventType]map[IEventProcessor]interface{}{}
+
+	return &eh
+}
+
+func NewEventProcessor() IEventProcessor{
+	ep := EventProcessor{}
+	ep.mapListenerEvent  =  map[EventType]map[IEventProcessor]int{}
+	ep.mapBindHandlerEvent = map[EventType]map[IEventHandler]EventCallBack{}
+
+	return &ep
 }
 
 func (slf *EventHandler) addRegInfo(eventType EventType,eventProcessor IEventProcessor){
@@ -93,6 +106,7 @@ func (slf *EventHandler) NotifyEvent(ev *Event){
 
 func (slf *EventHandler) Init(processor IEventProcessor){
 	slf.eventProcessor = processor
+	slf.mapRegEvent =map[EventType]map[IEventProcessor]interface{}{}
 }
 
 
@@ -112,12 +126,8 @@ func (slf *EventProcessor) SetEventChannel(channelNum int) bool{
 }
 
 func (slf *EventProcessor) addBindEvent(eventType EventType,reciver IEventHandler,callback EventCallBack){
-	//mapBindHandlerEvent map[EventType]map[IEventHandler]EventCallBack//收到事件处理
 	slf.locker.Lock()
 	defer slf.locker.Unlock()
-	if slf.mapBindHandlerEvent == nil {
-		slf.mapBindHandlerEvent = map[EventType]map[IEventHandler]EventCallBack{}
-	}
 
 	if _,ok := slf.mapBindHandlerEvent[eventType]; ok == false {
 		slf.mapBindHandlerEvent[eventType] = map[IEventHandler]EventCallBack{}
@@ -129,11 +139,6 @@ func (slf *EventProcessor) addBindEvent(eventType EventType,reciver IEventHandle
 func (slf *EventProcessor) addListen(eventType EventType,reciver IEventHandler){
 	slf.locker.Lock()
 	defer slf.locker.Unlock()
-
-	//mapListenerEvent map[EventType]map[IEventProcessor]int
-	if slf.mapListenerEvent == nil {
-		slf.mapListenerEvent = map[EventType]map[IEventProcessor]int{}
-	}
 
 	if _,ok :=slf.mapListenerEvent[eventType];ok == false{
 		slf.mapListenerEvent[eventType] = map[IEventProcessor]int{}

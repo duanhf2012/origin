@@ -1,0 +1,55 @@
+syntax = "proto2";
+
+package tcpgateway;
+
+
+message Int{
+  optional int32 value = 1;
+}
+
+
+message Int64{
+  optional int64 value = 1;
+}
+
+
+message Bool{
+  optional bool value = 1;
+}
+
+message String{
+  optional string value = 1;
+}
+
+message Bytes{
+  optional bytes value = 1;
+}
+
+
+message MsgHead
+{
+    optional int32 cid = 1;
+}
+
+message Msg
+{
+    optional MsgHead head = 1;
+    optional int32 ret = 2;
+    extensions 100 to 10000; 
+}
+
+message ClientList
+{
+  repeated uint64 clientList = 1;
+}
+
+message ReplyMessage
+{
+  repeated uint64 clientList = 1;
+  optional uint32 msgType = 2;
+  optional bytes msg = 3;
+}
+
+message PlaceHolders
+{
+}

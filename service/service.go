@@ -41,7 +41,9 @@ type Service struct {
 	serviceCfg interface{}
 	gorouterNum int32
 	startStatus bool
-	eventProcessor event.EventProcessor //事件接收者
+	eventProcessor event.IEventProcessor
+
+	//eventProcessor event.EventProcessor //事件接收者
 	profiler *profiler.Profiler //性能分析器
 }
 
@@ -69,7 +71,9 @@ func (slf *Service) Init(iservice IService,getClientFun rpc.FuncRpcClient,getSer
 	slf.descendants = map[int64]IModule{}
 	slf.serviceCfg = serviceCfg
 	slf.gorouterNum = 1
-	slf.eventHandler.Init(&slf.eventProcessor)
+	slf.eventProcessor = event.NewEventProcessor()
+	slf.eventHandler =  event.NewEventHandler()
+	slf.eventHandler.Init(slf.eventProcessor)
 }
 
 func (slf *Service) SetGoRouterNum(gorouterNum int32) bool {

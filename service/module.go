@@ -52,7 +52,8 @@ type Module struct {
 
 	//事件管道
 	moduleName string
-	eventHandler event.EventHandler
+	eventHandler event.IEventHandler
+	//eventHandler event.EventHandler
 }
 
 
@@ -74,6 +75,7 @@ func (slf *Module) GetModuleName() string{
 }
 
 func (slf *Module) OnInit() error{
+//	slf.eventHandler = event.NewEventHandler()
  	return nil
 }
 
@@ -100,6 +102,7 @@ func (slf *Module) AddModule(module IModule) (int64,error){
 	pAddModule.dispatcher = slf.GetAncestor().getBaseModule().(*Module).dispatcher
 	pAddModule.ancestor = slf.ancestor
 	pAddModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
+	pAddModule.eventHandler = event.NewEventHandler()
 	pAddModule.eventHandler.Init(slf.eventHandler.GetEventProcessor())
 	err := module.OnInit()
 	if err != nil {
@@ -216,5 +219,5 @@ func (slf *Module) NotifyEvent(ev *event.Event){
 }
 
 func (slf *Module) GetEventHandler() event.IEventHandler{
-	return &slf.eventHandler
+	return slf.eventHandler
 }
