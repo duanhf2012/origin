@@ -164,6 +164,7 @@ func (slf *Client) AsycCall(rpcHandler IRpcHandler,serviceMethod string,callback
 	call.rpcHandler = rpcHandler
 	call.ServiceMethod = serviceMethod
 
+	processorType, processor := GetProcessorType(args)
 	InParam,herr := processor.Marshal(args)
 	if herr != nil {
 		ReleaseCall(call)
@@ -190,7 +191,7 @@ func (slf *Client) AsycCall(rpcHandler IRpcHandler,serviceMethod string,callback
 		return fmt.Errorf("Rpc server is disconnect,call %s is fail!",serviceMethod)
 	}
 
-	err = slf.conn.WriteMsg(bytes)
+	err = slf.conn.WriteMsg([]byte{uint8(processorType)},bytes)
 	if err != nil {
 		slf.RemovePending(call.Seq)
 		ReleaseCall(call)
@@ -199,7 +200,7 @@ func (slf *Client) AsycCall(rpcHandler IRpcHandler,serviceMethod string,callback
 	return err
 }
 
-func (slf *Client) RawGo(noReply bool,serviceMethod string,args []byte,additionParam interface{},reply interface{}) *Call {
+func (slf *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod string,args []byte,additionParam interface{},reply interface{}) *Call {
 	call := MakeCall()
 	call.ServiceMethod = serviceMethod
 	call.Reply = reply
@@ -235,13 +236,14 @@ func (slf *Client) RawGo(noReply bool,serviceMethod string,args []byte,additionP
 }
 
 func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply interface{}) *Call {
+	_,processor := GetProcessorType(args)
 	InParam,err := processor.Marshal(args)
 	if err != nil {
 		call := MakeCall()
 		call.Err = err
 	}
 
-	return slf.RawGo(noReply,serviceMethod,InParam,nil,reply)
+	return slf.RawGo(processor,noReply,serviceMethod,InParam,nil,reply)
 }
 
 func (slf *Client) Run(){
@@ -260,11 +262,18 @@ func (slf *Client) Run(){
 			log.Error("rpcClient %s ReadMsg error:%+v",slf.Addr,err)
 			return
 		}
+
+		processor := GetProcessor(uint8(bytes[0]))
+		if processor==nil {
+			log.Error("rpcClient %s ReadMsg head error:%+v",slf.Addr,err)
+			return
+		}
+
 		//1.解析head
 		respone := &RpcResponse{}
 		respone.RpcResponeData =processor.MakeRpcResponse(0,nil,nil)
 
-		err = processor.Unmarshal(bytes,respone.RpcResponeData)
+		err = processor.Unmarshal(bytes[1:],respone.RpcResponeData)
 		if err != nil {
 			processor.ReleaseRpcRespose(respone.RpcResponeData)
 			log.Error("rpcClient Unmarshal head error,error:%+v",err)

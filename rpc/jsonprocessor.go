@@ -81,6 +81,12 @@ func (slf *JsonProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
 	rpcJsonResponeDataPool.Put(rpcRequestData)
 }
 
+func (slf *JsonProcessor) IsParse(param interface{}) bool {
+	_,err := json.Marshal(param)
+	return err==nil
+}
+
+
 func (slf *JsonRpcRequestData) IsNoReply() bool{
 	return slf.NoReply
 }

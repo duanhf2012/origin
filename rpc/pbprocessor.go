@@ -128,6 +128,11 @@ func (slf *PBProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
 	rpcPbResponeDataPool.Put(rpcRequestData)
 }
 
+func (slf *PBProcessor) IsParse(param interface{}) bool {
+	_,ok := param.(proto.Message)
+	return ok
+}
+
 
 func (slf *PBRpcRequestData) IsNoReply() bool{
 	return slf.GetNoReply()
@@ -139,7 +144,6 @@ func (slf *PBRpcResponseData)		GetErr() *RpcError {
 	}
 	return Errorf(slf.GetError())
 }
-
 
 
 

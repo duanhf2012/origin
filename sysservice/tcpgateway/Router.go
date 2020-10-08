@@ -201,7 +201,7 @@ func (slf *Router) RouterMessage(clientId uint64,msgType uint16,msg []byte) {
 	}
 
 	if routerId>0 {
-		slf.rpcHandler.RawGoNode(routerId,routerInfo.Rpc,msg,proto.Uint64(clientId))
+		slf.rpcHandler.RawGoNode(rpc.RPC_PROCESSOR_PB,routerId,routerInfo.Rpc,msg,proto.Uint64(clientId))
 	}
 }
 
@@ -222,7 +222,7 @@ func (slf *Router) RouterEvent(clientId uint64,eventType string) bool{
 	}
 
 	if routerId>0 {
-		slf.rpcHandler.RawGoNode(routerId,routerInfo.Rpc,[]byte{},proto.Uint64(clientId))
+		slf.rpcHandler.RawGoNode(rpc.RPC_PROCESSOR_PB,routerId,routerInfo.Rpc,[]byte{},proto.Uint64(clientId))
 		return true
 	}
 

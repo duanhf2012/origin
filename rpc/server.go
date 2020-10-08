@@ -9,8 +9,16 @@ import (
 	"reflect"
 	"strings"
 )
+type RpcProcessorType uint8
 
-var processor IRpcProcessor = &JsonProcessor{}
+const (
+	RPC_PROCESSOR_JSON RpcProcessorType = 0
+	RPC_PROCESSOR_PB RpcProcessorType = 1
+)
+
+//var processor IRpcProcessor = &JsonProcessor{}
+var arrayProcessor  = []IRpcProcessor{&JsonProcessor{},&PBProcessor{}}
+var arrayProcessorLen uint8 = 2
 var LittleEndian bool
 
 type Server struct {
@@ -20,8 +28,26 @@ type Server struct {
 	rpcserver *network.TCPServer
 }
 
-func SetProcessor(proc IRpcProcessor) {
-	processor = proc
+func AppendProcessor(rpcProcessor IRpcProcessor) {
+	arrayProcessor = append(arrayProcessor,rpcProcessor)
+	arrayProcessorLen++
+}
+
+func GetProcessorType(param interface{}) (RpcProcessorType,IRpcProcessor){
+	for i:=uint8(1);i<arrayProcessorLen;i++{
+		if arrayProcessor[i].IsParse(param) == true {
+			return RpcProcessorType(i),arrayProcessor[i]
+		}
+	}
+
+	return RPC_PROCESSOR_JSON,arrayProcessor[RPC_PROCESSOR_JSON]
+}
+
+func GetProcessor(processorType uint8) IRpcProcessor{
+	if processorType>=arrayProcessorLen{
+		return nil
+	}
+	return arrayProcessor[processorType]
 }
 
 func (slf *Server) Init(rpcHandleFinder RpcHandleFinder) {
@@ -56,7 +82,7 @@ type RpcAgent struct {
 }
 
 
-func (agent *RpcAgent) WriteRespone(serviceMethod string,seq uint64,reply interface{},err *RpcError) {
+func (agent *RpcAgent) WriteRespone(processor IRpcProcessor,serviceMethod string,seq uint64,reply interface{},err *RpcError) {
 	var mReply []byte
 	var rpcError *RpcError
 	var errM error
@@ -98,15 +124,22 @@ func (agent *RpcAgent) Run() {
 			//will close tcpconn
 			break
 		}
+		processor := GetProcessor(uint8(data[0]))
+		if processor==nil {
+			log.Error("remote rpc  %s data head error:%+v",agent.conn.RemoteAddr(),err)
+			return
+		}
+
 		//解析head
 		req := MakeRpcRequest()
+		req.rpcProcessor = processor
 		req.RpcRequestData = processor.MakeRpcRequest(0,"",false,nil,nil)
-		err = processor.Unmarshal(data,req.RpcRequestData)
+		err = processor.Unmarshal(data[1:],req.RpcRequestData)
 		if err != nil {
 			log.Error("rpc Unmarshal request is error: %v", err)
 			if req.RpcRequestData.GetSeq()>0 {
 				rpcError := RpcError(err.Error())
-				agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+				agent.WriteRespone(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
 				processor.ReleaseRpcRequest(req.RpcRequestData)
 				ReleaseRpcRequest(req)
 				continue
@@ -122,7 +155,7 @@ func (agent *RpcAgent) Run() {
 		serviceMethod := strings.Split(req.RpcRequestData.GetServiceMethod(),".")
 		if len(serviceMethod)!=2 {
 			rpcError := RpcError("rpc request req.ServiceMethod is error")
-			agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+			agent.WriteRespone(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
 			processor.ReleaseRpcRequest(req.RpcRequestData)
 			ReleaseRpcRequest(req)
 			log.Debug("rpc request req.ServiceMethod is error")
@@ -132,7 +165,7 @@ func (agent *RpcAgent) Run() {
 		rpcHandler := agent.rpcserver.rpcHandleFinder.FindRpcHandler(serviceMethod[0])
 		if rpcHandler== nil {
 			rpcError := RpcError(fmt.Sprintf("service method %s not config!", req.RpcRequestData.GetServiceMethod()))
-			agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+			agent.WriteRespone(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
 			processor.ReleaseRpcRequest(req.RpcRequestData)
 			ReleaseRpcRequest(req)
 			log.Error("service method %s not config!", req.RpcRequestData.GetServiceMethod())
@@ -141,7 +174,7 @@ func (agent *RpcAgent) Run() {
 
 		if req.RpcRequestData.IsNoReply()==false {
 			req.requestHandle = func(Returns interface{},Err *RpcError){
-				agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),Returns,Err)
+				agent.WriteRespone(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),Returns,Err)
 			}
 		}
 
@@ -150,7 +183,7 @@ func (agent *RpcAgent) Run() {
 			rpcError := RpcError(err.Error())
 
 			if req.RpcRequestData.IsNoReply() {
-				agent.WriteRespone(req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+				agent.WriteRespone(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
 			}
 
 			processor.ReleaseRpcRequest(req.RpcRequestData)
@@ -200,7 +233,7 @@ func (slf *Server) myselfRpcHandlerGo(handlerName string,methodName string, args
 }
 
 
-func (slf *Server) selfNodeRpcHandlerGo(client *Client,noReply bool,handlerName string,methodName string, args interface{},rawArgs []byte,reply interface{},additionParam interface{}) *Call {
+func (slf *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Client,noReply bool,handlerName string,methodName string, args interface{},rawArgs []byte,reply interface{},additionParam interface{}) *Call {
 	pCall := MakeCall()
 	pCall.Seq = client.generateSeq()
 
@@ -217,7 +250,12 @@ func (slf *Server) selfNodeRpcHandlerGo(client *Client,noReply bool,handlerName 
 	req.localParam = args
 	req.localReply = reply
 	req.localRawParam = rawArgs
+	if processor == nil {
+		_,processor = GetProcessorType(args)
+	}
+
 	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil,additionParam)
+	req.rpcProcessor = processor
 	if noReply == false {
 		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{},Err *RpcError){
@@ -267,6 +305,8 @@ func (slf *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler IRp
 	req.localParam = args
 	req.localReply = reply
 	req.bLocalRequest = true
+	_,processor := GetProcessorType(args)
+	req.rpcProcessor =processor
 	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil,nil)
 	if noReply == false {
 		client.AddPending(pCall)

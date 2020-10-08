@@ -15,6 +15,7 @@ type RpcRequest struct {
 	localRawParam []byte
 	requestHandle RequestHandler
 	callback *reflect.Value
+	rpcProcessor IRpcProcessor
 }
 
 type RpcResponse struct {

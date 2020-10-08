@@ -46,6 +46,7 @@ type RpcMethodInfo struct {
 	additionParam reflect.Value
 	//addition *IRawAdditionParam
 	hashAdditionParam bool
+	rpcProcessorType RpcProcessorType
 }
 
 type RpcHandler struct {
@@ -76,8 +77,8 @@ type IRpcHandler interface {
 	AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error
 	CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error
 	GoNode(nodeId int,serviceMethod string,args interface{}) error
-	RawGoNode(nodeId int,serviceMethod string,args []byte,additionParam interface{}) error
-	RawCastGo(serviceMethod string,args []byte,additionParam interface{})
+	RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error
+	RawCastGo(rpcProcessorType RpcProcessorType,serviceMethod string,args []byte,additionParam interface{})
 }
 
 var rawAdditionParamValueNull reflect.Value
@@ -152,6 +153,9 @@ func (slf *RpcHandler) suitableMethods(method reflect.Method) error {
 	}
 
 	rpcMethodInfo.iparam = reflect.New(typ.In(parIdx).Elem()) //append(rpcMethodInfo.iparam,)
+	pt,_ := GetProcessorType(rpcMethodInfo.iparam.Interface())
+	rpcMethodInfo.rpcProcessorType = pt
+
 	parIdx++
 	if parIdx< typ.NumIn() {
 		rpcMethodInfo.oParam = reflect.New(typ.In(parIdx).Elem())
@@ -225,7 +229,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}()
 	defer ReleaseRpcRequest(request)
-	defer processor.ReleaseRpcRequest(request.RpcRequestData)
+	defer request.rpcProcessor.ReleaseRpcRequest(request.RpcRequestData)
 
 	v,ok := slf.mapfunctons[request.RpcRequestData.GetServiceMethod()]
 	if ok == false {
@@ -241,7 +245,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	var err error
 	iparam := reflect.New(v.iparam.Type().Elem()).Interface()
 	if request.bLocalRequest == false {
-		err = processor.Unmarshal(request.RpcRequestData.GetInParam(),iparam)
+		err = request.rpcProcessor.Unmarshal(request.RpcRequestData.GetInParam(),iparam)
 		if err!=nil {
 			rerr := Errorf("Call Rpc %s Param error %+v",request.RpcRequestData.GetServiceMethod(),err)
 			log.Error("%s",rerr.Error())
@@ -252,7 +256,7 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}else {
 		if request.localRawParam!=nil {
-			err = processor.Unmarshal(request.localRawParam,iparam)
+			err = request.rpcProcessor.Unmarshal(request.localRawParam,iparam)
 			if err!=nil {
 				rerr := Errorf("Call Rpc %s Param error %+v",request.RpcRequestData.GetServiceMethod(),err)
 				log.Error("%s",rerr.Error())
@@ -327,7 +331,7 @@ func (slf *RpcHandler) CallMethod(ServiceMethod string,param interface{},reply i
 	return err
 }
 
-func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args interface{}) error {
+func (slf *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,serviceMethod string,args interface{}) error {
 	var pClientList []*Client
 	err := slf.funcRpcClient(nodeId,serviceMethod,&pClientList)
 	if err != nil {
@@ -360,7 +364,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args int
 				return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,nil)
 			}
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(pClient,true,sMethod[0],sMethod[1],args,nil,nil,nil)
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClient,true,sMethod[0],sMethod[1],args,nil,nil,nil)
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
@@ -381,7 +385,7 @@ func (slf *RpcHandler) goRpc(bCast bool,nodeId int,serviceMethod string,args int
 
 
 
-func (slf *RpcHandler) rawGoRpc(bCast bool,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
+func (slf *RpcHandler) rawGoRpc(processor IRpcProcessor,bCast bool,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
 	var pClientList []*Client
 	err := slf.funcRpcClient(nodeId,serviceMethod,&pClientList)
 	if err != nil {
@@ -414,7 +418,7 @@ func (slf *RpcHandler) rawGoRpc(bCast bool,nodeId int,serviceMethod string,args 
 				return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,nil)
 			}
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(pClient,true,sMethod[0],sMethod[1],nil,args,nil,additionParam)
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClient,true,sMethod[0],sMethod[1],nil,args,nil,additionParam)
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
@@ -423,7 +427,7 @@ func (slf *RpcHandler) rawGoRpc(bCast bool,nodeId int,serviceMethod string,args 
 		}
 
 		//跨node调用
-		pCall := pClient.RawGo(true,serviceMethod,args,additionParam,nil)
+		pCall := pClient.RawGo(processor,true,serviceMethod,args,additionParam,nil)
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
@@ -464,7 +468,7 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 			return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,reply)
 		}
 		//其他的rpcHandler的处理器
-		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(pClient,false,sMethod[0],sMethod[1],args,nil,reply,nil)
+		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(nil,pClient,false,sMethod[0],sMethod[1],args,nil,reply,nil)
 		err = pCall.Done().Err
 		pClient.RemovePending(pCall.Seq)
 		ReleaseCall(pCall)
@@ -549,7 +553,7 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 			}
 			return nil
 		}
-		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(pClient,false,sMethod[0],sMethod[1],args,nil,reply,nil)
+		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(nil,pClient,false,sMethod[0],sMethod[1],args,nil,reply,nil)
 		err = pCall.Done().Err
 		pClient.RemovePending(pCall.Seq)
 		ReleaseCall(pCall)
@@ -584,7 +588,7 @@ func (slf *RpcHandler) Call(serviceMethod string,args interface{},reply interfac
 
 
 func (slf *RpcHandler) Go(serviceMethod string,args interface{}) error {
-	return slf.goRpc(false,0,serviceMethod,args)
+	return slf.goRpc(nil,false,0,serviceMethod,args)
 }
 
 func (slf *RpcHandler) AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error {
@@ -596,18 +600,18 @@ func (slf *RpcHandler) CallNode(nodeId int,serviceMethod string,args interface{}
 }
 
 func (slf *RpcHandler) GoNode(nodeId int,serviceMethod string,args interface{}) error {
-	return slf.goRpc(false,nodeId,serviceMethod,args)
+	return slf.goRpc(nil,false,nodeId,serviceMethod,args)
 }
 
 func (slf *RpcHandler) CastGo(serviceMethod string,args interface{})  {
-	slf.goRpc(true,0,serviceMethod,args)
+	slf.goRpc(nil,true,0,serviceMethod,args)
 }
 
-func (slf *RpcHandler) RawGoNode(nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
-	return slf.rawGoRpc(false,nodeId,serviceMethod,args,additionParam)
+func (slf *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
+	return slf.rawGoRpc(GetProcessor(uint8(rpcProcessorType)),false,nodeId,serviceMethod,args,additionParam)
 }
 
-func (slf *RpcHandler) RawCastGo(serviceMethod string,args []byte,additionParam interface{})  {
-	slf.goRpc(true,0,serviceMethod,args)
+func (slf *RpcHandler) RawCastGo(rpcProcessorType RpcProcessorType,serviceMethod string,args []byte,additionParam interface{})  {
+	slf.goRpc(GetProcessor(uint8(rpcProcessorType)),true,0,serviceMethod,args)
 }
 
