@@ -19,8 +19,8 @@ var timerDispatcherLen = 10
 
 type IService interface {
 	Init(iservice IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})
+	SetName(serviceName string)
 	GetName() string
-
 	OnSetup(iservice IService)
 	OnInit() error
 	OnRelease()
@@ -162,6 +162,11 @@ func (slf *Service) Run() {
 func (slf *Service) GetName() string{
 	return slf.name
 }
+
+func (slf *Service) SetName(serviceName string) {
+	slf.name = serviceName
+}
+
 
 func (slf *Service) Release(){
 	defer func() {
