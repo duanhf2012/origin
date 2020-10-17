@@ -79,7 +79,7 @@ func initNode(id int){
 			continue
 		}
 
-		pServiceCfg := cluster.GetCluster().GetServiceCfg(nodeId,s.GetName())
+		pServiceCfg := cluster.GetCluster().GetServiceCfg(s.GetName())
 		s.Init(s,cluster.GetRpcClient,cluster.GetRpcServer,pServiceCfg)
 
 		service.Setup(s)
@@ -153,7 +153,7 @@ func startNode(args []string) error {
 			profiler.Report()
 		}
 	}
-
+	cluster.GetCluster().Stop()
 	//7.退出
 	close(closeSig)
 	service.WaitStop()
@@ -186,3 +186,4 @@ func SetSysLog(strLevel string, pathname string, flag int){
 func OpenProfilerReport(interval time.Duration){
 	profilerInterval = interval
 }
+

@@ -10,9 +10,13 @@ import (
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
+type NodeInfoList struct {
+	NodeList []NodeInfo
+}
 
-func (slf *Cluster) ReadClusterConfig(filepath string) (*SubNet,error) {
-	c := &SubNet{}
+
+func (slf *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList,error) {
+	c := &NodeInfoList{}
 	d, err := ioutil.ReadFile(filepath)
 	if err != nil {
 		return nil, err
@@ -26,10 +30,10 @@ func (slf *Cluster) ReadClusterConfig(filepath string) (*SubNet,error) {
 }
 
 
-func (slf *Cluster) ReadServiceConfig(filepath string)  (map[string]interface{},map[int]map[string]interface{},error) {
+func (slf *Cluster) readServiceConfig(filepath string)  (map[string]interface{},map[int]map[string]interface{},error) {
 
 	c := map[string]interface{}{}
-
+	//读取配置
 	d, err := ioutil.ReadFile(filepath)
 	if err != nil {
 		return nil,nil, err
@@ -51,162 +55,156 @@ func (slf *Cluster) ReadServiceConfig(filepath string)  (map[string]interface{},
 		nodeServiceList := nodeServiceCfg.([]interface{})
 		for _,v := range nodeServiceList{
 			serviceCfg :=v.(map[string]interface{})
-			nodeid,ok := serviceCfg["NodeId"]
+			nodeId,ok := serviceCfg["NodeId"]
 			if ok == false {
-				log.Fatal("nodeservice list not find nodeid field: %+v",nodeServiceList)
+				log.Fatal("NodeService list not find nodeId field: %+v",nodeServiceList)
 			}
-			mapNodeService[int(nodeid.(float64))] = serviceCfg
+			mapNodeService[int(nodeId.(float64))] = serviceCfg
 		}
 	}
 	return serviceConfig,mapNodeService,nil
 }
 
-func (slf *Cluster) ReadAllSubNetConfig() error {
+
+func (slf *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,error) {
+	var nodeInfoList [] NodeInfo
+	clusterCfgPath :=strings.TrimRight(configdir,"/")  +"/cluster"
+	fileInfoList,err := ioutil.ReadDir(clusterCfgPath)
+	if err != nil {
+		return nil,fmt.Errorf("Read dir %s is fail :%+v",clusterCfgPath,err)
+	}
+
+	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
+	for _,f := range fileInfoList{
+		if f.IsDir() == false {
+			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()
+			localNodeInfoList,err := slf.ReadClusterConfig(filePath)
+			if err != nil {
+				return nil,fmt.Errorf("read file path %s is error:%+v" ,filePath,err)
+			}
+
+			for _,nodeInfo := range localNodeInfoList.NodeList {
+				if nodeInfo.NodeId == nodeId || nodeId == 0 {
+					nodeInfoList = append(nodeInfoList,nodeInfo)
+					//slf.localNodeInfo = nodeInfo
+				}
+			}
+		}
+	}
+
+	if nodeId != 0 &&  (len(nodeInfoList)!=1){
+		return nil,fmt.Errorf("%d configurations were found for the configuration with node ID %d!",len(nodeInfoList),nodeId)
+	}
+
+	return nodeInfoList,nil
+}
+
+func (slf *Cluster) readLocalService(localNodeId int) error {
 	clusterCfgPath :=strings.TrimRight(configdir,"/")  +"/cluster"
 	fileInfoList,err := ioutil.ReadDir(clusterCfgPath)
 	if err != nil {
 		return fmt.Errorf("Read dir %s is fail :%+v",clusterCfgPath,err)
 	}
 
-	slf.mapSubNetInfo =map[string] SubNet{}
-	for _,f := range fileInfoList{
-		if f.IsDir() == true {
-			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()+"/"+"cluster.json"
-			subnetinfo,err:=slf.ReadClusterConfig(filePath)
+	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
+	for _,f := range fileInfoList {
+		if f.IsDir() == false {
+			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath, "/"), "\\") + "/" + f.Name()
+			serviceConfig,mapNodeService,err := slf.readServiceConfig(filePath)
 			if err != nil {
-				return fmt.Errorf("read file path %s is error:%+v" ,filePath,err)
+				continue
 			}
-			slf.mapSubNetInfo[f.Name()] = *subnetinfo
+
+			for _,s := range slf.localNodeInfo.ServiceList{
+				for{
+					//取公共服务配置
+					pubCfg,ok := serviceConfig[s]
+					if ok == true {
+						slf.localServiceCfg[s] = pubCfg
+					}
+
+					//如果结点也配置了该服务，则覆盖之
+					nodeService,ok := mapNodeService[localNodeId]
+					if ok == false {
+						break
+					}
+					sCfg,ok := nodeService[s]
+					if ok == false{
+						break
+					}
+
+					slf.localServiceCfg[s] = sCfg
+					break
+				}
+			}
 		}
 	}
 
+	if len(slf.localServiceCfg)==0{
+		return fmt.Errorf("No service configuration was found.")
+	}
 	return nil
 }
 
-func (slf *Cluster) ReadLocalSubNetServiceConfig(subnet string) error {
-	clusterCfgPath :=strings.TrimRight(configdir,"/")  +"/cluster"
-	fileInfoList,err := ioutil.ReadDir(clusterCfgPath)
+func (slf *Cluster) parseLocalCfg(){
+	slf.mapIdNode[slf.localNodeInfo.NodeId] = slf.localNodeInfo
+
+	for _,sName := range slf.localNodeInfo.ServiceList{
+		slf.mapServiceNode[sName] = append(slf.mapServiceNode[sName],slf.localNodeInfo.NodeId)
+	}
+}
+
+func (slf *Cluster) InitCfg(localNodeId int) error{
+	slf.localServiceCfg = map[string]interface{}{}
+	slf.mapRpc = map[int] NodeRpcInfo{}
+	slf.mapIdNode = map[int]NodeInfo{}
+	slf.mapServiceNode = map[string][]int{}
+
+	//加载本地结点的NodeList配置
+	nodeInfoList,err := slf.readLocalClusterConfig(localNodeId)
 	if err != nil {
-		return fmt.Errorf("Read %s dir is fail:%+v ",clusterCfgPath,err)
+		return err
 	}
+	slf.localNodeInfo = nodeInfoList[0]
 
-	slf.mapSubNetInfo =map[string] SubNet{}
-	for _,f := range fileInfoList{
-		if f.IsDir() == true && f.Name()==subnet{ //同一子网
-			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()+"/"+"service.json"
-			localServiceCfg,localNodeServiceCfg,err:=slf.ReadServiceConfig(filePath)
-			if err != nil {
-				return fmt.Errorf("Read file %s is fail :%+v",filePath,err)
-			}
-			slf.localServiceCfg = localServiceCfg
-			slf.localNodeServiceCfg =localNodeServiceCfg
-		}
-	}
-
-	return nil
-}
-
-
-
-func (slf *Cluster) InitCfg(currentNodeId int) error{
-	//mapSubNetInfo  := map[string] SubNet{} //子网名称，子网信息
-	mapSubNetNodeInfo := map[string]map[int]NodeInfo{} //map[子网名称]map[NodeId]NodeInfo
-	localSubNetMapNode := map[int]NodeInfo{}           //本子网内 map[NodeId]NodeInfo
-	localSubNetMapService := map[string][]NodeInfo{}   //本子网内所有ServiceName对应的结点列表
-	localNodeMapService := map[string]interface{}{}    //本Node支持的服务
-	localNodeInfo := NodeInfo{}
-
-	err := slf.ReadAllSubNetConfig()
+	//读取本地服务配置
+	err = slf.readLocalService(localNodeId)
 	if err != nil {
 		return err
 	}
 
-	//分析配置
-	var localSubnetName string
-	for subnetName,subnetInfo := range slf.mapSubNetInfo {
-		for _,nodeinfo := range subnetInfo.NodeList {
-			//装载slf.mapNodeInfo
-			_,ok := mapSubNetNodeInfo[subnetName]
-			if ok == false {
-				mapnodeInfo := make(map[int]NodeInfo,1)
-				mapnodeInfo[nodeinfo.NodeId] = nodeinfo
-				mapSubNetNodeInfo[subnetName] = mapnodeInfo
-			}else{
-				mapSubNetNodeInfo[subnetName][nodeinfo.NodeId] = nodeinfo
-			}
-
-			//判断本进程的子网
-			if nodeinfo.NodeId == currentNodeId {
-				localSubnetName = subnetName
-			}
-		}
-	}
+	//本地配置服务加到全局map信息中
+	slf.parseLocalCfg()
+	return nil
+}
 
 
-	//装载
-	subnet,ok := slf.mapSubNetInfo[localSubnetName]
+func (slf *Cluster) IsConfigService(serviceName string) bool {
+	slf.locker.RLock()
+	defer slf.locker.RUnlock()
+	nodeList,ok := slf.mapServiceNode[serviceName]
 	if ok == false {
-		return fmt.Errorf("NodeId %d not in any subnet",currentNodeId)
+		return false
 	}
-	subnet.SubNetName = localSubnetName
-	for _,nodeinfo := range subnet.NodeList {
-		localSubNetMapNode[nodeinfo.NodeId] = nodeinfo
 
-		//装载本Node进程所有的服务
-		if nodeinfo.NodeId == currentNodeId {
-			for _,s := range nodeinfo.ServiceList {
-				servicename := s
-				if strings.Index(s,"_") == 0 {
-					servicename = s[1:]
-				}
-				localNodeMapService[servicename] = nil
-			}
-			localNodeInfo = nodeinfo
-		}
-
-		for _,s := range nodeinfo.ServiceList {
-			//以_打头的，表示只在本机进程，不对整个子网开发
-			if strings.Index(s,"_") == 0 {
-				continue
-			}
-
-			if _,ok := localSubNetMapService[s];ok== true{
-				localSubNetMapService[s] = []NodeInfo{}
-			}
-			localSubNetMapService[s] = append(localSubNetMapService[s],nodeinfo)
+	for _,nodeId := range nodeList{
+		if slf.localNodeInfo.NodeId == nodeId {
+			return true
 		}
 	}
-	if localNodeInfo.NodeId == 0 {
-		return fmt.Errorf("Canoot find NodeId %d not in any config file.",currentNodeId)
-	}
 
-
-	slf.mapSubNetNodeInfo=mapSubNetNodeInfo
-	slf.localSubNetMapNode=localSubNetMapNode
-	slf.localSubNetMapService = localSubNetMapService
-	slf.localNodeMapService = localNodeMapService
-	slf.localsubnet = subnet
-	slf.localNodeInfo =localNodeInfo
-
-	//读取服务
-	return slf.ReadLocalSubNetServiceConfig(slf.localsubnet.SubNetName)
+	return false
 }
-
-
-func (slf *Cluster) IsConfigService(servicename string) bool {
-	_,ok := slf.localNodeMapService[servicename]
-	return ok
-}
-
-
 
 func (slf *Cluster) GetNodeIdByService(servicename string,rpcClientList *[]*rpc.Client) {
-	nodeInfoList,ok := slf.localSubNetMapService[servicename]
+	slf.locker.RLock()
+	defer slf.locker.RUnlock()
+	nodeIdList,ok := slf.mapServiceNode[servicename]
 	if ok == true {
-		for _,node := range nodeInfoList {
-			pClient := GetCluster().GetRpcClient(node.NodeId)
+		for _,nodeId := range nodeIdList {
+			pClient := GetCluster().GetRpcClient(nodeId)
 			if pClient==nil {
-				log.Error("Cannot connect node id %d",node.NodeId)
+				log.Error("Cannot connect node id %d",nodeId)
 				continue
 			}
 			*rpcClientList = append(*rpcClientList,pClient)
@@ -224,16 +222,11 @@ func (slf *Cluster) getServiceCfg(servicename string) interface{}{
 	return v
 }
 
-func (slf *Cluster) GetServiceCfg(nodeid int,servicename string) interface{}{
-	nodeService,ok := slf.localNodeServiceCfg[nodeid]
+func (slf *Cluster) GetServiceCfg(serviceName string) interface{}{
+	serviceCfg,ok := slf.localServiceCfg[serviceName]
 	if ok == false {
-		return slf.getServiceCfg(servicename)
+		return nil
 	}
 
-	v,ok := nodeService[servicename]
-	if ok == false{
-		return slf.getServiceCfg(servicename)
-	}
-
-	return v
+	return serviceCfg
 }

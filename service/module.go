@@ -38,7 +38,7 @@ type IModule interface {
 type Module struct {
 	moduleId int64
 	parent IModule        //父亲
-	self IModule        //父亲
+	self IModule        //自己
 	child map[int64]IModule //孩子们
 	mapActiveTimer map[*timer.Timer]interface{}
 	mapActiveCron map[*timer.Cron]interface{}

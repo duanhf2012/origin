@@ -2,22 +2,21 @@ package cluster
 
 import (
 	"fmt"
+	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/service"
 	"strings"
+	"sync"
 )
 
 var configdir = "./config/"
 
-type SubNet struct {
-	SubNetName string
-	NodeList []NodeInfo
-}
+
 
 type NodeInfo struct {
 	NodeId int
-	ListenAddr string
 	NodeName string
+	ListenAddr string
 	ServiceList []string
 }
 
@@ -27,55 +26,135 @@ type NodeRpcInfo struct {
 }
 
 
-
 var cluster Cluster
 
 type Cluster struct {
-	localsubnet SubNet         //本子网
-	mapSubNetInfo map[string] SubNet //子网名称，子网信息
-
-	mapSubNetNodeInfo map[string]map[int]NodeInfo //map[子网名称]map[NodeId]NodeInfo
-	localSubNetMapNode map[int]NodeInfo           //本子网内 map[NodeId]NodeInfo
-	localSubNetMapService map[string][]NodeInfo   //本子网内所有ServiceName对应的结点列表
-	localNodeMapService map[string]interface{}    //本Node支持的服务
-	localNodeInfo NodeInfo
-
-	localServiceCfg map[string]interface{} //map[servicename]数据
-	localNodeServiceCfg map[int]map[string]interface{}  //map[nodeid]map[servicename]数据
+	localNodeInfo NodeInfo //×
+	localServiceCfg map[string]interface{} //map[servicename]配置数据*
 
 	mapRpc map[int] NodeRpcInfo//nodeid
-
 	rpcServer rpc.Server
-}
+	serviceDiscovery IServiceDiscovery //服务发现接口
 
+	mapIdNode map[int]NodeInfo           //map[NodeId]NodeInfo
+	mapServiceNode map[string][]int //map[serviceName]NodeInfo
+
+	locker sync.RWMutex
+}
 
 func SetConfigDir(cfgdir string){
 	configdir = cfgdir
 }
 
-func (slf *Cluster) Init(currentNodeId int) error{
-	//1.初始化配置
-	err := slf.InitCfg(currentNodeId)
+func SetServiceDiscovery(serviceDiscovery IServiceDiscovery) {
+	cluster.serviceDiscovery = serviceDiscovery
+}
+
+func (slf *Cluster) serviceDiscoveryDelNode (nodeId int){
+	slf.locker.Lock()
+	defer slf.locker.Unlock()
+
+	slf.delNode(nodeId)
+}
+
+func (slf *Cluster) delNode(nodeId int){
+	//删除rpc连接关系
+	rpc,ok := slf.mapRpc[nodeId]
+	if ok == true {
+		delete(slf.mapRpc,nodeId)
+		rpc.client.Close(false)
+	}
+
+	nodeInfo,ok := slf.mapIdNode[nodeId]
+	if ok == false {
+		return
+	}
+
+	for _,serviceName := range nodeInfo.ServiceList{
+		slf.delServiceNode(serviceName,nodeId)
+	}
+
+	delete(slf.mapIdNode,nodeId)
+}
+
+func (slf *Cluster) delServiceNode(serviceName string,nodeId int){
+	nodeList := slf.mapServiceNode[serviceName]
+	for idx,nId := range nodeList {
+		if nId == nodeId {
+			slf.mapServiceNode[serviceName] = append(nodeList[idx:],nodeList[idx+1:]...)
+			return
+		}
+	}
+}
+
+
+func (slf *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
+	if nodeInfo.NodeId == slf.localNodeInfo.NodeId {
+		return
+	}
+
+	slf.locker.Lock()
+	defer slf.locker.Unlock()
+
+	//先清理删除
+	slf.delNode(nodeInfo.NodeId)
+
+	//再重新组装
+	mapDuplicate := map[string]interface{}{} //预防重复数据
+	for _,serviceName := range nodeInfo.ServiceList {
+		if _,ok :=  mapDuplicate[serviceName];ok == true {
+			//存在重复
+			log.Error("Bad duplicate Service Cfg.")
+			continue
+		}
+
+		slf.mapServiceNode[serviceName] = append(slf.mapServiceNode[serviceName],nodeInfo.NodeId)
+	}
+
+	slf.mapIdNode[nodeInfo.NodeId] = *nodeInfo
+	rpcInfo := NodeRpcInfo{}
+	rpcInfo.nodeinfo = *nodeInfo
+	rpcInfo.client = &rpc.Client{}
+	rpcInfo.client.Connect(nodeInfo.ListenAddr)
+	slf.mapRpc[nodeInfo.NodeId] = rpcInfo
+}
+
+func (slf *Cluster) buildLocalRpc(){
+	rpcInfo := NodeRpcInfo{}
+	rpcInfo.nodeinfo = slf.localNodeInfo
+	rpcInfo.client = &rpc.Client{}
+	rpcInfo.client.Connect("")
+
+	slf.mapRpc[slf.localNodeInfo.NodeId] = rpcInfo
+}
+
+func (slf *Cluster) Init(localNodeId int) error{
+	slf.locker.Lock()
+
+
+	//1.处理服务发现接口
+	if slf.serviceDiscovery == nil {
+		slf.serviceDiscovery = &ConfigDiscovery{}
+	}
+
+	//2.初始化配置
+	err := slf.InitCfg(localNodeId)
 	if err != nil {
+		slf.locker.Unlock()
 		return err
 	}
 
 	slf.rpcServer.Init(slf)
+	slf.buildLocalRpc()
 
-	//2.建议rpc连接
-	slf.mapRpc = map[int] NodeRpcInfo{}
-	for _,nodeinfo := range slf.localSubNetMapNode {
-		rpcinfo := NodeRpcInfo{}
-		rpcinfo.nodeinfo = nodeinfo
-		rpcinfo.client = &rpc.Client{}
-		if nodeinfo.NodeId == currentNodeId {
-			rpcinfo.client.Connect("")
-		}else{
-			rpcinfo.client.Connect(nodeinfo.ListenAddr)
-		}
-		slf.mapRpc[nodeinfo.NodeId] = rpcinfo
+	slf.serviceDiscovery.RegFunDelNode(slf.serviceDiscoveryDelNode)
+	slf.serviceDiscovery.RegFunSetNode(slf.serviceDiscoverySetNodeInfo)
+	slf.locker.Unlock()
+
+	err = slf.serviceDiscovery.Init(localNodeId)
+	if err != nil {
+		return err
 	}
-
 	return nil
 }
 
@@ -92,12 +171,17 @@ func (slf *Cluster) Start() {
 	slf.rpcServer.Start(slf.localNodeInfo.ListenAddr)
 }
 
+func (slf *Cluster) Stop() {
+	slf.serviceDiscovery.OnNodeStop()
+}
 
 func GetCluster() *Cluster{
 	return &cluster
 }
 
 func (slf *Cluster) GetRpcClient(nodeid int) *rpc.Client {
+	slf.locker.RLock()
+	defer slf.locker.RUnlock()
 	c,ok := slf.mapRpc[nodeid]
 	if ok == false {
 		return nil

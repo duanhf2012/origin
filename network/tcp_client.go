@@ -117,7 +117,7 @@ reconnect:
 	}
 }
 
-func (client *TCPClient) Close() {
+func (client *TCPClient) Close(waitDone bool) {
 	client.Lock()
 	client.closeFlag = true
 	for conn := range client.conns {
@@ -126,5 +126,8 @@ func (client *TCPClient) Close() {
 	client.conns = nil
 	client.Unlock()
 
-	client.wg.Wait()
+	if waitDone == true{
+		client.wg.Wait()
+	}
 }
+
