@@ -43,7 +43,7 @@ origin引擎三大对象关系
 * Service:一个独立的服务可以认为是一个大的功能模块，他是Node的子集，创建完成并安装Node对象中。服务可以支持对外部RPC等功能。
 * Module: 这是origin最小对象单元，强烈建议所有的业务模块都划分成各个小的Module组合，origin引擎将监控所有服务与Module运行状态，例如可以监控它们的慢处理和死循环函数。Module可以建立树状关系。Service本身也是Module的类型。
 
-origin集群核心配置文件在config的cluster目录下，在cluster下有子网目录，如github.com/duanhf2012/originserver的config/cluster目录下有subnet目录，表示子网名为subnet，可以新加多个子网的目录配置。子网与子网间是隔离的，后续将支持子网间通信规则，origin集群配置以子网的模式配置，在每个子网下配置多个Node服务器,子网在应对复杂的系统时可以应用到各个子系统，方便每个子系统的隔离。在示例的subnet目录中有cluster.json与service.json配置：
+origin集群核心配置文件在config的cluster目录下，如github.com/duanhf2012/originserver的config/cluster目录下有cluster.json与service.json配置：
 
 cluster.json如下：
 ---------------
@@ -250,7 +250,7 @@ func main(){
 
 ```
 
-* config/cluster/subnet/cluster.json如下：
+* config/cluster/cluster.json如下：
 ```
 {
     "NodeList":[
@@ -752,7 +752,7 @@ func (slf *TestHttpService) HttpPost(session *sysservice.HttpSession){
 }
 
 ```
-注意，要在main.go中加入import _ "orginserver/simple_service"，并且在config/cluster/subnet/cluster.json中的ServiceList加入服务。
+注意，要在main.go中加入import _ "orginserver/simple_service"，并且在config/cluster/cluster.json中的ServiceList加入服务。
 
 
 
