@@ -8,12 +8,14 @@ import (
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/service"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+	_ "net/http/pprof"
 )
 
 var closeSig chan bool
@@ -21,13 +23,63 @@ var sigs chan os.Signal
 var nodeId int
 var preSetupService []service.IService //预安装
 var profilerInterval time.Duration
+var bValid bool
 
 func init() {
+
 	closeSig = make(chan bool,1)
 	sigs = make(chan os.Signal, 3)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM,syscall.Signal(10))
+
+	console.RegisterCommandBool("help",false,"This help.",usage)
+	console.RegisterCommandString("start","","Run originserver.",startNode)
+	console.RegisterCommandBool("stop",false,"Stop originserver process",stopNode)
+	console.RegisterCommandString("config","","Configuration file path.",setConfigPath)
+	console.RegisterCommandString("pprof","","Open performance analysis.",setPprof)
 }
 
+func usage(val interface{}) error{
+	ret := val.(bool)
+	if ret == false {
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, `orgin version: orgin/2.10.20201019
+Usage: originserver [-help] [-start node=1] [-stop] [-config path] [-pprof 0.0.0.0:6060]
+`)
+	console.PrintDefaults()
+	return nil
+}
+
+func setPprof(val interface{}) error {
+	listenAddr := val.(string)
+	if listenAddr==""{
+		return nil
+	}
+
+	go func(){
+		err := http.ListenAndServe(listenAddr, nil)
+		if err != nil {
+			panic(fmt.Errorf("%+v",err))
+		}
+	}()
+
+	return nil
+}
+
+func setConfigPath(val interface{}) error{
+	configPath := val.(string)
+	if configPath==""{
+		return nil
+	}
+	_, err := os.Stat(configPath)
+	if err != nil {
+		return fmt.Errorf("Cannot find file path %s",configPath)
+	}
+
+	cluster.SetConfigDir(configPath)
+	return nil
+}
 
 func  getRunProcessPid() (int,error) {
 	f, err := os.OpenFile(os.Args[0]+".pid", os.O_RDONLY, 0600)
@@ -90,8 +142,6 @@ func initNode(id int){
 }
 
 func Start() {
-	console.RegisterCommand("start",startNode)
-	console.RegisterCommand("stop",stopNode)
 	err := console.Run(os.Args)
 	if err!=nil {
 		fmt.Printf("%+v\n",err)
@@ -99,20 +149,28 @@ func Start() {
 	}
 }
 
+func stopNode(args interface{}) error {
+	isStop := args.(bool)
+	if isStop == false{
+		return nil
+	}
 
-func stopNode(args []string) error {
-	processid,err := getRunProcessPid()
+	processId,err := getRunProcessPid()
 	if err != nil {
 		return err
 	}
 
-	KillProcess(processid)
+	KillProcess(processId)
 	return nil
 }
 
-func startNode(args []string) error {
+func startNode(args interface{}) error{
 	//1.解析参数
-	param := args[2]
+	param := args.(string)
+	if param == "" {
+		return nil
+	}
+
 	sparam := strings.Split(param,"=")
 	if len(sparam) != 2 {
 		return fmt.Errorf("invalid option %s",param)

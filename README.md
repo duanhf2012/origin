@@ -75,7 +75,8 @@ cluster.json如下：
 * ServiceList:该Node将安装的服务列表
 ---------------
 
-在启动程序命令program start nodeid=1中nodeid就是根据该配置装载服务。
+在启动程序命令originserver -start nodeid=1中nodeid就是根据该配置装载服务。
+更多参数使用，请使用originserver -help查看。
 service.json如下：
 ---------------
 ```
@@ -267,7 +268,7 @@ func main(){
 
 编译后运行结果如下：
 ```
-#originserver start nodeid=1
+#originserver -start nodeid=1
 TestService1 OnInit.
 TestService2 OnInit.
 ```
