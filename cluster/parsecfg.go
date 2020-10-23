@@ -140,9 +140,6 @@ func (slf *Cluster) readLocalService(localNodeId int) error {
 		}
 	}
 
-	if len(slf.localServiceCfg)==0{
-		return fmt.Errorf("No service configuration was found.")
-	}
 	return nil
 }
 
