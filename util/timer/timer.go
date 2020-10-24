@@ -3,6 +3,7 @@ package timer
 import (
 	"fmt"
 	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/util/timewheel"
 	"reflect"
 	"runtime"
 	"time"
@@ -10,18 +11,18 @@ import (
 
 // one dispatcher per goroutine (goroutine not safe)
 type Dispatcher struct {
-	ChanTimer chan *Timer
+	ChanTimer chan *timewheel.Timer
 }
 
 func NewDispatcher(l int) *Dispatcher {
 	disp := new(Dispatcher)
-	disp.ChanTimer = make(chan *Timer, l)
+	disp.ChanTimer = make(chan *timewheel.Timer, l)
 	return disp
 }
 
 // Timer
 type Timer struct {
-	t  *time.Timer
+	t  *timewheel.Timer
 	cb func()
 	cbex func(*Timer)
 	name string
@@ -58,10 +59,7 @@ func (disp *Dispatcher) AfterFunc(d time.Duration, cb func()) *Timer {
 	t := new(Timer)
 	t.cb = cb
 	t.name = reflect.TypeOf(cb).Name()
-
-	t.t = time.AfterFunc(d, func() {
-		disp.ChanTimer <- t
-	})
+	t.t = timewheel.NewTimerEx(d,disp.ChanTimer,t)
 
 	return t
 }
@@ -69,14 +67,9 @@ func (disp *Dispatcher) AfterFunc(d time.Duration, cb func()) *Timer {
 func (disp *Dispatcher) AfterFuncEx(funName string,d time.Duration, cbex func(timer *Timer)) *Timer {
 	t := new(Timer)
 	t.cbex = cbex
-	t.name = funName//reflect.TypeOf(cbex).Name()
-	//t.name = runtime.FuncForPC(reflect.ValueOf(cbex).Pointer()).Name()
-	t.t = time.AfterFunc(d, func() {
-		if disp == nil {
-			return
-		}
-		disp.ChanTimer <- t
-	})
+	t.name = funName
+	t.t = timewheel.NewTimerEx(d,disp.ChanTimer,t)
+
 	return t
 }
 
