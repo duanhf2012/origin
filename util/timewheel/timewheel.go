@@ -35,7 +35,7 @@ func init(){
 
 //定时器运行与驱动
 func timerRunning(){
-	t := time.NewTicker(time.Microsecond*5)
+	t := time.NewTicker(time.Millisecond*10)
 	for {
 /*		if test == true {
 			testTimerRunning()
