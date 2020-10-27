@@ -108,8 +108,7 @@ func (agent *RpcAgent) WriteRespone(processor IRpcProcessor,serviceMethod string
 		return
 	}
 
-
-	errM = agent.conn.WriteMsg(bytes)
+	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())},bytes)
 	if errM != nil {
 		log.Error("Rpc %s return is error:%+v",serviceMethod,errM)
 	}

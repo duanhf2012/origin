@@ -134,6 +134,11 @@ func (slf *PBProcessor) IsParse(param interface{}) bool {
 }
 
 
+func (slf *PBProcessor)	GetProcessorType() RpcProcessorType{
+	return RPC_PROCESSOR_PB
+}
+
+
 func (slf *PBRpcRequestData) IsNoReply() bool{
 	return slf.GetNoReply()
 }

@@ -9,6 +9,7 @@ type IRpcProcessor interface {
 	ReleaseRpcRequest(rpcRequestData IRpcRequestData)
 	ReleaseRpcRespose(rpcRequestData IRpcResponseData)
 	IsParse(param interface{}) bool //是否可解析
+	GetProcessorType() RpcProcessorType
 }
 
 

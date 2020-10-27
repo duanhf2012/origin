@@ -226,7 +226,7 @@ func (slf *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod stri
 		return call
 	}
 
-	err = slf.conn.WriteMsg(bytes)
+	err = slf.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())},bytes)
 	if err != nil {
 		slf.RemovePending(call.Seq)
 		call.Err = err

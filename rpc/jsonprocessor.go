@@ -87,6 +87,11 @@ func (slf *JsonProcessor) IsParse(param interface{}) bool {
 }
 
 
+func (slf *JsonProcessor)	GetProcessorType() RpcProcessorType{
+	return RPC_PROCESSOR_JSON
+}
+
+
 func (slf *JsonRpcRequestData) IsNoReply() bool{
 	return slf.NoReply
 }
@@ -128,8 +133,6 @@ func (slf *JsonRpcResponseData)		GetErr() *RpcError {
 func (slf *JsonRpcResponseData)		GetReply() []byte{
 	return slf.Reply
 }
-
-
 
 
 
