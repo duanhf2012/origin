@@ -93,13 +93,25 @@ type Timer struct {
 //停止停时器
 func (timer *Timer) Stop(){
 	//将关闭标志设为1关闭状态
-	atomic.StoreInt32(&timer.isClose,1)
-	chanStopTimer<-timer
+	if atomic.SwapInt32(&timer.isClose,1) == 0 {
+		chanStopTimer<-timer
+	}
 }
 
 //定时器是否已经停止
 func (timer *Timer) IsStop() bool {
 	return atomic.LoadInt32(&timer.isClose) != 0
+}
+
+func (timer *Timer) doTimeout(){
+	if atomic.SwapInt32(&timer.isClose,1) != 0 {
+		return
+	}
+	timer.prev = nil
+	timer.next = nil
+	select {
+		case timer.C <- timer:
+	}
 }
 
 //每个时间轮上的刻度
@@ -227,7 +239,10 @@ func ReleaseTimer(timer *Timer) {
 func (t *timeWheel) addTimer(timer *Timer) *Timer {
 	//1.计算到期时间ticks
 	ticks := timer.expireTicks - t.currentTicks
-
+	if ticks<=0 {
+		timer.doTimeout()
+		return timer
+	}
 	//2.for遍历通过ticks找到适合的轮子插入,从底轮子往高找
 	var slot *slots
 	for wheelIndex,info :=  range t.wheelInfos {
@@ -297,9 +312,7 @@ func (t *timeWheel) TickOneFrame(){
 		if currTimer.IsStop() == true {
 			continue
 		}
-		select {
-		case currTimer.C<-currTimer:
-		}
+		currTimer.doTimeout()
 	}
 
 	//3.将timer全部清空处理
@@ -349,9 +362,7 @@ func (t *timeWheel) cascade(wheelIndex int) {
 		//如果到时,直接送到channel
 		if currentTimer.expireTicks<= t.currentTicks {
 			if currentTimer.IsStop() == false {
-				select {
-				case currentTimer.C<-currentTimer:
-				}
+				currentTimer.doTimeout()
 			}
 		}else{//否则重新添加，会加到下一级轮中
 			t.addTimer(currentTimer)
