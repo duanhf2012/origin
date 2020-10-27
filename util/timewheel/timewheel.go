@@ -1,6 +1,7 @@
 package timewheel
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -23,6 +24,10 @@ var tWheel *timeWheel           //时间实例化对象指针
 var chanStartTimer chan *Timer  //开始定时器Channel
 var chanStopTimer chan *Timer   //停止定时器Channel
 const chanTimerLen int = 40960  //Channel
+var timerPool = sync.Pool{New: func() interface{}{
+	return &Timer{}
+}}
+
 
 //构造时间轮对象与相关初始化
 func init(){
@@ -37,10 +42,11 @@ func init(){
 func timerRunning(){
 	t := time.NewTicker(time.Millisecond*10)
 	for {
-/*		if test == true {
+		/*
+		if test == true {
 			testTimerRunning()
-		}
- */
+		}*/
+
 		select{
 			case startTimer:=<-chanStartTimer:
 				tWheel.addTimer(startTimer)
@@ -55,10 +61,19 @@ func timerRunning(){
 var test bool = false
 func testTimerRunning(){
 	for {
-		tWheel.TickOneFrame()
+		select {
+		case startTimer := <-chanStartTimer:
+			tWheel.addTimer(startTimer)
+		case stopTimer := <-chanStopTimer:
+			tWheel.delTimer(stopTimer)
+		default:
+			tWheel.TickOneFrame()
+		}
 	}
 }
 */
+
+
 
 func NewTimerEx(d time.Duration,c chan *Timer,additionData interface{}) *Timer{
 	if c == nil {
@@ -228,11 +243,16 @@ func GetNow() int64 {
 
 //创建定时器 ticks表示多少个ticks单位到期, additionData定时器附带数据, c到时通知的channel
 func (t *timeWheel) newTimer(ticks int64,additionData interface{},c chan *Timer) *Timer{
-	return &Timer{AdditionData: additionData,expireTicks:ticks+t.currentTicks,C:c}
+	pTimer := timerPool.Get().(*Timer)
+	pTimer.isClose = 0
+	pTimer.C = c
+	pTimer.AdditionData = additionData
+	pTimer.expireTicks = ticks+t.currentTicks
+	return pTimer
 }
 
-
 func ReleaseTimer(timer *Timer) {
+	timerPool.Put(timer)
 }
 
 //添加定时器
@@ -282,8 +302,7 @@ func (t *timeWheel) addTimer(timer *Timer) *Timer {
 func (t *timeWheel) delTimer(timer *Timer) {
 	timer.prev.next = timer.next
 	timer.next.prev = timer.prev
-	timer.next = nil
-	timer.prev = nil
+	ReleaseTimer(timer)
 }
 
 //按照自然时间走动时间差计算loop，并且进行Tick
@@ -306,13 +325,17 @@ func (t *timeWheel) TickOneFrame(){
 	t.currentTicks += 1
 
 	//2.将当前slot全部到时处理
+	var nextTimer *Timer
 	slot := t.wheels[0].slots[t.wheels[0].slotIndex]
-	for currTimer := slot.timer.next;currTimer!=slot.timer;currTimer = currTimer.next {
+	for currTimer := slot.timer.next;currTimer!=slot.timer; {
+		nextTimer = currTimer.next
 		//如果当前定时器已经停止,不做任何处理.否则放入到定时器的channel
 		if currTimer.IsStop() == true {
+			currTimer = nextTimer
 			continue
 		}
 		currTimer.doTimeout()
+		currTimer = nextTimer
 	}
 
 	//3.将timer全部清空处理

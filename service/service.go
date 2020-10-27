@@ -7,6 +7,7 @@ import (
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
+	"github.com/duanhf2012/origin/util/timewheel"
 	"reflect"
 	"runtime"
 	"sync"
@@ -147,6 +148,7 @@ func (slf *Service) Run() {
 					analyzer.Pop()
 					analyzer = nil
 				}
+				timewheel.ReleaseTimer(t)
 			}
 		}
 
