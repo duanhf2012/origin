@@ -128,11 +128,11 @@ func (slf *Module) ReleaseModule(moduleId int64){
 	pModule.self.OnRelease()
 	log.Debug("Release module %s.",slf.GetModuleName())
 	for pTimer,_ := range pModule.mapActiveTimer {
-		pTimer.Stop()
+		pTimer.Close()
 	}
 
 	for pCron,_ := range pModule.mapActiveCron {
-		pCron.Stop()
+		pCron.Close()
 	}
 
 	delete(slf.child,moduleId)

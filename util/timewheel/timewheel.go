@@ -100,26 +100,32 @@ type stNode struct {
 type Timer struct {
 	stNode
 	expireTicks  int64       //到期滴答数
-	isClose      int32       //是否已经关闭0表示开启状态,1表示关闭
+	end        int32       //是否已经关闭0表示开启状态,1表示关闭
+	bClose       bool        //是否关闭
 	C            chan *Timer //定时器管道
 	AdditionData interface{} //定时器附加数据
 }
 
 //停止停时器
-func (timer *Timer) Stop(){
+func (timer *Timer) Close(){
+	timer.bClose = true
 	//将关闭标志设为1关闭状态
-	if atomic.SwapInt32(&timer.isClose,1) == 0 {
+	if atomic.SwapInt32(&timer.end,1) == 0 {
 		chanStopTimer<-timer
 	}
 }
 
 //定时器是否已经停止
-func (timer *Timer) IsStop() bool {
-	return atomic.LoadInt32(&timer.isClose) != 0
+func (timer *Timer) IsClose() bool {
+	return timer.bClose
+}
+
+func (timer *Timer) IsEnd() bool{
+	return atomic.LoadInt32(&timer.end) !=0
 }
 
 func (timer *Timer) doTimeout(){
-	if atomic.SwapInt32(&timer.isClose,1) != 0 {
+	if atomic.SwapInt32(&timer.end,1) != 0 {
 		return
 	}
 	timer.prev = nil
@@ -244,7 +250,8 @@ func GetNow() int64 {
 //创建定时器 ticks表示多少个ticks单位到期, additionData定时器附带数据, c到时通知的channel
 func (t *timeWheel) newTimer(ticks int64,additionData interface{},c chan *Timer) *Timer{
 	pTimer := timerPool.Get().(*Timer)
-	pTimer.isClose = 0
+	pTimer.end = 0
+	pTimer.bClose = false
 	pTimer.C = c
 	pTimer.AdditionData = additionData
 	pTimer.expireTicks = ticks+t.currentTicks
@@ -330,7 +337,7 @@ func (t *timeWheel) TickOneFrame(){
 	for currTimer := slot.timer.next;currTimer!=slot.timer; {
 		nextTimer = currTimer.next
 		//如果当前定时器已经停止,不做任何处理.否则放入到定时器的channel
-		if currTimer.IsStop() == true {
+		if currTimer.IsEnd() == true {
 			currTimer = nextTimer
 			continue
 		}
@@ -384,7 +391,7 @@ func (t *timeWheel) cascade(wheelIndex int) {
 		nextTimer:=currentTimer.next
 		//如果到时,直接送到channel
 		if currentTimer.expireTicks<= t.currentTicks {
-			if currentTimer.IsStop() == false {
+			if currentTimer.IsEnd() == false {
 				currentTimer.doTimeout()
 			}
 		}else{//否则重新添加，会加到下一级轮中

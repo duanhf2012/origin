@@ -139,7 +139,7 @@ func (slf *Service) Run() {
 				analyzer = nil
 			}
 		case t := <- slf.dispatcher.ChanTimer:
-			if t.IsStop() == false {
+			if t.IsClose() == false {
 				if slf.profiler != nil {
 					analyzer = slf.profiler.Push(fmt.Sprintf("Timer_%s", t.AdditionData.(*timer.Timer).GetFunctionName()))
 				}

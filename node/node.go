@@ -44,7 +44,7 @@ func usage(val interface{}) error{
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, `orgin version: orgin/2.12.20201024
+	fmt.Fprintf(os.Stderr, `orgin version: orgin/2.13.20201028
 Usage: originserver [-help] [-start node=1] [-stop] [-config path] [-pprof 0.0.0.0:6060]
 `)
 	console.PrintDefaults()

@@ -28,8 +28,8 @@ type Timer struct {
 	name string
 }
 
-func (t *Timer) Stop() {
-	t.t.Stop()
+func (t *Timer) Close() {
+	t.t.Close()
 	t.cb = nil
 }
 
@@ -78,9 +78,9 @@ type Cron struct {
 	t *Timer
 }
 
-func (c *Cron) Stop() {
+func (c *Cron) Close() {
 	if c.t != nil {
-		c.t.Stop()
+		c.t.Close()
 	}
 }
 
