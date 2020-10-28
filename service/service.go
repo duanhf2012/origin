@@ -211,3 +211,6 @@ func (slf *Service) RegEventReciverFunc(eventType event.EventType,reciver event.
 func (slf *Service) UnRegEventReciverFun(eventType event.EventType,reciver event.IEventHandler){
 	slf.eventProcessor.UnRegEventReciverFun(eventType,reciver)
 }
+func (slf *Service) IsSingleCoroutine() bool {
+	return slf.gorouterNum == 1
+}
