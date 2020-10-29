@@ -7,8 +7,8 @@ type ConfigDiscovery struct {
 	localNodeId int
 }
 
-func (slf *ConfigDiscovery) Init(localNodeId int) error{
-	slf.localNodeId = localNodeId
+func (discovery *ConfigDiscovery) Init(localNodeId int) error{
+	discovery.localNodeId = localNodeId
 
 	//解析本地其他服务配置
 	nodeInfoList,err := GetCluster().readLocalClusterConfig(0)
@@ -20,21 +20,19 @@ func (slf *ConfigDiscovery) Init(localNodeId int) error{
 		if nodeInfo.NodeId == localNodeId {
 			continue
 		}
-		slf.funSetService(&nodeInfo)
+		discovery.funSetService(&nodeInfo)
 	}
 
 	return nil
 }
 
-
-func (slf *ConfigDiscovery) OnNodeStop(){
+func (discovery *ConfigDiscovery) OnNodeStop(){
 }
 
-
-func (slf *ConfigDiscovery) RegFunDelNode(funDelNode FunDelNode){
-	slf.funDelService = funDelNode
+func (discovery *ConfigDiscovery) RegFunDelNode(funDelNode FunDelNode){
+	discovery.funDelService = funDelNode
 }
 
-func (slf *ConfigDiscovery) RegFunSetNode(funSetNodeInfo FunSetNodeInfo){
-	slf.funSetService = funSetNodeInfo
+func (discovery *ConfigDiscovery) RegFunSetNode(funSetNodeInfo FunSetNodeInfo){
+	discovery.funSetService = funSetNodeInfo
 }

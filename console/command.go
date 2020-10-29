@@ -9,6 +9,7 @@ import (
 type valueType int
 type CommandFunctionCB func(args interface{}) error
 var commandList []*command
+var programName string
 const(
 	boolType valueType = iota
 	stringType valueType = iota
@@ -29,14 +30,11 @@ func (cmd *command) execute() error{
 	}else if cmd.valType == stringType {
 		return cmd.fn(cmd.strValue)
 	}else{
-		return fmt.Errorf("unknow command type!")
+		return fmt.Errorf("Unknow command type.")
 	}
 
 	return nil
 }
-
-
-var programName string
 
 func Run(args []string) error {
 	flag.Parse()
@@ -57,7 +55,11 @@ func Run(args []string) error {
 		}
 	}
 
-	return startCmd.execute()
+	if startCmd != nil {
+		return startCmd.execute()
+	}
+
+	return fmt.Errorf("Command input parameter error,try `%s -help` for help",args[0])
 }
 
 func RegisterCommandBool(cmdName string, defaultValue bool, usage string,fn CommandFunctionCB){

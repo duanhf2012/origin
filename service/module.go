@@ -124,7 +124,7 @@ func (slf *Module) ReleaseModule(moduleId int64){
 		slf.ReleaseModule(id)
 	}
 
-	pModule.GetEventHandler().Desctory()
+	pModule.GetEventHandler().Destroy()
 	pModule.self.OnRelease()
 	log.Debug("Release module %s.",slf.GetModuleName())
 	for pTimer,_ := range pModule.mapActiveTimer {

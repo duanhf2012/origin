@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-const Default_EventChannelLen = 10000
+const DefaultEventChannelLen = 10000
 
 //事件接受器
 type EventCallBack func(event *Event)
@@ -22,7 +22,7 @@ type IEventHandler interface {
 	Init(processor IEventProcessor)
 	GetEventProcessor() IEventProcessor  //获得事件
 	NotifyEvent(*Event)
-	Desctory()
+	Destroy()
 	//注册了事件
 	addRegInfo(eventType EventType,eventProcessor IEventProcessor)
 	removeRegInfo(eventType EventType,eventProcessor IEventProcessor)
@@ -77,135 +77,134 @@ func NewEventProcessor() IEventProcessor{
 	return &ep
 }
 
-func (slf *EventHandler) addRegInfo(eventType EventType,eventProcessor IEventProcessor){
-	slf.locker.Lock()
-	defer slf.locker.Unlock()
-	if slf.mapRegEvent == nil {
-		slf.mapRegEvent = map[EventType]map[IEventProcessor]interface{}{}
+func (handler *EventHandler) addRegInfo(eventType EventType,eventProcessor IEventProcessor){
+	handler.locker.Lock()
+	defer handler.locker.Unlock()
+	if handler.mapRegEvent == nil {
+		handler.mapRegEvent = map[EventType]map[IEventProcessor]interface{}{}
 	}
 
-	if _,ok := slf.mapRegEvent[eventType] ;ok == false{
-		slf.mapRegEvent[eventType] = map[IEventProcessor]interface{}{}
+	if _,ok := handler.mapRegEvent[eventType] ;ok == false{
+		handler.mapRegEvent[eventType] = map[IEventProcessor]interface{}{}
 	}
-	slf.mapRegEvent[eventType][eventProcessor] = nil
+	handler.mapRegEvent[eventType][eventProcessor] = nil
 }
 
-func (slf *EventHandler) removeRegInfo(eventType EventType,eventProcessor IEventProcessor){
-	if _,ok :=slf.mapRegEvent[eventType];ok == true {
-		delete(slf.mapRegEvent[eventType],eventProcessor)
+func (handler *EventHandler) removeRegInfo(eventType EventType,eventProcessor IEventProcessor){
+	if _,ok := handler.mapRegEvent[eventType];ok == true {
+		delete(handler.mapRegEvent[eventType],eventProcessor)
 	}
 }
 
-func (slf *EventHandler) GetEventProcessor() IEventProcessor{
-	return slf.eventProcessor
+func (handler *EventHandler) GetEventProcessor() IEventProcessor{
+	return handler.eventProcessor
 }
 
-func (slf *EventHandler) NotifyEvent(ev *Event){
-	slf.GetEventProcessor().castEvent(ev)
+func (handler *EventHandler) NotifyEvent(ev *Event){
+	handler.GetEventProcessor().castEvent(ev)
 }
 
-func (slf *EventHandler) Init(processor IEventProcessor){
-	slf.eventProcessor = processor
-	slf.mapRegEvent =map[EventType]map[IEventProcessor]interface{}{}
+func (handler *EventHandler) Init(processor IEventProcessor){
+	handler.eventProcessor = processor
+	handler.mapRegEvent =map[EventType]map[IEventProcessor]interface{}{}
 }
 
 
-func (slf *EventProcessor) SetEventChannel(channelNum int) bool{
-	slf.locker.Lock()
-	defer slf.locker.Unlock()
-	if slf.eventChannel!=nil {
+func (processor *EventProcessor) SetEventChannel(channelNum int) bool{
+	processor.locker.Lock()
+	defer processor.locker.Unlock()
+	if processor.eventChannel!=nil {
 		return false
 	}
 
 	if channelNum == 0 {
-		channelNum = Default_EventChannelLen
+		channelNum = DefaultEventChannelLen
 	}
 
-	slf.eventChannel = make(chan *Event,channelNum)
+	processor.eventChannel = make(chan *Event,channelNum)
 	return true
 }
 
-func (slf *EventProcessor) addBindEvent(eventType EventType,reciver IEventHandler,callback EventCallBack){
-	slf.locker.Lock()
-	defer slf.locker.Unlock()
+func (processor *EventProcessor) addBindEvent(eventType EventType,reciver IEventHandler,callback EventCallBack){
+	processor.locker.Lock()
+	defer processor.locker.Unlock()
 
-	if _,ok := slf.mapBindHandlerEvent[eventType]; ok == false {
-		slf.mapBindHandlerEvent[eventType] = map[IEventHandler]EventCallBack{}
+	if _,ok := processor.mapBindHandlerEvent[eventType]; ok == false {
+		processor.mapBindHandlerEvent[eventType] = map[IEventHandler]EventCallBack{}
 	}
 
-	slf.mapBindHandlerEvent[eventType][reciver] = callback
+	processor.mapBindHandlerEvent[eventType][reciver] = callback
 }
 
-func (slf *EventProcessor) addListen(eventType EventType,reciver IEventHandler){
-	slf.locker.Lock()
-	defer slf.locker.Unlock()
+func (processor *EventProcessor) addListen(eventType EventType,reciver IEventHandler){
+	processor.locker.Lock()
+	defer processor.locker.Unlock()
 
-	if _,ok :=slf.mapListenerEvent[eventType];ok == false{
-		slf.mapListenerEvent[eventType] = map[IEventProcessor]int{}
+	if _,ok := processor.mapListenerEvent[eventType];ok == false{
+		processor.mapListenerEvent[eventType] = map[IEventProcessor]int{}
 	}
 
-	slf.mapListenerEvent[eventType][reciver.GetEventProcessor()] += 1
+	processor.mapListenerEvent[eventType][reciver.GetEventProcessor()] += 1
 }
 
-func (slf *EventProcessor) removeBindEvent(eventType EventType,reciver IEventHandler){
-	slf.locker.Lock()
-	defer slf.locker.Unlock()
-	if _,ok := slf.mapBindHandlerEvent[eventType];ok == true{
-		delete(slf.mapBindHandlerEvent[eventType],reciver)
+func (processor *EventProcessor) removeBindEvent(eventType EventType,reciver IEventHandler){
+	processor.locker.Lock()
+	defer processor.locker.Unlock()
+	if _,ok := processor.mapBindHandlerEvent[eventType];ok == true{
+		delete(processor.mapBindHandlerEvent[eventType],reciver)
 	}
 }
 
-func (slf *EventProcessor) removeListen(eventType EventType,reciver IEventHandler){
-	slf.locker.Lock()
-	defer slf.locker.Unlock()
-	if _,ok := slf.mapListenerEvent[eventType];ok == true{
-		slf.mapListenerEvent[eventType][reciver.GetEventProcessor()]-=1
-		if slf.mapListenerEvent[eventType][reciver.GetEventProcessor()] <= 0 {
-			delete(slf.mapListenerEvent[eventType],reciver.GetEventProcessor())
+func (processor *EventProcessor) removeListen(eventType EventType,reciver IEventHandler){
+	processor.locker.Lock()
+	defer processor.locker.Unlock()
+	if _,ok := processor.mapListenerEvent[eventType];ok == true{
+		processor.mapListenerEvent[eventType][reciver.GetEventProcessor()]-=1
+		if processor.mapListenerEvent[eventType][reciver.GetEventProcessor()] <= 0 {
+			delete(processor.mapListenerEvent[eventType],reciver.GetEventProcessor())
 		}
 	}
 }
 
-func (slf *EventProcessor) RegEventReciverFunc(eventType EventType,reciver IEventHandler,callback EventCallBack){
+func (processor *EventProcessor) RegEventReciverFunc(eventType EventType,reciver IEventHandler,callback EventCallBack){
 	//记录reciver自己注册过的事件
-	reciver.addRegInfo(eventType,slf)
+	reciver.addRegInfo(eventType, processor)
 	//记录当前所属IEventProcessor注册的回调
 	reciver.GetEventProcessor().addBindEvent(eventType,reciver,callback)
 	//将注册加入到监听中
-	slf.addListen(eventType,reciver)
+	processor.addListen(eventType,reciver)
 }
 
-func (slf *EventProcessor) UnRegEventReciverFun(eventType EventType,reciver IEventHandler) {
-	slf.removeListen(eventType,reciver)
+func (processor *EventProcessor) UnRegEventReciverFun(eventType EventType,reciver IEventHandler) {
+	processor.removeListen(eventType,reciver)
 	reciver.GetEventProcessor().removeBindEvent(eventType,reciver)
-	reciver.removeRegInfo(eventType,slf)
+	reciver.removeRegInfo(eventType, processor)
 }
 
-func (slf *EventHandler) Desctory(){
-	for eventTyp,mapEventProcess := range slf.mapRegEvent {
+func (handler *EventHandler) Destroy(){
+	for eventTyp,mapEventProcess := range handler.mapRegEvent {
 		if mapEventProcess == nil {
 			continue
 		}
 
-		//map[IEventProcessor]interface{}
 		for eventProcess,_ := range mapEventProcess {
-			eventProcess.UnRegEventReciverFun(eventTyp,slf)
+			eventProcess.UnRegEventReciverFun(eventTyp, handler)
 		}
 	}
 }
 
-func (slf *EventProcessor) GetEventChan() chan *Event{
-	slf.locker.Lock()
-	defer slf.locker.Unlock()
+func (processor *EventProcessor) GetEventChan() chan *Event{
+	processor.locker.Lock()
+	defer processor.locker.Unlock()
 
-	if slf.eventChannel == nil {
-		slf.eventChannel =make(chan *Event,Default_EventChannelLen)
+	if processor.eventChannel == nil {
+		processor.eventChannel =make(chan *Event,DefaultEventChannelLen)
 	}
 
-	return slf.eventChannel
+	return processor.eventChannel
 }
 
-func (slf *EventProcessor) EventHandler(ev *Event) {
+func (processor *EventProcessor) EventHandler(ev *Event) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -215,7 +214,7 @@ func (slf *EventProcessor) EventHandler(ev *Event) {
 		}
 	}()
 
-	mapCallBack,ok := slf.mapBindHandlerEvent[ev.Type]
+	mapCallBack,ok := processor.mapBindHandlerEvent[ev.Type]
 	if ok == false {
 		return
 	}
@@ -227,28 +226,28 @@ func (slf *EventProcessor) EventHandler(ev *Event) {
 
 
 
-func (slf *EventProcessor) pushEvent(event *Event){
-	if len(slf.eventChannel)>=cap(slf.eventChannel){
+func (processor *EventProcessor) pushEvent(event *Event){
+	if len(processor.eventChannel)>=cap(processor.eventChannel){
 		log.Error("event process channel is full.")
 		return
 	}
 
-	slf.eventChannel<-event
+	processor.eventChannel<-event
 }
 
-func (slf *EventProcessor) castEvent(event *Event){
-	if slf.mapListenerEvent == nil{
+func (processor *EventProcessor) castEvent(event *Event){
+	if processor.mapListenerEvent == nil{
 		log.Error("mapListenerEvent not init!")
 		return
 	}
 
-	processor,ok :=slf.mapListenerEvent[event.Type]
+	eventProcessor,ok := processor.mapListenerEvent[event.Type]
 	if ok == false || processor == nil{
 		log.Debug("event type %d not listen.",event.Type)
 		return
 	}
 
-	for proc,_ := range processor {
+	for proc,_ := range eventProcessor {
 		proc.pushEvent(event)
 	}
 }

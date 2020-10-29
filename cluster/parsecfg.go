@@ -14,8 +14,7 @@ type NodeInfoList struct {
 	NodeList []NodeInfo
 }
 
-
-func (slf *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList,error) {
+func (cls *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList,error) {
 	c := &NodeInfoList{}
 	d, err := ioutil.ReadFile(filepath)
 	if err != nil {
@@ -29,9 +28,7 @@ func (slf *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList,error) {
 	return c,nil
 }
 
-
-func (slf *Cluster) readServiceConfig(filepath string)  (map[string]interface{},map[int]map[string]interface{},error) {
-
+func (cls *Cluster) readServiceConfig(filepath string)  (map[string]interface{},map[int]map[string]interface{},error) {
 	c := map[string]interface{}{}
 	//读取配置
 	d, err := ioutil.ReadFile(filepath)
@@ -65,10 +62,9 @@ func (slf *Cluster) readServiceConfig(filepath string)  (map[string]interface{},
 	return serviceConfig,mapNodeService,nil
 }
 
-
-func (slf *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,error) {
+func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,error) {
 	var nodeInfoList [] NodeInfo
-	clusterCfgPath :=strings.TrimRight(configdir,"/")  +"/cluster"
+	clusterCfgPath :=strings.TrimRight(configDir,"/")  +"/cluster"
 	fileInfoList,err := ioutil.ReadDir(clusterCfgPath)
 	if err != nil {
 		return nil,fmt.Errorf("Read dir %s is fail :%+v",clusterCfgPath,err)
@@ -78,7 +74,7 @@ func (slf *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,error) {
 	for _,f := range fileInfoList{
 		if f.IsDir() == false {
 			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()
-			localNodeInfoList,err := slf.ReadClusterConfig(filePath)
+			localNodeInfoList,err := cls.ReadClusterConfig(filePath)
 			if err != nil {
 				return nil,fmt.Errorf("read file path %s is error:%+v" ,filePath,err)
 			}
@@ -86,7 +82,6 @@ func (slf *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,error) {
 			for _,nodeInfo := range localNodeInfoList.NodeList {
 				if nodeInfo.NodeId == nodeId || nodeId == 0 {
 					nodeInfoList = append(nodeInfoList,nodeInfo)
-					//slf.localNodeInfo = nodeInfo
 				}
 			}
 		}
@@ -99,8 +94,8 @@ func (slf *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,error) {
 	return nodeInfoList,nil
 }
 
-func (slf *Cluster) readLocalService(localNodeId int) error {
-	clusterCfgPath :=strings.TrimRight(configdir,"/")  +"/cluster"
+func (cls *Cluster) readLocalService(localNodeId int) error {
+	clusterCfgPath :=strings.TrimRight(configDir,"/")  +"/cluster"
 	fileInfoList,err := ioutil.ReadDir(clusterCfgPath)
 	if err != nil {
 		return fmt.Errorf("Read dir %s is fail :%+v",clusterCfgPath,err)
@@ -110,17 +105,17 @@ func (slf *Cluster) readLocalService(localNodeId int) error {
 	for _,f := range fileInfoList {
 		if f.IsDir() == false {
 			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath, "/"), "\\") + "/" + f.Name()
-			serviceConfig,mapNodeService,err := slf.readServiceConfig(filePath)
+			serviceConfig,mapNodeService,err := cls.readServiceConfig(filePath)
 			if err != nil {
 				continue
 			}
 
-			for _,s := range slf.localNodeInfo.ServiceList{
+			for _,s := range cls.localNodeInfo.ServiceList{
 				for{
 					//取公共服务配置
 					pubCfg,ok := serviceConfig[s]
 					if ok == true {
-						slf.localServiceCfg[s] = pubCfg
+						cls.localServiceCfg[s] = pubCfg
 					}
 
 					//如果结点也配置了该服务，则覆盖之
@@ -133,7 +128,7 @@ func (slf *Cluster) readLocalService(localNodeId int) error {
 						break
 					}
 
-					slf.localServiceCfg[s] = sCfg
+					cls.localServiceCfg[s] = sCfg
 					break
 				}
 			}
@@ -143,49 +138,48 @@ func (slf *Cluster) readLocalService(localNodeId int) error {
 	return nil
 }
 
-func (slf *Cluster) parseLocalCfg(){
-	slf.mapIdNode[slf.localNodeInfo.NodeId] = slf.localNodeInfo
+func (cls *Cluster) parseLocalCfg(){
+	cls.mapIdNode[cls.localNodeInfo.NodeId] = cls.localNodeInfo
 
-	for _,sName := range slf.localNodeInfo.ServiceList{
-		slf.mapServiceNode[sName] = append(slf.mapServiceNode[sName],slf.localNodeInfo.NodeId)
+	for _,sName := range cls.localNodeInfo.ServiceList{
+		cls.mapServiceNode[sName] = append(cls.mapServiceNode[sName], cls.localNodeInfo.NodeId)
 	}
 }
 
-func (slf *Cluster) InitCfg(localNodeId int) error{
-	slf.localServiceCfg = map[string]interface{}{}
-	slf.mapRpc = map[int] NodeRpcInfo{}
-	slf.mapIdNode = map[int]NodeInfo{}
-	slf.mapServiceNode = map[string][]int{}
+func (cls *Cluster) InitCfg(localNodeId int) error{
+	cls.localServiceCfg = map[string]interface{}{}
+	cls.mapRpc = map[int] NodeRpcInfo{}
+	cls.mapIdNode = map[int]NodeInfo{}
+	cls.mapServiceNode = map[string][]int{}
 
 	//加载本地结点的NodeList配置
-	nodeInfoList,err := slf.readLocalClusterConfig(localNodeId)
+	nodeInfoList,err := cls.readLocalClusterConfig(localNodeId)
 	if err != nil {
 		return err
 	}
-	slf.localNodeInfo = nodeInfoList[0]
+	cls.localNodeInfo = nodeInfoList[0]
 
 	//读取本地服务配置
-	err = slf.readLocalService(localNodeId)
+	err = cls.readLocalService(localNodeId)
 	if err != nil {
 		return err
 	}
 
 	//本地配置服务加到全局map信息中
-	slf.parseLocalCfg()
+	cls.parseLocalCfg()
 	return nil
 }
 
-
-func (slf *Cluster) IsConfigService(serviceName string) bool {
-	slf.locker.RLock()
-	defer slf.locker.RUnlock()
-	nodeList,ok := slf.mapServiceNode[serviceName]
+func (cls *Cluster) IsConfigService(serviceName string) bool {
+	cls.locker.RLock()
+	defer cls.locker.RUnlock()
+	nodeList,ok := cls.mapServiceNode[serviceName]
 	if ok == false {
 		return false
 	}
 
 	for _,nodeId := range nodeList{
-		if slf.localNodeInfo.NodeId == nodeId {
+		if cls.localNodeInfo.NodeId == nodeId {
 			return true
 		}
 	}
@@ -193,10 +187,10 @@ func (slf *Cluster) IsConfigService(serviceName string) bool {
 	return false
 }
 
-func (slf *Cluster) GetNodeIdByService(servicename string,rpcClientList *[]*rpc.Client) {
-	slf.locker.RLock()
-	defer slf.locker.RUnlock()
-	nodeIdList,ok := slf.mapServiceNode[servicename]
+func (cls *Cluster) GetNodeIdByService(serviceName string,rpcClientList *[]*rpc.Client) {
+	cls.locker.RLock()
+	defer cls.locker.RUnlock()
+	nodeIdList,ok := cls.mapServiceNode[serviceName]
 	if ok == true {
 		for _,nodeId := range nodeIdList {
 			pClient := GetCluster().GetRpcClient(nodeId)
@@ -209,9 +203,8 @@ func (slf *Cluster) GetNodeIdByService(servicename string,rpcClientList *[]*rpc.
 	}
 }
 
-
-func (slf *Cluster) getServiceCfg(servicename string) interface{}{
-	v,ok := slf.localServiceCfg[servicename]
+func (cls *Cluster) getServiceCfg(serviceName string) interface{}{
+	v,ok := cls.localServiceCfg[serviceName]
 	if ok == false {
 		return nil
 	}
@@ -219,8 +212,8 @@ func (slf *Cluster) getServiceCfg(servicename string) interface{}{
 	return v
 }
 
-func (slf *Cluster) GetServiceCfg(serviceName string) interface{}{
-	serviceCfg,ok := slf.localServiceCfg[serviceName]
+func (cls *Cluster) GetServiceCfg(serviceName string) interface{}{
+	serviceCfg,ok := cls.localServiceCfg[serviceName]
 	if ok == false {
 		return nil
 	}
