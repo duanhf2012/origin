@@ -265,6 +265,7 @@ func (slf *Client) Run(){
 
 		processor := GetProcessor(uint8(bytes[0]))
 		if processor==nil {
+			slf.conn.ReleaseReadMsg(bytes)
 			log.Error("rpcClient %s ReadMsg head error:%+v",slf.Addr,err)
 			return
 		}
@@ -274,6 +275,7 @@ func (slf *Client) Run(){
 		respone.RpcResponeData =processor.MakeRpcResponse(0,nil,nil)
 
 		err = processor.Unmarshal(bytes[1:],respone.RpcResponeData)
+		slf.conn.ReleaseReadMsg(bytes)
 		if err != nil {
 			processor.ReleaseRpcRespose(respone.RpcResponeData)
 			log.Error("rpcClient Unmarshal head error,error:%+v",err)

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"net"
 	"sync"
@@ -16,26 +17,37 @@ type TCPConn struct {
 	msgParser *MsgParser
 }
 
+
+func freeChannel(conn *TCPConn){
+	for;len(conn.writeChan)>0;{
+		byteBuff := <- conn.writeChan
+		if byteBuff != nil {
+			conn.ReleaseReadMsg(byteBuff)
+		}
+	}
+}
+
 func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser) *TCPConn {
 	tcpConn := new(TCPConn)
 	tcpConn.conn = conn
 	tcpConn.writeChan = make(chan []byte, pendingWriteNum)
 	tcpConn.msgParser = msgParser
-
 	go func() {
 		for b := range tcpConn.writeChan {
 			if b == nil {
 				break
 			}
-
 			_, err := conn.Write(b)
+			releaseByteSlice(b)
+
+
 			if err != nil {
 				break
 			}
 		}
-
 		conn.Close()
 		tcpConn.Lock()
+		freeChannel(tcpConn)
 		tcpConn.closeFlag = true
 		tcpConn.Unlock()
 	}()
@@ -77,7 +89,8 @@ func (tcpConn *TCPConn) GetRemoteIp() string {
 
 func (tcpConn *TCPConn) doWrite(b []byte) {
 	if len(tcpConn.writeChan) == cap(tcpConn.writeChan) {
-		log.Debug("close conn: channel full")
+		tcpConn.ReleaseReadMsg(b)
+		log.Error("close conn: channel full")
 		tcpConn.doDestroy()
 		return
 	}
@@ -90,6 +103,7 @@ func (tcpConn *TCPConn) Write(b []byte) {
 	tcpConn.Lock()
 	defer tcpConn.Unlock()
 	if tcpConn.closeFlag || b == nil {
+		tcpConn.ReleaseReadMsg(b)
 		return
 	}
 
@@ -112,7 +126,14 @@ func (tcpConn *TCPConn) ReadMsg() ([]byte, error) {
 	return tcpConn.msgParser.Read(tcpConn)
 }
 
+func (tcpConn *TCPConn) ReleaseReadMsg(byteBuff []byte){
+	releaseByteSlice(byteBuff)
+}
+
 func (tcpConn *TCPConn) WriteMsg(args ...[]byte) error {
+	if tcpConn.closeFlag == true {
+		return fmt.Errorf("conn is close")
+	}
 	return tcpConn.msgParser.Write(tcpConn, args...)
 }
 

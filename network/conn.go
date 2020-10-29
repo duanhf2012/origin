@@ -11,4 +11,5 @@ type Conn interface {
 	RemoteAddr() net.Addr
 	Close()
 	Destroy()
+	ReleaseReadMsg(byteBuff []byte)
 }

@@ -172,6 +172,7 @@ func (slf *Client) Run() {
 			break
 		}
 		data,err:=slf.tcpService.process.Unmarshal(bytes)
+		slf.tcpConn.ReleaseReadMsg(bytes)
 		if err != nil {
 			slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_UnknownPack,Data:bytes,MsgProcessor:slf.tcpService.process}})
 			continue

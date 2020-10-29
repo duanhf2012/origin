@@ -125,6 +125,7 @@ func (agent *RpcAgent) Run() {
 		}
 		processor := GetProcessor(uint8(data[0]))
 		if processor==nil {
+			agent.conn.ReleaseReadMsg(data)
 			log.Error("remote rpc  %s data head error:%+v",agent.conn.RemoteAddr(),err)
 			return
 		}
@@ -134,6 +135,7 @@ func (agent *RpcAgent) Run() {
 		req.rpcProcessor = processor
 		req.RpcRequestData = processor.MakeRpcRequest(0,"",false,nil,nil)
 		err = processor.Unmarshal(data[1:],req.RpcRequestData)
+		agent.conn.ReleaseReadMsg(data)
 		if err != nil {
 			log.Error("rpc Unmarshal request is error: %v", err)
 			if req.RpcRequestData.GetSeq()>0 {
