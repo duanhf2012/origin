@@ -18,7 +18,7 @@ type WSClient struct {
 	AutoReconnect    bool
 	NewAgent         func(*WSConn) Agent
 	dialer           websocket.Dialer
-	conns            WebsocketConnSet
+	cons             WebsocketConnSet
 	wg               sync.WaitGroup
 	closeFlag        bool
 }
@@ -59,11 +59,11 @@ func (client *WSClient) init() {
 	if client.NewAgent == nil {
 		log.Fatal("NewAgent must not be nil")
 	}
-	if client.conns != nil {
+	if client.cons != nil {
 		log.Fatal("client is running")
 	}
 
-	client.conns = make(WebsocketConnSet)
+	client.cons = make(WebsocketConnSet)
 	client.closeFlag = false
 	client.dialer = websocket.Dialer{
 		HandshakeTimeout: client.HandshakeTimeout,
@@ -99,7 +99,7 @@ reconnect:
 		conn.Close()
 		return
 	}
-	client.conns[conn] = struct{}{}
+	client.cons[conn] = struct{}{}
 	client.Unlock()
 
 	wsConn := newWSConn(conn, client.PendingWriteNum, client.MaxMsgLen)
@@ -109,7 +109,7 @@ reconnect:
 	// cleanup
 	wsConn.Close()
 	client.Lock()
-	delete(client.conns, conn)
+	delete(client.cons, conn)
 	client.Unlock()
 	agent.OnClose()
 
@@ -122,10 +122,10 @@ reconnect:
 func (client *WSClient) Close() {
 	client.Lock()
 	client.closeFlag = true
-	for conn := range client.conns {
+	for conn := range client.cons {
 		conn.Close()
 	}
-	client.conns = nil
+	client.cons = nil
 	client.Unlock()
 
 	client.wg.Wait()

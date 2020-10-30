@@ -18,7 +18,7 @@ type HttpClientModule struct {
 	client *http.Client
 }
 
-type HttpRespone struct {
+type HttpResponse struct {
 	Err        error
 	Header     http.Header
 	StatusCode int
@@ -26,11 +26,11 @@ type HttpRespone struct {
 	Body       []byte
 }
 
-type SyncHttpRespone struct {
-	resp chan HttpRespone
+type SyncHttpResponse struct {
+	resp chan HttpResponse
 }
 
-func (slf *SyncHttpRespone) Get(timeoutMs int) HttpRespone {
+func (slf *SyncHttpResponse) Get(timeoutMs int) HttpResponse {
 	timerC := time.NewTicker(time.Millisecond * time.Duration(timeoutMs)).C
 	select {
 	case <-timerC:
@@ -38,21 +38,21 @@ func (slf *SyncHttpRespone) Get(timeoutMs int) HttpRespone {
 	case rsp := <-slf.resp:
 		return rsp
 	}
-	return HttpRespone{
+	return HttpResponse{
 		Err: fmt.Errorf("Getting the return result timeout [%d]ms", timeoutMs),
 	}
 }
 
-func (slf *HttpClientModule) Init(maxpool int, proxyUrl string) {
+func (m *HttpClientModule) Init(maxpool int, proxyUrl string) {
 	type ProxyFun func(_ *http.Request) (*url.URL, error)
-	var proxyfun ProxyFun
+	var proxyFun ProxyFun
 	if proxyUrl != "" {
-		proxyfun = func(_ *http.Request) (*url.URL, error) {
+		proxyFun = func(_ *http.Request) (*url.URL, error) {
 			return url.Parse(proxyUrl)
 		}
 	}
 
-	slf.client = &http.Client{
+	m.client = &http.Client{
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
@@ -61,33 +61,33 @@ func (slf *HttpClientModule) Init(maxpool int, proxyUrl string) {
 			MaxIdleConns:        maxpool,
 			MaxIdleConnsPerHost: maxpool,
 			IdleConnTimeout:     60 * time.Second,
-			Proxy:               proxyfun,
+			Proxy:               proxyFun,
 			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		},
 		Timeout:   5 * time.Second,
 	}
 }
 
-func (slf *HttpClientModule) SetTimeOut(value time.Duration) {
-	slf.client.Timeout = value
+func (m *HttpClientModule) SetTimeOut(value time.Duration) {
+	m.client.Timeout = value
 }
 
-func (slf *HttpClientModule) SyncRequest(method string, url string, body []byte, header http.Header) SyncHttpRespone {
-	ret := SyncHttpRespone{
-		resp: make(chan HttpRespone, 1),
+func (m *HttpClientModule) SyncRequest(method string, url string, body []byte, header http.Header) SyncHttpResponse {
+	ret := SyncHttpResponse{
+		resp: make(chan HttpResponse, 1),
 	}
 	go func() {
-		rsp := slf.Request(method, url, body, header)
+		rsp := m.Request(method, url, body, header)
 		ret.resp <- rsp
 	}()
 	return ret
 }
 
-func (slf *HttpClientModule) Request(method string, url string, body []byte, header http.Header) HttpRespone {
-	if slf.client == nil {
+func (m *HttpClientModule) Request(method string, url string, body []byte, header http.Header) HttpResponse {
+	if m.client == nil {
 		panic("Call the init function first")
 	}
-	ret := HttpRespone{}
+	ret := HttpResponse{}
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		ret.Err = err
@@ -96,7 +96,7 @@ func (slf *HttpClientModule) Request(method string, url string, body []byte, hea
 	if header != nil {
 		req.Header = header
 	}
-	rsp, err := slf.client.Do(req)
+	rsp, err := m.client.Do(req)
 	if err != nil {
 		ret.Err = err
 		return ret

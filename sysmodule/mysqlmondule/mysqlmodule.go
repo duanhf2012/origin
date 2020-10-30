@@ -64,46 +64,46 @@ type DataSetList struct {
 }
 
 
-type dbcontrol interface {
+type dbControl interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	Query(query string, args ...interface{}) (*sql.Rows, error)
 }
 
 
-func (slf *MySQLModule) Init( url string, userName string, password string, dbname string,maxConn int) error {
-	slf.url = url
-	slf.username = userName
-	slf.password = password
-	slf.dbname = dbname
-	slf.pingCoroutine = PingExecute{tickerPing : time.NewTicker(5*time.Second), pintExit : make(chan bool, 1)}
+func (m *MySQLModule) Init( url string, userName string, password string, dbname string,maxConn int) error {
+	m.url = url
+	m.username = userName
+	m.password = password
+	m.dbname = dbname
+	m.pingCoroutine = PingExecute{tickerPing : time.NewTicker(5*time.Second), pintExit : make(chan bool, 1)}
 
-	return slf.connect(maxConn)
+	return m.connect(maxConn)
 }
 
-func (slf *MySQLModule) SetQuerySlowTime(slowDuration time.Duration) {
-	slf.slowDuration = slowDuration
+func (m *MySQLModule) SetQuerySlowTime(slowDuration time.Duration) {
+	m.slowDuration = slowDuration
 }
 
-func (slf *MySQLModule) Query(strQuery string, args ...interface{}) (*DataSetList, error) {
-	return query(slf.slowDuration,slf.db,strQuery,args...)
+func (m *MySQLModule) Query(strQuery string, args ...interface{}) (*DataSetList, error) {
+	return query(m.slowDuration, m.db,strQuery,args...)
 }
 
 // Exec ...
-func (slf *MySQLModule) Exec(strSql string, args ...interface{}) (*DBResult, error) {
-	return exec(slf.slowDuration,slf.db,strSql,args...)
+func (m *MySQLModule) Exec(strSql string, args ...interface{}) (*DBResult, error) {
+	return exec(m.slowDuration, m.db,strSql,args...)
 }
 
 // Begin starts a transaction.
-func (slf *MySQLModule) Begin() (*Tx, error) {
-	var txDBMoudule Tx
-	txdb, err := slf.db.Begin()
+func (m *MySQLModule) Begin() (*Tx, error) {
+	var txDBModule Tx
+	txDb, err := m.db.Begin()
 	if err != nil {
 		log.Error("Begin error:%s", err.Error())
-		return &txDBMoudule, err
+		return &txDBModule, err
 	}
-	txDBMoudule.slowDuration = slf.slowDuration
-	txDBMoudule.tx = txdb
-	return &txDBMoudule, nil
+	txDBModule.slowDuration = m.slowDuration
+	txDBModule.tx = txDb
+	return &txDBModule, nil
 }
 
 // Rollback aborts the transaction.
@@ -116,7 +116,6 @@ func (slf *Tx) Commit() error {
 	return slf.tx.Commit()
 }
 
-
 // QueryEx executes a query that return rows.
 func (slf *Tx) Query(strQuery string, args ...interface{}) (*DataSetList, error) {
 	return query(slf.slowDuration,slf.tx,strQuery,args...)
@@ -127,14 +126,13 @@ func (slf *Tx) Exec(strSql string, args ...interface{}) (*DBResult, error) {
 	return exec(slf.slowDuration,slf.tx,strSql,args...)
 }
 
-
 // Connect ...
-func (slf *MySQLModule) connect(maxConn int) error {
+func (m *MySQLModule) connect(maxConn int) error {
 	cmd := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&parseTime=true&loc=%s&readTimeout=30s&timeout=15s&writeTimeout=30s",
-		slf.username,
-		slf.password,
-		slf.url,
-		slf.dbname,
+		m.username,
+		m.password,
+		m.url,
+		m.dbname,
 		url.QueryEscape(time.Local.String()))
 
 	db, err := sql.Open("mysql", cmd)
@@ -146,25 +144,25 @@ func (slf *MySQLModule) connect(maxConn int) error {
 		db.Close()
 		return err
 	}
-	slf.db = db
+	m.db = db
 	db.SetMaxOpenConns(maxConn)
 	db.SetMaxIdleConns(maxConn)
 	db.SetConnMaxLifetime(time.Second * 90)
 
-	go slf.runPing()
+	go m.runPing()
 
 	return nil
 }
 
-func (slf *MySQLModule) runPing() {
+func (m *MySQLModule) runPing() {
 	for {
 		select {
-		case <-slf.pingCoroutine.pintExit:
-			log.Error("RunPing stopping %s...", fmt.Sprintf("%T", slf))
+		case <-m.pingCoroutine.pintExit:
+			log.Error("RunPing stopping %s...", fmt.Sprintf("%T", m))
 			return
-		case <-slf.pingCoroutine.tickerPing.C:
-			if slf.db != nil {
-				slf.db.Ping()
+		case <-m.pingCoroutine.tickerPing.C:
+			if m.db != nil {
+				m.db.Ping()
 			}
 		}
 	}
@@ -213,7 +211,6 @@ func  checkArgs(args ...interface{}) error {
 	return nil
 }
 
-
 func checkSlow(slowDuration time.Duration,Time time.Duration) bool {
 	if slowDuration != 0 && Time >=slowDuration {
 		return true
@@ -221,7 +218,7 @@ func checkSlow(slowDuration time.Duration,Time time.Duration) bool {
 	return false
 }
 
-func query(slowDuration time.Duration,db dbcontrol,strQuery string, args ...interface{}) (*DataSetList, error) {
+func query(slowDuration time.Duration,db dbControl,strQuery string, args ...interface{}) (*DataSetList, error) {
 	datasetList := DataSetList{}
 	datasetList.tag = "json"
 	datasetList.blur = true
@@ -294,7 +291,7 @@ func query(slowDuration time.Duration,db dbcontrol,strQuery string, args ...inte
 	return &datasetList, nil
 }
 
-func exec(slowDuration time.Duration,db dbcontrol,strSql string, args ...interface{}) (*DBResult, error) {
+func exec(slowDuration time.Duration,db dbControl,strSql string, args ...interface{}) (*DBResult, error) {
 	ret := &DBResult{}
 	if db == nil {
 		log.Error("cannot connect database:%s", strSql)
@@ -323,9 +320,9 @@ func exec(slowDuration time.Duration,db dbcontrol,strSql string, args ...interfa
 	return ret, nil
 }
 
-func (slf *DataSetList) UnMarshal(args ...interface{}) error {
-	if len(slf.dataSetList) != len(args) {
-		return errors.New(fmt.Sprintf("Data set len(%d,%d) is not equal to args!", len(slf.dataSetList), len(args)))
+func (ds *DataSetList) UnMarshal(args ...interface{}) error {
+	if len(ds.dataSetList) != len(args) {
+		return errors.New(fmt.Sprintf("Data set len(%d,%d) is not equal to args!", len(ds.dataSetList), len(args)))
 	}
 
 	for _, out := range args {
@@ -339,26 +336,26 @@ func (slf *DataSetList) UnMarshal(args ...interface{}) error {
 		}
 
 		if v.Elem().Kind() == reflect.Struct {
-			err := slf.rowData2interface(0, slf.dataSetList[slf.currentDataSetIdx].RowInfo, v)
+			err := ds.rowData2interface(0, ds.dataSetList[ds.currentDataSetIdx].RowInfo, v)
 			if err != nil {
 				return err
 			}
 		}
 		if v.Elem().Kind() == reflect.Slice {
-			err := slf.slice2interface(out)
+			err := ds.slice2interface(out)
 			if err != nil {
 				return err
 			}
 		}
 
-		slf.currentDataSetIdx = slf.currentDataSetIdx + 1
+		ds.currentDataSetIdx = ds.currentDataSetIdx + 1
 	}
 
 	return nil
 }
 
-func (slf *DataSetList) slice2interface(in interface{}) error {
-	length := slf.dataSetList[slf.currentDataSetIdx].rowNum
+func (ds *DataSetList) slice2interface(in interface{}) error {
+	length := ds.dataSetList[ds.currentDataSetIdx].rowNum
 	if length == 0 {
 		return nil
 	}
@@ -378,7 +375,7 @@ func (slf *DataSetList) slice2interface(in interface{}) error {
 			idxv = idxv.Addr()
 		}
 
-		err := slf.rowData2interface(i, slf.dataSetList[slf.currentDataSetIdx].RowInfo, idxv)
+		err := ds.rowData2interface(i, ds.dataSetList[ds.currentDataSetIdx].RowInfo, idxv)
 		if err != nil {
 			return err
 		}
@@ -387,7 +384,7 @@ func (slf *DataSetList) slice2interface(in interface{}) error {
 	return nil
 }
 
-func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}, v reflect.Value) error {
+func (ds *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}, v reflect.Value) error {
 	t := v.Type()
 	val := v.Elem()
 	typ := t.Elem()
@@ -399,7 +396,7 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 	for i := 0; i < val.NumField(); i++ {
 		value := val.Field(i)
 		kind := value.Kind()
-		tag := typ.Field(i).Tag.Get(slf.tag)
+		tag := typ.Field(i).Tag.Get(ds.tag)
 		if tag == "" {
 			tag = typ.Field(i).Name
 		}
@@ -408,7 +405,7 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 			vtag := strings.ToLower(tag)
 			columnData, ok := m[vtag]
 			if ok == false {
-				if !slf.blur {
+				if !ds.blur {
 					return fmt.Errorf("Cannot find filed name %s!", vtag)
 				}
 				continue
@@ -418,7 +415,7 @@ func (slf *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{}
 			}
 			meta := columnData[rowIdx].(*sql.NullString)
 			if !ok {
-				if !slf.blur {
+				if !ds.blur {
 					return fmt.Errorf("No corresponding field was found in the result set %s!", tag)
 				}
 				continue

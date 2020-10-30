@@ -90,7 +90,6 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 		}
 	}
 
-
 	// check len
 	if msgLen > p.maxMsgLen {
 		return nil, errors.New("message too long")
@@ -123,8 +122,7 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 	} else if msgLen < p.minMsgLen {
 		return errors.New("message too short")
 	}
-
-	//msgLen -= 2
+	
 	//msg := make([]byte, uint32(p.lenMsgLen)+msgLen)
 	msg := makeByteSlice(p.lenMsgLen+int(msgLen))
 	// write len

@@ -57,12 +57,8 @@ func (areaPool *memAreaPool) releaseByteSlice(byteBuff []byte) bool{
 		panic("assert!")
 		return false
 	}
-
+	
 	areaPool.pool[pos].Put(byteBuff)
-
-
-
-
 	return true
 }
 

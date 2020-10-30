@@ -15,7 +15,6 @@ func Init(chanCloseSig chan bool) {
 	}
 }
 
-
 func Setup(s IService) bool {
 	_,ok := mapServiceName[s.GetName()]
 	if ok == true {
@@ -26,15 +25,14 @@ func Setup(s IService) bool {
 	return true
 }
 
-func GetService(servicename string) IService {
-	s,ok := mapServiceName[servicename]
+func GetService(serviceName string) IService {
+	s,ok := mapServiceName[serviceName]
 	if ok == false {
 		return nil
 	}
 
 	return s
 }
-
 
 func Start(){
 	for _,s := range mapServiceName {
@@ -47,4 +45,3 @@ func WaitStop(){
 		s.Wait()
 	}
 }
-

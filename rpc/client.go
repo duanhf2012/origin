@@ -18,146 +18,146 @@ type Client struct {
 	network.TCPClient
 	conn *network.TCPConn
 
-	pendingLock sync.RWMutex
-	startSeq uint64
-	pending map[uint64]*list.Element
-	pendingTimer *list.List
-	callRpcTimerout time.Duration
+	pendingLock          sync.RWMutex
+	startSeq             uint64
+	pending              map[uint64]*list.Element
+	pendingTimer         *list.List
+	callRpcTimeout       time.Duration
 	maxCheckCallRpcCount int
 }
 
-func (slf *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
-	slf.conn = conn
-	slf.ResetPending()
+func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
+	client.conn = conn
+	client.ResetPending()
 
-	return slf
+	return client
 }
 
-func (slf *Client) Connect(addr string) error {
-	slf.Addr = addr
-	slf.maxCheckCallRpcCount = 100
-	slf.callRpcTimerout = 15*time.Second
-	slf.ConnNum = 1
-	slf.ConnectInterval = time.Second*2
-	slf.PendingWriteNum = 2000000
-	slf.AutoReconnect = true
-	slf.LenMsgLen = 2
-	slf.MinMsgLen = 2
-	slf.MaxMsgLen = math.MaxUint16
-	slf.NewAgent = slf.NewClientAgent
-	slf.LittleEndian = LittleEndian
-	slf.ResetPending()
-	go slf.startCheckRpcCallTimer()
+func (client *Client) Connect(addr string) error {
+	client.Addr = addr
+	client.maxCheckCallRpcCount = 100
+	client.callRpcTimeout = 15*time.Second
+	client.ConnNum = 1
+	client.ConnectInterval = time.Second*2
+	client.PendingWriteNum = 2000000
+	client.AutoReconnect = true
+	client.LenMsgLen = 2
+	client.MinMsgLen = 2
+	client.MaxMsgLen = math.MaxUint16
+	client.NewAgent = client.NewClientAgent
+	client.LittleEndian = LittleEndian
+	client.ResetPending()
+	go client.startCheckRpcCallTimer()
 	if addr == "" {
-		slf.bSelfNode = true
+		client.bSelfNode = true
 		return nil
 	}
 
-	slf.Start()
+	client.Start()
 	return nil
 }
 
-func (slf *Client) startCheckRpcCallTimer(){
+func (client *Client) startCheckRpcCallTimer(){
 	tick :=time.NewTicker( 3 * time.Second)
 
 	for{
 		select {
 			case <- tick.C:
-				slf.checkRpcCallTimerout()
+				client.checkRpcCallTimeout()
 		}
 	}
+
 	tick.Stop()
 }
 
-func (slf *Client) makeCallFail(call *Call){
+func (client *Client) makeCallFail(call *Call){
 	if call.callback!=nil && call.callback.IsValid() {
-		call.rpcHandler.(*RpcHandler).callResponeCallBack<-call
+		call.rpcHandler.(*RpcHandler).callResponseCallBack <-call
 	}else{
 		call.done <- call
 	}
-	slf.removePending(call.Seq)
+	client.removePending(call.Seq)
 }
 
-func (slf *Client) checkRpcCallTimerout(){
-	tnow := time.Now()
+func (client *Client) checkRpcCallTimeout(){
+	now := time.Now()
 
-	for i:=0;i<slf.maxCheckCallRpcCount;i++ {
-		slf.pendingLock.Lock()
-		pElem := slf.pendingTimer.Front()
+	for i:=0;i< client.maxCheckCallRpcCount;i++ {
+		client.pendingLock.Lock()
+		pElem := client.pendingTimer.Front()
 		if pElem == nil {
-			slf.pendingLock.Unlock()
+			client.pendingLock.Unlock()
 			break
 		}
 		pCall := pElem.Value.(*Call)
-		if tnow.Sub(pCall.calltime) > slf.callRpcTimerout {
-			pCall.Err = fmt.Errorf("RPC call takes more than %d seconds!",slf.callRpcTimerout/time.Second)
-			slf.makeCallFail(pCall)
-			slf.pendingLock.Unlock()
+		if now.Sub(pCall.callTime) > client.callRpcTimeout {
+			pCall.Err = fmt.Errorf("RPC call takes more than %d seconds!", client.callRpcTimeout/time.Second)
+			client.makeCallFail(pCall)
+			client.pendingLock.Unlock()
 			continue
 		}
-		slf.pendingLock.Unlock()
+		client.pendingLock.Unlock()
 	}
 }
 
-func (slf *Client) ResetPending(){
-	slf.pendingLock.Lock()
-	if slf.pending != nil {
-		for _,v := range slf.pending {
+func (client *Client) ResetPending(){
+	client.pendingLock.Lock()
+	if client.pending != nil {
+		for _,v := range client.pending {
 			v.Value.(*Call).Err = fmt.Errorf("node is disconnect.")
 			v.Value.(*Call).done <- v.Value.(*Call)
 		}
 	}
 
-	slf.pending = map[uint64]*list.Element{}
-	slf.pendingTimer = list.New()
-	slf.pendingLock.Unlock()
+	client.pending = map[uint64]*list.Element{}
+	client.pendingTimer = list.New()
+	client.pendingLock.Unlock()
 }
 
-func (slf *Client) AddPending(call *Call){
-	slf.pendingLock.Lock()
-	call.calltime = time.Now()
-	elemTimer := slf.pendingTimer.PushBack(call)
-	slf.pending[call.Seq] = elemTimer//如果下面发送失败，将会一一直存在这里
-	slf.pendingLock.Unlock()
+func (client *Client) AddPending(call *Call){
+	client.pendingLock.Lock()
+	call.callTime = time.Now()
+	elemTimer := client.pendingTimer.PushBack(call)
+	client.pending[call.Seq] = elemTimer //如果下面发送失败，将会一一直存在这里
+	client.pendingLock.Unlock()
 }
 
-func (slf *Client) RemovePending(seq uint64)  *Call{
-	slf.pendingLock.Lock()
-	call := slf.removePending(seq)
-	slf.pendingLock.Unlock()
+func (client *Client) RemovePending(seq uint64)  *Call{
+	client.pendingLock.Lock()
+	call := client.removePending(seq)
+	client.pendingLock.Unlock()
 	return call
 }
 
-func (slf *Client) removePending(seq uint64) *Call{
-	v,ok := slf.pending[seq]
+func (client *Client) removePending(seq uint64) *Call{
+	v,ok := client.pending[seq]
 	if ok == false{
 		return nil
 	}
-	slf.pendingTimer.Remove(v)
-	delete(slf.pending,seq)
+	client.pendingTimer.Remove(v)
+	delete(client.pending,seq)
 	return v.Value.(*Call)
 }
 
-
-func (slf *Client) FindPending(seq uint64) *Call{
-	slf.pendingLock.Lock()
-	v,ok := slf.pending[seq]
+func (client *Client) FindPending(seq uint64) *Call{
+	client.pendingLock.Lock()
+	v,ok := client.pending[seq]
 	if ok == false {
-		slf.pendingLock.Unlock()
+		client.pendingLock.Unlock()
 		return nil
 	}
 
 	pCall := v.Value.(*Call)
-	slf.pendingLock.Unlock()
+	client.pendingLock.Unlock()
 
 	return pCall
 }
 
-func (slf *Client) generateSeq() uint64{
-	return atomic.AddUint64(&slf.startSeq,1)
+func (client *Client) generateSeq() uint64{
+	return atomic.AddUint64(&client.startSeq,1)
 }
 
-func (slf *Client) AsycCall(rpcHandler IRpcHandler,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
+func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
 	call := MakeCall()
 	call.Reply = replyParam
 	call.callback = &callback
@@ -173,69 +173,69 @@ func (slf *Client) AsycCall(rpcHandler IRpcHandler,serviceMethod string,callback
 
 	request := &RpcRequest{}
 	call.Arg = args
-	call.Seq = slf.generateSeq()
-	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,false,InParam,nil)
-	slf.AddPending(call)
+	call.Seq = client.generateSeq()
+	request.RpcRequestData = processor.MakeRpcRequest(client.startSeq,serviceMethod,false,InParam,nil)
+	client.AddPending(call)
 
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	processor.ReleaseRpcRequest(request.RpcRequestData)
 	if err != nil {
-		slf.RemovePending(call.Seq)
+		client.RemovePending(call.Seq)
 		ReleaseCall(call)
 		return err
 	}
 
-	if slf.conn == nil {
-		slf.RemovePending(call.Seq)
+	if client.conn == nil {
+		client.RemovePending(call.Seq)
 		ReleaseCall(call)
 		return fmt.Errorf("Rpc server is disconnect,call %s is fail!",serviceMethod)
 	}
 
-	err = slf.conn.WriteMsg([]byte{uint8(processorType)},bytes)
+	err = client.conn.WriteMsg([]byte{uint8(processorType)},bytes)
 	if err != nil {
-		slf.RemovePending(call.Seq)
+		client.RemovePending(call.Seq)
 		ReleaseCall(call)
 	}
 
 	return err
 }
 
-func (slf *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod string,args []byte,additionParam interface{},reply interface{}) *Call {
+func (client *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod string,args []byte,additionParam interface{},reply interface{}) *Call {
 	call := MakeCall()
 	call.ServiceMethod = serviceMethod
 	call.Reply = reply
 
 	request := &RpcRequest{}
 	call.Arg = args
-	call.Seq = slf.generateSeq()
+	call.Seq = client.generateSeq()
 	if noReply == false {
-		slf.AddPending(call)
+		client.AddPending(call)
 	}
-	request.RpcRequestData = processor.MakeRpcRequest(slf.startSeq,serviceMethod,noReply,args,additionParam)
+	request.RpcRequestData = processor.MakeRpcRequest(client.startSeq,serviceMethod,noReply,args,additionParam)
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	processor.ReleaseRpcRequest(request.RpcRequestData)
 	if err != nil {
 		call.Err = err
-		slf.RemovePending(call.Seq)
+		client.RemovePending(call.Seq)
 		return call
 	}
 
-	if slf.conn == nil {
+	if client.conn == nil {
 		call.Err = fmt.Errorf("call %s is fail,rpc client is disconnect.",serviceMethod)
-		slf.RemovePending(call.Seq)
+		client.RemovePending(call.Seq)
 		return call
 	}
 
-	err = slf.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())},bytes)
+	err = client.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())},bytes)
 	if err != nil {
-		slf.RemovePending(call.Seq)
+		client.RemovePending(call.Seq)
 		call.Err = err
 	}
 
 	return call
 }
 
-func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply interface{}) *Call {
+func (client *Client) Go(noReply bool,serviceMethod string, args interface{},reply interface{}) *Call {
 	_,processor := GetProcessorType(args)
 	InParam,err := processor.Marshal(args)
 	if err != nil {
@@ -243,10 +243,10 @@ func (slf *Client) Go(noReply bool,serviceMethod string, args interface{},reply 
 		call.Err = err
 	}
 
-	return slf.RawGo(processor,noReply,serviceMethod,InParam,nil,reply)
+	return client.RawGo(processor,noReply,serviceMethod,InParam,nil,reply)
 }
 
-func (slf *Client) Run(){
+func (client *Client) Run(){
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -257,62 +257,62 @@ func (slf *Client) Run(){
 	}()
 
 	for {
-		bytes,err := slf.conn.ReadMsg()
+		bytes,err := client.conn.ReadMsg()
 		if err != nil {
-			log.Error("rpcClient %s ReadMsg error:%+v",slf.Addr,err)
+			log.Error("rpcClient %s ReadMsg error:%+v", client.Addr,err)
 			return
 		}
 
 		processor := GetProcessor(uint8(bytes[0]))
 		if processor==nil {
-			slf.conn.ReleaseReadMsg(bytes)
-			log.Error("rpcClient %s ReadMsg head error:%+v",slf.Addr,err)
+			client.conn.ReleaseReadMsg(bytes)
+			log.Error("rpcClient %s ReadMsg head error:%+v", client.Addr,err)
 			return
 		}
 
 		//1.解析head
 		respone := &RpcResponse{}
-		respone.RpcResponeData =processor.MakeRpcResponse(0,nil,nil)
+		respone.RpcResponseData =processor.MakeRpcResponse(0,nil,nil)
 
-		err = processor.Unmarshal(bytes[1:],respone.RpcResponeData)
-		slf.conn.ReleaseReadMsg(bytes)
+		err = processor.Unmarshal(bytes[1:],respone.RpcResponseData)
+		client.conn.ReleaseReadMsg(bytes)
 		if err != nil {
-			processor.ReleaseRpcRespose(respone.RpcResponeData)
+			processor.ReleaseRpcRespose(respone.RpcResponseData)
 			log.Error("rpcClient Unmarshal head error,error:%+v",err)
 			continue
 		}
 
-		v := slf.RemovePending(respone.RpcResponeData.GetSeq())
+		v := client.RemovePending(respone.RpcResponseData.GetSeq())
 		if v == nil {
-			log.Error("rpcClient cannot find seq %d in pending",respone.RpcResponeData.GetSeq())
+			log.Error("rpcClient cannot find seq %d in pending",respone.RpcResponseData.GetSeq())
 		}else  {
 			v.Err = nil
-			if len(respone.RpcResponeData.GetReply()) >0 {
-				err = processor.Unmarshal(respone.RpcResponeData.GetReply(),v.Reply)
+			if len(respone.RpcResponseData.GetReply()) >0 {
+				err = processor.Unmarshal(respone.RpcResponseData.GetReply(),v.Reply)
 				if err != nil {
 					log.Error("rpcClient Unmarshal body error,error:%+v",err)
 					v.Err = err
 				}
 			}
 
-			if respone.RpcResponeData.GetErr() != nil {
-				v.Err= respone.RpcResponeData.GetErr()
+			if respone.RpcResponseData.GetErr() != nil {
+				v.Err= respone.RpcResponseData.GetErr()
 			}
 
 			if v.callback!=nil && v.callback.IsValid() {
-				 v.rpcHandler.(*RpcHandler).callResponeCallBack<-v
+				 v.rpcHandler.(*RpcHandler).callResponseCallBack <-v
 			}else{
 				v.done <- v
 			}
 		}
 
-		processor.ReleaseRpcRespose(respone.RpcResponeData)
+		processor.ReleaseRpcRespose(respone.RpcResponseData)
 	}
 }
 
-func (slf *Client) OnClose(){
+func (client *Client) OnClose(){
 }
 
-func (slf *Client) IsConnected() bool {
-	return slf.conn!=nil && slf.conn.IsConnected()==true
+func (client *Client) IsConnected() bool {
+	return client.conn!=nil && client.conn.IsConnected()==true
 }

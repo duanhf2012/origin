@@ -17,7 +17,7 @@ type WSService struct {
 	mapClientLocker sync.RWMutex
 	mapClient       map[uint64] *WSClient
 	initClientId    uint64
-	process         processor.Processor
+	process         processor.IProcessor
 }
 
 type WSPackType int8
@@ -28,55 +28,59 @@ const(
 	WPT_UnknownPack WSPackType = 3
 )
 
-type WSPack struct {
-	Type         WSPackType //0表示连接 1表示断开 2表示数据
-	MsgProcessor processor.Processor
-	ClientId     uint64
-	Data         interface{}
-}
-
-
 const Default_WS_MaxConnNum = 3000
 const Default_WS_PendingWriteNum = 10000
 const Default_WS_MaxMsgLen = 65535
 
+type WSClient struct {
+	id uint64
+	wsConn *network.WSConn
+	wsService *WSService
+}
 
-func (slf *WSService) OnInit() error{
-	iConfig := slf.GetServiceCfg()
+type WSPack struct {
+	Type         WSPackType //0表示连接 1表示断开 2表示数据
+	MsgProcessor processor.IProcessor
+	ClientId     uint64
+	Data         interface{}
+}
+
+func (ws *WSService) OnInit() error{
+	iConfig := ws.GetServiceCfg()
 	if iConfig == nil {
-		return fmt.Errorf("%s service config is error!",slf.GetName())
+		return fmt.Errorf("%s service config is error!", ws.GetName())
 	}
 	wsCfg := iConfig.(map[string]interface{})
 	addr,ok := wsCfg["ListenAddr"]
 	if ok == false {
-		return fmt.Errorf("%s service config is error!",slf.GetName())
+		return fmt.Errorf("%s service config is error!", ws.GetName())
 	}
 
-	slf.wsServer.Addr = addr.(string)
-	slf.wsServer.MaxConnNum = Default_WS_MaxConnNum
-	slf.wsServer.PendingWriteNum = Default_WS_PendingWriteNum
-	slf.wsServer.MaxMsgLen = Default_WS_MaxMsgLen
+	ws.wsServer.Addr = addr.(string)
+	ws.wsServer.MaxConnNum = Default_WS_MaxConnNum
+	ws.wsServer.PendingWriteNum = Default_WS_PendingWriteNum
+	ws.wsServer.MaxMsgLen = Default_WS_MaxMsgLen
 	MaxConnNum,ok := wsCfg["MaxConnNum"]
 	if ok == true {
-		slf.wsServer.MaxConnNum = int(MaxConnNum.(float64))
+		ws.wsServer.MaxConnNum = int(MaxConnNum.(float64))
 	}
 	PendingWriteNum,ok := wsCfg["PendingWriteNum"]
 	if ok == true {
-		slf.wsServer.PendingWriteNum = int(PendingWriteNum.(float64))
+		ws.wsServer.PendingWriteNum = int(PendingWriteNum.(float64))
 	}
 
 	MaxMsgLen,ok := wsCfg["MaxMsgLen"]
 	if ok == true {
-		slf.wsServer.MaxMsgLen = uint32(MaxMsgLen.(float64))
+		ws.wsServer.MaxMsgLen = uint32(MaxMsgLen.(float64))
 	}
 
-	slf.mapClient = make( map[uint64] *WSClient,slf.wsServer.MaxConnNum)
-	slf.wsServer.NewAgent =slf.NewWSClient
-	slf.wsServer.Start()
+	ws.mapClient = make( map[uint64] *WSClient, ws.wsServer.MaxConnNum)
+	ws.wsServer.NewAgent = ws.NewWSClient
+	ws.wsServer.Start()
 	return nil
 }
 
-func (slf *WSService) WSEventHandler(ev *event.Event) {
+func (ws *WSService) WSEventHandler(ev *event.Event) {
 	pack := ev.Data.(*WSPack)
 	switch pack.Type {
 	case WPT_Connected:
@@ -90,35 +94,29 @@ func (slf *WSService) WSEventHandler(ev *event.Event) {
 	}
 }
 
-func (slf *WSService) SetProcessor(process processor.Processor,handler event.IEventHandler){
-	slf.process = process
-	slf.RegEventReciverFunc(event.Sys_Event_WebSocket,handler,slf.WSEventHandler)
+func (ws *WSService) SetProcessor(process processor.IProcessor,handler event.IEventHandler){
+	ws.process = process
+	ws.RegEventReceiverFunc(event.Sys_Event_WebSocket,handler, ws.WSEventHandler)
 }
 
-func (slf *WSService) NewWSClient(conn *network.WSConn) network.Agent {
-	slf.mapClientLocker.Lock()
-	defer slf.mapClientLocker.Unlock()
+func (ws *WSService) NewWSClient(conn *network.WSConn) network.Agent {
+	ws.mapClientLocker.Lock()
+	defer ws.mapClientLocker.Unlock()
 
 	for {
-		slf.initClientId+=1
-		_,ok := slf.mapClient[slf.initClientId]
+		ws.initClientId+=1
+		_,ok := ws.mapClient[ws.initClientId]
 		if ok == true {
 			continue
 		}
 
-		pClient := &WSClient{wsConn:conn, id:slf.initClientId}
-		pClient.wsService = slf
-		slf.mapClient[slf.initClientId] = pClient
+		pClient := &WSClient{wsConn:conn, id: ws.initClientId}
+		pClient.wsService = ws
+		ws.mapClient[ws.initClientId] = pClient
 		return pClient
 	}
 
 	return nil
-}
-
-type WSClient struct {
-	id uint64
-	wsConn *network.WSConn
-	wsService *WSService
 }
 
 func (slf *WSClient) GetId() uint64 {
@@ -149,27 +147,27 @@ func (slf *WSClient) OnClose(){
 	delete (slf.wsService.mapClient,slf.GetId())
 }
 
-func (slf *WSService) SendMsg(clientid uint64,msg interface{}) error{
-	slf.mapClientLocker.Lock()
-	client,ok := slf.mapClient[clientid]
+func (ws *WSService) SendMsg(clientid uint64,msg interface{}) error{
+	ws.mapClientLocker.Lock()
+	client,ok := ws.mapClient[clientid]
 	if ok == false{
-		slf.mapClientLocker.Unlock()
+		ws.mapClientLocker.Unlock()
 		return fmt.Errorf("client %d is disconnect!",clientid)
 	}
 
-	slf.mapClientLocker.Unlock()
-	bytes,err := slf.process.Marshal(msg)
+	ws.mapClientLocker.Unlock()
+	bytes,err := ws.process.Marshal(msg)
 	if err != nil {
 		return err
 	}
 	return client.wsConn.WriteMsg(bytes)
 }
 
-func (slf *WSService) Close(clientid uint64) {
-	slf.mapClientLocker.Lock()
-	defer slf.mapClientLocker.Unlock()
+func (ws *WSService) Close(clientid uint64) {
+	ws.mapClientLocker.Lock()
+	defer ws.mapClientLocker.Unlock()
 
-	client,ok := slf.mapClient[clientid]
+	client,ok := ws.mapClient[clientid]
 	if ok == false{
 		return
 	}

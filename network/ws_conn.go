@@ -133,6 +133,5 @@ func (wsConn *WSConn) WriteMsg(args ...[]byte) error {
 	}
 
 	wsConn.doWrite(msg)
-
 	return nil
 }

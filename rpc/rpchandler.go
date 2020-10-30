@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 )
 
-type FuncRpcClient func(nodeid int,serviceMethod string,client *[]*Client) error
+type FuncRpcClient func(nodeId int,serviceMethod string,client *[]*Client) error
 type FuncRpcServer func() (*Server)
 var NilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
@@ -35,42 +35,40 @@ func ConvertError(e error) *RpcError{
 
 func Errorf(format string, a ...interface{}) *RpcError {
 	rpcErr := RpcError(fmt.Sprintf(format,a...))
+
 	return &rpcErr
 }
 
-
 type RpcMethodInfo struct {
 	method reflect.Method
-	iparam reflect.Value
-	iInParam interface{}
-	oParam reflect.Value
-	iOutParam interface{}
+	inParamValue reflect.Value
+	inParam interface{}
+	outParamValue reflect.Value
 	additionParam reflect.Value
-	//addition *IRawAdditionParam
-	hashAdditionParam bool
+	hasAdditionParam bool
 	rpcProcessorType RpcProcessorType
 }
 
 type RpcHandler struct {
-	callRequest chan *RpcRequest
-	rpcHandler IRpcHandler
-	mapfunctons map[string]RpcMethodInfo
+	callRequest   chan *RpcRequest
+	rpcHandler    IRpcHandler
+	mapFunctions  map[string]RpcMethodInfo
 	funcRpcClient FuncRpcClient
 	funcRpcServer FuncRpcServer
 
-	callResponeCallBack chan *Call //异步返回的回调
+	callResponseCallBack chan *Call //异步返回的回调
 }
 
 type IRpcHandler interface {
 	GetName() string
 	InitRpcHandler(rpcHandler IRpcHandler,getClientFun FuncRpcClient,getServerFun FuncRpcServer)
 	GetRpcHandler() IRpcHandler
-	PushRequest(callinfo *RpcRequest) error
+	PushRequest(callInfo *RpcRequest) error
 	HandlerRpcRequest(request *RpcRequest)
-	HandlerRpcResponeCB(call *Call)
+	HandlerRpcResponseCB(call *Call)
 
 	GetRpcRequestChan() chan *RpcRequest
-	GetRpcResponeChan() chan *Call
+	GetRpcResponseChan() chan *Call
 	CallMethod(ServiceMethod string,param interface{},reply interface{}) error
 	
 	AsyncCall(serviceMethod string,args interface{},callback interface{}) error
@@ -88,20 +86,20 @@ var rawAdditionParamValueNull reflect.Value
 func init(){
 	rawAdditionParamValueNull = reflect.ValueOf(&RawAdditionParamNull{})
 }
-func (slf *RpcHandler) GetRpcHandler() IRpcHandler{
-	return slf.rpcHandler
+func (handler *RpcHandler) GetRpcHandler() IRpcHandler{
+	return handler.rpcHandler
 }
 
-func (slf *RpcHandler) InitRpcHandler(rpcHandler IRpcHandler,getClientFun FuncRpcClient,getServerFun FuncRpcServer) {
-	slf.callRequest = make(chan *RpcRequest,1000000)
-	slf.callResponeCallBack = make(chan *Call,1000000)
+func (handler *RpcHandler) InitRpcHandler(rpcHandler IRpcHandler,getClientFun FuncRpcClient,getServerFun FuncRpcServer) {
+	handler.callRequest = make(chan *RpcRequest,1000000)
+	handler.callResponseCallBack = make(chan *Call,1000000)
 
-	slf.rpcHandler = rpcHandler
-	slf.mapfunctons = map[string]RpcMethodInfo{}
-	slf.funcRpcClient = getClientFun
-	slf.funcRpcServer = getServerFun
+	handler.rpcHandler = rpcHandler
+	handler.mapFunctions = map[string]RpcMethodInfo{}
+	handler.funcRpcClient = getClientFun
+	handler.funcRpcServer = getServerFun
 
-	slf.RegisterRpc(rpcHandler)
+	handler.RegisterRpc(rpcHandler)
 }
 
 // Is this an exported - upper case - name?
@@ -111,7 +109,7 @@ func isExported(name string) bool {
 }
 
 // Is this type exported or a builtin?
-func (slf *RpcHandler) isExportedOrBuiltinType(t reflect.Type) bool {
+func (handler *RpcHandler) isExportedOrBuiltinType(t reflect.Type) bool {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
@@ -120,8 +118,7 @@ func (slf *RpcHandler) isExportedOrBuiltinType(t reflect.Type) bool {
 	return isExported(t.Name()) || t.PkgPath() == ""
 }
 
-
-func (slf *RpcHandler) suitableMethods(method reflect.Method) error {
+func (handler *RpcHandler) suitableMethods(method reflect.Method) error {
 	//只有RPC_开头的才能被调用
 	if strings.Index(method.Name,"RPC_")!=0 {
 		return nil
@@ -146,35 +143,35 @@ func (slf *RpcHandler) suitableMethods(method reflect.Method) error {
 	var parIdx int = 1
 	if typ.In(parIdx).String() == "rpc.IRawAdditionParam" {
 		parIdx += 1
-		rpcMethodInfo.hashAdditionParam = true
+		rpcMethodInfo.hasAdditionParam = true
 	}
 
 	for i:= parIdx ;i<typ.NumIn();i++{
-		if slf.isExportedOrBuiltinType(typ.In(i)) == false {
+		if handler.isExportedOrBuiltinType(typ.In(i)) == false {
 			return fmt.Errorf("%s Unsupported parameter types!",method.Name)
 		}
 	}
 
-	rpcMethodInfo.iparam = reflect.New(typ.In(parIdx).Elem()) //append(rpcMethodInfo.iparam,)
-	rpcMethodInfo.iInParam  = reflect.New(typ.In(parIdx).Elem()).Interface()
-	pt,_ := GetProcessorType(rpcMethodInfo.iparam.Interface())
+	rpcMethodInfo.inParamValue = reflect.New(typ.In(parIdx).Elem()) //append(rpcMethodInfo.iparam,)
+	rpcMethodInfo.inParam  = reflect.New(typ.In(parIdx).Elem()).Interface()
+	pt,_ := GetProcessorType(rpcMethodInfo.inParamValue.Interface())
 	rpcMethodInfo.rpcProcessorType = pt
 
 	parIdx++
 	if parIdx< typ.NumIn() {
-		rpcMethodInfo.oParam = reflect.New(typ.In(parIdx).Elem())
+		rpcMethodInfo.outParamValue = reflect.New(typ.In(parIdx).Elem())
 	}
 
 	rpcMethodInfo.method = method
-	slf.mapfunctons[slf.rpcHandler.GetName()+"."+method.Name] = rpcMethodInfo
+	handler.mapFunctions[handler.rpcHandler.GetName()+"."+method.Name] = rpcMethodInfo
 	return nil
 }
 
-func  (slf *RpcHandler) RegisterRpc(rpcHandler IRpcHandler) error {
+func  (handler *RpcHandler) RegisterRpc(rpcHandler IRpcHandler) error {
 	typ := reflect.TypeOf(rpcHandler)
 	for m:=0;m<typ.NumMethod();m++{
 		method := typ.Method(m)
-		err := slf.suitableMethods(method)
+		err := handler.suitableMethods(method)
 		if err != nil {
 			panic(err)
 		}
@@ -183,24 +180,24 @@ func  (slf *RpcHandler) RegisterRpc(rpcHandler IRpcHandler) error {
 	return nil
 }
 
-func (slf *RpcHandler) PushRequest(req *RpcRequest) error{
-	if len(slf.callRequest) >= cap(slf.callRequest){
-		return fmt.Errorf("RpcHandler %s Rpc Channel is full.",slf.GetName())
+func (handler *RpcHandler) PushRequest(req *RpcRequest) error{
+	if len(handler.callRequest) >= cap(handler.callRequest){
+		return fmt.Errorf("RpcHandler %s Rpc Channel is full.", handler.GetName())
 	}
 
-	slf.callRequest <- req
+	handler.callRequest <- req
 	return nil
 }
 
-func (slf *RpcHandler) GetRpcRequestChan() (chan *RpcRequest) {
-	return slf.callRequest
+func (handler *RpcHandler) GetRpcRequestChan() (chan *RpcRequest) {
+	return handler.callRequest
 }
 
-func (slf *RpcHandler) GetRpcResponeChan() chan *Call{
-	return slf.callResponeCallBack
+func (handler *RpcHandler) GetRpcResponseChan() chan *Call{
+	return handler.callResponseCallBack
 }
 
-func (slf *RpcHandler) HandlerRpcResponeCB(call *Call){
+func (handler *RpcHandler) HandlerRpcResponseCB(call *Call){
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -218,8 +215,7 @@ func (slf *RpcHandler) HandlerRpcResponeCB(call *Call){
 	ReleaseCall(call)
 }
 
-
-func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
+func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	defer func() {
 		if r := recover(); r != nil {
 				buf := make([]byte, 4096)
@@ -235,9 +231,9 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	defer ReleaseRpcRequest(request)
 	defer request.rpcProcessor.ReleaseRpcRequest(request.RpcRequestData)
 
-	v,ok := slf.mapfunctons[request.RpcRequestData.GetServiceMethod()]
+	v,ok := handler.mapFunctions[request.RpcRequestData.GetServiceMethod()]
 	if ok == false {
-		err := Errorf("RpcHandler %s cannot find %s",slf.rpcHandler.GetName(),request.RpcRequestData.GetServiceMethod())
+		err := Errorf("RpcHandler %s cannot find %s", handler.rpcHandler.GetName(),request.RpcRequestData.GetServiceMethod())
 		log.Error("%s",err.Error())
 		if request.requestHandle!=nil {
 			request.requestHandle(nil,err)
@@ -249,10 +245,10 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	var err error
 	var iParam interface{}
 	//单协程下减少gc
-	if slf.IsSingleCoroutine(){
-		iParam = v.iInParam
+	if handler.IsSingleCoroutine(){
+		iParam = v.inParam
 	}else{
-		iParam = reflect.New(v.iparam.Type().Elem()).Interface()
+		iParam = reflect.New(v.inParamValue.Type().Elem()).Interface()
 	}
 
 	if request.bLocalRequest == false {
@@ -269,10 +265,10 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		if request.localRawParam!=nil {
 			err = request.rpcProcessor.Unmarshal(request.localRawParam,iParam)
 			if err!=nil {
-				rerr := Errorf("Call Rpc %s Param error %+v",request.RpcRequestData.GetServiceMethod(),err)
-				log.Error("%s",rerr.Error())
+				rErr := Errorf("Call Rpc %s Param error %+v",request.RpcRequestData.GetServiceMethod(),err)
+				log.Error("%s", rErr.Error())
 				if request.requestHandle!=nil {
-					request.requestHandle(nil, rerr)
+					request.requestHandle(nil, rErr)
 				}
 				return
 			}
@@ -281,9 +277,9 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}
 
-	paramList = append(paramList,reflect.ValueOf(slf.GetRpcHandler())) //接受者
+	paramList = append(paramList,reflect.ValueOf(handler.GetRpcHandler())) //接受者
 	additionParams := request.RpcRequestData.GetAdditionParams()
-	if v.hashAdditionParam == true{
+	if v.hasAdditionParam == true{
 		if additionParams!=nil && additionParams.GetParamValue()!=nil{
 			additionVal := reflect.ValueOf(additionParams)
 			paramList = append(paramList,additionVal)
@@ -294,19 +290,19 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 
 	paramList = append(paramList,reflect.ValueOf(iParam))
 	var oParam reflect.Value
-	if v.oParam.IsValid() {
+	if v.outParamValue.IsValid() {
 		if request.localReply!=nil {
 			oParam = reflect.ValueOf(request.localReply) //输出参数
-		}else if slf.IsSingleCoroutine()==true{
-			oParam = v.oParam
+		}else if handler.IsSingleCoroutine()==true{
+			oParam = v.outParamValue
 		}else{
-			oParam = reflect.New(v.oParam.Type().Elem())
+			oParam = reflect.New(v.outParamValue.Type().Elem())
 		}
 		paramList = append(paramList,oParam) //输出参数
-	}else if(request.requestHandle!=nil){ //调用方有返回值，但被调用函数没有返回参数
-		rerr := Errorf("Call Rpc %s without return parameter!",request.RpcRequestData.GetServiceMethod())
-		log.Error("%s",rerr.Error())
-		request.requestHandle(nil, rerr)
+	}else if(request.requestHandle != nil){ //调用方有返回值，但被调用函数没有返回参数
+		rErr := Errorf("Call Rpc %s without return parameter!",request.RpcRequestData.GetServiceMethod())
+		log.Error("%s",rErr.Error())
+		request.requestHandle(nil, rErr)
 		return
 	}
 	returnValues := v.method.Func.Call(paramList)
@@ -320,18 +316,18 @@ func (slf *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	}
 }
 
-func (slf *RpcHandler) CallMethod(ServiceMethod string,param interface{},reply interface{}) error{
+func (handler *RpcHandler) CallMethod(ServiceMethod string,param interface{},reply interface{}) error{
 	var err error
-	v,ok := slf.mapfunctons[ServiceMethod]
+	v,ok := handler.mapFunctions[ServiceMethod]
 	if ok == false {
-		err = fmt.Errorf("RpcHandler %s cannot find %s",slf.rpcHandler.GetName(),ServiceMethod)
+		err = fmt.Errorf("RpcHandler %s cannot find %s", handler.rpcHandler.GetName(),ServiceMethod)
 		log.Error("%s",err.Error())
 
 		return err
 	}
 
 	var paramList []reflect.Value
-	paramList = append(paramList,reflect.ValueOf(slf.GetRpcHandler())) //接受者
+	paramList = append(paramList,reflect.ValueOf(handler.GetRpcHandler())) //接受者
 	paramList = append(paramList,reflect.ValueOf(param))
 	paramList = append(paramList,reflect.ValueOf(reply)) //输出参数
 
@@ -344,9 +340,9 @@ func (slf *RpcHandler) CallMethod(ServiceMethod string,param interface{},reply i
 	return err
 }
 
-func (slf *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,serviceMethod string,args interface{}) error {
+func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,serviceMethod string,args interface{}) error {
 	var pClientList []*Client
-	err := slf.funcRpcClient(nodeId,serviceMethod,&pClientList)
+	err := handler.funcRpcClient(nodeId,serviceMethod,&pClientList)
 	if err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
@@ -360,19 +356,19 @@ func (slf *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,servi
 	//如果调用本结点服务
 	for _,pClient := range pClientList {
 		if pClient.bSelfNode == true {
-			pLocalRpcServer:=slf.funcRpcServer()
+			pLocalRpcServer:= handler.funcRpcServer()
 			//判断是否是同一服务
 			sMethod := strings.Split(serviceMethod,".")
 			if len(sMethod)!=2 {
-				serr := fmt.Errorf("Call serviceMethod %s is error!",serviceMethod)
-				log.Error("%+v",serr)
-				if serr!= nil {
-					err = serr
+				sErr := fmt.Errorf("Call serviceMethod %s is error!",serviceMethod)
+				log.Error("%+v", sErr)
+				if sErr != nil {
+					err = sErr
 				}
 				continue
 			}
 			//调用自己rpcHandler处理器
-			if sMethod[0] == slf.rpcHandler.GetName() { //自己服务调用
+			if sMethod[0] == handler.rpcHandler.GetName() { //自己服务调用
 				//
 				return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,nil)
 			}
@@ -396,11 +392,9 @@ func (slf *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,servi
 	return err
 }
 
-
-
-func (slf *RpcHandler) rawGoRpc(processor IRpcProcessor,bCast bool,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
+func (handler *RpcHandler) rawGoRpc(processor IRpcProcessor,bCast bool,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
 	var pClientList []*Client
-	err := slf.funcRpcClient(nodeId,serviceMethod,&pClientList)
+	err := handler.funcRpcClient(nodeId,serviceMethod,&pClientList)
 	if err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
@@ -414,7 +408,7 @@ func (slf *RpcHandler) rawGoRpc(processor IRpcProcessor,bCast bool,nodeId int,se
 	//如果调用本结点服务
 	for _,pClient := range pClientList {
 		if pClient.bSelfNode == true {
-			pLocalRpcServer:=slf.funcRpcServer()
+			pLocalRpcServer:= handler.funcRpcServer()
 			//判断是否是同一服务
 			sMethod := strings.Split(serviceMethod,".")
 			if len(sMethod)!=2 {
@@ -426,7 +420,7 @@ func (slf *RpcHandler) rawGoRpc(processor IRpcProcessor,bCast bool,nodeId int,se
 				continue
 			}
 			//调用自己rpcHandler处理器
-			if sMethod[0] == slf.rpcHandler.GetName() { //自己服务调用
+			if sMethod[0] == handler.rpcHandler.GetName() { //自己服务调用
 				//
 				return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,nil)
 			}
@@ -451,9 +445,9 @@ func (slf *RpcHandler) rawGoRpc(processor IRpcProcessor,bCast bool,nodeId int,se
 }
 
 
-func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
+func (handler *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
 	var pClientList []*Client
-	err := slf.funcRpcClient(nodeId,serviceMethod,&pClientList)
+	err := handler.funcRpcClient(nodeId,serviceMethod,&pClientList)
 	if err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
@@ -467,7 +461,7 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 	//如果调用本结点服务
 	pClient := pClientList[0]
 	if pClient.bSelfNode == true {
-		pLocalRpcServer:=slf.funcRpcServer()
+		pLocalRpcServer:= handler.funcRpcServer()
 		//判断是否是同一服务
 		sMethod := strings.Split(serviceMethod,".")
 		if len(sMethod)!=2 {
@@ -476,7 +470,7 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 			return err
 		}
 		//调用自己rpcHandler处理器
-		if sMethod[0] == slf.rpcHandler.GetName() { //自己服务调用
+		if sMethod[0] == handler.rpcHandler.GetName() { //自己服务调用
 			//
 			return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,reply)
 		}
@@ -499,7 +493,7 @@ func (slf *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},
 	return err
 }
 
-func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interface{},callback interface{}) error {
+func (handler *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interface{},callback interface{}) error {
 	fVal := reflect.ValueOf(callback)
 	if fVal.Kind()!=reflect.Func{
 		err := fmt.Errorf("call %s input callback param is error!",serviceMethod)
@@ -521,7 +515,7 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 
 	reply := reflect.New(fVal.Type().In(0).Elem()).Interface()
 	var pClientList []*Client
-	err := slf.funcRpcClient(nodeid,serviceMethod,&pClientList)
+	err := handler.funcRpcClient(nodeid,serviceMethod,&pClientList)
 	if err != nil {
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 		log.Error("Call serviceMethod is error:%+v!",err)
@@ -539,7 +533,7 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 	//如果调用本结点服务
 	pClient := pClientList[0]
 	if pClient.bSelfNode == true {
-		pLocalRpcServer:=slf.funcRpcServer()
+		pLocalRpcServer:= handler.funcRpcServer()
 		//判断是否是同一服务
 		sMethod := strings.Split(serviceMethod,".")
 		if len(sMethod)!=2 {
@@ -549,7 +543,7 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 			return nil
 		}
 		//调用自己rpcHandler处理器
-		if sMethod[0] == slf.rpcHandler.GetName() { //自己服务调用
+		if sMethod[0] == handler.rpcHandler.GetName() { //自己服务调用
 			err := pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,reply)
 			if err == nil {
 				fVal.Call([]reflect.Value{reflect.ValueOf(reply),NilError})
@@ -560,7 +554,7 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 
 		//其他的rpcHandler的处理器
 		if callback!=nil {
-			err =  pLocalRpcServer.selfNodeRpcHandlerAsyncGo(pClient,slf,false,sMethod[0],sMethod[1],args,reply,fVal)
+			err =  pLocalRpcServer.selfNodeRpcHandlerAsyncGo(pClient, handler,false,sMethod[0],sMethod[1],args,reply,fVal)
 			if err != nil {
 				fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 			}
@@ -575,54 +569,54 @@ func (slf *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args interfa
 	}
 
 	//跨node调用
-	err =  pClient.AsycCall(slf,serviceMethod,fVal,args,reply)
+	err =  pClient.AsyncCall(handler,serviceMethod,fVal,args,reply)
 	if err != nil {
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 	}
 	return nil
 }
 
-func (slf *RpcHandler) GetName() string{
-	return slf.rpcHandler.GetName()
+func (handler *RpcHandler) GetName() string{
+	return handler.rpcHandler.GetName()
 }
 
-func (slf *RpcHandler) IsSingleCoroutine() bool{
-	return slf.rpcHandler.IsSingleCoroutine()
+func (handler *RpcHandler) IsSingleCoroutine() bool{
+	return handler.rpcHandler.IsSingleCoroutine()
 }
 
-func (slf *RpcHandler) AsyncCall(serviceMethod string,args interface{},callback interface{}) error {
-	return slf.asyncCallRpc(0,serviceMethod,args,callback)
+func (handler *RpcHandler) AsyncCall(serviceMethod string,args interface{},callback interface{}) error {
+	return handler.asyncCallRpc(0,serviceMethod,args,callback)
 }
 
-func (slf *RpcHandler) Call(serviceMethod string,args interface{},reply interface{}) error {
-	return slf.callRpc(0,serviceMethod,args,reply)
+func (handler *RpcHandler) Call(serviceMethod string,args interface{},reply interface{}) error {
+	return handler.callRpc(0,serviceMethod,args,reply)
 }
 
-func (slf *RpcHandler) Go(serviceMethod string,args interface{}) error {
-	return slf.goRpc(nil,false,0,serviceMethod,args)
+func (handler *RpcHandler) Go(serviceMethod string,args interface{}) error {
+	return handler.goRpc(nil,false,0,serviceMethod,args)
 }
 
-func (slf *RpcHandler) AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error {
-	return slf.asyncCallRpc(nodeId,serviceMethod,args,callback)
+func (handler *RpcHandler) AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error {
+	return handler.asyncCallRpc(nodeId,serviceMethod,args,callback)
 }
 
-func (slf *RpcHandler) CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
-	return slf.callRpc(nodeId,serviceMethod,args,reply)
+func (handler *RpcHandler) CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
+	return handler.callRpc(nodeId,serviceMethod,args,reply)
 }
 
-func (slf *RpcHandler) GoNode(nodeId int,serviceMethod string,args interface{}) error {
-	return slf.goRpc(nil,false,nodeId,serviceMethod,args)
+func (handler *RpcHandler) GoNode(nodeId int,serviceMethod string,args interface{}) error {
+	return handler.goRpc(nil,false,nodeId,serviceMethod,args)
 }
 
-func (slf *RpcHandler) CastGo(serviceMethod string,args interface{})  {
-	slf.goRpc(nil,true,0,serviceMethod,args)
+func (handler *RpcHandler) CastGo(serviceMethod string,args interface{})  {
+	handler.goRpc(nil,true,0,serviceMethod,args)
 }
 
-func (slf *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
-	return slf.rawGoRpc(GetProcessor(uint8(rpcProcessorType)),false,nodeId,serviceMethod,args,additionParam)
+func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
+	return handler.rawGoRpc(GetProcessor(uint8(rpcProcessorType)),false,nodeId,serviceMethod,args,additionParam)
 }
 
-func (slf *RpcHandler) RawCastGo(rpcProcessorType RpcProcessorType,serviceMethod string,args []byte,additionParam interface{})  {
-	slf.goRpc(GetProcessor(uint8(rpcProcessorType)),true,0,serviceMethod,args)
+func (handler *RpcHandler) RawCastGo(rpcProcessorType RpcProcessorType,serviceMethod string,args []byte,additionParam interface{})  {
+	handler.goRpc(GetProcessor(uint8(rpcProcessorType)),true,0,serviceMethod,args)
 }
 

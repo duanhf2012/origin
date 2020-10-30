@@ -17,7 +17,6 @@ type TCPConn struct {
 	msgParser *MsgParser
 }
 
-
 func freeChannel(conn *TCPConn){
 	for;len(conn.writeChan)>0;{
 		byteBuff := <- conn.writeChan

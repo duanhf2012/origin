@@ -23,76 +23,75 @@ type TcpGateService struct {
 
 	processor processor.IRawProcessor
 	tcpService *tcpservice.TcpService
-
 	loadBalance ILoadBalance
 	router IRouter
 }
 
 
-func (slf *TcpGateService) OnInit() error {
-	slf.OnLoad()
+func (gateService *TcpGateService) OnInit() error {
+	gateService.OnLoad()
 
 	//注册监听客户连接断开事件
-	slf.processor.SetDisConnectedHandler(slf.router.OnDisconnected)
+	gateService.processor.SetDisConnectedHandler(gateService.router.OnDisconnected)
 	//注册监听客户连接事件
-	slf.processor.SetConnectedHandler(slf.router.OnConnected)
+	gateService.processor.SetConnectedHandler(gateService.router.OnConnected)
 
 	//注册监听消息类型MsgType_MsgReq，并注册回调
-	slf.processor.SetRawMsgHandler(slf.router.RouterMessage)
+	gateService.processor.SetRawMsgHandler(gateService.router.RouterMessage)
 	//将protobuf消息处理器设置到TcpService服务中
-	slf.tcpService.SetProcessor(slf.processor,slf.GetEventHandler())
+	gateService.tcpService.SetProcessor(gateService.processor, gateService.GetEventHandler())
 	
 	return nil
 }
 
-func (slf *TcpGateService) OnLoad() {
+func (gateService *TcpGateService) OnLoad() {
 	//设置默认LoadBalance
-	if slf.loadBalance == nil {
-		slf.loadBalance = &LoadBalance{}
+	if gateService.loadBalance == nil {
+		gateService.loadBalance = &LoadBalance{}
 	}
 
 	//设置默认Router
-	if slf.router == nil {
-		slf.router = NewRouter(slf.loadBalance,slf,slf.GetServiceCfg())
+	if gateService.router == nil {
+		gateService.router = NewRouter(gateService.loadBalance, gateService, gateService.GetServiceCfg())
 	}
 
 	//新建内置的protobuf处理器，您也可以自定义路由器，比如json
-	if slf.processor == nil {
-		slf.processor = processor.NewPBRawProcessor()
+	if gateService.processor == nil {
+		gateService.processor = processor.NewPBRawProcessor()
 	}
 
 	//加载路由
-	slf.router.Load()
+	gateService.router.Load()
 
 	//设置默认的TcpService服务
-	if slf.tcpService == nil {
-		slf.tcpService =  node.GetService("TcpService").(*tcpservice.TcpService)
+	if gateService.tcpService == nil {
+		gateService.tcpService =  node.GetService("TcpService").(*tcpservice.TcpService)
 	}
 
-	if slf.tcpService == nil {
+	if gateService.tcpService == nil {
 		panic("TcpService is not installed!")
 	}
 }
 
-func (slf *TcpGateService) SetLoadBalance(loadBalance ILoadBalance){
-	slf.loadBalance = loadBalance
+func (gateService *TcpGateService) SetLoadBalance(loadBalance ILoadBalance){
+	gateService.loadBalance = loadBalance
 }
 
-func (slf *TcpGateService) SetRouter(router IRouter){
-	slf.router = router
+func (gateService *TcpGateService) SetRouter(router IRouter){
+	gateService.router = router
 }
 
-func (slf *TcpGateService) SetRawProcessor(processor processor.IRawProcessor){
-	slf.processor = processor
+func (gateService *TcpGateService) SetRawProcessor(processor processor.IRawProcessor){
+	gateService.processor = processor
 }
 
-func (slf *TcpGateService) SetTcpGateService(tcpService *tcpservice.TcpService){
-	slf.tcpService = tcpService
+func (gateService *TcpGateService) SetTcpGateService(tcpService *tcpservice.TcpService){
+	gateService.tcpService = tcpService
 }
 
-func (slf *TcpGateService) RPC_Dispatch(replyMsg *ReplyMessage) error {
+func (gateService *TcpGateService) RPC_Dispatch(replyMsg *ReplyMessage) error {
 	for _,id := range replyMsg.ClientList {
-		err := slf.tcpService.SendRawMsg(id,replyMsg.Msg)
+		err := gateService.tcpService.SendRawMsg(id,replyMsg.Msg)
 		if err != nil {
 			log.Debug("SendRawMsg fail:%+v!",err)
 		}

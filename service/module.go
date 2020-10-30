@@ -9,9 +9,7 @@ import (
 	"runtime"
 	"time"
 )
-
 const InitModuleId = 1e17
-
 
 type IModule interface {
 	SetModuleId(moduleId int64) bool
@@ -31,102 +29,96 @@ type IModule interface {
 	NotifyEvent(ev *event.Event)
 }
 
-
-
 //1.管理各模块树层关系
 //2.提供定时器常用工具
 type Module struct {
-	moduleId int64
-	parent IModule        //父亲
-	self IModule        //自己
-	child map[int64]IModule //孩子们
+	moduleId int64                              //模块Id
+	moduleName string                           //模块名称
+	parent IModule        						//父亲
+	self IModule        						//自己
+	child map[int64]IModule 					//孩子们
 	mapActiveTimer map[*timer.Timer]interface{}
 	mapActiveCron map[*timer.Cron]interface{}
-
-	dispatcher         *timer.Dispatcher //timer
+	dispatcher         *timer.Dispatcher 		//timer
 
 	//根结点
-	ancestor IModule      //始祖
-	seedModuleId int64    //模块id种子
-	descendants map[int64]IModule//始祖的后裔们
+	ancestor IModule      						//始祖
+	seedModuleId int64    						//模块id种子
+	descendants map[int64]IModule				//始祖的后裔们
 
 	//事件管道
-	moduleName string
 	eventHandler event.IEventHandler
-	//eventHandler event.EventHandler
 }
 
-
-func (slf *Module) SetModuleId(moduleId int64) bool{
-	if slf.moduleId > 0 {
+func (m *Module) SetModuleId(moduleId int64) bool{
+	if m.moduleId > 0 {
 		return false
 	}
 
-	slf.moduleId = moduleId
+	m.moduleId = moduleId
 	return true
 }
 
-func (slf *Module) GetModuleId() int64{
-	return slf.moduleId
+func (m *Module) GetModuleId() int64{
+	return m.moduleId
 }
 
-func (slf *Module) GetModuleName() string{
-	return slf.moduleName
+func (m *Module) GetModuleName() string{
+	return m.moduleName
 }
 
-func (slf *Module) OnInit() error{
-//	slf.eventHandler = event.NewEventHandler()
+func (m *Module) OnInit() error{
  	return nil
 }
 
-func (slf *Module) AddModule(module IModule) (int64,error){
+func (m *Module) AddModule(module IModule) (int64,error){
 	//没有事件处理器不允许加入其他模块
-	if slf.GetEventProcessor() == nil {
-		return 0,fmt.Errorf("module %+v is not Event Processor is nil",slf.self)
+	if m.GetEventProcessor() == nil {
+		return 0,fmt.Errorf("module %+v is not Event Processor is nil", m.self)
 	}
 	pAddModule := module.getBaseModule().(*Module)
 	if pAddModule.GetModuleId()==0 {
-		pAddModule.moduleId = slf.NewModuleId()
+		pAddModule.moduleId = m.NewModuleId()
 	}
 
-	if slf.child == nil {
-		slf.child = map[int64]IModule{}
+	if m.child == nil {
+		m.child = map[int64]IModule{}
 	}
-	_,ok := slf.child[module.GetModuleId()]
+	_,ok := m.child[module.GetModuleId()]
 	if ok == true {
 		return 0,fmt.Errorf("Exists module id %d",module.GetModuleId())
 	}
 
 	pAddModule.self = module
-	pAddModule.parent = slf.self
-	pAddModule.dispatcher = slf.GetAncestor().getBaseModule().(*Module).dispatcher
-	pAddModule.ancestor = slf.ancestor
+	pAddModule.parent = m.self
+	pAddModule.dispatcher = m.GetAncestor().getBaseModule().(*Module).dispatcher
+	pAddModule.ancestor = m.ancestor
 	pAddModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
 	pAddModule.eventHandler = event.NewEventHandler()
-	pAddModule.eventHandler.Init(slf.eventHandler.GetEventProcessor())
+	pAddModule.eventHandler.Init(m.eventHandler.GetEventProcessor())
 	err := module.OnInit()
 	if err != nil {
 		return 0,err
 	}
 
-	slf.child[module.GetModuleId()] = module
-	slf.ancestor.getBaseModule().(*Module).descendants[module.GetModuleId()] = module
+	m.child[module.GetModuleId()] = module
+	m.ancestor.getBaseModule().(*Module).descendants[module.GetModuleId()] = module
 
-	log.Debug("Add module %s completed",slf.GetModuleName())
+	log.Debug("Add module %s completed", m.GetModuleName())
 	return module.GetModuleId(),nil
 }
 
-func (slf *Module) ReleaseModule(moduleId int64){
-	pModule := slf.GetModule(moduleId).getBaseModule().(*Module)
+func (m *Module) ReleaseModule(moduleId int64){
+	pModule := m.GetModule(moduleId).getBaseModule().(*Module)
 
 	//释放子孙
 	for id,_ := range pModule.child {
-		slf.ReleaseModule(id)
+		m.ReleaseModule(id)
 	}
 
 	pModule.GetEventHandler().Destroy()
 	pModule.self.OnRelease()
-	log.Debug("Release module %s.",slf.GetModuleName())
+	log.Debug("Release module %s.", m.GetModuleName())
 	for pTimer,_ := range pModule.mapActiveTimer {
 		pTimer.Close()
 	}
@@ -135,8 +127,8 @@ func (slf *Module) ReleaseModule(moduleId int64){
 		pCron.Close()
 	}
 
-	delete(slf.child,moduleId)
-	delete (slf.ancestor.getBaseModule().(*Module).descendants,moduleId)
+	delete(m.child,moduleId)
+	delete (m.ancestor.getBaseModule().(*Module).descendants,moduleId)
 
 	//清理被删除的Module
 	pModule.self = nil
@@ -149,75 +141,74 @@ func (slf *Module) ReleaseModule(moduleId int64){
 	pModule.descendants = nil
 }
 
-func (slf *Module) NewModuleId() int64{
-	slf.ancestor.getBaseModule().(*Module).seedModuleId+=1
-	return slf.ancestor.getBaseModule().(*Module).seedModuleId
+func (m *Module) NewModuleId() int64{
+	m.ancestor.getBaseModule().(*Module).seedModuleId+=1
+	return m.ancestor.getBaseModule().(*Module).seedModuleId
 }
 
-func (slf *Module) GetAncestor()IModule{
-	return slf.ancestor
+func (m *Module) GetAncestor()IModule{
+	return m.ancestor
 }
 
-func (slf *Module) GetModule(moduleId int64) IModule{
-	iModule,ok := slf.GetAncestor().getBaseModule().(*Module).descendants[moduleId]
+func (m *Module) GetModule(moduleId int64) IModule{
+	iModule,ok := m.GetAncestor().getBaseModule().(*Module).descendants[moduleId]
 	if ok == false{
 		return nil
 	}
 	return iModule
 }
 
-func (slf *Module) getBaseModule() IModule{
-	return slf
+func (m *Module) getBaseModule() IModule{
+	return m
 }
 
-
-func (slf *Module) GetParent()IModule{
-	return slf.parent
+func (m *Module) GetParent()IModule{
+	return m.parent
 }
 
-func (slf *Module) AfterFunc(d time.Duration, cb func()) *timer.Timer {
-	if slf.mapActiveTimer == nil {
-		slf.mapActiveTimer =map[*timer.Timer]interface{}{}
+func (m *Module) AfterFunc(d time.Duration, cb func()) *timer.Timer {
+	if m.mapActiveTimer == nil {
+		m.mapActiveTimer =map[*timer.Timer]interface{}{}
 	}
 
 	funName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
-	 tm := slf.dispatcher.AfterFuncEx(funName,d,func(t *timer.Timer){
+	 tm := m.dispatcher.AfterFuncEx(funName,d,func(t *timer.Timer){
 		cb()
-		delete(slf.mapActiveTimer,t)
+		delete(m.mapActiveTimer,t)
 	 })
 
-	 slf.mapActiveTimer[tm] = nil
+	 m.mapActiveTimer[tm] = nil
 	 return tm
 }
 
-func (slf *Module) CronFunc(cronExpr *timer.CronExpr, cb func()) *timer.Cron {
-	if slf.mapActiveCron == nil {
-		slf.mapActiveCron =map[*timer.Cron]interface{}{}
+func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func()) *timer.Cron {
+	if m.mapActiveCron == nil {
+		m.mapActiveCron =map[*timer.Cron]interface{}{}
 	}
 
-	cron := slf.dispatcher.CronFuncEx(cronExpr, func(cron *timer.Cron) {
+	cron := m.dispatcher.CronFuncEx(cronExpr, func(cron *timer.Cron) {
 		cb()
 	})
 
-	slf.mapActiveCron[cron] = nil
+	m.mapActiveCron[cron] = nil
 	return cron
 }
 
-func (slf *Module) OnRelease(){
+func (m *Module) OnRelease(){
 }
 
-func (slf *Module) GetService() IService {
-	return slf.GetAncestor().(IService)
+func (m *Module) GetService() IService {
+	return m.GetAncestor().(IService)
 }
 
-func (slf *Module) GetEventProcessor() event.IEventProcessor{
-	return slf.eventHandler.GetEventProcessor()
+func (m *Module) GetEventProcessor() event.IEventProcessor{
+	return m.eventHandler.GetEventProcessor()
 }
 
-func (slf *Module) NotifyEvent(ev *event.Event){
-	slf.eventHandler.NotifyEvent(ev)
+func (m *Module) NotifyEvent(ev *event.Event){
+	m.eventHandler.NotifyEvent(ev)
 }
 
-func (slf *Module) GetEventHandler() event.IEventHandler{
-	return slf.eventHandler
+func (m *Module) GetEventHandler() event.IEventHandler{
+	return m.eventHandler
 }

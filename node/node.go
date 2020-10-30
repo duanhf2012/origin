@@ -9,17 +9,17 @@ import (
 	"github.com/duanhf2012/origin/service"
 	"io/ioutil"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
-	_ "net/http/pprof"
 )
 
 var closeSig chan bool
-var sigs chan os.Signal
+var sig chan os.Signal
 var nodeId int
 var preSetupService []service.IService //预安装
 var profilerInterval time.Duration
@@ -28,8 +28,8 @@ var bValid bool
 func init() {
 
 	closeSig = make(chan bool,1)
-	sigs = make(chan os.Signal, 3)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM,syscall.Signal(10))
+	sig = make(chan os.Signal, 3)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM,syscall.Signal(10))
 
 	console.RegisterCommandBool("help",false,"This help.",usage)
 	console.RegisterCommandString("start","","Run originserver.",startNode)
@@ -88,12 +88,12 @@ func  getRunProcessPid() (int,error) {
 		return 0,err
 	}
 
-	pidbyte,errs := ioutil.ReadAll(f)
+	pidByte,errs := ioutil.ReadAll(f)
 	if errs!=nil {
 		return 0,errs
 	}
 
-	return strconv.Atoi(string(pidbyte))
+	return strconv.Atoi(string(pidByte))
 }
 
 func writeProcessPid() {
@@ -171,14 +171,14 @@ func startNode(args interface{}) error{
 		return nil
 	}
 
-	sparam := strings.Split(param,"=")
-	if len(sparam) != 2 {
+	sParam := strings.Split(param,"=")
+	if len(sParam) != 2 {
 		return fmt.Errorf("invalid option %s",param)
 	}
-	if sparam[0]!="nodeid" {
+	if sParam[0]!="nodeid" {
 		return fmt.Errorf("invalid option %s",param)
 	}
-	nodeId,err:= strconv.Atoi(sparam[1])
+	nodeId,err:= strconv.Atoi(sParam[1])
 	if err != nil {
 		return fmt.Errorf("invalid option %s",param)
 	}
@@ -204,7 +204,7 @@ func startNode(args interface{}) error{
 	}
 	for bRun {
 		select {
-		case <-sigs:
+		case <-sig:
 			log.Debug("receipt stop signal.")
 			bRun = false
 		case <- pProfilerTicker.C:
@@ -228,12 +228,12 @@ func Setup(s ...service.IService)  {
 	}
 }
 
-func GetService(servicename string) service.IService {
-	return service.GetService(servicename)
+func GetService(serviceName string) service.IService {
+	return service.GetService(serviceName)
 }
 
-func SetConfigDir(configdir string){
-	cluster.SetConfigDir(configdir)
+func SetConfigDir(configDir string){
+	cluster.SetConfigDir(configDir)
 }
 
 func SetSysLog(strLevel string, pathname string, flag int){

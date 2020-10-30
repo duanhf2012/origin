@@ -9,10 +9,13 @@ import (
 )
 
 //最大超长时间，一般可以认为是死锁或者死循环，或者极差的性能问题
-var Default_MaxOverTime time.Duration = 5*time.Second
+var DefaultMaxOvertime time.Duration = 5*time.Second
 //超过该时间将会监控报告
-var Default_OverTime time.Duration = 10*time.Millisecond
-var Default_MaxRecordNum int = 100 //最大记录条数
+var DefaultOvertime time.Duration = 10*time.Millisecond
+var DefaultMaxRecordNum int = 100 //最大记录条数
+var mapProfiler map[string]*Profiler
+type ReportFunType func(name string,callNum int,costTime time.Duration,record *list.List)
+var reportFunc ReportFunType =DefaultReportFunction
 
 type Element struct {
 	tagName string
@@ -21,10 +24,9 @@ type Element struct {
 
 type RecordType int
 const  (
-	MaxOverTime_Type = 1
-	OverTime_Type =2
+	MaxOvertimeType = 1
+	OvertimeType    =2
 	)
-
 
 type Record struct {
 	RType RecordType
@@ -32,12 +34,10 @@ type Record struct {
 	RecordName string
 }
 
-
 type Analyzer struct {
 	elem *list.Element
 	profiler *Profiler
 }
-
 
 type Profiler struct {
 	stack *list.List //Element
@@ -53,8 +53,6 @@ type Profiler struct {
 	maxRecordNum int
 }
 
-var mapProfiler map[string]*Profiler
-
 func init(){
 	mapProfiler = map[string]*Profiler{}
 }
@@ -64,7 +62,7 @@ func RegProfiler(profilerName string) *Profiler {
 		return nil
 	}
 
-	pProfiler :=  &Profiler{stack:list.New(),record:list.New(),maxOverTime:Default_MaxOverTime,overTime:Default_OverTime}
+	pProfiler :=  &Profiler{stack:list.New(),record:list.New(),maxOverTime: DefaultMaxOvertime,overTime: DefaultOvertime}
 	mapProfiler[profilerName] =pProfiler
 	return pProfiler
 }
@@ -90,7 +88,6 @@ func (slf *Profiler) Push(tag string) *Analyzer{
 	return &Analyzer{elem:pElem,profiler:slf}
 }
 
-
 func (slf *Profiler) check(pElem *Element) (*Record,time.Duration) {
 	if pElem == nil {
 		return nil,0
@@ -102,13 +99,13 @@ func (slf *Profiler) check(pElem *Element) (*Record,time.Duration) {
 	}
 
 	record := Record{
-		RType:      OverTime_Type,
+		RType:      OvertimeType,
 		CostTime:   subTm,
 		RecordName: pElem.tagName,
 	}
 
 	if subTm>slf.maxOverTime {
-		record.RType = MaxOverTime_Type
+		record.RType = MaxOvertimeType
 	}
 
 	return &record,subTm
@@ -129,7 +126,7 @@ func (slf *Analyzer) Pop(){
 }
 
 func (slf *Profiler) pushRecordLog(record *Record){
-	if slf.record.Len()>=Default_MaxRecordNum{
+	if slf.record.Len()>= DefaultMaxRecordNum {
 		front := slf.stack.Front()
 		if front!=nil {
 			slf.stack.Remove(front)
@@ -138,12 +135,6 @@ func (slf *Profiler) pushRecordLog(record *Record){
 
 	slf.record.PushBack(record)
 }
-
-
-
-type ReportFunType func(name string,callNum int,costTime time.Duration,record *list.List)
-
-var reportFunc ReportFunType =DefaultReportFunction
 
 func SetReportFunction(reportFun ReportFunType) {
 	reportFunc = reportFun
@@ -166,7 +157,7 @@ func DefaultReportFunction(name string,callNum int,costTime time.Duration,record
 	var strTypes string
 	for elem!=nil {
 		pRecord := elem.Value.(*Record)
-		if  pRecord.RType == MaxOverTime_Type {
+		if  pRecord.RType == MaxOvertimeType {
 			strTypes = "too slow process"
 		}else{
 			strTypes = "slow process"

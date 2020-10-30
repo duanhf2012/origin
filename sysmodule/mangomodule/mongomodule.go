@@ -33,7 +33,6 @@ func (slf *MangoModule) Init(url string,sessionNum uint32,dialTimeout time.Durat
 	return err
 }
 
-
 func (slf *MangoModule) Take() *Session{
 	return slf.dailContext.Take()
 }

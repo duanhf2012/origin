@@ -9,12 +9,12 @@ import (
 type PBProcessor struct {
 }
 
-var rpcPbResponeDataPool sync.Pool
+var rpcPbResponseDataPool sync.Pool
 var rpcPbRequestDataPool sync.Pool
 
 
 func init(){
-	rpcPbResponeDataPool.New = func()interface{}{
+	rpcPbResponseDataPool.New = func()interface{}{
 		return &PBRpcResponseData{}
 	}
 
@@ -115,7 +115,7 @@ func (slf *PBProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply b
 }
 
 func (slf *PBProcessor) MakeRpcResponse(seq uint64,err *RpcError,reply []byte) IRpcResponseData {
-	pPBRpcResponseData := rpcPbResponeDataPool.Get().(*PBRpcResponseData)
+	pPBRpcResponseData := rpcPbResponseDataPool.Get().(*PBRpcResponseData)
 	pPBRpcResponseData.MakeRespone(seq,err,reply)
 	return pPBRpcResponseData
 }
@@ -125,7 +125,7 @@ func (slf *PBProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
 }
 
 func (slf *PBProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
-	rpcPbResponeDataPool.Put(rpcRequestData)
+	rpcPbResponseDataPool.Put(rpcRequestData)
 }
 
 func (slf *PBProcessor) IsParse(param interface{}) bool {
@@ -135,7 +135,7 @@ func (slf *PBProcessor) IsParse(param interface{}) bool {
 
 
 func (slf *PBProcessor)	GetProcessorType() RpcProcessorType{
-	return RPC_PROCESSOR_PB
+	return RpcProcessorPb
 }
 
 

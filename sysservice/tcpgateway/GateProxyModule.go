@@ -16,7 +16,7 @@ func NewGateProxyModule() *GateProxyModule{
 	return &GateProxyModule{defaultGateRpc:"TcpGateService.RPC_Dispatch"}
 }
 
-func (slf *GateProxyModule) Send(clientId interface{},msgType uint16,msg proto.Message) error {
+func (gate *GateProxyModule) Send(clientId interface{},msgType uint16,msg proto.Message) error {
 	//对agentId进行分组
 	mapNodeClientId := map[int][]uint64{}
 	switch clientId.(type) {
@@ -41,7 +41,6 @@ func (slf *GateProxyModule) Send(clientId interface{},msgType uint16,msg proto.M
 	replyMsg.MsgType = proto.Uint32(uint32(msgType))
 	replyMsg.Msg = bData
 
-
 	for nodeId,clientIdList := range mapNodeClientId {
 		if nodeId <0 || nodeId>tcpservice.MaxNodeId {
 			fmt.Errorf("nodeid is error %d",nodeId)
@@ -49,20 +48,17 @@ func (slf *GateProxyModule) Send(clientId interface{},msgType uint16,msg proto.M
 		}
 
 		replyMsg.ClientList = clientIdList
-		slf.GetService().GetRpcHandler().GoNode(nodeId,slf.defaultGateRpc,&replyMsg)
+		gate.GetService().GetRpcHandler().GoNode(nodeId,gate.defaultGateRpc,&replyMsg)
 	}
 
 	return nil
 }
 
-
-
-func (slf *GateProxyModule) SetDefaultGateRpcMethodName(rpcMethodName string){
-	slf.defaultGateRpc = rpcMethodName
+func (gate *GateProxyModule) SetDefaultGateRpcMethodName(rpcMethodName string){
+	gate.defaultGateRpc = rpcMethodName
 }
 
-
-func (slf *GateProxyModule) send(clientId uint64,msgType uint16,msg []byte) error {
+func (gate *GateProxyModule) send(clientId uint64,msgType uint16,msg []byte) error {
 	nodeId := tcpservice.GetNodeId(clientId)
 	if nodeId <0 || nodeId>tcpservice.MaxNodeId {
 		return fmt.Errorf("nodeid is error %d",nodeId)
@@ -73,5 +69,5 @@ func (slf *GateProxyModule) send(clientId uint64,msgType uint16,msg []byte) erro
 	replyMsg.Msg = msg
 	replyMsg.ClientList = append(replyMsg.ClientList ,clientId)
 
-	return slf.GetService().GetRpcHandler().GoNode(nodeId,slf.defaultGateRpc,&replyMsg)
+	return gate.GetService().GetRpcHandler().GoNode(nodeId, gate.defaultGateRpc,&replyMsg)
 }

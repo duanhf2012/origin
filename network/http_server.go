@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-var Default_MaxHeaderBytes int = 1<<20
+var DefaultMaxHeaderBytes int = 1<<20
 
 type CAFile struct {
-	Certfile string
+	CertFile string
 	Keyfile string
 }
 
@@ -40,9 +40,9 @@ func (slf *HttpServer) startListen() error {
 	var tlsCaList []tls.Certificate
 	var tlsConfig *tls.Config
 	for _, caFile := range slf.caFileList {
-		cer, err := tls.LoadX509KeyPair(caFile.Certfile, caFile.Keyfile)
+		cer, err := tls.LoadX509KeyPair(caFile.CertFile, caFile.Keyfile)
 		if err != nil {
-			log.Fatal("Load CA  [%s]-[%s] file is fail:%s", caFile.Certfile, caFile.Keyfile, err.Error())
+			log.Fatal("Load CA  [%s]-[%s] file is fail:%s", caFile.CertFile, caFile.Keyfile, err.Error())
 			return err
 		}
 		tlsCaList = append(tlsCaList, cer)
@@ -57,7 +57,7 @@ func (slf *HttpServer) startListen() error {
 		Handler:        slf.handler,
 		ReadTimeout:    slf.readTimeout,
 		WriteTimeout:   slf.writeTimeout,
-		MaxHeaderBytes: Default_MaxHeaderBytes,
+		MaxHeaderBytes: DefaultMaxHeaderBytes,
 		TLSConfig:      tlsConfig,
 	}
 

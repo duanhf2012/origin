@@ -15,7 +15,7 @@ type TCPClient struct {
 	PendingWriteNum int
 	AutoReconnect   bool
 	NewAgent        func(*TCPConn) Agent
-	conns           ConnSet
+	cons            ConnSet
 	wg              sync.WaitGroup
 	closeFlag       bool
 
@@ -55,11 +55,11 @@ func (client *TCPClient) init() {
 	if client.NewAgent == nil {
 		log.Fatal("NewAgent must not be nil")
 	}
-	if client.conns != nil {
+	if client.cons != nil {
 		log.Fatal("client is running")
 	}
 
-	client.conns = make(ConnSet)
+	client.cons = make(ConnSet)
 	client.closeFlag = false
 
 	// msg parser
@@ -97,7 +97,7 @@ reconnect:
 		conn.Close()
 		return
 	}
-	client.conns[conn] = struct{}{}
+	client.cons[conn] = struct{}{}
 	client.Unlock()
 
 	tcpConn := newTCPConn(conn, client.PendingWriteNum, client.msgParser)
@@ -107,7 +107,7 @@ reconnect:
 	// cleanup
 	tcpConn.Close()
 	client.Lock()
-	delete(client.conns, conn)
+	delete(client.cons, conn)
 	client.Unlock()
 	agent.OnClose()
 
@@ -120,10 +120,10 @@ reconnect:
 func (client *TCPClient) Close(waitDone bool) {
 	client.Lock()
 	client.closeFlag = true
-	for conn := range client.conns {
+	for conn := range client.cons {
 		conn.Close()
 	}
-	client.conns = nil
+	client.cons = nil
 	client.Unlock()
 
 	if waitDone == true{

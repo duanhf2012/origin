@@ -20,7 +20,6 @@ type JsonRpcRequestData struct {
 	AdditionParam interface{}
 }
 
-
 type JsonRpcResponseData struct {
 	//head
 	Seq           uint64   // sequence number chosen by client
@@ -30,14 +29,11 @@ type JsonRpcResponseData struct {
 	Reply []byte
 }
 
-
-var rpcJsonResponeDataPool sync.Pool
+var rpcJsonResponseDataPool sync.Pool
 var rpcJsonRequestDataPool sync.Pool
 
-
-
 func init(){
-	rpcJsonResponeDataPool.New = func()interface{}{
+	rpcJsonResponseDataPool.New = func()interface{}{
 		return &JsonRpcResponseData{}
 	}
 
@@ -46,16 +42,15 @@ func init(){
 	}
 }
 
-func (slf *JsonProcessor) Marshal(v interface{}) ([]byte, error){
-	return json.Marshal(v)
+func (jsonProcessor *JsonProcessor) Marshal(v interface{}) ([]byte, error){
+	return jsonProcessor.Marshal(v)
 }
 
-func (slf *JsonProcessor) Unmarshal(data []byte, v interface{}) error{
+func (jsonProcessor *JsonProcessor) Unmarshal(data []byte, v interface{}) error{
 	return json.Unmarshal(data,v)
 }
 
-
-func (slf *JsonProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte,additionParam interface{}) IRpcRequestData{
+func (jsonProcessor *JsonProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte,additionParam interface{}) IRpcRequestData{
 	jsonRpcRequestData := rpcJsonRequestDataPool.Get().(*JsonRpcRequestData)
 	jsonRpcRequestData.Seq = seq
 	jsonRpcRequestData.ServiceMethod = serviceMethod
@@ -65,74 +60,71 @@ func (slf *JsonProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply
 	return jsonRpcRequestData
 }
 
-func (slf *JsonProcessor) MakeRpcResponse(seq uint64,err *RpcError,reply []byte) IRpcResponseData {
-	jsonRpcResponseData := rpcJsonResponeDataPool.Get().(*JsonRpcResponseData)
+func (jsonProcessor *JsonProcessor) MakeRpcResponse(seq uint64,err *RpcError,reply []byte) IRpcResponseData {
+	jsonRpcResponseData := rpcJsonResponseDataPool.Get().(*JsonRpcResponseData)
 	jsonRpcResponseData.Seq = seq
 	jsonRpcResponseData.Err = err.Error()
 	jsonRpcResponseData.Reply = reply
 	return jsonRpcResponseData
 }
 
-func (slf *JsonProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
+func (jsonProcessor *JsonProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
 	rpcJsonRequestDataPool.Put(rpcRequestData)
 }
 
-func (slf *JsonProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
-	rpcJsonResponeDataPool.Put(rpcRequestData)
+func (jsonProcessor *JsonProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
+	rpcJsonResponseDataPool.Put(rpcRequestData)
 }
 
-func (slf *JsonProcessor) IsParse(param interface{}) bool {
+func (jsonProcessor *JsonProcessor) IsParse(param interface{}) bool {
 	_,err := json.Marshal(param)
 	return err==nil
 }
 
-
-func (slf *JsonProcessor)	GetProcessorType() RpcProcessorType{
-	return RPC_PROCESSOR_JSON
+func (jsonProcessor *JsonProcessor)	GetProcessorType() RpcProcessorType{
+	return RpcProcessorJson
 }
 
-
-func (slf *JsonRpcRequestData) IsNoReply() bool{
-	return slf.NoReply
+func (jsonRpcRequestData *JsonRpcRequestData) IsNoReply() bool{
+	return jsonRpcRequestData.NoReply
 }
 
-func (slf *JsonRpcRequestData) GetSeq() uint64{
-	return slf.Seq
+func (jsonRpcRequestData *JsonRpcRequestData) GetSeq() uint64{
+	return jsonRpcRequestData.Seq
 }
 
-func (slf *JsonRpcRequestData) GetServiceMethod() string{
-	return slf.ServiceMethod
+func (jsonRpcRequestData *JsonRpcRequestData) GetServiceMethod() string{
+	return jsonRpcRequestData.ServiceMethod
 }
 
-func (slf *JsonRpcRequestData) GetInParam() []byte{
-	return slf.InParam
+func (jsonRpcRequestData *JsonRpcRequestData) GetInParam() []byte{
+	return jsonRpcRequestData.InParam
 }
 
-func (slf *JsonRpcRequestData) GetParamValue() interface{}{
-	return slf.AdditionParam
+func (jsonRpcRequestData *JsonRpcRequestData) GetParamValue() interface{}{
+	return jsonRpcRequestData.AdditionParam
 }
 
-func (slf *JsonRpcRequestData) GetAdditionParams() IRawAdditionParam{
-	return slf
+func (jsonRpcRequestData *JsonRpcRequestData) GetAdditionParams() IRawAdditionParam{
+	return jsonRpcRequestData
 }
 
-
-func (slf *JsonRpcResponseData)	GetSeq() uint64 {
-	return slf.Seq
+func (jsonRpcResponseData *JsonRpcResponseData)	GetSeq() uint64 {
+	return jsonRpcResponseData.Seq
 }
 
-func (slf *JsonRpcResponseData)		GetErr() *RpcError {
-	if slf.Err == ""{
+func (jsonRpcResponseData *JsonRpcResponseData)		GetErr() *RpcError {
+	if jsonRpcResponseData.Err == ""{
 		return nil
 	}
 
-	return Errorf(slf.Err)
+	return Errorf(jsonRpcResponseData.Err)
 }
 
-
-func (slf *JsonRpcResponseData)		GetReply() []byte{
-	return slf.Reply
+func (jsonRpcResponseData *JsonRpcResponseData)		GetReply() []byte{
+	return jsonRpcResponseData.Reply
 }
+
 
 
 

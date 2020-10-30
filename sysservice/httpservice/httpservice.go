@@ -17,11 +17,9 @@ import (
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-var Default_ReadTimeout time.Duration = time.Second*10
-var Default_WriteTimeout time.Duration = time.Second*10
-var Default_ProcessTimeout time.Duration = time.Second*10
-
-var Default_HttpRouter *HttpRouter= &HttpRouter{}
+var DefaultReadTimeout time.Duration = time.Second*10
+var DefaultWriteTimeout time.Duration = time.Second*10
+var DefaultProcessTimeout time.Duration = time.Second*10
 
 //http redirect
 type HttpRedirectData struct {
@@ -40,12 +38,10 @@ const (
 )
 
 type HttpHandle func(session *HttpSession)
-
 type routerMatchData struct {
 	matchURL   string
 	httpHandle HttpHandle
 }
-
 
 type routerServeFileData struct {
 	matchUrl string
@@ -54,7 +50,6 @@ type routerServeFileData struct {
 }
 
 type IHttpRouter interface {
-	//RegRouter(method HTTP_METHOD, url string, handle HttpHandle) bool
 	GET(url string, handle HttpHandle) bool
 	POST(url string, handle HttpHandle) bool
 	Router(session *HttpSession)
@@ -65,11 +60,9 @@ type IHttpRouter interface {
 	AddHttpFiltrate(FiltrateFun HttpFiltrate) bool
 }
 
-
 type HttpRouter struct {
 	pathRouter map[HTTP_METHOD] map[string] routerMatchData //url地址，对应本service地址
 	serveFileData  map[string] *routerServeFileData
-	//eventReciver event.IEventHandler
 	httpFiltrateList [] HttpFiltrate
 
 	formFileKey string
@@ -104,13 +97,18 @@ type HttpService struct {
 	processTimeout time.Duration
 }
 
-func (slf *HttpService) AddFiltrate(FiltrateFun HttpFiltrate) bool {
-	return slf.httpRouter.AddHttpFiltrate(FiltrateFun)
+type HttpFiltrate func(session *HttpSession) bool //true is pass
+
+type CORSHeader struct {
+	AllowCORSHeader map[string][]string
+}
+
+func (httpService *HttpService) AddFiltrate(FiltrateFun HttpFiltrate) bool {
+	return httpService.httpRouter.AddHttpFiltrate(FiltrateFun)
 }
 
 func NewHttpHttpRouter() IHttpRouter {
 	httpRouter := &HttpRouter{}
-	//httpRouter.eventReciver = eventHandler
 	httpRouter.pathRouter =map[HTTP_METHOD] map[string] routerMatchData{}
 	httpRouter.serveFileData = map[string] *routerServeFileData{}
 	httpRouter.formFileKey = "file"
@@ -118,14 +116,10 @@ func NewHttpHttpRouter() IHttpRouter {
 		httpRouter.pathRouter[i] = map[string] routerMatchData{}
 	}
 
-
 	return httpRouter
 }
 
-
-
 func (slf *HttpSession) Query(key string) (string, bool) {
-
 	if slf.mapParam == nil {
 		slf.mapParam = make(map[string]string)
 
@@ -211,8 +205,6 @@ func (slf *HttpSession) getMethod(method string) HTTP_METHOD {
 	return METHOD_INVALID
 }
 
-
-
 func (slf *HttpRouter) analysisRouterUrl(url string) (string, error) {
 
 	//替换所有空格
@@ -236,7 +228,6 @@ func (slf *HttpRouter) SetFormFileKey(formFileKey string){
 func (slf *HttpRouter) GetFormFileKey()string{
 	return slf.formFileKey
 }
-
 
 func (slf *HttpRouter) GET(url string, handle HttpHandle) bool {
 	return slf.regRouter(METHOD_GET, url, handle)
@@ -279,7 +270,6 @@ func (slf *HttpRouter) Router(session *HttpSession){
 		}
 
 		v.httpHandle(session)
-		//session.done()
 		return
 	}
 
@@ -296,18 +286,14 @@ func (slf *HttpRouter) Router(session *HttpSession){
 	session.Done()
 }
 
-
-func (slf *HttpService) HttpEventHandler(ev *event.Event)  {
+func (httpService *HttpService) HttpEventHandler(ev *event.Event)  {
 	ev.Data.(*HttpSession).Handle()
 }
 
-func (slf *HttpService) SetHttpRouter(httpRouter IHttpRouter,eventHandler event.IEventHandler) {
-	slf.httpRouter = httpRouter
-	slf.RegEventReciverFunc(event.Sys_Event_Http_Event,eventHandler,slf.HttpEventHandler)
+func (httpService *HttpService) SetHttpRouter(httpRouter IHttpRouter,eventHandler event.IEventHandler) {
+	httpService.httpRouter = httpRouter
+	httpService.RegEventReceiverFunc(event.Sys_Event_Http_Event,eventHandler, httpService.HttpEventHandler)
 }
-
-
-
 
 func (slf *HttpRouter) SetServeFile(method HTTP_METHOD, urlpath string, dirname string) error {
 	_, err := os.Stat(dirname)
@@ -327,9 +313,6 @@ func (slf *HttpRouter) SetServeFile(method HTTP_METHOD, urlpath string, dirname 
 
 	return nil
 }
-
-
-type HttpFiltrate func(session *HttpSession) bool //true is pass
 
 func (slf *HttpRouter) AddHttpFiltrate(FiltrateFun HttpFiltrate) bool {
 	slf.httpFiltrateList = append(slf.httpFiltrateList, FiltrateFun)
@@ -359,20 +342,18 @@ func (slf *HttpSession) redirects() {
 		http.StatusTemporaryRedirect)
 }
 
-
-
-func (slf *HttpService) OnInit() error {
-	iConfig := slf.GetServiceCfg()
+func (httpService *HttpService) OnInit() error {
+	iConfig := httpService.GetServiceCfg()
 	if iConfig == nil {
-		return fmt.Errorf("%s service config is error!",slf.GetName())
+		return fmt.Errorf("%s service config is error!", httpService.GetName())
 	}
 	tcpCfg := iConfig.(map[string]interface{})
 	addr,ok := tcpCfg["ListenAddr"]
 	if ok == false {
-		return fmt.Errorf("%s service config is error!",slf.GetName())
+		return fmt.Errorf("%s service config is error!", httpService.GetName())
 	}
-	var readTimeout time.Duration = Default_ReadTimeout
-	var writeTimeout time.Duration = Default_WriteTimeout
+	var readTimeout time.Duration = DefaultReadTimeout
+	var writeTimeout time.Duration = DefaultWriteTimeout
 
 	if cfgRead,ok := tcpCfg["ReadTimeout"];ok == true {
 		readTimeout = time.Duration(cfgRead.(float64))*time.Millisecond
@@ -382,12 +363,12 @@ func (slf *HttpService) OnInit() error {
 		writeTimeout = time.Duration(cfgWrite.(float64))*time.Millisecond
 	}
 
-	slf.processTimeout = Default_ProcessTimeout
+	httpService.processTimeout = DefaultProcessTimeout
 	if cfgProcessTimeout,ok := tcpCfg["ProcessTimeout"];ok == true {
-		slf.processTimeout = time.Duration(cfgProcessTimeout.(float64))*time.Millisecond
+		httpService.processTimeout = time.Duration(cfgProcessTimeout.(float64))*time.Millisecond
 	}
 
-	slf.httpServer.Init(addr.(string), slf, readTimeout, writeTimeout)
+	httpService.httpServer.Init(addr.(string), httpService, readTimeout, writeTimeout)
 	//Set CAFile
 	caFileList,ok := tcpCfg["CAFile"]
 	if ok == false {
@@ -408,24 +389,24 @@ func (slf *HttpService) OnInit() error {
 
 		if c.(string)!="" && k.(string)!="" {
 			caFile = append(caFile,network.CAFile{
-				Certfile:  c.(string),
+				CertFile:  c.(string),
 				Keyfile:  k.(string),
 			})
 		}
 	}
-	slf.httpServer.SetCAFile(caFile)
-	slf.httpServer.Start()
+	httpService.httpServer.SetCAFile(caFile)
+	httpService.httpServer.Start()
 	return nil
 }
 
-func (slf *HttpService) SetAllowCORS(corsHeader *CORSHeader) {
-	slf.corsHeader = corsHeader
+func (httpService *HttpService) SetAllowCORS(corsHeader *CORSHeader) {
+	httpService.corsHeader = corsHeader
 }
 
-func (slf *HttpService) ProcessFile(session *HttpSession){
-	upath := session.r.URL.Path
-	idx := strings.Index(upath, session.fileData.matchUrl)
-	subPath := strings.Trim(upath[idx+len(session.fileData.matchUrl):], "/")
+func (httpService *HttpService) ProcessFile(session *HttpSession){
+	uPath := session.r.URL.Path
+	idx := strings.Index(uPath, session.fileData.matchUrl)
+	subPath := strings.Trim(uPath[idx+len(session.fileData.matchUrl):], "/")
 
 	destLocalPath := session.fileData.localPath + "/"+subPath
 
@@ -461,24 +442,19 @@ func (slf *HttpService) ProcessFile(session *HttpSession){
 		filePrefixName := uuid.Rand().HexEx()
 		fileName := filePrefixName + "." + imgFormat[len(imgFormat)-1]
 		//创建文件
-		localpath := fmt.Sprintf("%s%s", destLocalPath, fileName)
-		localfd, err := os.OpenFile(localpath, os.O_WRONLY|os.O_CREATE, 0666)
+		localPath := fmt.Sprintf("%s%s", destLocalPath, fileName)
+		localFd, err := os.OpenFile(localPath, os.O_WRONLY|os.O_CREATE, 0666)
 		if err != nil {
 			session.WriteStatusCode(http.StatusNotFound)
 			session.flush()
 			return
 		}
-		defer localfd.Close()
-		io.Copy(localfd, resourceFile)
+		defer localFd.Close()
+		io.Copy(localFd, resourceFile)
 		session.WriteStatusCode(http.StatusOK)
-		session.Write([]byte(upath+"/"+fileName))
+		session.Write([]byte(uPath+"/"+fileName))
 		session.flush()
 	}
-}
-
-
-type CORSHeader struct {
-	AllowCORSHeader map[string][]string
 }
 
 func NewAllowCORSHeader() *CORSHeader{
@@ -503,17 +479,17 @@ func (slf *CORSHeader) copyTo(header http.Header){
 	}
 }
 
-func (slf *HttpService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if slf.corsHeader != nil {
+func (httpService *HttpService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if httpService.corsHeader != nil {
 		if origin := r.Header.Get("Origin"); origin != "" {
-			slf.corsHeader.copyTo(w.Header())
+			httpService.corsHeader.copyTo(w.Header())
 		}
 	}
 	if r.Method == "OPTIONS" {
 		return
 	}
 
-	session := &HttpSession{sessionDone:make(chan *HttpSession,1),httpRouter:slf.httpRouter,statusCode:http.StatusOK}
+	session := &HttpSession{sessionDone:make(chan *HttpSession,1),httpRouter:httpService.httpRouter,statusCode:http.StatusOK}
 	session.r = r
 	session.w = w
 
@@ -526,8 +502,8 @@ func (slf *HttpService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	session.body = body
 
-	slf.GetEventHandler().NotifyEvent(&event.Event{Type:event.Sys_Event_Http_Event,Data:session})
-	ticker := time.NewTicker(slf.processTimeout)
+	httpService.GetEventHandler().NotifyEvent(&event.Event{Type:event.Sys_Event_Http_Event,Data:session})
+	ticker := time.NewTicker(httpService.processTimeout)
 	select {
 	case <-ticker.C:
 		session.WriteStatusCode(http.StatusGatewayTimeout)
@@ -535,7 +511,7 @@ func (slf *HttpService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		break
 	case <- session.sessionDone:
 		if session.fileData!=nil {
-			slf.ProcessFile(session)
+			httpService.ProcessFile(session)
 		}else if session.redirectData!=nil {
 			session.redirects()
 		}else{

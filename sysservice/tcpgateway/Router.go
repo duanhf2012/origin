@@ -46,9 +46,9 @@ func NewRouter(loadBalance ILoadBalance,rpcHandler rpc.IRpcHandler,cfg interface
 	return router
 }
 
-func (slf *Router) loadCfg(cfg interface{}){
-	slf.mapMsgRouterInfo = map[uint16]*MsgRouterInfo{}
-	slf.mapEventRouterInfo = map[string]*EventRouterInfo{}
+func (r *Router) loadCfg(cfg interface{}){
+	r.mapMsgRouterInfo = map[uint16]*MsgRouterInfo{}
+	r.mapEventRouterInfo = map[string]*EventRouterInfo{}
 
 	mapRouter,ok := cfg.(map[string]interface{})
 	if ok == false{
@@ -100,7 +100,7 @@ func (slf *Router) loadCfg(cfg interface{}){
 			continue
 		}
 
-		slf.mapMsgRouterInfo[uint16(msgId)] = &MsgRouterInfo{ServiceName:strService[0],Rpc: iRpc.(string),LoadBalanceType: iLoadBalanceType.(string)}
+		r.mapMsgRouterInfo[uint16(msgId)] = &MsgRouterInfo{ServiceName: strService[0],Rpc: iRpc.(string),LoadBalanceType: iLoadBalanceType.(string)}
 	}
 
 	//parse EventRouter
@@ -147,12 +147,12 @@ func (slf *Router) loadCfg(cfg interface{}){
 			continue
 		}
 
-		slf.mapEventRouterInfo[strEventType] = &EventRouterInfo{ServiceName:strService[0],Rpc: iRpc.(string),LoadBalanceType: iLoadBalanceType.(string)}
+		r.mapEventRouterInfo[strEventType] = &EventRouterInfo{ServiceName: strService[0],Rpc: iRpc.(string),LoadBalanceType: iLoadBalanceType.(string)}
 	}
 }
 
-func (slf *Router) GetMsgRouterService(msgType uint16) *MsgRouterInfo{
-	info,ok := slf.mapMsgRouterInfo[msgType]
+func (r *Router) GetMsgRouterService(msgType uint16) *MsgRouterInfo{
+	info,ok := r.mapMsgRouterInfo[msgType]
 	if ok == false {
 		return nil
 	}
@@ -160,8 +160,8 @@ func (slf *Router) GetMsgRouterService(msgType uint16) *MsgRouterInfo{
 	return info
 }
 
-func (slf *Router) GetEventRouterService(eventType string) *EventRouterInfo{
-	info,ok := slf.mapEventRouterInfo[eventType]
+func (r *Router) GetEventRouterService(eventType string) *EventRouterInfo{
+	info,ok := r.mapEventRouterInfo[eventType]
 	if ok == false {
 		return nil
 	}
@@ -169,8 +169,8 @@ func (slf *Router) GetEventRouterService(eventType string) *EventRouterInfo{
 	return info
 }
 
-func (slf *Router) GetRouterId(clientId uint64,serviceName *string) int {
-	mapServiceRouter,ok := slf.mapClientRouterCache[clientId]
+func (r *Router) GetRouterId(clientId uint64,serviceName *string) int {
+	mapServiceRouter,ok := r.mapClientRouterCache[clientId]
 	if ok == false{
 		return 0
 	}
@@ -183,46 +183,46 @@ func (slf *Router) GetRouterId(clientId uint64,serviceName *string) int {
 	return routerId
 }
 
-func (slf *Router) SetRouterId(clientId uint64,serviceName *string,routerId int){
-	slf.mapClientRouterCache[clientId][*serviceName] = routerId
+func (r *Router) SetRouterId(clientId uint64,serviceName *string,routerId int){
+	r.mapClientRouterCache[clientId][*serviceName] = routerId
 }
 
-func (slf *Router) RouterMessage(clientId uint64,msgType uint16,msg []byte) {
-	routerInfo:= slf.GetMsgRouterService(msgType)
+func (r *Router) RouterMessage(clientId uint64,msgType uint16,msg []byte) {
+	routerInfo:= r.GetMsgRouterService(msgType)
 	if routerInfo==nil {
 		log.Error("The message type is %d with no configured route!",msgType)
 		return
 	}
 
-	routerId := slf.GetRouterId(clientId,&routerInfo.ServiceName)
+	routerId := r.GetRouterId(clientId,&routerInfo.ServiceName)
 	if routerId ==0 {
-		routerId = slf.loadBalance.SelectNode(routerInfo.ServiceName)
-		slf.SetRouterId(clientId,&routerInfo.ServiceName,routerId)
+		routerId = r.loadBalance.SelectNode(routerInfo.ServiceName)
+		r.SetRouterId(clientId,&routerInfo.ServiceName,routerId)
 	}
 
 	if routerId>0 {
-		slf.rpcHandler.RawGoNode(rpc.RPC_PROCESSOR_PB,routerId,routerInfo.Rpc,msg,proto.Uint64(clientId))
+		r.rpcHandler.RawGoNode(rpc.RpcProcessorPb,routerId,routerInfo.Rpc,msg,proto.Uint64(clientId))
 	}
 }
 
-func (slf *Router) Load(){
+func (r *Router) Load(){
 }
 
-func (slf *Router) RouterEvent(clientId uint64,eventType string) bool{
-	routerInfo:= slf.GetEventRouterService(eventType)
+func (r *Router) RouterEvent(clientId uint64,eventType string) bool{
+	routerInfo:= r.GetEventRouterService(eventType)
 	if routerInfo==nil {
 		log.Error("The event type is %s with no register!",eventType)
 		return false
 	}
 
-	routerId := slf.GetRouterId(clientId,&routerInfo.ServiceName)
+	routerId := r.GetRouterId(clientId,&routerInfo.ServiceName)
 	if routerId ==0 {
-		routerId = slf.loadBalance.SelectNode(routerInfo.ServiceName)
-		slf.SetRouterId(clientId,&routerInfo.ServiceName,routerId)
+		routerId = r.loadBalance.SelectNode(routerInfo.ServiceName)
+		r.SetRouterId(clientId,&routerInfo.ServiceName,routerId)
 	}
 
 	if routerId>0 {
-		slf.rpcHandler.RawGoNode(rpc.RPC_PROCESSOR_PB,routerId,routerInfo.Rpc,[]byte{},proto.Uint64(clientId))
+		r.rpcHandler.RawGoNode(rpc.RpcProcessorPb,routerId,routerInfo.Rpc,[]byte{},proto.Uint64(clientId))
 		return true
 	}
 
@@ -230,13 +230,13 @@ func (slf *Router) RouterEvent(clientId uint64,eventType string) bool{
 }
 
 
-func (slf *Router) OnDisconnected(clientId uint64){
-	delete(slf.mapClientRouterCache,clientId)
+func (r *Router) OnDisconnected(clientId uint64){
+	delete(r.mapClientRouterCache,clientId)
 	//通知事件
-	slf.RouterEvent(clientId,"DisConnect")
+	r.RouterEvent(clientId,"DisConnect")
 }
 
-func (slf *Router) OnConnected(clientId uint64){
-	slf.mapClientRouterCache[clientId] = map[string]int{}
-	slf.RouterEvent(clientId,"Connect")
+func (r *Router) OnConnected(clientId uint64){
+	r.mapClientRouterCache[clientId] = map[string]int{}
+	r.RouterEvent(clientId,"Connect")
 }
