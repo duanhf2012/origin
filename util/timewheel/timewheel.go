@@ -307,6 +307,9 @@ func (t *timeWheel) addTimer(timer *Timer) *Timer {
 
 //删除定时器
 func (t *timeWheel) delTimer(timer *Timer) {
+	if timer.next == nil {
+		return
+	}
 	timer.prev.next = timer.next
 	timer.next.prev = timer.prev
 	ReleaseTimer(timer)

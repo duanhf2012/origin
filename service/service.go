@@ -109,7 +109,7 @@ func (s *Service) Run() {
 			bStop = true
 		case rpcRequest :=<- rpcRequestChan:
 			if s.profiler!=nil {
-				analyzer = s.profiler.Push("Req_"+rpcRequest.RpcRequestData.GetServiceMethod())
+				analyzer = s.profiler.Push("[Req]"+rpcRequest.RpcRequestData.GetServiceMethod())
 			}
 
 			s.GetRpcHandler().HandlerRpcRequest(rpcRequest)
@@ -119,7 +119,7 @@ func (s *Service) Run() {
 			}
 		case rpcResponseCB := <-rpcResponseCallBack:
 			if s.profiler!=nil {
-				analyzer = s.profiler.Push("Res_" + rpcResponseCB.ServiceMethod)
+				analyzer = s.profiler.Push("[Res]" + rpcResponseCB.ServiceMethod)
 			}
 			s.GetRpcHandler().HandlerRpcResponseCB(rpcResponseCB)
 			if analyzer!=nil {
@@ -128,7 +128,7 @@ func (s *Service) Run() {
 			}
 		case ev := <- eventChan:
 			if s.profiler!=nil {
-				analyzer = s.profiler.Push(fmt.Sprintf("Event_%d", int(ev.Type)))
+				analyzer = s.profiler.Push(fmt.Sprintf("[Event]%d", int(ev.Type)))
 			}
 			s.eventProcessor.EventHandler(ev)
 			if analyzer!=nil {
@@ -137,10 +137,11 @@ func (s *Service) Run() {
 			}
 		case t := <- s.dispatcher.ChanTimer:
 			if t.IsClose() == false {
+				time := t.AdditionData.(timer.ITime)
 				if s.profiler != nil {
-					analyzer = s.profiler.Push(fmt.Sprintf("Timer_%s", t.AdditionData.(*timer.Timer).GetFunctionName()))
+					analyzer = s.profiler.Push("[timer]"+time.GetName())
 				}
-				t.AdditionData.(*timer.Timer).Cb()
+				time.Do()
 				if analyzer != nil {
 					analyzer.Pop()
 					analyzer = nil
