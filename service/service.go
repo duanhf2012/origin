@@ -130,7 +130,7 @@ func (s *Service) Run() {
 			if s.profiler!=nil {
 				analyzer = s.profiler.Push(fmt.Sprintf("[Event]%d", int(ev.Type)))
 			}
-			s.eventProcessor.EventHandler(ev)
+			s.eventProcessor.EventHandler(&ev)
 			if analyzer!=nil {
 				analyzer.Pop()
 				analyzer = nil

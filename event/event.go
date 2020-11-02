@@ -41,7 +41,7 @@ type IEventProcessor interface {
 	addListen(eventType EventType,reciver IEventHandler)
 	removeBindEvent(eventType EventType,reciver IEventHandler)
 	removeListen(eventType EventType,reciver IEventHandler)
-	GetEventChan() chan *Event
+	GetEventChan() chan Event
 }
 
 type EventHandler struct {
@@ -55,7 +55,7 @@ type EventHandler struct {
 
 
 type EventProcessor struct {
-	eventChannel chan *Event
+	eventChannel chan Event
 
 	locker sync.RWMutex
 	mapListenerEvent map[EventType]map[IEventProcessor]int           //监听者信息
@@ -109,7 +109,6 @@ func (handler *EventHandler) Init(processor IEventProcessor){
 	handler.mapRegEvent =map[EventType]map[IEventProcessor]interface{}{}
 }
 
-
 func (processor *EventProcessor) SetEventChannel(channelNum int) bool{
 	processor.locker.Lock()
 	defer processor.locker.Unlock()
@@ -121,7 +120,7 @@ func (processor *EventProcessor) SetEventChannel(channelNum int) bool{
 		channelNum = DefaultEventChannelLen
 	}
 
-	processor.eventChannel = make(chan *Event,channelNum)
+	processor.eventChannel = make(chan Event,channelNum)
 	return true
 }
 
@@ -182,6 +181,8 @@ func (processor *EventProcessor) UnRegEventReciverFun(eventType EventType,recive
 }
 
 func (handler *EventHandler) Destroy(){
+	handler.locker.Lock()
+	defer handler.locker.Unlock()
 	for eventTyp,mapEventProcess := range handler.mapRegEvent {
 		if mapEventProcess == nil {
 			continue
@@ -193,12 +194,12 @@ func (handler *EventHandler) Destroy(){
 	}
 }
 
-func (processor *EventProcessor) GetEventChan() chan *Event{
+func (processor *EventProcessor) GetEventChan() chan Event{
 	processor.locker.Lock()
 	defer processor.locker.Unlock()
 
 	if processor.eventChannel == nil {
-		processor.eventChannel =make(chan *Event,DefaultEventChannelLen)
+		processor.eventChannel =make(chan Event,DefaultEventChannelLen)
 	}
 
 	return processor.eventChannel
@@ -223,20 +224,17 @@ func (processor *EventProcessor) EventHandler(ev *Event) {
 	}
 }
 
-
-
-
 func (processor *EventProcessor) pushEvent(event *Event){
 	if len(processor.eventChannel)>=cap(processor.eventChannel){
 		log.Error("event process channel is full.")
 		return
 	}
 
-	processor.eventChannel<-event
+	processor.eventChannel<-*event
 }
 
 func (processor *EventProcessor) castEvent(event *Event){
-	if processor.mapListenerEvent == nil{
+	if processor.mapListenerEvent == nil {
 		log.Error("mapListenerEvent not init!")
 		return
 	}
