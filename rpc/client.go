@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
+	"github.com/duanhf2012/origin/util/timewheel"
 	"math"
 	"reflect"
 	"runtime"
@@ -35,7 +36,7 @@ func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 
 func (client *Client) Connect(addr string) error {
 	client.Addr = addr
-	client.maxCheckCallRpcCount = 100
+	client.maxCheckCallRpcCount = 1000
 	client.callRpcTimeout = 15*time.Second
 	client.ConnNum = 1
 	client.ConnectInterval = time.Second*2
@@ -58,16 +59,18 @@ func (client *Client) Connect(addr string) error {
 }
 
 func (client *Client) startCheckRpcCallTimer(){
-	tick :=time.NewTicker( 3 * time.Second)
-
+	timer:=timewheel.NewTimer(3*time.Second)
 	for{
 		select {
-			case <- tick.C:
+			case <- timer.C:
+				timewheel.ReleaseTimer(timer)
+				timer=timewheel.NewTimer(3*time.Second)
 				client.checkRpcCallTimeout()
 		}
 	}
 
-	tick.Stop()
+	timer.Close()
+	timewheel.ReleaseTimer(timer)
 }
 
 func (client *Client) makeCallFail(call *Call){
@@ -109,7 +112,7 @@ func (client *Client) ResetPending(){
 		}
 	}
 
-	client.pending = map[uint64]*list.Element{}
+	client.pending = make(map[uint64]*list.Element,4096)
 	client.pendingTimer = list.New()
 	client.pendingLock.Unlock()
 }
@@ -271,32 +274,32 @@ func (client *Client) Run(){
 		}
 
 		//1.解析head
-		respone := &RpcResponse{}
-		respone.RpcResponseData =processor.MakeRpcResponse(0,nil,nil)
+		response := RpcResponse{}
+		response.RpcResponseData =processor.MakeRpcResponse(0,nil,nil)
 
-		err = processor.Unmarshal(bytes[1:],respone.RpcResponseData)
+		err = processor.Unmarshal(bytes[1:], response.RpcResponseData)
 		client.conn.ReleaseReadMsg(bytes)
 		if err != nil {
-			processor.ReleaseRpcRespose(respone.RpcResponseData)
+			processor.ReleaseRpcResponse(response.RpcResponseData)
 			log.Error("rpcClient Unmarshal head error,error:%+v",err)
 			continue
 		}
 
-		v := client.RemovePending(respone.RpcResponseData.GetSeq())
+		v := client.RemovePending(response.RpcResponseData.GetSeq())
 		if v == nil {
-			log.Error("rpcClient cannot find seq %d in pending",respone.RpcResponseData.GetSeq())
+			log.Error("rpcClient cannot find seq %d in pending", response.RpcResponseData.GetSeq())
 		}else  {
 			v.Err = nil
-			if len(respone.RpcResponseData.GetReply()) >0 {
-				err = processor.Unmarshal(respone.RpcResponseData.GetReply(),v.Reply)
+			if len(response.RpcResponseData.GetReply()) >0 {
+				err = processor.Unmarshal(response.RpcResponseData.GetReply(),v.Reply)
 				if err != nil {
 					log.Error("rpcClient Unmarshal body error,error:%+v",err)
 					v.Err = err
 				}
 			}
 
-			if respone.RpcResponseData.GetErr() != nil {
-				v.Err= respone.RpcResponseData.GetErr()
+			if response.RpcResponseData.GetErr() != nil {
+				v.Err= response.RpcResponseData.GetErr()
 			}
 
 			if v.callback!=nil && v.callback.IsValid() {
@@ -306,7 +309,7 @@ func (client *Client) Run(){
 			}
 		}
 
-		processor.ReleaseRpcRespose(respone.RpcResponseData)
+		processor.ReleaseRpcResponse(response.RpcResponseData)
 	}
 }
 

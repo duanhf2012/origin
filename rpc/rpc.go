@@ -22,7 +22,7 @@ type RpcResponse struct {
 	RpcResponseData IRpcResponseData
 }
 
-var rpcResponsePool sync.Pool
+//var rpcResponsePool sync.Pool
 var rpcRequestPool sync.Pool
 var rpcCallPool sync.Pool
 
@@ -67,10 +67,6 @@ type Call struct {
 }
 
 func init(){
-	rpcResponsePool.New = func()interface{}{
-		return &RpcResponse{}
-	}
-
 	rpcRequestPool.New = func() interface{} {
 		return &RpcRequest{}
 	}
@@ -111,20 +107,12 @@ func (call *Call) Done() *Call{
 	return <-call.done
 }
 
-func MakeRpcResponse() *RpcResponse{
-	return rpcResponsePool.Get().(*RpcResponse).Clear()
-}
-
 func MakeRpcRequest() *RpcRequest{
 	return rpcRequestPool.Get().(*RpcRequest).Clear()
 }
 
 func MakeCall() *Call {
 	return rpcCallPool.Get().(*Call).Clear()
-}
-
-func ReleaseRpcResponse(rpcResponse *RpcResponse){
-	rpcResponsePool.Put(rpcResponse)
 }
 
 func ReleaseRpcRequest(rpcRequest *RpcRequest){

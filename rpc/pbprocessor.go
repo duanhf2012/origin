@@ -1,8 +1,8 @@
 package rpc
 
 import (
-	"github.com/golang/protobuf/proto"
 	"fmt"
+	"github.com/golang/protobuf/proto"
 	"sync"
 )
 
@@ -107,7 +107,6 @@ func (slf *PBProcessor) Unmarshal(data []byte, msg interface{}) error{
 	return proto.Unmarshal(data, protoMsg)
 }
 
-
 func (slf *PBProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte,inAdditionParam interface{}) IRpcRequestData{
 	pPbRpcRequestData := rpcPbRequestDataPool.Get().(*PBRpcRequestData)
 	pPbRpcRequestData.MakeRequest(seq,serviceMethod,noReply,inParam,inAdditionParam)
@@ -124,8 +123,8 @@ func (slf *PBProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequestData){
 	rpcPbRequestDataPool.Put(rpcRequestData)
 }
 
-func (slf *PBProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
-	rpcPbResponseDataPool.Put(rpcRequestData)
+func (slf *PBProcessor) ReleaseRpcResponse(rpcResponseData IRpcResponseData){
+	rpcPbResponseDataPool.Put(rpcResponseData)
 }
 
 func (slf *PBProcessor) IsParse(param interface{}) bool {
@@ -133,11 +132,9 @@ func (slf *PBProcessor) IsParse(param interface{}) bool {
 	return ok
 }
 
-
 func (slf *PBProcessor)	GetProcessorType() RpcProcessorType{
 	return RpcProcessorPb
 }
-
 
 func (slf *PBRpcRequestData) IsNoReply() bool{
 	return slf.GetNoReply()

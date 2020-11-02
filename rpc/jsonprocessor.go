@@ -43,7 +43,7 @@ func init(){
 }
 
 func (jsonProcessor *JsonProcessor) Marshal(v interface{}) ([]byte, error){
-	return jsonProcessor.Marshal(v)
+	return json.Marshal(v)
 }
 
 func (jsonProcessor *JsonProcessor) Unmarshal(data []byte, v interface{}) error{
@@ -65,6 +65,7 @@ func (jsonProcessor *JsonProcessor) MakeRpcResponse(seq uint64,err *RpcError,rep
 	jsonRpcResponseData.Seq = seq
 	jsonRpcResponseData.Err = err.Error()
 	jsonRpcResponseData.Reply = reply
+
 	return jsonRpcResponseData
 }
 
@@ -72,8 +73,8 @@ func (jsonProcessor *JsonProcessor) ReleaseRpcRequest(rpcRequestData IRpcRequest
 	rpcJsonRequestDataPool.Put(rpcRequestData)
 }
 
-func (jsonProcessor *JsonProcessor) ReleaseRpcRespose(rpcRequestData IRpcResponseData){
-	rpcJsonResponseDataPool.Put(rpcRequestData)
+func (jsonProcessor *JsonProcessor) ReleaseRpcResponse(rpcResponseData IRpcResponseData){
+	rpcJsonResponseDataPool.Put(rpcResponseData)
 }
 
 func (jsonProcessor *JsonProcessor) IsParse(param interface{}) bool {

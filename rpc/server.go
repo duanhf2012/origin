@@ -100,7 +100,7 @@ func (agent *RpcAgent) WriteResponse(processor IRpcProcessor,serviceMethod strin
 	var rpcResponse RpcResponse
 	rpcResponse.RpcResponseData = processor.MakeRpcResponse(seq,rpcError,mReply)
 	bytes,errM :=  processor.Marshal(rpcResponse.RpcResponseData)
-	defer processor.ReleaseRpcRespose(rpcResponse.RpcResponseData)
+	defer processor.ReleaseRpcResponse(rpcResponse.RpcResponseData)
 
 	if errM != nil {
 		log.Error("service method %s %+v Marshal error:%+v!", serviceMethod,rpcResponse,errM)

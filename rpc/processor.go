@@ -7,7 +7,7 @@ type IRpcProcessor interface {
 	MakeRpcResponse(seq uint64,err *RpcError,reply []byte) IRpcResponseData
 
 	ReleaseRpcRequest(rpcRequestData IRpcRequestData)
-	ReleaseRpcRespose(rpcRequestData IRpcResponseData)
+	ReleaseRpcResponse(rpcRequestData IRpcResponseData)
 	IsParse(param interface{}) bool //是否可解析
 	GetProcessorType() RpcProcessorType
 }

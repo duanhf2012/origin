@@ -109,6 +109,10 @@ type Timer struct {
 //停止停时器
 func (timer *Timer) Close(){
 	timer.bClose = true
+	if timer.bClose == true {
+		return
+	}
+
 	//将关闭标志设为1关闭状态
 	if atomic.SwapInt32(&timer.end,1) == 0 {
 		chanStopTimer<-timer
