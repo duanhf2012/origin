@@ -258,6 +258,10 @@ func (t *timeWheel) newTimer(ticks int64,additionData interface{},c chan *Timer)
 	pTimer.bClose = false
 	pTimer.C = c
 	pTimer.AdditionData = additionData
+
+	if ticks<=0 {
+		ticks = 1
+	}
 	pTimer.expireTicks = ticks+t.currentTicks
 	return pTimer
 }
