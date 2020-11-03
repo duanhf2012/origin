@@ -61,26 +61,26 @@ func (slf *PBRpcRequestData) MakeRequest(seq uint64,serviceMethod string,noReply
 	}
 
 	switch inAdditionParam.(type) {
-	case *int:
-		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_SParam{int64(*inAdditionParam.(*int))}}
-	case *int32:
-		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_SParam{int64(*inAdditionParam.(*int32))}}
-	case *int16:
-		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_SParam{int64(*inAdditionParam.(*int16))}}
-	case *int64:
-		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_SParam{*inAdditionParam.(*int64)}}
-	case *uint:
-		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_UParam{uint64(*inAdditionParam.(*uint))}}
-	case *uint32:
-		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_UParam{uint64(*inAdditionParam.(*uint32))}}
-	case *uint16:
-		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_UParam{uint64(*inAdditionParam.(*uint16))}}
-	case *uint64:
-		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_UParam{*inAdditionParam.(*uint64)}}
-	case *string:
-		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_StrParam{*inAdditionParam.(*string)}}
-	case *[]byte:
-		slf.AddtionParam = &AdditionParam{AdditionOneof: &AdditionParam_BParam{*inAdditionParam.(*[]byte)}}
+	case int:
+		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_SParam{int64(inAdditionParam.(int))}}
+	case int32:
+		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_SParam{int64(inAdditionParam.(int32))}}
+	case int16:
+		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_SParam{int64(inAdditionParam.(int16))}}
+	case int64:
+		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_SParam{inAdditionParam.(int64)}}
+	case uint:
+		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_UParam{uint64(inAdditionParam.(uint))}}
+	case uint32:
+		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_UParam{uint64(inAdditionParam.(uint32))}}
+	case uint16:
+		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_UParam{uint64(inAdditionParam.(uint16))}}
+	case uint64:
+		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_UParam{inAdditionParam.(uint64)}}
+	case string:
+		slf.AddtionParam =  &AdditionParam{AdditionOneof:&AdditionParam_StrParam{inAdditionParam.(string)}}
+	case []byte:
+		slf.AddtionParam = &AdditionParam{AdditionOneof: &AdditionParam_BParam{inAdditionParam.([]byte)}}
 	default:
 		panic(fmt.Sprintf("not support type %+v",inAdditionParam))
 	}

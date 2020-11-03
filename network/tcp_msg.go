@@ -101,7 +101,7 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 	//msgData := make([]byte, msgLen)
 	msgData := makeByteSlice(int(msgLen))
 	if _, err := io.ReadFull(conn, msgData); err != nil {
-		releaseByteSlice(msgData)
+		ReleaseByteSlice(msgData)
 		return nil, err
 	}
 
@@ -122,7 +122,7 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 	} else if msgLen < p.minMsgLen {
 		return errors.New("message too short")
 	}
-	
+
 	//msg := make([]byte, uint32(p.lenMsgLen)+msgLen)
 	msg := makeByteSlice(p.lenMsgLen+int(msgLen))
 	// write len

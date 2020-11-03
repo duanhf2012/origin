@@ -53,7 +53,7 @@ func (pbRawProcessor *PBRawProcessor ) Unmarshal(data []byte) (interface{}, erro
 		msgType = binary.BigEndian.Uint16(data[:2])
 	}
 
-	return &PBRawPackInfo{typ:msgType,rawMsg:data[2:]},nil
+	return &PBRawPackInfo{typ:msgType,rawMsg:data},nil
 }
 
 // must goroutine safe

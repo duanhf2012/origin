@@ -3,6 +3,7 @@ package processor
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/duanhf2012/origin/network"
 	"reflect"
 )
 
@@ -53,6 +54,7 @@ func (jsonProcessor *JsonProcessor ) MsgRoute(msg interface{},userdata interface
 
 func (jsonProcessor *JsonProcessor) Unmarshal(data []byte) (interface{}, error) {
 	typeStruct := struct {Type int `json:"typ"`}{}
+	defer network.ReleaseByteSlice(data)
 	err := json.Unmarshal(data, &typeStruct)
 	if err != nil {
 		return nil, err
@@ -64,13 +66,13 @@ func (jsonProcessor *JsonProcessor) Unmarshal(data []byte) (interface{}, error) 
 		return nil,fmt.Errorf("Cannot find register %d msgType!",msgType)
 	}
 
-	msg := reflect.New(info.msgType.Elem()).Interface()
-	err = json.Unmarshal(data, msg)
+	msgData := reflect.New(info.msgType.Elem()).Interface()
+	err = json.Unmarshal(data, msgData)
 	if err != nil {
 		return nil,err
 	}
 
-	return &JsonPackInfo{typ:msgType,msg:msg},nil
+	return &JsonPackInfo{typ:msgType,msg:msgData},nil
 }
 
 func (jsonProcessor *JsonProcessor) Marshal(msg interface{}) ([]byte, error) {

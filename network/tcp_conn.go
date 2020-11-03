@@ -37,8 +37,7 @@ func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser) *TCPCo
 				break
 			}
 			_, err := conn.Write(b)
-			releaseByteSlice(b)
-
+			ReleaseByteSlice(b)
 
 			if err != nil {
 				break
@@ -126,7 +125,7 @@ func (tcpConn *TCPConn) ReadMsg() ([]byte, error) {
 }
 
 func (tcpConn *TCPConn) ReleaseReadMsg(byteBuff []byte){
-	releaseByteSlice(byteBuff)
+	ReleaseByteSlice(byteBuff)
 }
 
 func (tcpConn *TCPConn) WriteMsg(args ...[]byte) error {

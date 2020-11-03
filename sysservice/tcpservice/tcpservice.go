@@ -45,7 +45,7 @@ var seedLocker sync.Mutex
 
 type TcpPack struct {
 	Type         TcpPackType //0表示连接 1表示断开 2表示数据
-	MsgProcessor processor.IProcessor
+	//MsgProcessor processor.IProcessor
 	ClientId     uint64
 	Data         interface{}
 }
@@ -118,16 +118,16 @@ func (tcpService *TcpService) OnInit() error{
 }
 
 func (tcpService *TcpService) TcpEventHandler(ev *event.Event) {
-	pack := ev.Data.(*TcpPack)
+	pack := ev.Data.(TcpPack)
 	switch pack.Type {
 	case TPT_Connected:
-		pack.MsgProcessor.ConnectedRoute(pack.ClientId)
+		tcpService.process.ConnectedRoute(pack.ClientId)
 	case TPT_DisConnected:
-		pack.MsgProcessor.DisConnectedRoute(pack.ClientId)
+		tcpService.process.DisConnectedRoute(pack.ClientId)
 	case TPT_UnknownPack:
-		pack.MsgProcessor.UnknownMsgRoute(pack.Data,pack.ClientId)
+		tcpService.process.UnknownMsgRoute(pack.Data,pack.ClientId)
 	case TPT_Pack:
-		pack.MsgProcessor.MsgRoute(pack.Data, pack.ClientId)
+		tcpService.process.MsgRoute(pack.Data, pack.ClientId)
 	}
 }
 
@@ -162,7 +162,7 @@ func (slf *Client) GetId() uint64 {
 }
 
 func (slf *Client) Run() {
-	slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_Connected,MsgProcessor:slf.tcpService.process}})
+	slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:TcpPack{ClientId:slf.id,Type:TPT_Connected}})
 	for{
 		if slf.tcpConn == nil {
 			break
@@ -173,17 +173,17 @@ func (slf *Client) Run() {
 			break
 		}
 		data,err:=slf.tcpService.process.Unmarshal(bytes)
-		slf.tcpConn.ReleaseReadMsg(bytes)
+
 		if err != nil {
-			slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_UnknownPack,Data:bytes,MsgProcessor:slf.tcpService.process}})
+			slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:TcpPack{ClientId:slf.id,Type:TPT_UnknownPack,Data:bytes}})
 			continue
 		}
-		slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_Pack,Data:data,MsgProcessor:slf.tcpService.process}})
+		slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:TcpPack{ClientId:slf.id,Type:TPT_Pack,Data:data}})
 	}
 }
 
 func (slf *Client) OnClose(){
-	slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:&TcpPack{ClientId:slf.id,Type:TPT_DisConnected,MsgProcessor:slf.tcpService.process}})
+	slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:TcpPack{ClientId:slf.id,Type:TPT_DisConnected}})
 	slf.tcpService.mapClientLocker.Lock()
 	defer slf.tcpService.mapClientLocker.Unlock()
 	delete (slf.tcpService.mapClient,slf.GetId())

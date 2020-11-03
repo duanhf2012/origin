@@ -3,6 +3,7 @@ package processor
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/duanhf2012/origin/network"
 	"github.com/golang/protobuf/proto"
 	"reflect"
 )
@@ -63,6 +64,7 @@ func (pbProcessor *PBProcessor ) MsgRoute(msg interface{},userdata interface{}) 
 
 // must goroutine safe
 func (pbProcessor *PBProcessor ) Unmarshal(data []byte) (interface{}, error) {
+	defer network.ReleaseByteSlice(data)
 	var msgType uint16
 	if pbProcessor.LittleEndian == true {
 		msgType = binary.LittleEndian.Uint16(data[:2])

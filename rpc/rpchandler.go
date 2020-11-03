@@ -77,8 +77,7 @@ type IRpcHandler interface {
 	AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error
 	CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error
 	GoNode(nodeId int,serviceMethod string,args interface{}) error
-	RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error
-	RawCastGo(rpcProcessorType RpcProcessorType,serviceMethod string,args []byte,additionParam interface{})
+	RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args IRawInputArgs) error
 	IsSingleCoroutine() bool
 }
 
@@ -230,6 +229,9 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	}()
 	defer ReleaseRpcRequest(request)
 	defer request.rpcProcessor.ReleaseRpcRequest(request.RpcRequestData)
+	if request.inputArgs!=nil {
+		defer request.inputArgs.DoGc()
+	}
 
 	v,ok := handler.mapFunctions[request.RpcRequestData.GetServiceMethod()]
 	if ok == false {
@@ -262,8 +264,8 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 			return
 		}
 	}else {
-		if request.localRawParam!=nil {
-			err = request.rpcProcessor.Unmarshal(request.localRawParam,iParam)
+		if request.inputArgs!=nil {
+			err = request.rpcProcessor.Unmarshal(request.inputArgs.GetRawData(),iParam)
 			if err!=nil {
 				rErr := Errorf("Call Rpc %s Param error %+v",request.RpcRequestData.GetServiceMethod(),err)
 				log.Error("%s", rErr.Error())
@@ -373,7 +375,7 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,s
 				return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,nil)
 			}
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClient,true,sMethod[0],sMethod[1],args,nil,nil,nil)
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClient,true,sMethod[0],sMethod[1],args,nil,nil)
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
@@ -391,59 +393,6 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,s
 
 	return err
 }
-
-func (handler *RpcHandler) rawGoRpc(processor IRpcProcessor,bCast bool,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
-	var pClientList []*Client
-	err := handler.funcRpcClient(nodeId,serviceMethod,&pClientList)
-	if err != nil {
-		log.Error("Call serviceMethod is error:%+v!",err)
-		return err
-	}
-	if len(pClientList) > 1 && bCast == false {
-		log.Error("Cannot call more then 1 node!")
-		return fmt.Errorf("Cannot call more then 1 node!")
-	}
-
-	//2.rpcclient调用
-	//如果调用本结点服务
-	for _,pClient := range pClientList {
-		if pClient.bSelfNode == true {
-			pLocalRpcServer:= handler.funcRpcServer()
-			//判断是否是同一服务
-			sMethod := strings.Split(serviceMethod,".")
-			if len(sMethod)!=2 {
-				serr := fmt.Errorf("Call serviceMethod %s is error!",serviceMethod)
-				log.Error("%+v",serr)
-				if serr!= nil {
-					err = serr
-				}
-				continue
-			}
-			//调用自己rpcHandler处理器
-			if sMethod[0] == handler.rpcHandler.GetName() { //自己服务调用
-				//
-				return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,nil)
-			}
-			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClient,true,sMethod[0],sMethod[1],nil,args,nil,additionParam)
-			if pCall.Err!=nil {
-				err = pCall.Err
-			}
-			ReleaseCall(pCall)
-			continue
-		}
-
-		//跨node调用
-		pCall := pClient.RawGo(processor,true,serviceMethod,args,additionParam,nil)
-		if pCall.Err!=nil {
-			err = pCall.Err
-		}
-		ReleaseCall(pCall)
-	}
-
-	return err
-}
-
 
 func (handler *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
 	var pClientList []*Client
@@ -475,7 +424,7 @@ func (handler *RpcHandler) callRpc(nodeId int,serviceMethod string,args interfac
 			return pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,reply)
 		}
 		//其他的rpcHandler的处理器
-		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(nil,pClient,false,sMethod[0],sMethod[1],args,nil,reply,nil)
+		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(nil,pClient,false,sMethod[0],sMethod[1],args,reply,nil)
 		err = pCall.Done().Err
 		pClient.RemovePending(pCall.Seq)
 		ReleaseCall(pCall)
@@ -560,7 +509,7 @@ func (handler *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args int
 			}
 			return nil
 		}
-		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(nil,pClient,false,sMethod[0],sMethod[1],args,nil,reply,nil)
+		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(nil,pClient,false,sMethod[0],sMethod[1],args,reply,nil)
 		err = pCall.Done().Err
 		pClient.RemovePending(pCall.Seq)
 		ReleaseCall(pCall)
@@ -612,11 +561,61 @@ func (handler *RpcHandler) CastGo(serviceMethod string,args interface{})  {
 	handler.goRpc(nil,true,0,serviceMethod,args)
 }
 
-func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args []byte,additionParam interface{}) error {
-	return handler.rawGoRpc(GetProcessor(uint8(rpcProcessorType)),false,nodeId,serviceMethod,args,additionParam)
-}
+func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args IRawInputArgs) error {
+	processor := GetProcessor(uint8(rpcProcessorType))
+	var pClientList []*Client
+	err := handler.funcRpcClient(nodeId,serviceMethod,&pClientList)
+	if err != nil {
+		args.DoGc()
+		log.Error("Call serviceMethod is error:%+v!",err)
+		return err
+	}
+	if len(pClientList) > 1 {
+		args.DoGc()
+		log.Error("Cannot call more then 1 node!")
+		return fmt.Errorf("Cannot call more then 1 node!")
+	}
 
-func (handler *RpcHandler) RawCastGo(rpcProcessorType RpcProcessorType,serviceMethod string,args []byte,additionParam interface{})  {
-	handler.goRpc(GetProcessor(uint8(rpcProcessorType)),true,0,serviceMethod,args)
+	//2.rpcclient调用
+	//如果调用本结点服务
+	for _,pClient := range pClientList {
+		if pClient.bSelfNode == true {
+			pLocalRpcServer:= handler.funcRpcServer()
+			//判断是否是同一服务
+			sMethod := strings.Split(serviceMethod,".")
+			if len(sMethod)!=2 {
+				serr := fmt.Errorf("Call serviceMethod %s is error!",serviceMethod)
+				log.Error("%+v",serr)
+				if serr!= nil {
+					err = serr
+				}
+				continue
+			}
+			//调用自己rpcHandler处理器
+			if sMethod[0] == handler.rpcHandler.GetName() { //自己服务调用
+				err:= pLocalRpcServer.myselfRpcHandlerGo(sMethod[0],sMethod[1],args,nil)
+				args.DoGc()
+				return err
+			}
+
+			//其他的rpcHandler的处理器
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClient,true,sMethod[0],sMethod[1],nil,nil,args)
+			if pCall.Err!=nil {
+				err = pCall.Err
+			}
+			ReleaseCall(pCall)
+			continue
+		}
+
+		//跨node调用
+		pCall := pClient.RawGo(processor,true,serviceMethod,args.GetRawData(),args.GetAdditionParam(),nil)
+		args.DoGc()
+		if pCall.Err!=nil {
+			err = pCall.Err
+		}
+		ReleaseCall(pCall)
+	}
+
+	return err
 }
 

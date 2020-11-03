@@ -175,7 +175,6 @@ func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,call
 	}
 
 	request := &RpcRequest{}
-	call.Arg = args
 	call.Seq = client.generateSeq()
 	request.RpcRequestData = processor.MakeRpcRequest(client.startSeq,serviceMethod,false,InParam,nil)
 	client.AddPending(call)
@@ -209,7 +208,6 @@ func (client *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod s
 	call.Reply = reply
 
 	request := &RpcRequest{}
-	call.Arg = args
 	call.Seq = client.generateSeq()
 	if noReply == false {
 		client.AddPending(call)

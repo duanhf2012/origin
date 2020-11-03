@@ -214,8 +214,8 @@ func (agent *RpcAgent) Destroy() {
 	agent.conn.Destroy()
 }
 
-func (server *Server) NewAgent(conn *network.TCPConn) network.Agent {
-	agent := &RpcAgent{conn: conn, rpcServer: server}
+func (server *Server) NewAgent(c *network.TCPConn) network.Agent {
+	agent := &RpcAgent{conn: c, rpcServer: server}
 
 	return agent
 }
@@ -232,12 +232,15 @@ func (server *Server) myselfRpcHandlerGo(handlerName string,methodName string, a
 }
 
 
-func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Client,noReply bool,handlerName string,methodName string, args interface{},rawArgs []byte,reply interface{},additionParam interface{}) *Call {
+func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Client,noReply bool,handlerName string,methodName string, args interface{},reply interface{},inputArgs IRawInputArgs) *Call {
 	pCall := MakeCall()
 	pCall.Seq = client.generateSeq()
 
 	rpcHandler := server.rpcHandleFinder.FindRpcHandler(handlerName)
 	if rpcHandler== nil {
+		if inputArgs!= nil {
+			inputArgs.DoGc()
+		}
 		pCall.Err = fmt.Errorf("service method %s.%s not config!", handlerName,methodName)
 		log.Error("%s",pCall.Err.Error())
 		pCall.done <- pCall
@@ -248,11 +251,14 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 	req.bLocalRequest = true
 	req.localParam = args
 	req.localReply = reply
-	req.localRawParam = rawArgs
+	req.inputArgs = inputArgs
 	if processor == nil {
 		_,processor = GetProcessorType(args)
 	}
-
+	var additionParam interface{}
+	if inputArgs!=nil {
+		additionParam = inputArgs.GetAdditionParam()
+	}
 	req.RpcRequestData = processor.MakeRpcRequest(0,fmt.Sprintf("%s.%s",handlerName,methodName),noReply,nil,additionParam)
 	req.rpcProcessor = processor
 	if noReply == false {

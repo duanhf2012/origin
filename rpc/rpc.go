@@ -12,7 +12,8 @@ type RpcRequest struct {
 	bLocalRequest bool
 	localReply interface{}
 	localParam interface{} //本地调用的参数列表
-	localRawParam []byte
+	inputArgs IRawInputArgs
+
 	requestHandle RequestHandler
 	callback *reflect.Value
 	rpcProcessor IRpcProcessor
@@ -44,6 +45,12 @@ type IRpcResponseData interface {
 	GetReply() []byte
 }
 
+type IRawInputArgs interface {
+	GetRawData() []byte  //获取原始数据
+	GetAdditionParam() interface{} //获取附加数据
+	DoGc()           //处理完成,回收内存
+}
+
 type RpcHandleFinder interface {
 	FindRpcHandler(serviceMethod string) IRpcHandler
 }
@@ -55,7 +62,6 @@ type RawAdditionParamNull struct {
 type Call struct {
 	Seq           uint64
 	ServiceMethod string
-	Arg           interface{}
 	Reply         interface{}
 	Response      *RpcResponse
 	Err           error
@@ -93,7 +99,6 @@ func (rpcResponse *RpcResponse) Clear() *RpcResponse{
 func (call *Call) Clear() *Call{
 	call.Seq = 0
 	call.ServiceMethod = ""
-	call.Arg = nil
 	call.Reply = nil
 	call.Response = nil
 	call.Err = nil

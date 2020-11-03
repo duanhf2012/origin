@@ -2,10 +2,10 @@ package tcpgateway
 
 import (
 	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/sysservice/tcpservice"
-	"github.com/golang/protobuf/proto"
 	"strings"
 )
 
@@ -187,6 +187,31 @@ func (r *Router) SetRouterId(clientId uint64,serviceName *string,routerId int){
 	r.mapClientRouterCache[clientId][*serviceName] = routerId
 }
 
+type RawInputArgs struct {
+	rawData []byte
+	clientId uint64
+}
+
+var rawInputEmpty []byte
+func (args RawInputArgs) GetRawData() []byte{
+	if len(args.rawData) < 2 {
+		return args.rawData
+	}
+
+	return args.rawData[2:]
+}
+
+func (args RawInputArgs) GetAdditionParam() interface{}{
+	return args.clientId
+}
+
+func (args RawInputArgs) DoGc() {
+	if len(args.rawData) < 2 {
+		return
+	}
+	network.ReleaseByteSlice(args.rawData)
+}
+
 func (r *Router) RouterMessage(clientId uint64,msgType uint16,msg []byte) {
 	routerInfo:= r.GetMsgRouterService(msgType)
 	if routerInfo==nil {
@@ -201,7 +226,7 @@ func (r *Router) RouterMessage(clientId uint64,msgType uint16,msg []byte) {
 	}
 
 	if routerId>0 {
-		r.rpcHandler.RawGoNode(rpc.RpcProcessorPb,routerId,routerInfo.Rpc,msg,proto.Uint64(clientId))
+		r.rpcHandler.RawGoNode(rpc.RpcProcessorPb,routerId,routerInfo.Rpc,RawInputArgs{rawData: msg,clientId: clientId})
 	}
 }
 
@@ -222,7 +247,7 @@ func (r *Router) RouterEvent(clientId uint64,eventType string) bool{
 	}
 
 	if routerId>0 {
-		r.rpcHandler.RawGoNode(rpc.RpcProcessorPb,routerId,routerInfo.Rpc,[]byte{},proto.Uint64(clientId))
+		r.rpcHandler.RawGoNode(rpc.RpcProcessorPb,routerId,routerInfo.Rpc,RawInputArgs{rawData: rawInputEmpty,clientId: clientId})
 		return true
 	}
 
