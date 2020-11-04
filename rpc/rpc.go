@@ -88,6 +88,9 @@ func (slf *RpcRequest) Clear() *RpcRequest{
 	slf.localParam = nil
 	slf.requestHandle = nil
 	slf.callback = nil
+	slf.bLocalRequest = false
+	slf.inputArgs = nil
+	slf.rpcProcessor = nil
 	return slf
 }
 
@@ -101,6 +104,7 @@ func (call *Call) Clear() *Call{
 	call.ServiceMethod = ""
 	call.Reply = nil
 	call.Response = nil
+	call.done = nil
 	call.Err = nil
 	call.connId = 0
 	call.callback = nil

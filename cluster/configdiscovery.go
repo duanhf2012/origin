@@ -1,10 +1,22 @@
 package cluster
 
+import "strings"
 
 type ConfigDiscovery struct {
 	funDelService FunDelNode
 	funSetService FunSetNodeInfo
 	localNodeId int
+}
+
+func (discovery *ConfigDiscovery) privateService(nodeInfo *NodeInfo){
+	var serviceList []string
+	for _,s := range nodeInfo.ServiceList {
+		if strings.HasPrefix(s,"_") {
+			continue
+		}
+		serviceList = append(serviceList,s)
+	}
+	nodeInfo.ServiceList = serviceList
 }
 
 func (discovery *ConfigDiscovery) Init(localNodeId int) error{
@@ -20,6 +32,8 @@ func (discovery *ConfigDiscovery) Init(localNodeId int) error{
 		if nodeInfo.NodeId == localNodeId {
 			continue
 		}
+		//去除私有服务
+		discovery.privateService(&nodeInfo)
 		discovery.funSetService(&nodeInfo)
 	}
 

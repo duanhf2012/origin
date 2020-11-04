@@ -146,6 +146,12 @@ func (cls *Cluster) parseLocalCfg(){
 	}
 }
 
+func (cls *Cluster) localPrivateService(localNodeInfo *NodeInfo){
+	for i:=0;i<len(localNodeInfo.ServiceList);i++{
+		localNodeInfo.ServiceList[i] = strings.TrimLeft(localNodeInfo.ServiceList[i],"_")
+	}
+}
+
 func (cls *Cluster) InitCfg(localNodeId int) error{
 	cls.localServiceCfg = map[string]interface{}{}
 	cls.mapRpc = map[int] NodeRpcInfo{}
@@ -158,6 +164,7 @@ func (cls *Cluster) InitCfg(localNodeId int) error{
 		return err
 	}
 	cls.localNodeInfo = nodeInfoList[0]
+	cls.localPrivateService(&cls.localNodeInfo)
 
 	//读取本地服务配置
 	err = cls.readLocalService(localNodeId)

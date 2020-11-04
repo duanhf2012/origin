@@ -183,8 +183,8 @@ func (r *Router) GetRouterId(clientId uint64,serviceName *string) int {
 	return routerId
 }
 
-func (r *Router) SetRouterId(clientId uint64,serviceName *string,routerId int){
-	r.mapClientRouterCache[clientId][*serviceName] = routerId
+func (r *Router) SetRouterId(clientId uint64,serviceName string,routerId int){
+	r.mapClientRouterCache[clientId][serviceName] = routerId
 }
 
 type RawInputArgs struct {
@@ -212,21 +212,21 @@ func (args RawInputArgs) DoGc() {
 	network.ReleaseByteSlice(args.rawData)
 }
 
-func (r *Router) RouterMessage(clientId uint64,msgType uint16,msg []byte) {
+func (r *Router) RouterMessage(cliId uint64,msgType uint16,msg []byte) {
 	routerInfo:= r.GetMsgRouterService(msgType)
 	if routerInfo==nil {
 		log.Error("The message type is %d with no configured route!",msgType)
 		return
 	}
 
-	routerId := r.GetRouterId(clientId,&routerInfo.ServiceName)
+	routerId := r.GetRouterId(cliId,&routerInfo.ServiceName)
 	if routerId ==0 {
 		routerId = r.loadBalance.SelectNode(routerInfo.ServiceName)
-		r.SetRouterId(clientId,&routerInfo.ServiceName,routerId)
+		r.SetRouterId(cliId,routerInfo.ServiceName,routerId)
 	}
 
 	if routerId>0 {
-		r.rpcHandler.RawGoNode(rpc.RpcProcessorPb,routerId,routerInfo.Rpc,RawInputArgs{rawData: msg,clientId: clientId})
+		r.rpcHandler.RawGoNode(rpc.RpcProcessorPb,routerId,routerInfo.Rpc,RawInputArgs{rawData: msg,clientId: cliId})
 	}
 }
 
@@ -243,7 +243,7 @@ func (r *Router) RouterEvent(clientId uint64,eventType string) bool{
 	routerId := r.GetRouterId(clientId,&routerInfo.ServiceName)
 	if routerId ==0 {
 		routerId = r.loadBalance.SelectNode(routerInfo.ServiceName)
-		r.SetRouterId(clientId,&routerInfo.ServiceName,routerId)
+		r.SetRouterId(clientId,routerInfo.ServiceName,routerId)
 	}
 
 	if routerId>0 {
