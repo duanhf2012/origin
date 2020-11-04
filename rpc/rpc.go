@@ -55,7 +55,7 @@ type RpcHandleFinder interface {
 	FindRpcHandler(serviceMethod string) IRpcHandler
 }
 
-type RequestHandler func(Returns interface{},Err *RpcError)
+type RequestHandler func(Returns interface{},Err RpcError)
 type RawAdditionParamNull struct {
 }
 

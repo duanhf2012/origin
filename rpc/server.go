@@ -81,19 +81,16 @@ func (server *Server) Start(listenAddr string) {
 
 func (agent *RpcAgent) OnDestroy() {}
 
-func (agent *RpcAgent) WriteResponse(processor IRpcProcessor,serviceMethod string,seq uint64,reply interface{},err *RpcError) {
+func (agent *RpcAgent) WriteResponse(processor IRpcProcessor,serviceMethod string,seq uint64,reply interface{},err RpcError) {
 	var mReply []byte
-	var rpcError *RpcError
+	var rpcError RpcError
 	var errM error
 
-	if err != nil {
-		rpcError = err
-	} else {
-		if reply!=nil {
-			mReply,errM = processor.Marshal(reply)
-			if errM != nil {
-				rpcError = ConvertError(errM)
-			}
+
+	if reply!=nil {
+		mReply,errM = processor.Marshal(reply)
+		if errM != nil {
+			rpcError = ConvertError(errM)
 		}
 	}
 
@@ -139,7 +136,7 @@ func (agent *RpcAgent) Run() {
 			log.Error("rpc Unmarshal request is error: %v", err)
 			if req.RpcRequestData.GetSeq()>0 {
 				rpcError := RpcError(err.Error())
-				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,rpcError)
 				processor.ReleaseRpcRequest(req.RpcRequestData)
 				ReleaseRpcRequest(req)
 				continue
@@ -155,7 +152,7 @@ func (agent *RpcAgent) Run() {
 		serviceMethod := strings.Split(req.RpcRequestData.GetServiceMethod(),".")
 		if len(serviceMethod)!=2 {
 			rpcError := RpcError("rpc request req.ServiceMethod is error")
-			agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+			agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,rpcError)
 			processor.ReleaseRpcRequest(req.RpcRequestData)
 			ReleaseRpcRequest(req)
 			log.Debug("rpc request req.ServiceMethod is error")
@@ -165,7 +162,7 @@ func (agent *RpcAgent) Run() {
 		rpcHandler := agent.rpcServer.rpcHandleFinder.FindRpcHandler(serviceMethod[0])
 		if rpcHandler== nil {
 			rpcError := RpcError(fmt.Sprintf("service method %s not config!", req.RpcRequestData.GetServiceMethod()))
-			agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+			agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,rpcError)
 			processor.ReleaseRpcRequest(req.RpcRequestData)
 			ReleaseRpcRequest(req)
 			log.Error("service method %s not config!", req.RpcRequestData.GetServiceMethod())
@@ -173,7 +170,7 @@ func (agent *RpcAgent) Run() {
 		}
 
 		if req.RpcRequestData.IsNoReply()==false {
-			req.requestHandle = func(Returns interface{},Err *RpcError){
+			req.requestHandle = func(Returns interface{},Err RpcError){
 				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),Returns,Err)
 			}
 		}
@@ -183,7 +180,7 @@ func (agent *RpcAgent) Run() {
 			rpcError := RpcError(err.Error())
 
 			if req.RpcRequestData.IsNoReply() {
-				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,&rpcError)
+				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,rpcError)
 			}
 
 			processor.ReleaseRpcRequest(req.RpcRequestData)
@@ -264,20 +261,14 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 	req.rpcProcessor = processor
 	if noReply == false {
 		client.AddPending(pCall)
-		req.requestHandle = func(Returns interface{},Err *RpcError){
+		req.requestHandle = func(Returns interface{},Err RpcError){
 			v := client.RemovePending(pCall.Seq)
 			if v == nil {
 				log.Error("rpcClient cannot find seq %d in pending",pCall.Seq)
 				ReleaseCall(pCall)
 				return
 			}
-
-			if Err!=nil {
-				pCall.Err = Err
-			}else{
-				pCall.Err = nil
-			}
-
+			pCall.Err = Err
 			pCall.done <- pCall
 		}
 	}
@@ -316,7 +307,7 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler 
 	req.RpcRequestData = processor.MakeRpcRequest(0,serviceMethod,noReply,nil,nil)
 	if noReply == false {
 		client.AddPending(pCall)
-		req.requestHandle = func(Returns interface{},Err *RpcError){
+		req.requestHandle = func(Returns interface{},Err RpcError){
 			v := client.RemovePending(pCall.Seq)
 			if v == nil {
 				log.Error("rpcClient cannot find seq %d in pending",pCall.Seq)
@@ -326,11 +317,8 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler 
 				return
 			}
 
-			if Err == nil {
-				pCall.Err = nil
-			}else{
-				pCall.Err = Err
-			}
+			pCall.Err = Err
+
 
 			if Returns!=nil {
 				pCall.Reply = Returns

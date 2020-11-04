@@ -60,7 +60,7 @@ func (jsonProcessor *JsonProcessor) MakeRpcRequest(seq uint64,serviceMethod stri
 	return jsonRpcRequestData
 }
 
-func (jsonProcessor *JsonProcessor) MakeRpcResponse(seq uint64,err *RpcError,reply []byte) IRpcResponseData {
+func (jsonProcessor *JsonProcessor) MakeRpcResponse(seq uint64,err RpcError,reply []byte) IRpcResponseData {
 	jsonRpcResponseData := rpcJsonResponseDataPool.Get().(*JsonRpcResponseData)
 	jsonRpcResponseData.Seq = seq
 	jsonRpcResponseData.Err = err.Error()

@@ -88,11 +88,9 @@ func (slf *PBRpcRequestData) MakeRequest(seq uint64,serviceMethod string,noReply
 	return slf
 }
 
-func (slf *PBRpcResponseData) MakeRespone(seq uint64,err *RpcError,reply []byte) *PBRpcResponseData{
+func (slf *PBRpcResponseData) MakeRespone(seq uint64,err RpcError,reply []byte) *PBRpcResponseData{
 	slf.Seq = proto.Uint64(seq)
-	if err != nil {
-		slf.Error = proto.String(err.Error())
-	}
+	slf.Error = proto.String(err.Error())
 	slf.Reply = reply
 
 	return slf
@@ -113,7 +111,7 @@ func (slf *PBProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply b
 	return pPbRpcRequestData
 }
 
-func (slf *PBProcessor) MakeRpcResponse(seq uint64,err *RpcError,reply []byte) IRpcResponseData {
+func (slf *PBProcessor) MakeRpcResponse(seq uint64,err RpcError,reply []byte) IRpcResponseData {
 	pPBRpcResponseData := rpcPbResponseDataPool.Get().(*PBRpcResponseData)
 	pPBRpcResponseData.MakeRespone(seq,err,reply)
 	return pPBRpcResponseData

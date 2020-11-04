@@ -273,7 +273,7 @@ func (client *Client) Run(){
 
 		//1.解析head
 		response := RpcResponse{}
-		response.RpcResponseData =processor.MakeRpcResponse(0,nil,nil)
+		response.RpcResponseData =processor.MakeRpcResponse(0,RpcError(""),nil)
 
 		err = processor.Unmarshal(bytes[1:], response.RpcResponseData)
 		client.conn.ReleaseReadMsg(bytes)

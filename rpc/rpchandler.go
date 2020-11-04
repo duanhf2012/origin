@@ -17,21 +17,17 @@ var NilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
 type RpcError string
 
-func (e *RpcError) Error() string {
+func (e RpcError) Error() string {
+	return string(e)
+}
+
+func ConvertError(e error) RpcError{
 	if e == nil {
 		return ""
 	}
 
-	return string(*e)
-}
-
-func ConvertError(e error) *RpcError{
-	if e == nil {
-		return nil
-	}
-
 	rpcErr := RpcError(e.Error())
-	return &rpcErr
+	return rpcErr
 }
 
 func Errorf(format string, a ...interface{}) *RpcError {
@@ -224,7 +220,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 				log.Error("Handler Rpc %s Core dump info:%+v\n",request.RpcRequestData.GetServiceMethod(),err)
 				rpcErr := RpcError("call error : core dumps")
 				if request.requestHandle!=nil {
-					request.requestHandle(nil,&rpcErr)
+					request.requestHandle(nil,rpcErr)
 				}
 		}
 	}()
@@ -236,10 +232,10 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 
 	v,ok := handler.mapFunctions[request.RpcRequestData.GetServiceMethod()]
 	if ok == false {
-		err := Errorf("RpcHandler %s cannot find %s", handler.rpcHandler.GetName(),request.RpcRequestData.GetServiceMethod())
-		log.Error("%s",err.Error())
+		err := "RpcHandler "+handler.rpcHandler.GetName()+"cannot find "+request.RpcRequestData.GetServiceMethod()
+		log.Error(err)
 		if request.requestHandle!=nil {
-			request.requestHandle(nil,err)
+			request.requestHandle(nil,RpcError(err))
 		}
 		return
 	}
@@ -257,10 +253,10 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	if request.bLocalRequest == false {
 		err = request.rpcProcessor.Unmarshal(request.RpcRequestData.GetInParam(),iParam)
 		if err!=nil {
-			rerr := Errorf("Call Rpc %s Param error %+v",request.RpcRequestData.GetServiceMethod(),err)
-			log.Error("%s",rerr.Error())
+			rErr := "Call Rpc "+request.RpcRequestData.GetServiceMethod()+" Param error "+err.Error()
+			log.Error(rErr)
 			if request.requestHandle!=nil {
-				request.requestHandle(nil, rerr)
+				request.requestHandle(nil, RpcError(rErr))
 			}
 			return
 		}
@@ -268,10 +264,10 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		if request.inputArgs!=nil {
 			err = request.rpcProcessor.Unmarshal(request.inputArgs.GetRawData(),iParam)
 			if err!=nil {
-				rErr := Errorf("Call Rpc %s Param error %+v",request.RpcRequestData.GetServiceMethod(),err)
-				log.Error("%s", rErr.Error())
+				rErr := "Call Rpc "+request.RpcRequestData.GetServiceMethod()+" Param error "+err.Error()
+				log.Error(rErr)
 				if request.requestHandle!=nil {
-					request.requestHandle(nil, rErr)
+					request.requestHandle(nil, RpcError(rErr))
 				}
 				return
 			}
@@ -302,10 +298,10 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 			oParam = reflect.New(v.outParamValue.Type().Elem())
 		}
 		paramList = append(paramList,oParam) //输出参数
-	}else if(request.requestHandle != nil){ //调用方有返回值，但被调用函数没有返回参数
-		rErr := Errorf("Call Rpc %s without return parameter!",request.RpcRequestData.GetServiceMethod())
-		log.Error("%s",rErr.Error())
-		request.requestHandle(nil, rErr)
+	}else if request.requestHandle != nil { //调用方有返回值，但被调用函数没有返回参数
+		rErr := "Call Rpc "+request.RpcRequestData.GetServiceMethod()+"without return parameter!"
+		log.Error(rErr)
+		request.requestHandle(nil, RpcError(rErr))
 		return
 	}
 	returnValues := v.method.Func.Call(paramList)
