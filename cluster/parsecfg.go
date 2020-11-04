@@ -194,10 +194,11 @@ func (cls *Cluster) IsConfigService(serviceName string) bool {
 	return false
 }
 
-func (cls *Cluster) GetNodeIdByService(serviceName string,rpcClientList *[]*rpc.Client) {
+func (cls *Cluster) GetNodeIdByService(serviceName string,rpcClientList []*rpc.Client) (error,int) {
 	cls.locker.RLock()
 	defer cls.locker.RUnlock()
 	nodeIdList,ok := cls.mapServiceNode[serviceName]
+	count := 0
 	if ok == true {
 		for _,nodeId := range nodeIdList {
 			pClient := GetCluster().GetRpcClient(nodeId)
@@ -205,9 +206,15 @@ func (cls *Cluster) GetNodeIdByService(serviceName string,rpcClientList *[]*rpc.
 				log.Error("Cannot connect node id %d",nodeId)
 				continue
 			}
-			*rpcClientList = append(*rpcClientList,pClient)
+			rpcClientList[count] = pClient
+			count++
+			if count>=cap(rpcClientList) {
+				break
+			}
 		}
 	}
+
+	return nil,count
 }
 
 func (cls *Cluster) getServiceCfg(serviceName string) interface{}{

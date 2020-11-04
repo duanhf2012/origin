@@ -10,7 +10,8 @@ import (
 	"unicode/utf8"
 )
 
-type FuncRpcClient func(nodeId int,serviceMethod string,client *[]*Client) error
+const maxClusterNode int = 128
+type FuncRpcClient func(nodeId int,serviceMethod string,client []*Client) (error,int)
 type FuncRpcServer func() (*Server)
 var NilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
@@ -343,21 +344,21 @@ func (handler *RpcHandler) CallMethod(ServiceMethod string,param interface{},rep
 }
 
 func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,serviceMethod string,args interface{}) error {
-	var pClientList []*Client
-	err := handler.funcRpcClient(nodeId,serviceMethod,&pClientList)
-	if err != nil {
+	var pClientList [maxClusterNode]*Client
+	err,count := handler.funcRpcClient(nodeId,serviceMethod,pClientList[:])
+	if count==0||err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
 	}
-	if len(pClientList) > 1 && bCast == false{
+	if count > 1 && bCast == false{
 		log.Error("Cannot call more then 1 node!")
 		return fmt.Errorf("Cannot call more then 1 node!")
 	}
 
 	//2.rpcclient调用
 	//如果调用本结点服务
-	for _,pClient := range pClientList {
-		if pClient.bSelfNode == true {
+	for i:=0;i<count;i++{
+		if pClientList[i].bSelfNode == true {
 			pLocalRpcServer:= handler.funcRpcServer()
 			//判断是否是同一服务
 			findIndex := strings.Index(serviceMethod,".")
@@ -376,7 +377,7 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,s
 				return pLocalRpcServer.myselfRpcHandlerGo(serviceName,method,args,nil)
 			}
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClient,true,serviceName,method,args,nil,nil)
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClientList[i],true,serviceName,method,args,nil,nil)
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
@@ -385,7 +386,7 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,s
 		}
 
 		//跨node调用
-		pCall := pClient.Go(true,serviceMethod,args,nil)
+		pCall := pClientList[i].Go(true,serviceMethod,args,nil)
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
@@ -396,13 +397,13 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,s
 }
 
 func (handler *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
-	var pClientList []*Client
-	err := handler.funcRpcClient(nodeId,serviceMethod,&pClientList)
-	if err != nil {
+	var pClientList [maxClusterNode]*Client
+	err,count := handler.funcRpcClient(nodeId,serviceMethod,pClientList[:])
+	if count==0||err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
 	}
-	if len(pClientList) > 1 {
+	if count > 1 {
 		log.Error("Cannot call more then 1 node!")
 		return fmt.Errorf("Cannot call more then 1 node!")
 	}
@@ -465,15 +466,15 @@ func (handler *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args int
 	}
 
 	reply := reflect.New(fVal.Type().In(0).Elem()).Interface()
-	var pClientList []*Client
-	err := handler.funcRpcClient(nodeid,serviceMethod,&pClientList)
-	if err != nil {
+	var pClientList [maxClusterNode]*Client
+	err,count := handler.funcRpcClient(nodeid,serviceMethod,pClientList[:])
+	if count==0||err != nil {
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return nil
 	}
 
-	if pClientList== nil || len(pClientList) > 1 {
+	if count > 1 {
 		err := fmt.Errorf("Cannot call more then 1 node!")
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 		log.Error("Cannot call more then 1 node!")
@@ -565,16 +566,17 @@ func (handler *RpcHandler) CastGo(serviceMethod string,args interface{})  {
 	handler.goRpc(nil,true,0,serviceMethod,args)
 }
 
+
 func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args IRawInputArgs) error {
 	processor := GetProcessor(uint8(rpcProcessorType))
-	var pClientList []*Client
-	err := handler.funcRpcClient(nodeId,serviceMethod,&pClientList)
-	if err != nil {
+	var pClientList [maxClusterNode]*Client
+	err,count := handler.funcRpcClient(nodeId,serviceMethod,pClientList[:])
+	if count==0||err != nil {
 		args.DoGc()
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
 	}
-	if len(pClientList) > 1 {
+	if count > 1 {
 		args.DoGc()
 		log.Error("Cannot call more then 1 node!")
 		return fmt.Errorf("Cannot call more then 1 node!")
@@ -582,8 +584,9 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 
 	//2.rpcclient调用
 	//如果调用本结点服务
-	for _,pClient := range pClientList {
-		if pClient.bSelfNode == true {
+	for i:=0;i<count;i++{
+	//for _,pClient := range pClientList {
+		if pClientList[i].bSelfNode == true {
 			pLocalRpcServer:= handler.funcRpcServer()
 			//判断是否是同一服务
 			findIndex := strings.Index(serviceMethod,".")
@@ -605,7 +608,7 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 			}
 
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClient,true,serviceName,method,nil,nil,args)
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClientList[i],true,serviceName,method,nil,nil,args)
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
@@ -614,7 +617,7 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 		}
 
 		//跨node调用
-		pCall := pClient.RawGo(processor,true,serviceMethod,args.GetRawData(),args.GetAdditionParam(),nil)
+		pCall := pClientList[i].RawGo(processor,true,serviceMethod,args.GetRawData(),args.GetAdditionParam(),nil)
 		args.DoGc()
 		if pCall.Err!=nil {
 			err = pCall.Err

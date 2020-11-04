@@ -182,24 +182,25 @@ func (cls *Cluster) GetRpcClient(nodeId int) *rpc.Client {
 	return c.client
 }
 
-func GetRpcClient(nodeId int,serviceMethod string,clientList *[]*rpc.Client) error {
+func GetRpcClient(nodeId int,serviceMethod string,clientList []*rpc.Client) (error,int) {
 	if nodeId>0 {
 		pClient := GetCluster().GetRpcClient(nodeId)
 		if pClient==nil {
-			return fmt.Errorf("cannot find  nodeid %d!",nodeId)
+			return fmt.Errorf("cannot find  nodeid %d!",nodeId),0
 		}
-		*clientList = append(*clientList,pClient)
-		return nil
+		clientList[0] = pClient
+		return nil,1
 	}
 
-	serviceAndMethod := strings.Split(serviceMethod,".")
-	if len(serviceAndMethod)!=2 {
-		return fmt.Errorf("servicemethod param  %s is error!",serviceMethod)
+
+	findIndex := strings.Index(serviceMethod,".")
+	if findIndex==-1 {
+		return fmt.Errorf("servicemethod param  %s is error!",serviceMethod),0
 	}
+	serviceName := serviceMethod[:findIndex]
 
 	//1.找到对应的rpcNodeid
-	GetCluster().GetNodeIdByService(serviceAndMethod[0],clientList)
-	return nil
+	return GetCluster().GetNodeIdByService(serviceName,clientList)
 }
 
 func GetRpcServer() *rpc.Server{

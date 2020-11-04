@@ -30,7 +30,6 @@ type TcpGateService struct {
 
 func (gateService *TcpGateService) OnInit() error {
 	gateService.OnLoad()
-
 	//注册监听客户连接断开事件
 	gateService.processor.SetDisConnectedHandler(gateService.router.OnDisconnected)
 	//注册监听客户连接事件
@@ -42,6 +41,10 @@ func (gateService *TcpGateService) OnInit() error {
 	gateService.tcpService.SetProcessor(gateService.processor, gateService.GetEventHandler())
 	
 	return nil
+}
+
+func (gateService *TcpGateService) SetEventChannel(channelNum int){
+	gateService.GetEventProcessor().SetEventChannel(channelNum)
 }
 
 func (gateService *TcpGateService) OnLoad() {
