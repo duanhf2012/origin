@@ -6,6 +6,7 @@ import (
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/sysservice/tcpservice"
+	"strconv"
 	"strings"
 )
 
@@ -88,9 +89,39 @@ func (r *Router) loadCfg(cfg interface{}){
 			//error ...
 			continue
 		}
-		msgId,ok  := iMsgId.(float64)
+		msgIdList,ok  := iMsgId.(string)
 		if ok == false {
 			//error ...
+			continue
+		}
+		var startMsgId int
+		var endMsgId int
+		var err error
+		sliceId := strings.Split(msgIdList,"-")
+		if len(sliceId) == 1 {
+			startMsgId,err = strconv.Atoi(msgIdList)
+			if err != nil {
+				log.Fatal("TcpGateService %s config is error!",iRpc.(string))
+				continue
+			}
+			endMsgId = startMsgId
+		} else if len(sliceId) == 2 {
+			startMsgId,err = strconv.Atoi(sliceId[0])
+			if err != nil {
+				log.Fatal("TcpGateService %s config is error!",iRpc.(string))
+				continue
+			}
+			endMsgId,err = strconv.Atoi(sliceId[1])
+			if err != nil {
+				log.Fatal("TcpGateService %s config is error!",iRpc.(string))
+				continue
+			}
+			if startMsgId>endMsgId {
+				log.Fatal("TcpGateService %s config is error!",iRpc.(string))
+				continue
+			}
+		}else {
+			log.Fatal("TcpGateService %s config is error!",iRpc.(string))
 			continue
 		}
 
@@ -100,7 +131,10 @@ func (r *Router) loadCfg(cfg interface{}){
 			continue
 		}
 
-		r.mapMsgRouterInfo[uint16(msgId)] = &MsgRouterInfo{ServiceName: strService[0],Rpc: iRpc.(string),LoadBalanceType: iLoadBalanceType.(string)}
+		msgInfo := &MsgRouterInfo{ServiceName: strService[0],Rpc: iRpc.(string),LoadBalanceType: iLoadBalanceType.(string)}
+		for i:=startMsgId;i<=endMsgId;i++{
+			r.mapMsgRouterInfo[uint16(i)] = msgInfo
+		}
 	}
 
 	//parse EventRouter

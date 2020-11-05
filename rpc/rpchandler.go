@@ -147,11 +147,15 @@ func (handler *RpcHandler) suitableMethods(method reflect.Method) error {
 			return fmt.Errorf("%s Unsupported parameter types!",method.Name)
 		}
 	}
-
-	rpcMethodInfo.inParamValue = reflect.New(typ.In(parIdx).Elem()) //append(rpcMethodInfo.iparam,)
-	rpcMethodInfo.inParam  = reflect.New(typ.In(parIdx).Elem()).Interface()
-	pt,_ := GetProcessorType(rpcMethodInfo.inParamValue.Interface())
-	rpcMethodInfo.rpcProcessorType = pt
+	a := typ.In(parIdx).Kind()
+	if a == reflect.Interface {
+		rpcMethodInfo.inParam = nil
+	}else{
+		rpcMethodInfo.inParamValue = reflect.New(typ.In(parIdx).Elem()) //append(rpcMethodInfo.iparam,)
+		rpcMethodInfo.inParam  = reflect.New(typ.In(parIdx).Elem()).Interface()
+		pt,_ := GetProcessorType(rpcMethodInfo.inParamValue.Interface())
+		rpcMethodInfo.rpcProcessorType = pt
+	}
 
 	parIdx++
 	if parIdx< typ.NumIn() {
@@ -251,17 +255,23 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	}
 
 	if request.bLocalRequest == false {
-		err = request.rpcProcessor.Unmarshal(request.RpcRequestData.GetInParam(),iParam)
-		if err!=nil {
-			rErr := "Call Rpc "+request.RpcRequestData.GetServiceMethod()+" Param error "+err.Error()
-			log.Error(rErr)
-			if request.requestHandle!=nil {
-				request.requestHandle(nil, RpcError(rErr))
+		if iParam == nil {
+			iParam = request.RpcRequestData.GetInParam()
+		}else{
+			err = request.rpcProcessor.Unmarshal(request.RpcRequestData.GetInParam(),iParam)
+			if err!=nil {
+				rErr := "Call Rpc "+request.RpcRequestData.GetServiceMethod()+" Param error "+err.Error()
+				log.Error(rErr)
+				if request.requestHandle!=nil {
+					request.requestHandle(nil, RpcError(rErr))
+				}
+				return
 			}
-			return
 		}
 	}else {
-		if request.inputArgs!=nil {
+		if iParam == nil {
+			iParam = request.inputArgs.GetRawData()
+		}else if request.inputArgs!=nil {
 			err = request.rpcProcessor.Unmarshal(request.inputArgs.GetRawData(),iParam)
 			if err!=nil {
 				rErr := "Call Rpc "+request.RpcRequestData.GetServiceMethod()+" Param error "+err.Error()
