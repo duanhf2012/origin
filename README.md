@@ -52,6 +52,7 @@ cluster.json如下：
     "NodeList":[
         {
           "NodeId": 1,
+          "Private": false,
           "ListenAddr":"127.0.0.1:8001",
           "NodeName": "Node_Test1",
 		  "remark":"//以_打头的，表示只在本机进程，不对整个子网开发",
@@ -59,6 +60,7 @@ cluster.json如下：
         },
 		 {
           "NodeId": 2,
+          "Private": false,
           "ListenAddr":"127.0.0.1:8002",
           "NodeName": "Node_Test1",
 		  "remark":"//以_打头的，表示只在本机进程，不对整个子网开发",
@@ -69,6 +71,7 @@ cluster.json如下：
 ---------------
 以上配置了两个结点服务器程序:
 * NodeId: 表示origin程序的结点Id标识，不允许重复。
+* Private: 是否私有结点，如果为true，表示其他结点不会发现它，但可以自我运行。
 * ListenAddr:Rpc通信服务的监听地址
 * NodeName:结点名称
 * remark:备注，可选项
@@ -257,6 +260,7 @@ func main(){
     "NodeList":[
         {
           "NodeId": 1,
+          "Private": false,
           "ListenAddr":"127.0.0.1:8001",
           "NodeName": "Node_Test1",
 		  "remark":"//以_打头的，表示只在本机进程，不对整个子网开发",

@@ -14,6 +14,7 @@ var configDir = "./config/"
 type NodeInfo struct {
 	NodeId int
 	NodeName string
+	Private bool
 	ListenAddr string
 	ServiceList []string
 }
@@ -81,7 +82,7 @@ func (cls *Cluster) delServiceNode(serviceName string,nodeId int){
 }
 
 func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
-	if nodeInfo.NodeId == cls.localNodeInfo.NodeId {
+	if nodeInfo.NodeId == cls.localNodeInfo.NodeId || len(nodeInfo.ServiceList)==0 || nodeInfo.Private == true {
 		return
 	}
 
