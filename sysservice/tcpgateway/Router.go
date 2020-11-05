@@ -211,6 +211,7 @@ func (args RawInputArgs) DoGc() {
 	}
 	network.ReleaseByteSlice(args.rawData)
 }
+var msgEventType string
 
 func (r *Router) RouterMessage(cliId uint64,msgType uint16,msg []byte) {
 	routerInfo:= r.GetMsgRouterService(msgType)
@@ -221,7 +222,7 @@ func (r *Router) RouterMessage(cliId uint64,msgType uint16,msg []byte) {
 
 	routerId := r.GetRouterId(cliId,&routerInfo.ServiceName)
 	if routerId ==0 {
-		routerId = r.loadBalance.SelectNode(routerInfo.ServiceName)
+		routerId = r.loadBalance.SelectNode(routerInfo.ServiceName,cliId,msgEventType,msgType,msg)
 		r.SetRouterId(cliId,routerInfo.ServiceName,routerId)
 	}
 
@@ -242,7 +243,7 @@ func (r *Router) RouterEvent(clientId uint64,eventType string) bool{
 
 	routerId := r.GetRouterId(clientId,&routerInfo.ServiceName)
 	if routerId ==0 {
-		routerId = r.loadBalance.SelectNode(routerInfo.ServiceName)
+		routerId = r.loadBalance.SelectNode(routerInfo.ServiceName,clientId,eventType,0,nil)
 		r.SetRouterId(clientId,routerInfo.ServiceName,routerId)
 	}
 

@@ -8,11 +8,6 @@ import (
 	"github.com/duanhf2012/origin/sysservice/tcpservice"
 )
 
-func init(){
-	node.Setup(&tcpservice.TcpService{})
-	node.Setup(&TcpGateService{})
-}
-
 type MsgTypeRouterInfo struct {
 	router      IRouter
 	serviceName string

@@ -108,7 +108,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
 	rpcInfo := NodeRpcInfo{}
 	rpcInfo.nodeInfo = *nodeInfo
 	rpcInfo.client = &rpc.Client{}
-	rpcInfo.client.Connect(nodeInfo.ListenAddr)
+	rpcInfo.client.Connect(nodeInfo.NodeId,nodeInfo.ListenAddr)
 	cls.mapRpc[nodeInfo.NodeId] = rpcInfo
 }
 
@@ -116,7 +116,7 @@ func (cls *Cluster) buildLocalRpc(){
 	rpcInfo := NodeRpcInfo{}
 	rpcInfo.nodeInfo = cls.localNodeInfo
 	rpcInfo.client = &rpc.Client{}
-	rpcInfo.client.Connect("")
+	rpcInfo.client.Connect(rpcInfo.nodeInfo.NodeId,"")
 
 	cls.mapRpc[cls.localNodeInfo.NodeId] = rpcInfo
 }

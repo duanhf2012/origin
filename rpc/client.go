@@ -15,6 +15,7 @@ import (
 )
 
 type Client struct {
+	id int
 	bSelfNode bool
 	network.TCPClient
 	conn *network.TCPConn
@@ -34,7 +35,8 @@ func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 	return client
 }
 
-func (client *Client) Connect(addr string) error {
+func (client *Client) Connect(id int,addr string) error {
+	client.id = id
 	client.Addr = addr
 	client.maxCheckCallRpcCount = 1000
 	client.callRpcTimeout = 15*time.Second
@@ -316,4 +318,8 @@ func (client *Client) OnClose(){
 
 func (client *Client) IsConnected() bool {
 	return client.conn!=nil && client.conn.IsConnected()==true
+}
+
+func (client *Client) GetId() int{
+	return client.id
 }
