@@ -14,13 +14,15 @@ import (
 const (
 	debugLevel   = 0
 	releaseLevel = 1
-	errorLevel   = 2
-	fatalLevel   = 3
+	warningLevel = 2
+	errorLevel   = 3
+	fatalLevel   = 4
 )
 
 const (
 	printDebugLevel   = "[debug  ] "
 	printReleaseLevel = "[release] "
+	printWarningLevel = "[warning] "
 	printErrorLevel   = "[error  ] "
 	printFatalLevel   = "[fatal  ] "
 )
@@ -42,6 +44,8 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 		level = debugLevel
 	case "release":
 		level = releaseLevel
+	case "warning":
+		level = warningLevel
 	case "error":
 		level = errorLevel
 	case "fatal":
@@ -141,6 +145,10 @@ func (logger *Logger) Release(format string, a ...interface{}) {
 	logger.doPrintf(releaseLevel, printReleaseLevel, format, a...)
 }
 
+func (logger *Logger) Warning(format string, a ...interface{}) {
+	logger.doPrintf(warningLevel, printWarningLevel, format, a...)
+}
+
 func (logger *Logger) Error(format string, a ...interface{}) {
 	logger.doPrintf(errorLevel, printErrorLevel, format, a...)
 }
@@ -164,6 +172,10 @@ func Debug(format string, a ...interface{}) {
 
 func Release(format string, a ...interface{}) {
 	gLogger.doPrintf(releaseLevel, printReleaseLevel, format, a...)
+}
+
+func Warning(format string, a ...interface{}) {
+	gLogger.doPrintf(warningLevel, printWarningLevel, format, a...)
 }
 
 func Error(format string, a ...interface{}) {
