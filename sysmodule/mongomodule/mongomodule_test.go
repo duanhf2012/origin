@@ -1,4 +1,4 @@
-package mangomodule
+package mongomodule
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ type Student struct {
 }
 
 func Test_Example(t *testing.T) {
-	module:=MangoModule{}
+	module:=MongoModule{}
 	module.Init("127.0.0.1",100, 5*time.Second,5*time.Second)
 
 	// take session

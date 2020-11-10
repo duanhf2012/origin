@@ -1,4 +1,4 @@
-package mangomodule
+package mongomodule
 
 import (
 	"github.com/duanhf2012/origin/log"
@@ -22,18 +22,18 @@ type DialContext struct {
 	takeSessionIdx uint32
 }
 
-type MangoModule struct {
+type MongoModule struct {
 	dailContext *DialContext
 }
 
-func (slf *MangoModule) Init(url string,sessionNum uint32,dialTimeout time.Duration, timeout time.Duration) error {
+func (slf *MongoModule) Init(url string,sessionNum uint32,dialTimeout time.Duration, timeout time.Duration) error {
 	var err error
 	slf.dailContext, err = dialWithTimeout(url, sessionNum, dialTimeout*time.Second, timeout*time.Minute)
 
 	return err
 }
 
-func (slf *MangoModule) Take() *Session{
+func (slf *MongoModule) Take() *Session{
 	return slf.dailContext.Take()
 }
 
