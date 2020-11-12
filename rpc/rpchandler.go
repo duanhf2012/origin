@@ -16,14 +16,14 @@ type FuncRpcServer func() (*Server)
 var NilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
 type RpcError string
-
+var noError RpcError
 func (e RpcError) Error() string {
 	return string(e)
 }
 
 func ConvertError(e error) RpcError{
 	if e == nil {
-		return ""
+		return noError
 	}
 
 	rpcErr := RpcError(e.Error())

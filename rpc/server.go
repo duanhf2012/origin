@@ -316,9 +316,11 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler 
 				ReleaseRpcRequest(req)
 				return
 			}
-
-			pCall.Err = Err
-
+			if len(Err) == 0 {
+				pCall.Err = nil
+			}else{
+				pCall.Err = Err
+			}
 
 			if Returns!=nil {
 				pCall.Reply = Returns
