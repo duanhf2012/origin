@@ -268,7 +268,11 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 				ReleaseCall(pCall)
 				return
 			}
-			pCall.Err = Err
+			if len(Err) == 0 {
+				pCall.Err = nil
+			}else{
+				pCall.Err = Err
+			}
 			pCall.done <- pCall
 		}
 	}

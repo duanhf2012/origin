@@ -104,7 +104,10 @@ func (call *Call) Clear() *Call{
 	call.ServiceMethod = ""
 	call.Reply = nil
 	call.Response = nil
-	call.done = nil
+	if len(call.done)>0 {
+		call.done = make(chan *Call,1)
+	}
+
 	call.Err = nil
 	call.connId = 0
 	call.callback = nil
