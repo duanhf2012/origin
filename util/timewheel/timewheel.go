@@ -79,13 +79,13 @@ func NewTimerEx(d time.Duration,c chan *Timer,additionData interface{}) *Timer{
 	if c == nil {
 		c = make(chan *Timer, 1)
 	}
-	timer := tWheel.newTimer(d.Milliseconds()/GRANULARITY,additionData,c)
+	timer := tWheel.newTimer(int64(d/time.Millisecond)/GRANULARITY,additionData,c)
 	chanStartTimer<-timer
 	return timer
 }
 
 func NewTimer(d time.Duration) *Timer{
-	timer := tWheel.newTimer(d.Milliseconds()/GRANULARITY,nil,make(chan *Timer, 1))
+	timer := tWheel.newTimer(int64(d/time.Millisecond)/GRANULARITY,nil,make(chan *Timer, 1))
 	chanStartTimer<-timer
 	return timer
 }
@@ -204,8 +204,8 @@ func (t *timeWheel) set(wheelBitSize []int){
 		totalBitSize += bitSize
 		//1.轮子信息
 		t.wheelInfos[idx] = &wheelInfo{}
-		t.wheelInfos[idx].slotNum = 1 << bitSize
-		t.wheelInfos[idx].threshold = 1<< totalBitSize
+		t.wheelInfos[idx].slotNum = 1 << uint(bitSize)
+		t.wheelInfos[idx].threshold = 1<< uint(totalBitSize)
 
 		//2.make轮子里面的slot
 		t.wheels[idx] = &stWheel{}
@@ -223,7 +223,7 @@ func (t *timeWheel) set(wheelBitSize []int){
 				perSlotTicks = t.wheelInfos[idx-1].threshold
 				turns = 1
 			}
-			s := ((1 << bitSize) - (slotIdx+turns))*int(perSlotTicks)
+			s := ((1 << uint(bitSize)) - (slotIdx+turns))*int(perSlotTicks)
 			t.wheels[idx].slots[slotIdx].restTicks = int64(s)
 		}
 	}
