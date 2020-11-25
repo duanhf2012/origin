@@ -13,17 +13,17 @@ import (
 const maxClusterNode int = 128
 type FuncRpcClient func(nodeId int,serviceMethod string,client []*Client) (error,int)
 type FuncRpcServer func() (*Server)
-var NilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
+var nilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
 type RpcError string
-var noError RpcError
+var NilError RpcError
 func (e RpcError) Error() string {
 	return string(e)
 }
 
 func ConvertError(e error) RpcError{
 	if e == nil {
-		return noError
+		return NilError
 	}
 
 	rpcErr := RpcError(e.Error())
@@ -41,8 +41,7 @@ type RpcMethodInfo struct {
 	inParamValue reflect.Value
 	inParam interface{}
 	outParamValue reflect.Value
-	additionParam reflect.Value
-	hasAdditionParam bool
+	hasResponder bool
 	rpcProcessorType RpcProcessorType
 }
 
@@ -78,10 +77,14 @@ type IRpcHandler interface {
 	IsSingleCoroutine() bool
 }
 
-var rawAdditionParamValueNull reflect.Value
-func init(){
-	rawAdditionParamValueNull = reflect.ValueOf(&RawAdditionParamNull{})
+func reqHandlerNull(Returns interface{},Err RpcError) {
 }
+
+var requestHandlerNull reflect.Value
+func init(){
+	requestHandlerNull = reflect.ValueOf(reqHandlerNull)
+}
+
 func (handler *RpcHandler) GetRpcHandler() IRpcHandler{
 	return handler.rpcHandler
 }
@@ -137,9 +140,9 @@ func (handler *RpcHandler) suitableMethods(method reflect.Method) error {
 
 	//1.判断第一个参数
 	var parIdx int = 1
-	if typ.In(parIdx).String() == "rpc.IRawAdditionParam" {
+	if typ.In(parIdx).String() == "rpc.RequestHandler" {
 		parIdx += 1
-		rpcMethodInfo.hasAdditionParam = true
+		rpcMethodInfo.hasResponder = true
 	}
 
 	for i:= parIdx ;i<typ.NumIn();i++{
@@ -208,7 +211,7 @@ func (handler *RpcHandler) HandlerRpcResponseCB(call *Call){
 	}()
 
 	if call.Err == nil {
-		call.callback.Call([]reflect.Value{reflect.ValueOf(call.Reply),NilError})
+		call.callback.Call([]reflect.Value{reflect.ValueOf(call.Reply),nilError})
 	}else{
 		call.callback.Call([]reflect.Value{reflect.ValueOf(call.Reply),reflect.ValueOf(call.Err)})
 	}
@@ -287,13 +290,12 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	}
 
 	paramList = append(paramList,reflect.ValueOf(handler.GetRpcHandler())) //接受者
-	additionParams := request.RpcRequestData.GetAdditionParams()
-	if v.hasAdditionParam == true{
-		if additionParams!=nil && additionParams.GetParamValue()!=nil{
-			additionVal := reflect.ValueOf(additionParams)
-			paramList = append(paramList,additionVal)
+	if v.hasResponder ==  true {
+		if request.requestHandle!=nil {
+			responder := reflect.ValueOf(request.requestHandle)
+			paramList = append(paramList,responder)
 		}else{
-			paramList = append(paramList,rawAdditionParamValueNull)
+			paramList = append(paramList,requestHandlerNull)
 		}
 	}
 
@@ -308,8 +310,8 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 			oParam = reflect.New(v.outParamValue.Type().Elem())
 		}
 		paramList = append(paramList,oParam) //输出参数
-	}else if request.requestHandle != nil { //调用方有返回值，但被调用函数没有返回参数
-		rErr := "Call Rpc "+request.RpcRequestData.GetServiceMethod()+"without return parameter!"
+	}else if request.requestHandle != nil && v.hasResponder==false{ //调用方有返回值，但被调用函数没有返回参数
+		rErr := "Call Rpc "+request.RpcRequestData.GetServiceMethod()+" without return parameter!"
 		log.Error(rErr)
 		request.requestHandle(nil, RpcError(rErr))
 		return
@@ -320,7 +322,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		err = errInter.(error)
 	}
 
-	if request.requestHandle!=nil {
+	if request.requestHandle!=nil && v.hasResponder==false {
 		request.requestHandle(oParam.Interface(), ConvertError(err))
 	}
 }
@@ -503,7 +505,7 @@ func (handler *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args int
 		if serviceName == handler.rpcHandler.GetName() { //自己服务调用
 			err := pLocalRpcServer.myselfRpcHandlerGo(serviceName,serviceMethod,args,reply)
 			if err == nil {
-				fVal.Call([]reflect.Value{reflect.ValueOf(reply),NilError})
+				fVal.Call([]reflect.Value{reflect.ValueOf(reply),nilError})
 			}else{
 				fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 			}
@@ -618,7 +620,7 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 		}
 
 		//跨node调用
-		pCall := pClientList[i].RawGo(processor,true,serviceMethod,args.GetRawData(),args.GetAdditionParam(),nil)
+		pCall := pClientList[i].RawGo(processor,true,serviceMethod,args.GetRawData(),nil)
 		args.DoGc()
 		if pCall.Err!=nil {
 			err = pCall.Err

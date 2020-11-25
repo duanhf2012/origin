@@ -23,20 +23,18 @@ type RpcResponse struct {
 	RpcResponseData IRpcResponseData
 }
 
+type Responder = RequestHandler
+
 //var rpcResponsePool sync.Pool
 var rpcRequestPool sync.Pool
 var rpcCallPool sync.Pool
 
-type IRawAdditionParam interface {
-	GetParamValue() interface{}
-}
 
 type IRpcRequestData interface {
 	GetSeq() uint64
 	GetServiceMethod() string
 	GetInParam() []byte
 	IsNoReply() bool
-	GetAdditionParams() IRawAdditionParam
 }
 
 type IRpcResponseData interface {
@@ -47,7 +45,6 @@ type IRpcResponseData interface {
 
 type IRawInputArgs interface {
 	GetRawData() []byte  //获取原始数据
-	GetAdditionParam() interface{} //获取附加数据
 	DoGc()           //处理完成,回收内存
 }
 
@@ -56,8 +53,6 @@ type RpcHandleFinder interface {
 }
 
 type RequestHandler func(Returns interface{},Err RpcError)
-type RawAdditionParamNull struct {
-}
 
 type Call struct {
 	Seq           uint64
@@ -135,6 +130,3 @@ func ReleaseCall(call *Call){
 	rpcCallPool.Put(call)
 }
 
-func (slf *RawAdditionParamNull) GetParamValue() interface{}{
-	return nil
-}
