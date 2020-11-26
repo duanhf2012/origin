@@ -250,8 +250,8 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	var paramList []reflect.Value
 	var err error
 	var iParam interface{}
-	//单协程下减少gc
-	if handler.IsSingleCoroutine(){
+	//单协程或非异步调用时直接使用预置对象
+	if handler.IsSingleCoroutine() && v.hasResponder==false {
 		iParam = v.inParam
 	}else{
 		iParam = reflect.New(v.inParamValue.Type().Elem()).Interface()
