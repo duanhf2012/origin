@@ -25,6 +25,10 @@ type RpcResponse struct {
 
 type Responder = RequestHandler
 
+func (r *Responder) IsInvalid() bool {
+	return reflect.ValueOf(*r).Pointer() == reflect.ValueOf(reqHandlerNull).Pointer()
+}
+
 //var rpcResponsePool sync.Pool
 var rpcRequestPool sync.Pool
 var rpcCallPool sync.Pool
