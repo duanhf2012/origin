@@ -317,7 +317,7 @@ func (client *Client) OnClose(){
 }
 
 func (client *Client) IsConnected() bool {
-	return client.conn!=nil && client.conn.IsConnected()==true
+	return client.bSelfNode || (client.conn!=nil && client.conn.IsConnected()==true)
 }
 
 func (client *Client) GetId() int{
