@@ -11,7 +11,10 @@ func Init(chanCloseSig chan bool) {
 	closeSig=chanCloseSig
 
 	for _,s := range mapServiceName {
-		s.OnInit()
+		err := s.OnInit()
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
