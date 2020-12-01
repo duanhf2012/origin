@@ -75,7 +75,7 @@ func (cls *Cluster) delServiceNode(serviceName string,nodeId int){
 	nodeList := cls.mapServiceNode[serviceName]
 	for idx,nId := range nodeList {
 		if nId == nodeId {
-			cls.mapServiceNode[serviceName] = append(nodeList[idx:],nodeList[idx+1:]...)
+			cls.mapServiceNode[serviceName] = append(nodeList[:idx],nodeList[idx+1:]...)
 			return
 		}
 	}
