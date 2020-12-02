@@ -75,7 +75,7 @@ func (cls *Cluster) delServiceNode(serviceName string,nodeId int){
 	nodeList := cls.mapServiceNode[serviceName]
 	for idx,nId := range nodeList {
 		if nId == nodeId {
-			cls.mapServiceNode[serviceName] = append(nodeList[idx:],nodeList[idx+1:]...)
+			cls.mapServiceNode[serviceName] = append(nodeList[:idx],nodeList[idx+1:]...)
 			return
 		}
 	}
@@ -201,7 +201,7 @@ func GetRpcClient(nodeId int,serviceMethod string,clientList []*rpc.Client) (err
 	serviceName := serviceMethod[:findIndex]
 
 	//1.找到对应的rpcNodeid
-	return GetCluster().GetNodeIdByService(serviceName,clientList)
+	return GetCluster().GetNodeIdByService(serviceName,clientList,true)
 }
 
 func GetRpcServer() *rpc.Server{

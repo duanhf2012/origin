@@ -178,7 +178,7 @@ func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,call
 
 	request := &RpcRequest{}
 	call.Seq = client.generateSeq()
-	request.RpcRequestData = processor.MakeRpcRequest(client.startSeq,serviceMethod,false,InParam,nil)
+	request.RpcRequestData = processor.MakeRpcRequest(client.startSeq,serviceMethod,false,InParam)
 	client.AddPending(call)
 
 	bytes,err := processor.Marshal(request.RpcRequestData)
@@ -204,7 +204,7 @@ func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,call
 	return err
 }
 
-func (client *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod string,args []byte,additionParam interface{},reply interface{}) *Call {
+func (client *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod string,args []byte,reply interface{}) *Call {
 	call := MakeCall()
 	call.ServiceMethod = serviceMethod
 	call.Reply = reply
@@ -214,7 +214,7 @@ func (client *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod s
 	if noReply == false {
 		client.AddPending(call)
 	}
-	request.RpcRequestData = processor.MakeRpcRequest(client.startSeq,serviceMethod,noReply,args,additionParam)
+	request.RpcRequestData = processor.MakeRpcRequest(client.startSeq,serviceMethod,noReply,args)
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	processor.ReleaseRpcRequest(request.RpcRequestData)
 	if err != nil {
@@ -246,7 +246,7 @@ func (client *Client) Go(noReply bool,serviceMethod string, args interface{},rep
 		call.Err = err
 	}
 
-	return client.RawGo(processor,noReply,serviceMethod,InParam,nil,reply)
+	return client.RawGo(processor,noReply,serviceMethod,InParam,reply)
 }
 
 func (client *Client) Run(){
@@ -317,7 +317,7 @@ func (client *Client) OnClose(){
 }
 
 func (client *Client) IsConnected() bool {
-	return client.conn!=nil && client.conn.IsConnected()==true
+	return client.bSelfNode || (client.conn!=nil && client.conn.IsConnected()==true)
 }
 
 func (client *Client) GetId() int{

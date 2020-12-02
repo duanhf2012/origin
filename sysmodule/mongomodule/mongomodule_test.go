@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+
+
 type Student struct {
 	ID    bson.ObjectId `bson:"_id"`
 	Name   string  `bson: "name"`
@@ -18,7 +20,7 @@ type Student struct {
 
 func Test_Example(t *testing.T) {
 	module:=MongoModule{}
-	module.Init("127.0.0.1",100, 5*time.Second,5*time.Second)
+	module.Init("mongodb://admin:123456@127.0.0.1:27017",100, 5*time.Second,5*time.Second)
 
 	// take session
 	s := module.Take()
@@ -62,7 +64,7 @@ func Test_Example(t *testing.T) {
 		fmt.Print(err)
 	}
 
-	//序号自增
+	//7.序号自增
 	s.EnsureCounter("test2","t_student","5f252f09999c622d36198951")
 	for i := 0; i < 3; i++ {
 		id, err := s.NextSeq("test2", "t_student", "5f252f09999c622d36198951")
@@ -72,4 +74,9 @@ func Test_Example(t *testing.T) {
 		}
 		fmt.Println(id)
 	}
+
+	//8.setoninsert使用
+	info,uErr := c.Upsert(bson.M{"_id":bson.ObjectIdHex("5f252f09999c622d36198951")},bson.M{
+		"$setOnInsert":bson.M{"Name":"setoninsert","Age":55}})
+	fmt.Println(info,uErr)
 }

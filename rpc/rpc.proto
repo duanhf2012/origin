@@ -1,24 +1,11 @@
 syntax = "proto2";
-
-
 package rpc;
-
-message AdditionParam {
-   oneof addition_oneof {
-    int64  SParam     = 10;
-	uint64 UParam  = 11;
-	string StrParam   = 12;
-    bytes  BParam   = 13;	
-  }
-}
-
-
+option go_package =".;rpc";
 message PBRpcRequestData{  
   optional uint64 Seq           = 1;
   optional string ServiceMethod = 2;
   optional bool NoReply         = 3;
   optional bytes   InParam      = 4;
-  optional AdditionParam addtionParam = 5;
 }
 
 message PBRpcResponseData{

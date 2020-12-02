@@ -129,7 +129,7 @@ func (agent *RpcAgent) Run() {
 		//解析head
 		req := MakeRpcRequest()
 		req.rpcProcessor = processor
-		req.RpcRequestData = processor.MakeRpcRequest(0,"",false,nil,nil)
+		req.RpcRequestData = processor.MakeRpcRequest(0,"",false,nil)
 		err = processor.Unmarshal(data[1:],req.RpcRequestData)
 		agent.conn.ReleaseReadMsg(data)
 		if err != nil {
@@ -252,12 +252,8 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 	if processor == nil {
 		_,processor = GetProcessorType(args)
 	}
-	var additionParam interface{}
-	if inputArgs!=nil {
-		additionParam = inputArgs.GetAdditionParam()
-	}
 
-	req.RpcRequestData = processor.MakeRpcRequest(0, serviceMethod,noReply,nil,additionParam)
+	req.RpcRequestData = processor.MakeRpcRequest(0, serviceMethod,noReply,nil)
 	req.rpcProcessor = processor
 	if noReply == false {
 		client.AddPending(pCall)
@@ -308,7 +304,7 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler 
 	req.bLocalRequest = true
 	_,processor := GetProcessorType(args)
 	req.rpcProcessor =processor
-	req.RpcRequestData = processor.MakeRpcRequest(0,serviceMethod,noReply,nil,nil)
+	req.RpcRequestData = processor.MakeRpcRequest(0,serviceMethod,noReply,nil)
 	if noReply == false {
 		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{},Err RpcError){

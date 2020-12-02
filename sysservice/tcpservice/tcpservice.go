@@ -242,3 +242,10 @@ func (tcpService *TcpService) SendRawMsg(clientId uint64,msg []byte) error{
 	tcpService.mapClientLocker.Unlock()
 	return client.tcpConn.WriteMsg(msg)
 }
+
+func (tcpService *TcpService) GetConnNum() int {
+	tcpService.mapClientLocker.Lock()
+	connNum := len(tcpService.mapClient)
+	tcpService.mapClientLocker.Unlock()
+	return connNum
+}
