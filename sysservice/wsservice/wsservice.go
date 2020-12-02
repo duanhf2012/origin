@@ -74,6 +74,37 @@ func (ws *WSService) OnInit() error{
 		ws.wsServer.MaxMsgLen = uint32(MaxMsgLen.(float64))
 	}
 
+	//Set CAFile
+	caFileList,ok := wsCfg["CAFile"]
+	if ok {
+		iCaList := caFileList.([]interface{})
+		var caFile [] network.CAFile
+		for _,i := range iCaList {
+			mapCAFile := i.(map[string]interface{})
+			c,ok := mapCAFile["Certfile"]
+			if ok == false{
+				continue
+			}
+			k,ok := mapCAFile["Keyfile"]
+			if ok == false{
+				continue
+			}
+
+			if c.(string)!="" && k.(string)!="" {
+				caFile = append(caFile,network.CAFile{
+					CertFile:  c.(string),
+					Keyfile:  k.(string),
+				})
+			}
+		}
+
+		for _, ca := range caFile {
+			ws.wsServer.CertFile = ca.CertFile
+			ws.wsServer.KeyFile = ca.Keyfile
+			break
+		}
+	}
+
 	ws.mapClient = make( map[uint64] *WSClient, ws.wsServer.MaxConnNum)
 	ws.wsServer.NewAgent = ws.NewWSClient
 	ws.wsServer.Start()
