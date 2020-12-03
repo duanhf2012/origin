@@ -5,6 +5,7 @@ import (
 	"github.com/duanhf2012/origin/log"
 	"net"
 	"sync"
+	"time"
 )
 
 type ConnSet map[net.Conn]struct{}
@@ -137,4 +138,12 @@ func (tcpConn *TCPConn) WriteMsg(args ...[]byte) error {
 
 func (tcpConn *TCPConn) IsConnected() bool {
 	return tcpConn.closeFlag == false
+}
+
+func (tcpConn *TCPConn) SetReadDeadline(d time.Duration)  {
+	tcpConn.conn.SetReadDeadline(time.Now().Add(d))
+}
+
+func (tcpConn *TCPConn) SetWriteDeadline(d time.Duration)  {
+	tcpConn.conn.SetWriteDeadline(time.Now().Add(d))
 }
