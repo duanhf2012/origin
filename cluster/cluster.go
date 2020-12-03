@@ -100,7 +100,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
 			log.Error("Bad duplicate Service Cfg.")
 			continue
 		}
-
+		mapDuplicate[serviceName] = nil
 		cls.mapServiceNode[serviceName] = append(cls.mapServiceNode[serviceName],nodeInfo.NodeId)
 	}
 

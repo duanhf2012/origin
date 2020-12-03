@@ -45,7 +45,6 @@ var seedLocker sync.Mutex
 
 type TcpPack struct {
 	Type         TcpPackType //0表示连接 1表示断开 2表示数据
-	//MsgProcessor processor.IProcessor
 	ClientId     uint64
 	Data         interface{}
 }
