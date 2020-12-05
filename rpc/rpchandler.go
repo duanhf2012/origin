@@ -55,6 +55,12 @@ type RpcHandler struct {
 	callResponseCallBack chan *Call //异步返回的回调
 }
 
+type TriggerRpcEvent func(bConnect bool,nodeId int)
+type IRpcListener interface {
+	OnRpcConnected(nodeId int)
+	OnRpcDisconnect(nodeId int)
+}
+
 type IRpcHandler interface {
 	GetName() string
 	InitRpcHandler(rpcHandler IRpcHandler,getClientFun FuncRpcClient,getServerFun FuncRpcServer)

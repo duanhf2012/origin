@@ -74,7 +74,7 @@ func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServe
 	s.eventHandler.Init(s.eventProcessor)
 }
 
-func (s *Service) SetGoRouterNum(goroutineNum int32) bool {
+func (s *Service) SetGoRoutineNum(goroutineNum int32) bool {
 	//已经开始状态不允许修改协程数量,打开性能分析器不允许开多线程
 	if s.startStatus == true || s.profiler!=nil {
 		log.Error("open profiler mode is not allowed to set Multi-coroutine.")

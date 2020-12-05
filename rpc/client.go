@@ -26,6 +26,7 @@ type Client struct {
 	pendingTimer         *list.List
 	callRpcTimeout       time.Duration
 	maxCheckCallRpcCount int
+	TriggerRpcEvent
 }
 
 func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
@@ -259,6 +260,7 @@ func (client *Client) Run(){
 		}
 	}()
 
+	client.TriggerRpcEvent(true,client.GetId())
 	for {
 		bytes,err := client.conn.ReadMsg()
 		if err != nil {
@@ -314,6 +316,7 @@ func (client *Client) Run(){
 }
 
 func (client *Client) OnClose(){
+	client.TriggerRpcEvent(false,client.GetId())
 }
 
 func (client *Client) IsConnected() bool {
