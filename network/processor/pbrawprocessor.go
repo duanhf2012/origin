@@ -75,8 +75,10 @@ func (pbRawProcessor *PBRawProcessor) SetRawMsgHandler(handle RawMessageHandler)
 	pbRawProcessor.msgHandler = handle
 }
 
-func (pbRawProcessor *PBRawProcessor) MakeRawMsg(msgType uint16,msg []byte) *PBRawPackInfo {
-	return &PBRawPackInfo{typ:msgType,rawMsg:msg}
+func (pbRawProcessor *PBRawProcessor) MakeRawMsg(msgType uint16,msg []byte,pbRawPackInfo *PBRawPackInfo)  {
+	pbRawPackInfo.typ = msgType
+	pbRawPackInfo.rawMsg = msg
+	//return &PBRawPackInfo{typ:msgType,rawMsg:msg}
 }
 
 func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(msg interface{}, userData interface{}){
