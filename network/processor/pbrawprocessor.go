@@ -116,3 +116,8 @@ func (slf *PBRawPackInfo) GetPackType() uint16 {
 func (slf *PBRawPackInfo) GetMsg() []byte {
 	return slf.rawMsg
 }
+
+func (slf *PBRawPackInfo) SetPackInfo(typ uint16,rawMsg  []byte){
+	slf.typ = typ
+	slf.rawMsg = rawMsg
+}
