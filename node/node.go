@@ -24,6 +24,7 @@ var nodeId int
 var preSetupService []service.IService //预安装
 var profilerInterval time.Duration
 var bValid bool
+var configDir = "./config/"
 
 func init() {
 
@@ -78,6 +79,7 @@ func setConfigPath(val interface{}) error{
 	}
 
 	cluster.SetConfigDir(configPath)
+	configDir = configPath
 	return nil
 }
 
@@ -233,7 +235,12 @@ func GetService(serviceName string) service.IService {
 }
 
 func SetConfigDir(configDir string){
+	configDir = configDir
 	cluster.SetConfigDir(configDir)
+}
+
+func GetConfigDir() string {
+	return configDir
 }
 
 func SetSysLog(strLevel string, pathname string, flag int){
