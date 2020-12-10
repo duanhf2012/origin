@@ -1,16 +1,16 @@
-syntax = "proto2";
+syntax = "proto3";
 package rpc;
 option go_package =".;rpc";
 message PBRpcRequestData{  
-  optional uint64 Seq           = 1;
-  optional string ServiceMethod = 2;
-  optional bool NoReply         = 3;
-  optional bytes   InParam      = 4;
+  uint64 Seq           = 1;
+  string ServiceMethod = 2;
+  bool NoReply         = 3;
+  bytes   InParam      = 4;
 }
 
 message PBRpcResponseData{
-  optional uint64 Seq = 1;
-  optional string Error = 2;
-  optional bytes Reply = 3;
+  uint64 Seq = 1;
+  string Error = 2;
+  bytes Reply = 3;
 }
 

@@ -23,17 +23,17 @@ func init(){
 }
 
 func (slf *PBRpcRequestData) MakeRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) *PBRpcRequestData{
-	slf.Seq = proto.Uint64(seq)
-	slf.ServiceMethod = proto.String(serviceMethod)
-	slf.NoReply = proto.Bool(noReply)
+	slf.Seq = seq
+	slf.ServiceMethod = serviceMethod
+	slf.NoReply = noReply
 	slf.InParam = inParam
 
 	return slf
 }
 
 func (slf *PBRpcResponseData) MakeRespone(seq uint64,err RpcError,reply []byte) *PBRpcResponseData{
-	slf.Seq = proto.Uint64(seq)
-	slf.Error = proto.String(err.Error())
+	slf.Seq = seq
+	slf.Error = err.Error()
 	slf.Reply = reply
 
 	return slf
