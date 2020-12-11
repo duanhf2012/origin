@@ -164,7 +164,7 @@ func (disp *Dispatcher) AfterFunc(d time.Duration, cb func(),onCloseTimer func(t
 	return t
 }
 
-func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(),onCloseTimer func(timer *timewheel.Timer),onAddTimer func(timer *timewheel.Timer))  *Cron {
+func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(*Cron),onCloseTimer func(timer *timewheel.Timer),onAddTimer func(timer *timewheel.Timer))  *Cron {
 	now := time.Now()
 	nextTime := cronExpr.Next(now)
 	if nextTime.IsZero() {
@@ -179,7 +179,7 @@ func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(),onCloseTimer func
 		now := time.Now()
 		nextTime := cronExpr.Next(now)
 		if nextTime.IsZero() {
-			cb()
+			cb(cron)
 			return
 		}
 
@@ -191,7 +191,7 @@ func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(),onCloseTimer func
 
 		cron.t = timewheel.NewTimerEx(interval,disp.ChanTimer,cron)
 		onAddTimer(cron.t)
-		cb()
+		cb(cron)
 	}
 	cron.cb = cbFunc
 	cron.t = timewheel.NewTimerEx(nextTime.Sub(now),disp.ChanTimer,cron)
@@ -199,7 +199,7 @@ func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(),onCloseTimer func
 	return cron
 }
 
-func (disp *Dispatcher) TickerFunc(d time.Duration, cb func(),onCloseTimer func(timer *timewheel.Timer),onAddTimer func(timer *timewheel.Timer))  *Ticker {
+func (disp *Dispatcher) TickerFunc(d time.Duration, cb func(*Ticker),onCloseTimer func(timer *timewheel.Timer),onAddTimer func(timer *timewheel.Timer))  *Ticker {
 	funcName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
 	ticker := NewTicker(nil,nil,funcName,onCloseTimer)
 	// callback
@@ -207,7 +207,7 @@ func (disp *Dispatcher) TickerFunc(d time.Duration, cb func(),onCloseTimer func(
 	cbFunc = func() {
 		ticker.t = timewheel.NewTimerEx(d,disp.ChanTimer,ticker)
 		onAddTimer(ticker.t)
-		cb()
+		cb(ticker)
 	}
 
 	ticker.cb = cbFunc

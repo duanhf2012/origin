@@ -178,7 +178,7 @@ func (m *Module) AfterFunc(d time.Duration, cb func()) *timer.Timer {
 	return m.dispatcher.AfterFunc(d,cb,m.OnCloseTimer,m.OnAddTimer)
 }
 
-func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func()) *timer.Cron {
+func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func(*timer.Cron)) *timer.Cron {
 	if m.mapActiveTimer == nil {
 		m.mapActiveTimer =map[*timewheel.Timer]interface{}{}
 	}
@@ -186,7 +186,7 @@ func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func()) *timer.Cron {
 	return m.dispatcher.CronFunc(cronExpr,cb,m.OnCloseTimer,m.OnAddTimer)
 }
 
-func (m *Module) NewTicker(d time.Duration, cb func()) *timer.Ticker {
+func (m *Module) NewTicker(d time.Duration, cb func(*timer.Ticker)) *timer.Ticker {
 	if m.mapActiveTimer == nil {
 		m.mapActiveTimer =map[*timewheel.Timer]interface{}{}
 	}
