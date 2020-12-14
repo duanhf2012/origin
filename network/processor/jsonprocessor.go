@@ -23,6 +23,7 @@ type JsonProcessor struct {
 	unknownMessageHandler UnknownMessageJsonHandler
 	connectHandler ConnectJsonHandler
 	disconnectHandler ConnectJsonHandler
+	network.INetMempool
 }
 
 type JsonPackInfo struct {
@@ -33,6 +34,8 @@ type JsonPackInfo struct {
 
 func NewJsonProcessor() *JsonProcessor {
 	processor := &JsonProcessor{mapMsg:map[uint16]MessageJsonInfo{}}
+	processor.INetMempool = network.NewMemAreaPool()
+
 	return processor
 }
 
@@ -54,7 +57,7 @@ func (jsonProcessor *JsonProcessor ) MsgRoute(msg interface{},userdata interface
 
 func (jsonProcessor *JsonProcessor) Unmarshal(data []byte) (interface{}, error) {
 	typeStruct := struct {Type int `json:"typ"`}{}
-	defer network.ReleaseByteSlice(data)
+	defer jsonProcessor.ReleaseByteSlice(data)
 	err := json.Unmarshal(data, &typeStruct)
 	if err != nil {
 		return nil, err

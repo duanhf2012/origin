@@ -24,6 +24,7 @@ type TCPServer struct {
 	MaxMsgLen    uint32
 	LittleEndian bool
 	msgParser    *MsgParser
+	netMemPool   INetMempool
 }
 
 func (server *TCPServer) Start() {
@@ -54,9 +55,17 @@ func (server *TCPServer) init() {
 
 	// msg parser
 	msgParser := NewMsgParser()
+	if msgParser.INetMempool == nil {
+		msgParser.INetMempool = NewMemAreaPool()
+	}
+
 	msgParser.SetMsgLen(server.LenMsgLen, server.MinMsgLen, server.MaxMsgLen)
 	msgParser.SetByteOrder(server.LittleEndian)
 	server.msgParser = msgParser
+}
+
+func (server *TCPServer) SetNetMempool(mempool INetMempool){
+	server.msgParser.INetMempool = mempool
 }
 
 func (server *TCPServer) run() {

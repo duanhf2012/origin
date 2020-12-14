@@ -271,3 +271,7 @@ func (tcpService *TcpService) GetConnNum() int {
 	tcpService.mapClientLocker.Unlock()
 	return connNum
 }
+
+func (server *TcpService) SetNetMempool(mempool network.INetMempool){
+	server.tcpServer.SetNetMempool(mempool)
+}

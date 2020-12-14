@@ -4,6 +4,11 @@ import (
 	"sync"
 )
 
+type INetMempool interface {
+	MakeByteSlice(size int) []byte
+	ReleaseByteSlice(byteBuff []byte) bool
+}
+
 type memAreaPool struct {
 	minAreaValue int   //最小范围值
 	maxAreaValue int   //最大范围值
@@ -18,6 +23,10 @@ func init(){
 	for i:=0;i<len(memAreaPoolList);i++{
 		memAreaPoolList[i].makePool()
 	}
+}
+
+func NewMemAreaPool() *memAreaPool{
+	return &memAreaPool{}
 }
 
 func (areaPool *memAreaPool) makePool(){
@@ -50,7 +59,6 @@ func (areaPool *memAreaPool) getPosByteSize(size int) int{
 	return pos
 }
 
-
 func (areaPool *memAreaPool) releaseByteSlice(byteBuff []byte) bool{
 	pos := areaPool.getPosByteSize(cap(byteBuff))
 	if pos > len(areaPool.pool) || pos == -1{
@@ -62,10 +70,9 @@ func (areaPool *memAreaPool) releaseByteSlice(byteBuff []byte) bool{
 	return true
 }
 
-func MakeByteSlice(size int) []byte{
+func (areaPool *memAreaPool) MakeByteSlice(size int) []byte{
 	for i:=0;i<len(memAreaPoolList);i++{
 		if size <= memAreaPoolList[i].maxAreaValue {
-
 			return memAreaPoolList[i].makeByteSlice(size)
 		}
 	}
@@ -73,8 +80,7 @@ func MakeByteSlice(size int) []byte{
 	return nil
 }
 
-
-func ReleaseByteSlice(byteBuff []byte) bool {
+func (areaPool *memAreaPool) ReleaseByteSlice(byteBuff []byte) bool {
 	for i:=0;i<len(memAreaPoolList);i++{
 		if cap(byteBuff) <= memAreaPoolList[i].maxAreaValue {
 			return memAreaPoolList[i].releaseByteSlice(byteBuff)
@@ -83,5 +89,3 @@ func ReleaseByteSlice(byteBuff []byte) bool {
 
 	return false
 }
-
-

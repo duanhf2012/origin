@@ -32,3 +32,4 @@ type IRawProcessor interface {
 	SetConnectedHandler(connectHandler RawConnectHandler)
 	SetDisConnectedHandler(disconnectHandler RawConnectHandler)
 }
+
