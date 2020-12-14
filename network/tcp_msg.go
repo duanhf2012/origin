@@ -101,13 +101,13 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 	
 	// data
 	//msgData := make([]byte, msgLen)
-	msgData := p.MakeByteSlice(int(msgLen))
-	if _, err := io.ReadFull(conn, msgData); err != nil {
+	msgData := p.MakeReadByteSlice(int(msgLen))
+	if _, err := io.ReadFull(conn, msgData[:msgLen]); err != nil {
 		p.ReleaseByteSlice(msgData)
 		return nil, err
 	}
 
-	return msgData, nil
+	return msgData[:msgLen], nil
 }
 
 // goroutine safe
@@ -126,7 +126,7 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 	}
 
 	//msg := make([]byte, uint32(p.lenMsgLen)+msgLen)
-	msg := p.MakeByteSlice(p.lenMsgLen+int(msgLen))
+	msg := p.MakeWriteByteSlice(p.lenMsgLen+int(msgLen))
 	// write len
 	switch p.lenMsgLen {
 	case 1:

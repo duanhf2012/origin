@@ -5,7 +5,8 @@ import (
 )
 
 type INetMempool interface {
-	MakeByteSlice(size int) []byte
+	MakeReadByteSlice(size int) []byte
+	MakeWriteByteSlice(size int) []byte
 	ReleaseByteSlice(byteBuff []byte) bool
 }
 
@@ -78,6 +79,14 @@ func (areaPool *memAreaPool) MakeByteSlice(size int) []byte{
 	}
 
 	return nil
+}
+
+func (areaPool *memAreaPool) MakeReadByteSlice(size int) []byte{
+	return areaPool.MakeByteSlice(size)
+}
+
+func (areaPool *memAreaPool) MakeWriteByteSlice(size int) []byte{
+	return areaPool.MakeByteSlice(size)
 }
 
 func (areaPool *memAreaPool) ReleaseByteSlice(byteBuff []byte) bool {
