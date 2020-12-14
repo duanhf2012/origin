@@ -62,7 +62,7 @@ func (areaPool *memAreaPool) releaseByteSlice(byteBuff []byte) bool{
 	return true
 }
 
-func makeByteSlice(size int) []byte{
+func MakeByteSlice(size int) []byte{
 	for i:=0;i<len(memAreaPoolList);i++{
 		if size <= memAreaPoolList[i].maxAreaValue {
 

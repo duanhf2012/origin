@@ -99,7 +99,7 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 	
 	// data
 	//msgData := make([]byte, msgLen)
-	msgData := makeByteSlice(int(msgLen))
+	msgData := MakeByteSlice(int(msgLen))
 	if _, err := io.ReadFull(conn, msgData); err != nil {
 		ReleaseByteSlice(msgData)
 		return nil, err
@@ -124,7 +124,7 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 	}
 
 	//msg := make([]byte, uint32(p.lenMsgLen)+msgLen)
-	msg := makeByteSlice(p.lenMsgLen+int(msgLen))
+	msg := MakeByteSlice(p.lenMsgLen+int(msgLen))
 	// write len
 	switch p.lenMsgLen {
 	case 1:
