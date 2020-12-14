@@ -2,15 +2,17 @@ package service
 
 //本地所有的service
 var mapServiceName map[string]IService
+var setupServiceList []IService
 
 func init(){
 	mapServiceName = map[string]IService{}
+	setupServiceList = []IService{}
 }
 
 func Init(chanCloseSig chan bool) {
 	closeSig=chanCloseSig
 
-	for _,s := range mapServiceName {
+	for _,s := range setupServiceList {
 		err := s.OnInit()
 		if err != nil {
 			panic(err)
@@ -25,6 +27,7 @@ func Setup(s IService) bool {
 	}
 
 	mapServiceName[s.GetName()] = s
+	setupServiceList = append(setupServiceList, s)
 	return true
 }
 
@@ -38,13 +41,13 @@ func GetService(serviceName string) IService {
 }
 
 func Start(){
-	for _,s := range mapServiceName {
+	for _,s := range setupServiceList {
 		s.Start()
 	}
 }
 
 func WaitStop(){
-	for _,s := range mapServiceName {
-		s.Wait()
+	for i := len(setupServiceList) - 1; i >= 0; i-- {
+		setupServiceList[i].Wait()
 	}
 }
