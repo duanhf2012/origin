@@ -1,7 +1,6 @@
 package timer
 
 import (
-	"fmt"
 	"reflect"
 	"runtime"
 	"sync"
@@ -169,7 +168,6 @@ func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(*Cron),onTimerClose
 	cron.name = funcName
 	cron.interval = nextTime.Sub(now)
 	cron.fireTime = Now().Add(cron.interval)
-	fmt.Println(cron.interval.Milliseconds(),"\n")
 	SetupTimer(&cron.Timer)
 	onAddTimer(&cron.Timer)
 	return cron
