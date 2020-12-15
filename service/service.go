@@ -15,7 +15,7 @@ import (
 
 
 var closeSig chan bool
-var timerDispatcherLen = 10000
+var timerDispatcherLen = 100000
 
 type IService interface {
 	Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})

@@ -65,23 +65,26 @@ func StartTimer(minTimerInterval time.Duration,maxTimerNum int){
 }
 
 func tickRoutine(minTimerInterval time.Duration){
+	var bContinue bool
 	for{
-		time.Sleep(minTimerInterval)
-		tick()
+		bContinue = tick()
+		if bContinue == false {
+			time.Sleep(minTimerInterval)
+		}
 	}
 }
 
-func tick(){
+func tick() bool{
 	now := Now()
 	timerHeapLock.Lock()
 	if timerHeap.Len() <= 0 { // 没有任何定时器，立刻返回
 		timerHeapLock.Unlock()
-		return
+		return false
 	}
 	nextFireTime := timerHeap.timers[0].fireTime
 	if nextFireTime.After(now) { // 没有到时间的定时器，返回
 		timerHeapLock.Unlock()
-		return
+		return false
 	}
 
 	t := heap.Pop(&timerHeap).(*Timer)
@@ -89,10 +92,11 @@ func tick(){
 	if len(t.C)>= cap(t.C) {
 		log.Error("Timer channel full!")
 
-		return
+		return true
 	}
 
 	t.C <- t
+	return true
 }
 
 func Now() time.Time{
