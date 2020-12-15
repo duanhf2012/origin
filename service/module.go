@@ -160,12 +160,10 @@ func (m *Module) GetParent()IModule{
 }
 
 func (m *Module) OnCloseTimer(timer *timer.Timer){
-	fmt.Printf("OnCloseTimer %p\n",timer)
 	delete(m.mapActiveTimer,timer)
 }
 
 func (m *Module) OnAddTimer(t *timer.Timer){
-	fmt.Printf("OnAddTimer %p\n",t)
 	if t != nil {
 		m.mapActiveTimer[t] = nil
 	}
