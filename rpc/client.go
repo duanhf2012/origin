@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
-	"github.com/duanhf2012/origin/util/timewheel"
+	"github.com/duanhf2012/origin/util/timer"
 	"math"
 	"reflect"
 	"runtime"
@@ -62,18 +62,17 @@ func (client *Client) Connect(id int,addr string) error {
 }
 
 func (client *Client) startCheckRpcCallTimer(){
-	timer:=timewheel.NewTimer(3*time.Second)
+	t:=timer.NewTimer(3*time.Second)
 	for{
 		select {
-			case <- timer.C:
-				timewheel.ReleaseTimer(timer)
-				timer=timewheel.NewTimer(3*time.Second)
+			case timer:=<- t.C:
+				timer.SetupTimer(time.Now())
 				client.checkRpcCallTimeout()
 		}
 	}
 
-	timer.Close()
-	timewheel.ReleaseTimer(timer)
+	t.Cancel()
+	timer.ReleaseTimer(t)
 }
 
 func (client *Client) makeCallFail(call *Call){

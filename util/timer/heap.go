@@ -14,6 +14,17 @@ func SetupTimer(timer *Timer) *Timer{
 	return timer
 }
 
+func NewTimer(d time.Duration) *Timer{
+	c := make(chan *Timer,1)
+	timer := newTimer(d,c,nil,"",nil)
+	SetupTimer(timer)
+	return timer
+}
+
+func ReleaseTimer(timer *Timer) {
+	releaseTimer(timer)
+}
+
 type _TimerHeap struct {
 	timers []*Timer
 }

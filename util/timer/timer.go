@@ -89,6 +89,11 @@ func (t *Timer) Do(){
 	}
 }
 
+func (t *Timer) SetupTimer(now time.Time){
+	t.fireTime = now.Add(t.interval)
+	SetupTimer(t)
+}
+
 func (t *Timer) GetInterval() time.Duration{
 	return t.interval
 }
