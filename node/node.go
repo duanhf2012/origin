@@ -7,6 +7,7 @@ import (
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/util/timer"
 	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
@@ -185,6 +186,7 @@ func startNode(args interface{}) error{
 		return fmt.Errorf("invalid option %s",param)
 	}
 
+	timer.StartTimer(10*time.Millisecond,100000)
 	log.Release("Start running server.")
 	//2.初始化node
 	initNode(nodeId)

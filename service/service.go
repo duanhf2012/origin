@@ -7,7 +7,6 @@ import (
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
-	"github.com/duanhf2012/origin/util/timewheel"
 	"reflect"
 	"runtime"
 	"sync"
@@ -136,17 +135,13 @@ func (s *Service) Run() {
 				analyzer = nil
 			}
 		case t := <- s.dispatcher.ChanTimer:
-			if t.IsClose() == false {
-				time := t.AdditionData.(timer.ITime)
-				if s.profiler != nil {
-					analyzer = s.profiler.Push("[timer]"+time.GetName())
-				}
-				time.Do()
-				if analyzer != nil {
-					analyzer.Pop()
-					analyzer = nil
-				}
-				timewheel.ReleaseTimer(t)
+			if s.profiler != nil {
+				analyzer = s.profiler.Push("[timer]"+t.GetName())
+			}
+			t.Do()
+			if analyzer != nil {
+				analyzer.Pop()
+				analyzer = nil
 			}
 		}
 
