@@ -1,6 +1,7 @@
 package timer
 
 import (
+	"fmt"
 	"reflect"
 	"runtime"
 	"sync"
@@ -16,6 +17,7 @@ type Timer struct {
 	fireTime  	 time.Time         // 触发时间
 	cb 			 func()
 	AdditionData interface{}    //定时器附加数据
+	rOpen        bool           //是否重新打开
 }
 
 // Ticker
@@ -52,7 +54,7 @@ func newTimer(d time.Duration,c chan *Timer,cb func(),name string,additionData i
 	timer.cb = cb
 	timer.name = name
 	timer.interval = d
-
+	timer.rOpen = false
 	return timer
 }
 
@@ -89,9 +91,12 @@ func (t *Timer) Do(){
 	}
 }
 
-func (t *Timer) SetupTimer(now time.Time){
+func (t *Timer) SetupTimer(now time.Time) error{
 	t.fireTime = now.Add(t.interval)
-	SetupTimer(t)
+	if SetupTimer(t) == nil {
+		return fmt.Errorf("Failed to install timer.")
+	}
+	return nil
 }
 
 func (t *Timer) GetInterval() time.Duration{
@@ -122,13 +127,18 @@ func (disp *Dispatcher) AfterFunc(d time.Duration, cb func(),onTimerClose OnTime
 	funName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
 	timer := newTimer(d,disp.ChanTimer,cb,funName,nil)
 	cbFunc := func() {
-		onTimerClose(timer)
-		releaseTimer(timer)
 		if timer.IsActive() == false {
+			onTimerClose(timer)
+			releaseTimer(timer)
 			return
 		}
 
 		cb()
+
+		if timer.rOpen ==false {
+			onTimerClose(timer)
+			releaseTimer(timer)
+		}
 	}
 
 	timer.cb = cbFunc

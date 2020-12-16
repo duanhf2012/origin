@@ -8,6 +8,11 @@ import (
 )
 
 func SetupTimer(timer *Timer) *Timer{
+	if timer.rOpen == true {
+		return nil
+	}
+
+	timer.rOpen = true
 	timerHeapLock.Lock() // 使用锁规避竞争条件
 	heap.Push(&timerHeap,timer)
 	timerHeapLock.Unlock()
@@ -94,7 +99,7 @@ func tick() bool{
 
 		return true
 	}
-
+	t.rOpen = false
 	t.C <- t
 	return true
 }
