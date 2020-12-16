@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+var OpenConsole bool = true
+
 // levels
 const (
 	debugLevel   = 0
@@ -31,6 +33,7 @@ type Logger struct {
 	filePath   string
 	logTime    time.Time
 	level      int
+	stdLogger   *log.Logger
 	baseLogger *log.Logger
 	baseFile   *os.File
 	flag       int
@@ -77,10 +80,10 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 	} else {
 		baseLogger = log.New(os.Stdout, "", flag)
 	}
-
 	// new
 	logger := new(Logger)
 	logger.level = level
+	logger.stdLogger = log.New(os.Stdout, "", flag)
 	logger.baseLogger = baseLogger
 	logger.baseFile = baseFile
 	logger.logTime = now
@@ -131,7 +134,9 @@ func (logger *Logger) doPrintf(level int, printLevel string, format string, a ..
 
 	format = printLevel + format
 	logger.baseLogger.Output(3, fmt.Sprintf(format, a...))
-
+	if OpenConsole == true {
+		logger.stdLogger.Output(3, fmt.Sprintf(format, a...))
+	}
 	if level == fatalLevel {
 		os.Exit(1)
 	}
