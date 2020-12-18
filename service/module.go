@@ -134,6 +134,7 @@ func (m *Module) ReleaseModule(moduleId int64){
 	pModule.dispatcher = nil
 	pModule.ancestor = nil
 	pModule.descendants = nil
+	pModule.IRpcHandler = nil
 }
 
 func (m *Module) NewModuleId() int64{

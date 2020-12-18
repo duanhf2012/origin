@@ -80,6 +80,7 @@ type IRpcHandler interface {
 	CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error
 	GoNode(nodeId int,serviceMethod string,args interface{}) error
 	RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceMethod string,args IRawInputArgs) error
+	CastGo(serviceMethod string,args interface{})
 	IsSingleCoroutine() bool
 }
 

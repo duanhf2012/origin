@@ -61,7 +61,7 @@ func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServe
 	s.dispatcher =timer.NewDispatcher(timerDispatcherLen)
 
 	s.rpcHandler.InitRpcHandler(iService.(rpc.IRpcHandler),getClientFun,getServerFun)
-	s.IRpcHandler = s
+	s.IRpcHandler = &s.rpcHandler
 	s.self = iService.(IModule)
 	//初始化祖先
 	s.ancestor = iService.(IModule)
