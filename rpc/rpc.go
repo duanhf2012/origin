@@ -7,6 +7,7 @@ import (
 )
 
 type RpcRequest struct {
+	ref bool
 	RpcRequestData IRpcRequestData
 
 	bLocalRequest bool
@@ -59,6 +60,7 @@ type RpcHandleFinder interface {
 type RequestHandler func(Returns interface{},Err RpcError)
 
 type Call struct {
+	ref           bool
 	Seq           uint64
 	ServiceMethod string
 	Reply         interface{}
@@ -118,19 +120,35 @@ func (call *Call) Done() *Call{
 	return <-call.done
 }
 
-func MakeRpcRequest() *RpcRequest{
-	return rpcRequestPool.Get().(*RpcRequest).Clear()
-}
+func MakeRpcRequest(rpcProcessor IRpcProcessor,seq uint64,serviceMethod string,noReply bool,inParam []byte) *RpcRequest{
+	rpcRequest := rpcRequestPool.Get().(*RpcRequest).Clear()
+	rpcRequest.rpcProcessor = rpcProcessor
+	rpcRequest.RpcRequestData = rpcRequest.rpcProcessor.MakeRpcRequest(seq,serviceMethod,noReply,inParam)
+	rpcRequest.ref = true
 
-func MakeCall() *Call {
-	return rpcCallPool.Get().(*Call).Clear()
+	return rpcRequest
 }
 
 func ReleaseRpcRequest(rpcRequest *RpcRequest){
+	if rpcRequest.ref == false {
+		panic("Duplicate memory release!")
+	}
+	rpcRequest.ref = false
+	rpcRequest.rpcProcessor.ReleaseRpcRequest(rpcRequest.RpcRequestData)
 	rpcRequestPool.Put(rpcRequest)
 }
 
+func MakeCall() *Call {
+	call := rpcCallPool.Get().(*Call).Clear()
+	call.ref = true
+	return call
+}
+
 func ReleaseCall(call *Call){
+	if call.ref == false {
+		panic("Duplicate memory release!")
+	}
+	call.ref = false
 	rpcCallPool.Put(call)
 }
 

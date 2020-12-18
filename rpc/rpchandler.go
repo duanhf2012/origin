@@ -238,7 +238,6 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}()
 	defer ReleaseRpcRequest(request)
-	defer request.rpcProcessor.ReleaseRpcRequest(request.RpcRequestData)
 	if request.inputArgs!=nil {
 		defer request.inputArgs.DoGc()
 	}
@@ -265,6 +264,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 
 	if request.bLocalRequest == false {
 		if iParam == nil {
+			//原始调用
 			iParam = request.RpcRequestData.GetInParam()
 		}else{
 			err = request.rpcProcessor.Unmarshal(request.RpcRequestData.GetInParam(),iParam)
@@ -394,6 +394,7 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,s
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
+			pClientList[i].RemovePending(pCall.Seq)
 			ReleaseCall(pCall)
 			continue
 		}
@@ -403,6 +404,7 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,s
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
+		pClientList[i].RemovePending(pCall.Seq)
 		ReleaseCall(pCall)
 	}
 
@@ -448,9 +450,11 @@ func (handler *RpcHandler) callRpc(nodeId int,serviceMethod string,args interfac
 
 	//跨node调用
 	pCall := pClient.Go(false,serviceMethod,args,reply)
+	pClient.RemovePending(pCall.Seq)
 	if pCall.Err != nil {
+		err = pCall.Err
 		ReleaseCall(pCall)
-		return pCall.Err
+		return err
 	}
 	err = pCall.Done().Err
 	ReleaseCall(pCall)
@@ -518,19 +522,11 @@ func (handler *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args int
 		}
 
 		//其他的rpcHandler的处理器
-		if callback!=nil {
-			err =  pLocalRpcServer.selfNodeRpcHandlerAsyncGo(pClient, handler,false,serviceName,serviceMethod,args,reply,fVal)
-			if err != nil {
-				fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
-			}
-			return nil
+		err =  pLocalRpcServer.selfNodeRpcHandlerAsyncGo(pClient, handler,false,serviceName,serviceMethod,args,reply,fVal)
+		if err != nil {
+			fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 		}
-		pCall := pLocalRpcServer.selfNodeRpcHandlerGo(nil,pClient,false,serviceName,serviceMethod,args,reply,nil)
-		err = pCall.Done().Err
-		pClient.RemovePending(pCall.Seq)
-		ReleaseCall(pCall)
-
-		return err
+		return nil
 	}
 
 	//跨node调用
@@ -621,6 +617,7 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
+			pClientList[i].RemovePending(pCall.Seq)
 			ReleaseCall(pCall)
 			continue
 		}
@@ -631,6 +628,7 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
+		pClientList[i].RemovePending(pCall.Seq)
 		ReleaseCall(pCall)
 	}
 
