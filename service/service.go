@@ -34,7 +34,7 @@ type IService interface {
 
 type Service struct {
 	Module
-	rpc.RpcHandler           //rpc
+	rpcHandler rpc.RpcHandler           //rpc
 	name           string    //service name
 	wg             sync.WaitGroup
 	serviceCfg     interface{}
@@ -60,7 +60,8 @@ func (s *Service) OpenProfiler()  {
 func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
 	s.dispatcher =timer.NewDispatcher(timerDispatcherLen)
 
-	s.InitRpcHandler(iService.(rpc.IRpcHandler),getClientFun,getServerFun)
+	s.rpcHandler.InitRpcHandler(iService.(rpc.IRpcHandler),getClientFun,getServerFun)
+	s.IRpcHandler = s
 	s.self = iService.(IModule)
 	//初始化祖先
 	s.ancestor = iService.(IModule)

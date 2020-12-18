@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/log"
+	rpcHandle "github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
 	"reflect"
 	"time"
@@ -31,6 +32,7 @@ type IModule interface {
 //1.管理各模块树层关系
 //2.提供定时器常用工具
 type Module struct {
+	rpcHandle.IRpcHandler
 	moduleId int64                              //模块Id
 	moduleName string                           //模块名称
 	parent IModule        						//父亲
@@ -86,7 +88,7 @@ func (m *Module) AddModule(module IModule) (int64,error){
 	if ok == true {
 		return 0,fmt.Errorf("Exists module id %d",module.GetModuleId())
 	}
-
+	pAddModule.IRpcHandler = m.IRpcHandler
 	pAddModule.self = module
 	pAddModule.parent = m.self
 	pAddModule.dispatcher = m.GetAncestor().getBaseModule().(*Module).dispatcher
