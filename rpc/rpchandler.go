@@ -450,13 +450,13 @@ func (handler *RpcHandler) callRpc(nodeId int,serviceMethod string,args interfac
 
 	//跨node调用
 	pCall := pClient.Go(false,serviceMethod,args,reply)
-	pClient.RemovePending(pCall.Seq)
 	if pCall.Err != nil {
 		err = pCall.Err
 		ReleaseCall(pCall)
 		return err
 	}
 	err = pCall.Done().Err
+	pClient.RemovePending(pCall.Seq)
 	ReleaseCall(pCall)
 	return err
 }
