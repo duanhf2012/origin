@@ -49,7 +49,6 @@ type RpcHandler struct {
 	callRequest   chan *RpcRequest
 	rpcHandler    IRpcHandler
 	mapFunctions  map[string]RpcMethodInfo
-	mapRawFunctions map[int]
 	funcRpcClient FuncRpcClient
 	funcRpcServer FuncRpcServer
 
