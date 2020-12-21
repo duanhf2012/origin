@@ -49,6 +49,7 @@ type RpcHandler struct {
 	callRequest   chan *RpcRequest
 	rpcHandler    IRpcHandler
 	mapFunctions  map[string]RpcMethodInfo
+	mapRawFunctions map[int]
 	funcRpcClient FuncRpcClient
 	funcRpcServer FuncRpcServer
 
@@ -257,9 +258,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	var err error
 	var iParam interface{}
 	//单协程或非异步调用时直接使用预置对象
-	if handler.IsSingleCoroutine() && v.hasResponder==false {
-		iParam = v.inParam
-	}else if v.inParam != nil {
+	if v.inParam!= nil {
 		iParam = reflect.New(v.inParamValue.Type().Elem()).Interface()
 	}
 
@@ -311,8 +310,6 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	if v.outParamValue.IsValid() {
 		if request.localReply!=nil {
 			oParam = reflect.ValueOf(request.localReply) //输出参数
-		}else if handler.IsSingleCoroutine()==true{
-			oParam = v.outParamValue
 		}else{
 			oParam = reflect.New(v.outParamValue.Type().Elem())
 		}
