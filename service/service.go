@@ -208,3 +208,7 @@ func (s *Service) UnRegEventReceiverFunc(eventType event.EventType, receiver eve
 func (s *Service) IsSingleCoroutine() bool {
 	return s.goroutineNum == 1
 }
+
+func (s *Service) RegRawRpc(rpcMethodId uint32,rawRpcCB rpc.RawRpcCallBack){
+	s.rpcHandler.RegRawRpc(rpcMethodId,rawRpcCB)
+}

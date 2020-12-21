@@ -177,7 +177,7 @@ func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,call
 	}
 
 	seq := client.generateSeq()
-	request:=MakeRpcRequest(processor,seq,serviceMethod,false,InParam)
+	request:=MakeRpcRequest(processor,seq,0,serviceMethod,false,InParam)
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	ReleaseRpcRequest(request)
 	if err != nil {
@@ -206,13 +206,13 @@ func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,call
 	return nil
 }
 
-func (client *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod string,args []byte,reply interface{}) *Call {
+func (client *Client) RawGo(processor IRpcProcessor,noReply bool,rpcMethodId uint32,serviceMethod string,args []byte,reply interface{}) *Call {
 	call := MakeCall()
 	call.ServiceMethod = serviceMethod
 	call.Reply = reply
 	call.Seq = client.generateSeq()
 
-	request := MakeRpcRequest(processor,call.Seq,serviceMethod,noReply,args)
+	request := MakeRpcRequest(processor,call.Seq,rpcMethodId,serviceMethod,noReply,args)
 	bytes,err := processor.Marshal(request.RpcRequestData)
 	ReleaseRpcRequest(request)
 	if err != nil {
@@ -250,7 +250,7 @@ func (client *Client) Go(noReply bool,serviceMethod string, args interface{},rep
 		return call
 	}
 
-	return client.RawGo(processor,noReply,serviceMethod,InParam,reply)
+	return client.RawGo(processor,noReply,0,serviceMethod,InParam,reply)
 }
 
 func (client *Client) Run(){

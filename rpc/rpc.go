@@ -40,6 +40,7 @@ type IRpcRequestData interface {
 	GetServiceMethod() string
 	GetInParam() []byte
 	IsNoReply() bool
+	GetRpcMethodId() uint32
 }
 
 type IRpcResponseData interface {
@@ -120,10 +121,10 @@ func (call *Call) Done() *Call{
 	return <-call.done
 }
 
-func MakeRpcRequest(rpcProcessor IRpcProcessor,seq uint64,serviceMethod string,noReply bool,inParam []byte) *RpcRequest{
+func MakeRpcRequest(rpcProcessor IRpcProcessor,seq uint64,rpcMethodId uint32,serviceMethod string,noReply bool,inParam []byte) *RpcRequest{
 	rpcRequest := rpcRequestPool.Get().(*RpcRequest).Clear()
 	rpcRequest.rpcProcessor = rpcProcessor
-	rpcRequest.RpcRequestData = rpcRequest.rpcProcessor.MakeRpcRequest(seq,serviceMethod,noReply,inParam)
+	rpcRequest.RpcRequestData = rpcRequest.rpcProcessor.MakeRpcRequest(seq,rpcMethodId,serviceMethod,noReply,inParam)
 	rpcRequest.ref = true
 
 	return rpcRequest

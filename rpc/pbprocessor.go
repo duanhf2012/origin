@@ -22,14 +22,16 @@ func init(){
 	}
 }
 
-func (slf *PBRpcRequestData) MakeRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) *PBRpcRequestData{
+func (slf *PBRpcRequestData) MakeRequest(seq uint64,rpcMethodId uint32,serviceMethod string,noReply bool,inParam []byte) *PBRpcRequestData{
 	slf.Seq = seq
+	slf.RpcMethodId = rpcMethodId
 	slf.ServiceMethod = serviceMethod
 	slf.NoReply = noReply
 	slf.InParam = inParam
 
 	return slf
 }
+
 
 func (slf *PBRpcResponseData) MakeRespone(seq uint64,err RpcError,reply []byte) *PBRpcResponseData{
 	slf.Seq = seq
@@ -48,9 +50,9 @@ func (slf *PBProcessor) Unmarshal(data []byte, msg interface{}) error{
 	return proto.Unmarshal(data, protoMsg)
 }
 
-func (slf *PBProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) IRpcRequestData{
+func (slf *PBProcessor) MakeRpcRequest(seq uint64,rpcMethodId uint32,serviceMethod string,noReply bool,inParam []byte) IRpcRequestData{
 	pPbRpcRequestData := rpcPbRequestDataPool.Get().(*PBRpcRequestData)
-	pPbRpcRequestData.MakeRequest(seq,serviceMethod,noReply,inParam)
+	pPbRpcRequestData.MakeRequest(seq,rpcMethodId,serviceMethod,noReply,inParam)
 	return pPbRpcRequestData
 }
 
