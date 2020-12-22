@@ -250,7 +250,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 			log.Error(err)
 			return
 		}
-		v(request.inputArgs.GetRawData())
+		v(request.RpcRequestData.GetInParam())
 		return
 	}
 

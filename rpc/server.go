@@ -146,7 +146,7 @@ func (agent *RpcAgent) Run() {
 
 		//交给程序处理
 		serviceMethod := strings.Split(req.RpcRequestData.GetServiceMethod(),".")
-		if len(serviceMethod)!=2 {
+		if len(serviceMethod) < 1 {
 			rpcError := RpcError("rpc request req.ServiceMethod is error")
 			agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,rpcError)
 			ReleaseRpcRequest(req)
