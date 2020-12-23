@@ -559,7 +559,6 @@ func (handler *RpcHandler) CastGo(serviceMethod string,args interface{})  {
 	handler.goRpc(nil,true,0,serviceMethod,args)
 }
 
-//RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,serviceName string,rpcMethodId uint32,args IRawInputArgs) error
 func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,args IRawInputArgs) error {
 	processor := GetProcessor(uint8(rpcProcessorType))
 	var pClientList [maxClusterNode]*Client

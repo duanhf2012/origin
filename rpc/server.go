@@ -81,11 +81,9 @@ func (server *Server) Start(listenAddr string) {
 
 func (agent *RpcAgent) OnDestroy() {}
 
-func (agent *RpcAgent) WriteResponse(processor IRpcProcessor,serviceMethod string,seq uint64,reply interface{},err RpcError) {
+func (agent *RpcAgent) WriteResponse(processor IRpcProcessor,serviceMethod string,seq uint64,reply interface{},rpcError RpcError) {
 	var mReply []byte
-	var rpcError RpcError
 	var errM error
-
 
 	if reply!=nil {
 		mReply,errM = processor.Marshal(reply)
