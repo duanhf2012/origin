@@ -275,3 +275,11 @@ func (tcpService *TcpService) GetConnNum() int {
 func (server *TcpService) SetNetMempool(mempool network.INetMempool){
 	server.tcpServer.SetNetMempool(mempool)
 }
+
+func (server *TcpService) GetNetMempool() network.INetMempool{
+	return server.tcpServer.GetNetMempool()
+}
+
+func (server *TcpService) ReleaseNetMem(byteBuff []byte) {
+	server.tcpServer.GetNetMempool().ReleaseByteSlice(byteBuff)
+}

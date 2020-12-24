@@ -68,6 +68,10 @@ func (server *TCPServer) SetNetMempool(mempool INetMempool){
 	server.msgParser.INetMempool = mempool
 }
 
+func (server *TCPServer) GetNetMempool() INetMempool{
+	return server.msgParser.INetMempool
+}
+
 func (server *TCPServer) run() {
 	server.wgLn.Add(1)
 	defer server.wgLn.Done()
