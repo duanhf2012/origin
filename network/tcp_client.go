@@ -72,7 +72,10 @@ func (client *TCPClient) init() {
 func (client *TCPClient) dial() net.Conn {
 	for {
 		conn, err := net.Dial("tcp", client.Addr)
-		if err == nil || client.closeFlag {
+		if client.closeFlag {
+			return conn
+		} else if err == nil && conn != nil {
+			conn.(*net.TCPConn).SetNoDelay(true)
 			return conn
 		}
 

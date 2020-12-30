@@ -95,6 +95,7 @@ func (server *TCPServer) run() {
 			}
 			return
 		}
+		conn.(*net.TCPConn).SetNoDelay(true)
 		tempDelay = 0
 
 		server.mutexConns.Lock()
