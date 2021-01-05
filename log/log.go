@@ -79,6 +79,7 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 		baseFile = file
 	} else {
 		baseLogger = log.New(os.Stdout, "", flag)
+		OpenConsole = false
 	}
 	// new
 	logger := new(Logger)
