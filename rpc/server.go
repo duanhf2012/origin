@@ -164,6 +164,7 @@ func (agent *RpcAgent) Run() {
 		if req.RpcRequestData.IsNoReply()==false {
 			req.requestHandle = func(Returns interface{},Err RpcError){
 				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),Returns,Err)
+				ReleaseRpcRequest(req)
 			}
 		}
 

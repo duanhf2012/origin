@@ -235,8 +235,11 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 					request.requestHandle(nil,rpcErr)
 				}
 		}
+
+		if request.requestHandle == nil {
+			ReleaseRpcRequest(request)
+		}
 	}()
-	defer ReleaseRpcRequest(request)
 	if request.inputArgs!=nil {
 		defer request.inputArgs.DoGc()
 	}
