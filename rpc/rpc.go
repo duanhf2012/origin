@@ -10,10 +10,8 @@ type RpcRequest struct {
 	ref bool
 	RpcRequestData IRpcRequestData
 
-	bLocalRequest bool
+	inParam interface{}
 	localReply interface{}
-	localParam interface{} //本地调用的参数列表
-	inputArgs IRawInputArgs
 
 	requestHandle RequestHandler
 	callback *reflect.Value
@@ -87,11 +85,9 @@ func init(){
 func (slf *RpcRequest) Clear() *RpcRequest{
 	slf.RpcRequestData = nil
 	slf.localReply = nil
-	slf.localParam = nil
+	slf.inParam = nil
 	slf.requestHandle = nil
 	slf.callback = nil
-	slf.bLocalRequest = false
-	slf.inputArgs = nil
 	slf.rpcProcessor = nil
 	return slf
 }

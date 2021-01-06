@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"errors"
 	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"reflect"
@@ -45,7 +46,12 @@ type RpcMethodInfo struct {
 	rpcProcessorType RpcProcessorType
 }
 
-type RawRpcCallBack func(rawData []byte)
+type RawRpcCallBack interface {
+	Unmarshal(data []byte) (interface{},error)
+	CB(data interface{})
+}
+
+//type RawRpcCallBack func(rawData []byte)
 type RpcHandler struct {
 	callRequest   chan *RpcRequest
 	rpcHandler    IRpcHandler
@@ -81,10 +87,12 @@ type IRpcHandler interface {
 	AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error
 	CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error
 	GoNode(nodeId int,serviceMethod string,args interface{}) error
-	RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,args IRawInputArgs) error
+	RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,rawArgs []byte) error
 	CastGo(serviceMethod string,args interface{})
 	IsSingleCoroutine() bool
+	UnmarshalInParam(rpcProcessor IRpcProcessor,serviceMethod string,rawRpcMethodId uint32,inParam []byte) (interface{},error)
 }
+
 
 func reqHandlerNull(Returns interface{},Err RpcError) {
 }
@@ -240,9 +248,6 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 			ReleaseRpcRequest(request)
 		}
 	}()
-	if request.inputArgs!=nil {
-		defer request.inputArgs.DoGc()
-	}
 
 	//如果是原始RPC请求
 	rawRpcId := request.RpcRequestData.GetRpcMethodId()
@@ -253,12 +258,8 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 			log.Error(err)
 			return
 		}
-		if request.inputArgs != nil {
-			v(request.inputArgs.GetRawData())
-		}else{
-			v(request.RpcRequestData.GetInParam())
-		}
 
+		v.CB(request.inParam)
 		return
 	}
 
@@ -275,21 +276,6 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 
 	var paramList []reflect.Value
 	var err error
-	iParam := reflect.New(v.inParamValue.Type().Elem()).Interface()
-	if request.bLocalRequest == false {
-		err = request.rpcProcessor.Unmarshal(request.RpcRequestData.GetInParam(),iParam)
-		if err!=nil {
-			rErr := "Call Rpc "+request.RpcRequestData.GetServiceMethod()+" Param error "+err.Error()
-			log.Error(rErr)
-			if request.requestHandle!=nil {
-				request.requestHandle(nil, RpcError(rErr))
-			}
-			return
-		}
-	}else {
-		iParam = request.localParam
-	}
-
 	//生成Call参数
 	paramList = append(paramList,reflect.ValueOf(handler.GetRpcHandler())) //接受者
 	if v.hasResponder ==  true {
@@ -301,7 +287,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}
 
-	paramList = append(paramList,reflect.ValueOf(iParam))
+	paramList = append(paramList,reflect.ValueOf(request.inParam))
 	var oParam reflect.Value
 	if v.outParamValue.IsValid() {
 		if request.localReply!=nil {
@@ -567,17 +553,17 @@ func (handler *RpcHandler) CastGo(serviceMethod string,args interface{})  {
 	handler.goRpc(nil,true,0,serviceMethod,args)
 }
 
-func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,args IRawInputArgs) error {
+func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,rawArgs []byte) error {
 	processor := GetProcessor(uint8(rpcProcessorType))
 	var pClientList [maxClusterNode]*Client
 	err,count := handler.funcRpcClient(nodeId,serviceName,pClientList[:])
 	if count==0||err != nil {
-		args.DoGc()
+		//args.DoGc()
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
 	}
 	if count > 1 {
-		args.DoGc()
+		//args.DoGc()
 		log.Error("Cannot call more then 1 node!")
 		return fmt.Errorf("Cannot call more then 1 node!")
 	}
@@ -589,13 +575,13 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 			pLocalRpcServer:= handler.funcRpcServer()
 			//调用自己rpcHandler处理器
 			if serviceName == handler.rpcHandler.GetName() { //自己服务调用
-				err:= pLocalRpcServer.myselfRpcHandlerGo(serviceName,serviceName,args,nil)
-				args.DoGc()
+				err:= pLocalRpcServer.myselfRpcHandlerGo(serviceName,serviceName,rawArgs,nil)
+				//args.DoGc()
 				return err
 			}
 
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClientList[i],true,serviceName,rpcMethodId,serviceName,nil,nil,args)
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClientList[i],true,serviceName,rpcMethodId,serviceName,nil,nil,rawArgs)
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
@@ -605,8 +591,7 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 		}
 
 		//跨node调用
-		pCall := pClientList[i].RawGo(processor,true,rpcMethodId,serviceName,args.GetRawData(),nil)
-		args.DoGc()
+		pCall := pClientList[i].RawGo(processor,true,rpcMethodId,serviceName,rawArgs,nil)
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
@@ -619,4 +604,34 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 
 func (handler *RpcHandler) RegRawRpc(rpcMethodId uint32,rawRpcCB RawRpcCallBack){
 	handler.mapRawFunctions[rpcMethodId] = rawRpcCB
+}
+
+func (handler *RpcHandler) UnmarshalInParam(rpcProcessor IRpcProcessor,serviceMethod string,rawRpcMethodId uint32,inParam []byte) (interface{},error){
+	if rawRpcMethodId>0 {
+		v,ok := handler.mapRawFunctions[rawRpcMethodId]
+		if ok == false {
+			err := fmt.Errorf("RpcHandler cannot find request rpc id %d!",rawRpcMethodId)
+			log.Error(err.Error())
+			return nil,err
+		}
+
+		msg,err := v.Unmarshal(inParam)
+		if err != nil {
+			err := fmt.Errorf("RpcHandler cannot Unmarshal rpc id %d!",rawRpcMethodId)
+			log.Error(err.Error())
+			return nil,err
+		}
+
+		return msg,err
+	}
+
+	v,ok := handler.mapFunctions[serviceMethod]
+	if ok == false {
+		return nil,errors.New( "RpcHandler "+handler.rpcHandler.GetName()+"cannot find "+serviceMethod)
+	}
+
+	var err error
+	param := reflect.New(v.inParamValue.Type().Elem()).Interface()
+	err = rpcProcessor.Unmarshal(inParam,inParam)
+	return param,err
 }
