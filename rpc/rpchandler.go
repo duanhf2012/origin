@@ -632,6 +632,6 @@ func (handler *RpcHandler) UnmarshalInParam(rpcProcessor IRpcProcessor,serviceMe
 
 	var err error
 	param := reflect.New(v.inParamValue.Type().Elem()).Interface()
-	err = rpcProcessor.Unmarshal(inParam,inParam)
+	err = rpcProcessor.Unmarshal(inParam,param)
 	return param,err
 }
