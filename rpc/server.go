@@ -12,12 +12,12 @@ import (
 type RpcProcessorType uint8
 
 const (
-	RpcProcessorJson RpcProcessorType = 0
-	RpcProcessorPb   RpcProcessorType = 1
+	RpcProcessorJson 	RpcProcessorType = 0
+	RpcProcessorGoGoPB 	RpcProcessorType = 1
 )
 
 //var processor IRpcProcessor = &JsonProcessor{}
-var arrayProcessor  = []IRpcProcessor{&JsonProcessor{},&PBProcessor{}}
+var arrayProcessor  = []IRpcProcessor{&JsonProcessor{},&GoGoPBProcessor{}}
 var arrayProcessorLen uint8 = 2
 var LittleEndian bool
 
@@ -265,6 +265,7 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 			ReleaseRpcRequest(req)
 			pCall.Err = err
 			pCall.done <- pCall
+			return pCall
 		}
 	}
 	//req.inputArgs = inputArgs
@@ -275,6 +276,7 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 			v := client.RemovePending(pCall.Seq)
 			if v == nil {
 				log.Error("rpcClient cannot find seq %d in pending",pCall.Seq)
+				ReleaseRpcRequest(req)
 				return
 			}
 			if len(Err) == 0 {
@@ -283,6 +285,7 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 				pCall.Err = Err
 			}
 			pCall.done <- pCall
+			ReleaseRpcRequest(req)
 		}
 	}
 
@@ -323,6 +326,7 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler 
 			if v == nil {
 				log.Error("rpcClient cannot find seq %d in pending",pCall.Seq)
 				//ReleaseCall(pCall)
+				ReleaseRpcRequest(req)
 				return
 			}
 			if len(Err) == 0 {
@@ -335,6 +339,7 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler 
 				pCall.Reply = Returns
 			}
 			pCall.rpcHandler.(*RpcHandler).callResponseCallBack <-pCall
+			ReleaseRpcRequest(req)
 		}
 	}
 
