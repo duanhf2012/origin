@@ -2,7 +2,7 @@ package rpc
 
 import (
 	"reflect"
-	"sync"
+	"github.com/duanhf2012/origin/util/sync"
 	"time"
 )
 
@@ -29,8 +29,13 @@ func (r *Responder) IsInvalid() bool {
 }
 
 //var rpcResponsePool sync.Pool
-var rpcRequestPool sync.Pool
-var rpcCallPool sync.Pool
+var rpcRequestPool = sync.NewPoolEx(make(chan sync.IPoolData,10240),func()sync.IPoolData{
+	return &RpcRequest{}
+})
+
+var rpcCallPool =  sync.NewPoolEx(make(chan sync.IPoolData,10240),func()sync.IPoolData{
+	return &Call{done:make(chan *Call,1)}
+})
 
 
 type IRpcRequestData interface {
@@ -72,16 +77,6 @@ type Call struct {
 	callTime      time.Time
 }
 
-func init(){
-	rpcRequestPool.New = func() interface{} {
-		return &RpcRequest{}
-	}
-
-	rpcCallPool.New = func() interface{} {
-		return &Call{done:make(chan *Call,1)}
-	}
-}
-
 func (slf *RpcRequest) Clear() *RpcRequest{
 	slf.RpcRequestData = nil
 	slf.localReply = nil
@@ -90,6 +85,22 @@ func (slf *RpcRequest) Clear() *RpcRequest{
 	slf.callback = nil
 	slf.rpcProcessor = nil
 	return slf
+}
+
+func (slf *RpcRequest) Reset() {
+	slf.Clear()
+}
+
+func (slf *RpcRequest) IsRef()bool{
+	return slf.ref
+}
+
+func (slf *RpcRequest) Ref(){
+	slf.ref = true
+}
+
+func (slf *RpcRequest) UnRef(){
+	slf.ref = false
 }
 
 func (rpcResponse *RpcResponse) Clear() *RpcResponse{
@@ -111,6 +122,22 @@ func (call *Call) Clear() *Call{
 	call.callback = nil
 	call.rpcHandler = nil
 	return call
+}
+
+func (call *Call) Reset() {
+	call.Clear()
+}
+
+func (call *Call) IsRef()bool{
+	return call.ref
+}
+
+func (call *Call) Ref(){
+	call.ref = true
+}
+
+func (call *Call) UnRef(){
+	call.ref = false
 }
 
 func (call *Call) Done() *Call{

@@ -2,9 +2,10 @@ package timer
 
 import (
 	"fmt"
+	"github.com/duanhf2012/origin/util/sync"
 	"reflect"
 	"runtime"
-	"sync"
+
 	"time"
 )
 
@@ -18,6 +19,8 @@ type Timer struct {
 	cb 			 func()
 	AdditionData interface{}    //定时器附加数据
 	rOpen        bool           //是否重新打开
+
+	ref          bool
 }
 
 // Ticker
@@ -30,17 +33,17 @@ type Cron struct {
 	Timer
 }
 
-var timerPool = sync.Pool{New: func() interface{}{
+var timerPool = sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolData{
 	return &Timer{}
-}}
+})
 
-var cronPool = sync.Pool{New: func() interface{}{
+var cronPool = sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolData{
 	return &Cron{}
-}}
+})
 
-var tickerPool = sync.Pool{New: func() interface{}{
+var tickerPool =sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolData{
 	return &Ticker{}
-}}
+})
 
 func newTimer(d time.Duration,c chan *Timer,cb func(),name string,additionData interface{}) *Timer{
 	if c == nil {
@@ -115,6 +118,53 @@ func (t *Timer) IsActive() bool {
 func (t *Timer) GetName() string{
 	return t.name
 }
+
+func (t *Timer) Reset(){
+}
+
+func (t *Timer) IsRef()bool{
+	return t.ref
+}
+
+func (t *Timer) Ref(){
+	t.ref = true
+}
+
+func (t *Timer) UnRef(){
+	t.ref = false
+}
+
+func (c *Cron) Reset(){
+}
+
+func (c *Cron) IsRef()bool{
+	return c.ref
+}
+
+func (c *Cron) Ref(){
+	c.ref = true
+}
+
+func (c *Cron) UnRef(){
+	c.ref = false
+}
+
+func (c *Ticker) Reset(){
+}
+
+func (c *Ticker) IsRef()bool{
+	return c.ref
+}
+
+func (c *Ticker) Ref(){
+	c.ref = true
+}
+
+func (c *Ticker) UnRef(){
+	c.ref = false
+}
+
+
 
 func NewDispatcher(l int) *Dispatcher {
 	disp := new(Dispatcher)
