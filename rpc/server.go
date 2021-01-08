@@ -273,6 +273,20 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 	if noReply == false {
 		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{},Err RpcError){
+			if reply != nil && Returns != reply && Returns != nil {
+				byteReturns, err := req.rpcProcessor.Marshal(Returns)
+				if err != nil {
+					log.Error("returns data cannot be marshal",pCall.Seq)
+					ReleaseRpcRequest(req)
+				}
+
+				err = req.rpcProcessor.Unmarshal(byteReturns, reply)
+				if err != nil {
+					log.Error("returns data cannot be Unmarshal",pCall.Seq)
+					ReleaseRpcRequest(req)
+				}
+			}
+
 			v := client.RemovePending(pCall.Seq)
 			if v == nil {
 				log.Error("rpcClient cannot find seq %d in pending",pCall.Seq)
