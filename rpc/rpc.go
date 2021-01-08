@@ -28,7 +28,6 @@ func (r *Responder) IsInvalid() bool {
 	return reflect.ValueOf(*r).Pointer() == reflect.ValueOf(reqHandlerNull).Pointer()
 }
 
-//var rpcResponsePool sync.Pool
 var rpcRequestPool = sync.NewPoolEx(make(chan sync.IPoolData,10240),func()sync.IPoolData{
 	return &RpcRequest{}
 })
@@ -148,31 +147,20 @@ func MakeRpcRequest(rpcProcessor IRpcProcessor,seq uint64,rpcMethodId uint32,ser
 	rpcRequest := rpcRequestPool.Get().(*RpcRequest).Clear()
 	rpcRequest.rpcProcessor = rpcProcessor
 	rpcRequest.RpcRequestData = rpcRequest.rpcProcessor.MakeRpcRequest(seq,rpcMethodId,serviceMethod,noReply,inParam)
-	rpcRequest.ref = true
 
 	return rpcRequest
 }
 
 func ReleaseRpcRequest(rpcRequest *RpcRequest){
-	if rpcRequest.ref == false {
-		panic("Duplicate memory release!")
-	}
-	rpcRequest.ref = false
 	rpcRequest.rpcProcessor.ReleaseRpcRequest(rpcRequest.RpcRequestData)
 	rpcRequestPool.Put(rpcRequest)
 }
 
 func MakeCall() *Call {
-	call := rpcCallPool.Get().(*Call).Clear()
-	call.ref = true
-	return call
+	return rpcCallPool.Get().(*Call)
 }
 
 func ReleaseCall(call *Call){
-	if call.ref == false {
-		panic("Duplicate memory release!")
-	}
-	call.ref = false
 	rpcCallPool.Put(call)
 }
 

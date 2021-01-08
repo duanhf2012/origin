@@ -120,6 +120,13 @@ func (t *Timer) GetName() string{
 }
 
 func (t *Timer) Reset(){
+	t.name = ""
+	t.cancelled = false
+	t.C    = nil
+	t.interval  = 0
+	t.cb = nil
+	t.AdditionData = nil
+	t.rOpen = false
 }
 
 func (t *Timer) IsRef()bool{

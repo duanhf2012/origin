@@ -1,26 +1,20 @@
 package rpc
 
 import (
+	"github.com/duanhf2012/origin/util/sync"
 	"github.com/gogo/protobuf/proto"
-	"sync"
 )
 
 type GoGoPBProcessor struct {
 }
 
-var rpcGoGoPbResponseDataPool sync.Pool
-var rpcGoGoPbRequestDataPool sync.Pool
+var rpcGoGoPbResponseDataPool =sync.NewPool(make(chan interface{},10240), func()interface{}{
+	return &GoGoPBRpcResponseData{}
+})
 
-
-func init(){
-	rpcGoGoPbResponseDataPool.New = func()interface{}{
-		return &GoGoPBRpcResponseData{}
-	}
-
-	rpcGoGoPbRequestDataPool.New = func()interface{}{
-		return &GoGoPBRpcRequestData{}
-	}
-}
+var rpcGoGoPbRequestDataPool =sync.NewPool(make(chan interface{},10240), func()interface{}{
+	return &GoGoPBRpcRequestData{}
+})
 
 func (slf *GoGoPBRpcRequestData) MakeRequest(seq uint64,rpcMethodId uint32,serviceMethod string,noReply bool,inParam []byte) *GoGoPBRpcRequestData{
 	slf.Seq = seq

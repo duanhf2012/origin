@@ -2,7 +2,7 @@ package rpc
 
 import (
 	jsoniter "github.com/json-iterator/go"
-	"sync"
+	"github.com/duanhf2012/origin/util/sync"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -29,18 +29,13 @@ type JsonRpcResponseData struct {
 	Reply []byte
 }
 
-var rpcJsonResponseDataPool sync.Pool
-var rpcJsonRequestDataPool sync.Pool
+var rpcJsonResponseDataPool=sync.NewPool(make(chan interface{},10240), func()interface{}{
+	return &JsonRpcResponseData{}
+})
 
-func init(){
-	rpcJsonResponseDataPool.New = func()interface{}{
-		return &JsonRpcResponseData{}
-	}
-
-	rpcJsonRequestDataPool.New = func()interface{}{
-		return &JsonRpcRequestData{}
-	}
-}
+var rpcJsonRequestDataPool =sync.NewPool(make(chan interface{},10240), func()interface{}{
+	return &JsonRpcRequestData{}
+})
 
 func (jsonProcessor *JsonProcessor) Marshal(v interface{}) ([]byte, error){
 	return json.Marshal(v)
