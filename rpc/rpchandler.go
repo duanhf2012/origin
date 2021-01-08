@@ -243,11 +243,11 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 					request.requestHandle(nil,rpcErr)
 				}
 		}
-
-		if request.requestHandle == nil {
-			ReleaseRpcRequest(request)
-		}
 	}()
+
+	if request.requestHandle == nil {
+		defer ReleaseRpcRequest(request)
+	}
 
 	//如果是原始RPC请求
 	rawRpcId := request.RpcRequestData.GetRpcMethodId()

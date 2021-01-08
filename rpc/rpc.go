@@ -144,7 +144,7 @@ func (call *Call) Done() *Call{
 }
 
 func MakeRpcRequest(rpcProcessor IRpcProcessor,seq uint64,rpcMethodId uint32,serviceMethod string,noReply bool,inParam []byte) *RpcRequest{
-	rpcRequest := rpcRequestPool.Get().(*RpcRequest).Clear()
+	rpcRequest := rpcRequestPool.Get().(*RpcRequest)
 	rpcRequest.rpcProcessor = rpcProcessor
 	rpcRequest.RpcRequestData = rpcRequest.rpcProcessor.MakeRpcRequest(seq,rpcMethodId,serviceMethod,noReply,inParam)
 

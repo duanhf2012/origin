@@ -1,6 +1,8 @@
 package sync
 
-import sysSync "sync"
+import (
+	sysSync "sync"
+)
 
 type Pool struct {
 	C chan interface{}  //最大缓存的数量
@@ -36,6 +38,7 @@ func (pool *Pool) Put(data interface{}){
 	default:
 		pool.syncPool.Put(data)
 	}
+
 }
 
 func NewPool(C chan interface{},New func()interface{}) *Pool{
