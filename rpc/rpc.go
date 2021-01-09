@@ -53,7 +53,8 @@ type IRpcResponseData interface {
 
 type IRawInputArgs interface {
 	GetRawData() []byte  //获取原始数据
-	DoGc()           //处理完成,回收内存
+	DoFree()           	 //处理完成,回收内存
+	DoEscape()         	 //逃逸,GC自动回收
 }
 
 type RpcHandleFinder interface {

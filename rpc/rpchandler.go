@@ -87,7 +87,7 @@ type IRpcHandler interface {
 	AsyncCallNode(nodeId int,serviceMethod string,args interface{},callback interface{}) error
 	CallNode(nodeId int,serviceMethod string,args interface{},reply interface{}) error
 	GoNode(nodeId int,serviceMethod string,args interface{}) error
-	RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,rawArgs []byte) error
+	RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,rawArgs IRawInputArgs) error
 	CastGo(serviceMethod string,args interface{})
 	IsSingleCoroutine() bool
 	UnmarshalInParam(rpcProcessor IRpcProcessor,serviceMethod string,rawRpcMethodId uint32,inParam []byte) (interface{},error)
@@ -553,7 +553,7 @@ func (handler *RpcHandler) CastGo(serviceMethod string,args interface{})  {
 	handler.goRpc(nil,true,0,serviceMethod,args)
 }
 
-func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,rawArgs []byte) error {
+func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,rawArgs IRawInputArgs) error {
 	processor := GetProcessor(uint8(rpcProcessorType))
 	var pClientList [maxClusterNode]*Client
 	err,count := handler.funcRpcClient(nodeId,serviceName,pClientList[:])
@@ -575,13 +575,14 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 			pLocalRpcServer:= handler.funcRpcServer()
 			//调用自己rpcHandler处理器
 			if serviceName == handler.rpcHandler.GetName() { //自己服务调用
-				err:= pLocalRpcServer.myselfRpcHandlerGo(serviceName,serviceName,rawArgs,nil)
+				err:= pLocalRpcServer.myselfRpcHandlerGo(serviceName,serviceName,rawArgs.GetRawData(),nil)
 				//args.DoGc()
 				return err
 			}
 
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClientList[i],true,serviceName,rpcMethodId,serviceName,nil,nil,rawArgs)
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClientList[i],true,serviceName,rpcMethodId,serviceName,nil,nil,rawArgs.GetRawData())
+			rawArgs.DoEscape()
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
@@ -591,7 +592,8 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 		}
 
 		//跨node调用
-		pCall := pClientList[i].RawGo(processor,true,rpcMethodId,serviceName,rawArgs,nil)
+		pCall := pClientList[i].RawGo(processor,true,rpcMethodId,serviceName,rawArgs.GetRawData(),nil)
+		rawArgs.DoFree()
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
