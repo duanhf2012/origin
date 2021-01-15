@@ -48,6 +48,7 @@ func dialWithTimeout(url string, sessionNum uint32, dialTimeout time.Duration, t
 	if err != nil {
 		return nil, err
 	}
+	s.SetMode(mgo.Monotonic,true)
 	s.SetSyncTimeout(timeout)
 	s.SetSocketTimeout(timeout)
 
