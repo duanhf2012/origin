@@ -172,7 +172,7 @@ func (m *Module) OnAddTimer(t *timer.Timer){
 	}
 }
 
-func (m *Module) AfterFunc(d time.Duration, cb func()) *timer.Timer {
+func (m *Module) AfterFunc(d time.Duration, cb func(*timer.Timer)) *timer.Timer {
 	if m.mapActiveTimer == nil {
 		m.mapActiveTimer =map[*timer.Timer]interface{}{}
 	}

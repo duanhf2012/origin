@@ -97,7 +97,7 @@ func (t *Timer) Do(){
 func (t *Timer) SetupTimer(now time.Time) error{
 	t.fireTime = now.Add(t.interval)
 	if SetupTimer(t) == nil {
-		return fmt.Errorf("Failed to install timer.")
+		return fmt.Errorf("failed to install timer")
 	}
 	return nil
 }
@@ -171,18 +171,16 @@ func (c *Ticker) UnRef(){
 	c.ref = false
 }
 
-
-
 func NewDispatcher(l int) *Dispatcher {
-	disp := new(Dispatcher)
-	disp.ChanTimer = make(chan *Timer, l)
-	return disp
+	dispatcher := new(Dispatcher)
+	dispatcher.ChanTimer = make(chan *Timer, l)
+	return dispatcher
 }
 
 type OnTimerClose func(timer *Timer)
-func (disp *Dispatcher) AfterFunc(d time.Duration, cb func(),onTimerClose OnTimerClose,onAddTimer func(timer *Timer)) *Timer {
+func (dispatcher *Dispatcher) AfterFunc(d time.Duration, cb func(*Timer),onTimerClose OnTimerClose,onAddTimer func(timer *Timer)) *Timer {
 	funName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
-	timer := newTimer(d,disp.ChanTimer,cb,funName,nil)
+	timer := newTimer(d,dispatcher.ChanTimer,nil,funName,nil)
 	cbFunc := func() {
 		if timer.IsActive() == false {
 			onTimerClose(timer)
@@ -190,7 +188,7 @@ func (disp *Dispatcher) AfterFunc(d time.Duration, cb func(),onTimerClose OnTime
 			return
 		}
 
-		cb()
+		cb(timer)
 
 		if timer.rOpen ==false {
 			onTimerClose(timer)
@@ -205,7 +203,7 @@ func (disp *Dispatcher) AfterFunc(d time.Duration, cb func(),onTimerClose OnTime
 	return t
 }
 
-func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(*Cron),onTimerClose OnTimerClose,onAddTimer func(timer *Timer))  *Cron {
+func (dispatcher *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(*Cron),onTimerClose OnTimerClose,onAddTimer func(timer *Timer))  *Cron {
 	now := Now()
 	nextTime := cronExpr.Next(now)
 	if nextTime.IsZero() {
@@ -235,7 +233,7 @@ func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(*Cron),onTimerClose
 		SetupTimer(&cron.Timer)
 		cb(cron)
 	}
-	cron.C = disp.ChanTimer
+	cron.C = dispatcher.ChanTimer
 	cron.cb = cbFunc
 	cron.name = funcName
 	cron.interval = nextTime.Sub(now)
@@ -245,7 +243,7 @@ func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(*Cron),onTimerClose
 	return cron
 }
 
-func (disp *Dispatcher) TickerFunc(d time.Duration, cb func(*Ticker),onTimerClose OnTimerClose,onAddTimer func(timer *Timer))  *Ticker {
+func (dispatcher *Dispatcher) TickerFunc(d time.Duration, cb func(*Ticker),onTimerClose OnTimerClose,onAddTimer func(timer *Timer))  *Ticker {
 	funcName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
 	ticker := newTicker()
 	cbFunc := func() {
@@ -259,7 +257,7 @@ func (disp *Dispatcher) TickerFunc(d time.Duration, cb func(*Ticker),onTimerClos
 		}
 	}
 
-	ticker.C = disp.ChanTimer
+	ticker.C = dispatcher.ChanTimer
 	ticker.fireTime = Now().Add(d)
 	ticker.cb = cbFunc
 	ticker.name = funcName
