@@ -128,9 +128,9 @@ func (s *Service) Run() {
 			}
 		case ev := <- eventChan:
 			if s.profiler!=nil {
-				analyzer = s.profiler.Push(fmt.Sprintf("[Event]%d", int(ev.Type)))
+				analyzer = s.profiler.Push(fmt.Sprintf("[Event]%d", int(ev.GetEventType())))
 			}
-			s.eventProcessor.EventHandler(&ev)
+			s.eventProcessor.EventHandler(ev)
 			if analyzer!=nil {
 				analyzer.Pop()
 				analyzer = nil

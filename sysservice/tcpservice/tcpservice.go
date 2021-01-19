@@ -135,8 +135,8 @@ func (tcpService *TcpService) OnInit() error{
 	return nil
 }
 
-func (tcpService *TcpService) TcpEventHandler(ev *event.Event) {
-	pack := ev.Data.(TcpPack)
+func (tcpService *TcpService) TcpEventHandler(ev event.IEvent) {
+	pack := ev.(*event.Event).Data.(TcpPack)
 	switch pack.Type {
 	case TPT_Connected:
 		tcpService.process.ConnectedRoute(pack.ClientId)
