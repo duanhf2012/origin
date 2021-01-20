@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -18,7 +19,8 @@ const (
 	releaseLevel = 1
 	warningLevel = 2
 	errorLevel   = 3
-	fatalLevel   = 4
+	stackLevel   = 4
+	fatalLevel   = 5
 )
 
 const (
@@ -26,6 +28,7 @@ const (
 	printReleaseLevel = "[release] "
 	printWarningLevel = "[warning] "
 	printErrorLevel   = "[error  ] "
+	printStackLevel   = "[stack  ] "
 	printFatalLevel   = "[fatal  ] "
 )
 
@@ -51,6 +54,8 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 		level = warningLevel
 	case "error":
 		level = errorLevel
+	case "stack":
+		level = stackLevel
 	case "fatal":
 		level = fatalLevel
 	default:
@@ -159,6 +164,10 @@ func (logger *Logger) Error(format string, a ...interface{}) {
 	logger.doPrintf(errorLevel, printErrorLevel, format, a...)
 }
 
+func (logger *Logger) Stack(format string, a ...interface{}) {
+	logger.doPrintf(stackLevel, printStackLevel, format, a...)
+}
+
 func (logger *Logger) Fatal(format string, a ...interface{}) {
 	logger.doPrintf(fatalLevel, printFatalLevel, format, a...)
 }
@@ -186,6 +195,11 @@ func Warning(format string, a ...interface{}) {
 
 func Error(format string, a ...interface{}) {
 	gLogger.doPrintf(errorLevel, printErrorLevel, format, a...)
+}
+
+func Stack(format string, a ...interface{}) {
+	s := string(debug.Stack())
+	gLogger.doPrintf(stackLevel, printStackLevel, s+"\n"+format, a...)
 }
 
 func Fatal(format string, a ...interface{}) {
