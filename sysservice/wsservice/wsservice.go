@@ -80,8 +80,8 @@ func (ws *WSService) OnInit() error{
 	return nil
 }
 
-func (ws *WSService) WSEventHandler(ev *event.Event) {
-	pack := ev.Data.(*WSPack)
+func (ws *WSService) WSEventHandler(ev event.IEvent) {
+	pack := ev.(*event.Event).Data.(*WSPack)
 	switch pack.Type {
 	case WPT_Connected:
 		pack.MsgProcessor.ConnectedRoute(pack.ClientId)
