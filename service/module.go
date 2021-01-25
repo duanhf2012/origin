@@ -29,6 +29,12 @@ type IModule interface {
 	NotifyEvent(ev *event.Event)
 }
 
+type IModuleTimer interface {
+	AfterFunc(d time.Duration, cb func(*timer.Timer)) *timer.Timer
+	CronFunc(cronExpr *timer.CronExpr, cb func(*timer.Cron)) *timer.Cron
+	NewTicker(d time.Duration, cb func(*timer.Ticker)) *timer.Ticker
+}
+
 //1.管理各模块树层关系
 //2.提供定时器常用工具
 type Module struct {
