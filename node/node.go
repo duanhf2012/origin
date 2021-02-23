@@ -1,13 +1,16 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"github.com/duanhf2012/origin/cluster"
 	"github.com/duanhf2012/origin/console"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/util/timer"
 	"io/ioutil"
+	slog "log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -24,6 +27,9 @@ var nodeId int
 var preSetupService []service.IService //预安装
 var profilerInterval time.Duration
 var bValid bool
+var configDir = "./config/"
+var logLevel string = "debug"
+var logPath string
 
 func init() {
 
@@ -31,11 +37,14 @@ func init() {
 	sig = make(chan os.Signal, 3)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM,syscall.Signal(10))
 
-	console.RegisterCommandBool("help",false,"This help.",usage)
-	console.RegisterCommandString("start","","Run originserver.",startNode)
-	console.RegisterCommandBool("stop",false,"Stop originserver process",stopNode)
-	console.RegisterCommandString("config","","Configuration file path.",setConfigPath)
-	console.RegisterCommandString("pprof","","Open performance analysis.",setPprof)
+	console.RegisterCommandBool("help",false,"<-help> This help.",usage)
+	console.RegisterCommandString("start","","<-start nodeid=nodeid> Run originserver.",startNode)
+	console.RegisterCommandBool("stop",false,"<-stop> Stop originserver process.",stopNode)
+	console.RegisterCommandString("config","","<-config path> Configuration file path.",setConfigPath)
+	console.RegisterCommandString("console", "", "<-console true|false> Turn on or off screen log output.", openConsole)
+	console.RegisterCommandString("loglevel", "debug", "<-loglevel debug|release|warning|error|fatal> Set loglevel.", setLevel)
+	console.RegisterCommandString("logpath", "", "<-logpath path> Set log file path.", setLogPath)
+	console.RegisterCommandString("pprof","","<-pprof ip:port> Open performance analysis.",setPprof)
 }
 
 func usage(val interface{}) error{
@@ -45,7 +54,7 @@ func usage(val interface{}) error{
 	}
 
 	fmt.Fprintf(os.Stderr, `orgin version: orgin/2.14.20201029
-Usage: originserver [-help] [-start node=1] [-stop] [-config path] [-pprof 0.0.0.0:6060]
+Usage: originserver [-help] [-start node=1] [-stop] [-config path] [-pprof 0.0.0.0:6060]...
 `)
 	console.PrintDefaults()
 	return nil
@@ -78,6 +87,7 @@ func setConfigPath(val interface{}) error{
 	}
 
 	cluster.SetConfigDir(configPath)
+	configDir = configPath
 	return nil
 }
 
@@ -141,6 +151,20 @@ func initNode(id int){
 	service.Init(closeSig)
 }
 
+func initLog() error{
+	if logPath == ""{
+		setLogPath("./log")
+	}
+
+	logger,err := log.New(logLevel,logPath,slog.LstdFlags|slog.Lshortfile)
+	if err != nil {
+		fmt.Printf("cannot create log file!\n")
+		return err
+	}
+	log.Export(logger)
+	return nil
+}
+
 func Start() {
 	err := console.Run(os.Args)
 	if err!=nil {
@@ -183,6 +207,12 @@ func startNode(args interface{}) error{
 		return fmt.Errorf("invalid option %s",param)
 	}
 
+	err = initLog()
+	if err != nil {
+		return err
+	}
+
+	timer.StartTimer(10*time.Millisecond,100000)
 	log.Release("Start running server.")
 	//2.初始化node
 	initNode(nodeId)
@@ -233,7 +263,12 @@ func GetService(serviceName string) service.IService {
 }
 
 func SetConfigDir(configDir string){
+	configDir = configDir
 	cluster.SetConfigDir(configDir)
+}
+
+func GetConfigDir() string {
+	return configDir
 }
 
 func SetSysLog(strLevel string, pathname string, flag int){
@@ -245,3 +280,49 @@ func OpenProfilerReport(interval time.Duration){
 	profilerInterval = interval
 }
 
+func openConsole(args interface{}) error{
+	if args == "" {
+		return nil
+	}
+	strOpen := strings.ToLower(strings.TrimSpace(args.(string)))
+	if strOpen == "false" {
+		log.OpenConsole = false
+	}else if strOpen == "true" {
+		log.OpenConsole = true
+	}else{
+		return errors.New("Parameter console error!")
+	}
+	return nil
+}
+
+func setLevel(args interface{}) error{
+	if args==""{
+		return nil
+	}
+
+	logLevel = strings.TrimSpace(args.(string))
+	if logLevel!= "debug" && logLevel!="release"&& logLevel!="warning"&&logLevel!="error"&&logLevel!="fatal" {
+		return errors.New("unknown level: " + logLevel)
+	}
+	return nil
+}
+
+func setLogPath(args interface{}) error{
+	if args == ""{
+		return nil
+	}
+	logPath = strings.TrimSpace(args.(string))
+	dir, err := os.Stat(logPath) //这个文件夹不存在
+	if err == nil && dir.IsDir()==false {
+		return errors.New("Not found dir "+logPath)
+	}
+
+	if err != nil {
+		err = os.Mkdir(logPath, os.ModePerm)
+		if err != nil {
+			return errors.New("Cannot create dir "+logPath)
+		}
+	}
+
+	return nil
+}

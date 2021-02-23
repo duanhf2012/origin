@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/log"
+	rpcHandle "github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
-	"github.com/duanhf2012/origin/util/timewheel"
 	"reflect"
 	"time"
 )
@@ -29,15 +29,22 @@ type IModule interface {
 	NotifyEvent(ev *event.Event)
 }
 
+type IModuleTimer interface {
+	AfterFunc(d time.Duration, cb func(*timer.Timer)) *timer.Timer
+	CronFunc(cronExpr *timer.CronExpr, cb func(*timer.Cron)) *timer.Cron
+	NewTicker(d time.Duration, cb func(*timer.Ticker)) *timer.Ticker
+}
+
 //1.管理各模块树层关系
 //2.提供定时器常用工具
 type Module struct {
+	rpcHandle.IRpcHandler
 	moduleId int64                              //模块Id
 	moduleName string                           //模块名称
 	parent IModule        						//父亲
 	self IModule        						//自己
 	child map[int64]IModule 					//孩子们
-	mapActiveTimer map[*timewheel.Timer]interface{}
+	mapActiveTimer map[*timer.Timer]interface{}
 	dispatcher         *timer.Dispatcher 		//timer
 
 	//根结点
@@ -87,7 +94,7 @@ func (m *Module) AddModule(module IModule) (int64,error){
 	if ok == true {
 		return 0,fmt.Errorf("Exists module id %d",module.GetModuleId())
 	}
-
+	pAddModule.IRpcHandler = m.IRpcHandler
 	pAddModule.self = module
 	pAddModule.parent = m.self
 	pAddModule.dispatcher = m.GetAncestor().getBaseModule().(*Module).dispatcher
@@ -119,7 +126,7 @@ func (m *Module) ReleaseModule(moduleId int64){
 	pModule.self.OnRelease()
 	log.Debug("Release module %s.", m.GetModuleName())
 	for pTimer,_ := range pModule.mapActiveTimer {
-		pTimer.AdditionData.(timer.ITime).Close()
+		pTimer.Cancel()
 	}
 
 	delete(m.child,moduleId)
@@ -133,6 +140,7 @@ func (m *Module) ReleaseModule(moduleId int64){
 	pModule.dispatcher = nil
 	pModule.ancestor = nil
 	pModule.descendants = nil
+	pModule.IRpcHandler = nil
 }
 
 func (m *Module) NewModuleId() int64{
@@ -160,35 +168,35 @@ func (m *Module) GetParent()IModule{
 	return m.parent
 }
 
-func (m *Module) OnCloseTimer(timer *timewheel.Timer){
+func (m *Module) OnCloseTimer(timer *timer.Timer){
 	delete(m.mapActiveTimer,timer)
 }
 
-func (m *Module) OnAddTimer(t *timewheel.Timer){
+func (m *Module) OnAddTimer(t *timer.Timer){
 	if t != nil {
 		m.mapActiveTimer[t] = nil
 	}
 }
 
-func (m *Module) AfterFunc(d time.Duration, cb func()) *timer.Timer {
+func (m *Module) AfterFunc(d time.Duration, cb func(*timer.Timer)) *timer.Timer {
 	if m.mapActiveTimer == nil {
-		m.mapActiveTimer =map[*timewheel.Timer]interface{}{}
+		m.mapActiveTimer =map[*timer.Timer]interface{}{}
 	}
 
 	return m.dispatcher.AfterFunc(d,cb,m.OnCloseTimer,m.OnAddTimer)
 }
 
-func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func()) *timer.Cron {
+func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func(*timer.Cron)) *timer.Cron {
 	if m.mapActiveTimer == nil {
-		m.mapActiveTimer =map[*timewheel.Timer]interface{}{}
+		m.mapActiveTimer =map[*timer.Timer]interface{}{}
 	}
 
 	return m.dispatcher.CronFunc(cronExpr,cb,m.OnCloseTimer,m.OnAddTimer)
 }
 
-func (m *Module) NewTicker(d time.Duration, cb func()) *timer.Ticker {
+func (m *Module) NewTicker(d time.Duration, cb func(*timer.Ticker)) *timer.Ticker {
 	if m.mapActiveTimer == nil {
-		m.mapActiveTimer =map[*timewheel.Timer]interface{}{}
+		m.mapActiveTimer =map[*timer.Timer]interface{}{}
 	}
 
 	return m.dispatcher.TickerFunc(d,cb,m.OnCloseTimer,m.OnAddTimer)

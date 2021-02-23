@@ -11,6 +11,7 @@ import (
 
 var configDir = "./config/"
 
+
 type NodeInfo struct {
 	NodeId int
 	NodeName string
@@ -34,6 +35,8 @@ type Cluster struct {
 	mapServiceNode map[string][]int        //map[serviceName]NodeInfo
 	locker sync.RWMutex
 	rpcServer rpc.Server
+
+	rpcListerList []rpc.IRpcListener
 }
 
 func SetConfigDir(cfgDir string){
@@ -108,6 +111,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
 	rpcInfo := NodeRpcInfo{}
 	rpcInfo.nodeInfo = *nodeInfo
 	rpcInfo.client = &rpc.Client{}
+	rpcInfo.client.TriggerRpcEvent = cls.triggerRpcEvent
 	rpcInfo.client.Connect(nodeInfo.NodeId,nodeInfo.ListenAddr)
 	cls.mapRpc[nodeInfo.NodeId] = rpcInfo
 }
@@ -212,3 +216,18 @@ func (cls *Cluster) IsNodeConnected (nodeId int) bool {
 	pClient := cls.GetRpcClient(nodeId)
 	return pClient!=nil && pClient.IsConnected()
 }
+
+func (cls *Cluster) RegisterRpcListener (rpcLister rpc.IRpcListener) {
+	cls.rpcListerList = append(cls.rpcListerList,rpcLister)
+}
+
+func (cls *Cluster) triggerRpcEvent (bConnect bool,nodeId int) {
+	for _,lister := range cls.rpcListerList {
+		if bConnect {
+			lister.OnRpcConnected(nodeId)
+		}else{
+			lister.OnRpcDisconnect(nodeId)
+		}
+	}
+}
+

@@ -15,6 +15,8 @@ type MsgParser struct {
 	minMsgLen    uint32
 	maxMsgLen    uint32
 	littleEndian bool
+
+	INetMempool
 }
 
 func NewMsgParser() *MsgParser {
@@ -23,7 +25,7 @@ func NewMsgParser() *MsgParser {
 	p.minMsgLen = 1
 	p.maxMsgLen = 4096
 	p.littleEndian = false
-
+	p.INetMempool = NewMemAreaPool()
 	return p
 }
 
@@ -98,14 +100,13 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 	}
 	
 	// data
-	//msgData := make([]byte, msgLen)
-	msgData := makeByteSlice(int(msgLen))
-	if _, err := io.ReadFull(conn, msgData); err != nil {
-		ReleaseByteSlice(msgData)
+	msgData := p.MakeByteSlice(int(msgLen))
+	if _, err := io.ReadFull(conn, msgData[:msgLen]); err != nil {
+		p.ReleaseByteSlice(msgData)
 		return nil, err
 	}
 
-	return msgData, nil
+	return msgData[:msgLen], nil
 }
 
 // goroutine safe
@@ -124,7 +125,7 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 	}
 
 	//msg := make([]byte, uint32(p.lenMsgLen)+msgLen)
-	msg := makeByteSlice(p.lenMsgLen+int(msgLen))
+	msg := p.MakeByteSlice(p.lenMsgLen+int(msgLen))
 	// write len
 	switch p.lenMsgLen {
 	case 1:

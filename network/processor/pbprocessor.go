@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/duanhf2012/origin/network"
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 	"reflect"
 )
 
@@ -25,6 +25,7 @@ type PBProcessor struct {
 	unknownMessageHandler UnknownMessageHandler
 	connectHandler ConnectHandler
 	disconnectHandler ConnectHandler
+	network.INetMempool
 }
 
 type PBPackInfo struct {
@@ -35,6 +36,7 @@ type PBPackInfo struct {
 
 func NewPBProcessor() *PBProcessor {
 	processor := &PBProcessor{mapMsg:map[uint16]MessageInfo{}}
+	processor.INetMempool = network.NewMemAreaPool()
 	return processor
 }
 
@@ -64,7 +66,7 @@ func (pbProcessor *PBProcessor ) MsgRoute(msg interface{},userdata interface{}) 
 
 // must goroutine safe
 func (pbProcessor *PBProcessor ) Unmarshal(data []byte) (interface{}, error) {
-	defer network.ReleaseByteSlice(data)
+	defer pbProcessor.ReleaseByteSlice(data)
 	var msgType uint16
 	if pbProcessor.LittleEndian == true {
 		msgType = binary.LittleEndian.Uint16(data[:2])

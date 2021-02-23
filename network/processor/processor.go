@@ -23,7 +23,7 @@ type IRawProcessor interface {
 	Marshal(msg interface{}) ([]byte, error)
 
 	SetRawMsgHandler(handle RawMessageHandler)
-	MakeRawMsg(msgType uint16,msg []byte) *PBRawPackInfo
+	MakeRawMsg(msgType uint16,msg []byte,pbRawPackInfo *PBRawPackInfo)
 	UnknownMsgRoute(msg interface{}, userData interface{})
 	ConnectedRoute(userData interface{})
 	DisConnectedRoute(userData interface{})
@@ -32,3 +32,4 @@ type IRawProcessor interface {
 	SetConnectedHandler(connectHandler RawConnectHandler)
 	SetDisConnectedHandler(disconnectHandler RawConnectHandler)
 }
+

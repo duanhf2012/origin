@@ -286,8 +286,8 @@ func (slf *HttpRouter) Router(session *HttpSession){
 	session.Done()
 }
 
-func (httpService *HttpService) HttpEventHandler(ev *event.Event)  {
-	ev.Data.(*HttpSession).Handle()
+func (httpService *HttpService) HttpEventHandler(ev event.IEvent)  {
+	ev.(*event.Event).Data.(*HttpSession).Handle()
 }
 
 func (httpService *HttpService) SetHttpRouter(httpRouter IHttpRouter,eventHandler event.IEventHandler) {

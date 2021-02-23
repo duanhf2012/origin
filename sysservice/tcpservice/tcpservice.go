@@ -135,8 +135,8 @@ func (tcpService *TcpService) OnInit() error{
 	return nil
 }
 
-func (tcpService *TcpService) TcpEventHandler(ev *event.Event) {
-	pack := ev.Data.(TcpPack)
+func (tcpService *TcpService) TcpEventHandler(ev event.IEvent) {
+	pack := ev.(*event.Event).Data.(TcpPack)
 	switch pack.Type {
 	case TPT_Connected:
 		tcpService.process.ConnectedRoute(pack.ClientId)
@@ -270,4 +270,16 @@ func (tcpService *TcpService) GetConnNum() int {
 	connNum := len(tcpService.mapClient)
 	tcpService.mapClientLocker.Unlock()
 	return connNum
+}
+
+func (server *TcpService) SetNetMempool(mempool network.INetMempool){
+	server.tcpServer.SetNetMempool(mempool)
+}
+
+func (server *TcpService) GetNetMempool() network.INetMempool{
+	return server.tcpServer.GetNetMempool()
+}
+
+func (server *TcpService) ReleaseNetMem(byteBuff []byte) {
+	server.tcpServer.GetNetMempool().ReleaseByteSlice(byteBuff)
 }

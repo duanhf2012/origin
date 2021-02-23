@@ -2,7 +2,7 @@ package rpc
 
 import (
 	jsoniter "github.com/json-iterator/go"
-	"sync"
+	"github.com/duanhf2012/origin/util/sync"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -12,11 +12,12 @@ type JsonProcessor struct {
 
 type JsonRpcRequestData struct {
 	//packhead
-	Seq uint64             // sequence number chosen by client
+	Seq           uint64             // sequence number chosen by client
+	rpcMethodId   uint32
 	ServiceMethod string   // format: "Service.Method"
-	NoReply bool           //是否需要返回
+	NoReply       bool           //是否需要返回
 	//packbody
-	InParam []byte
+	InParam      []byte
 }
 
 type JsonRpcResponseData struct {
@@ -28,18 +29,13 @@ type JsonRpcResponseData struct {
 	Reply []byte
 }
 
-var rpcJsonResponseDataPool sync.Pool
-var rpcJsonRequestDataPool sync.Pool
+var rpcJsonResponseDataPool=sync.NewPool(make(chan interface{},10240), func()interface{}{
+	return &JsonRpcResponseData{}
+})
 
-func init(){
-	rpcJsonResponseDataPool.New = func()interface{}{
-		return &JsonRpcResponseData{}
-	}
-
-	rpcJsonRequestDataPool.New = func()interface{}{
-		return &JsonRpcRequestData{}
-	}
-}
+var rpcJsonRequestDataPool =sync.NewPool(make(chan interface{},10240), func()interface{}{
+	return &JsonRpcRequestData{}
+})
 
 func (jsonProcessor *JsonProcessor) Marshal(v interface{}) ([]byte, error){
 	return json.Marshal(v)
@@ -49,9 +45,10 @@ func (jsonProcessor *JsonProcessor) Unmarshal(data []byte, v interface{}) error{
 	return json.Unmarshal(data,v)
 }
 
-func (jsonProcessor *JsonProcessor) MakeRpcRequest(seq uint64,serviceMethod string,noReply bool,inParam []byte) IRpcRequestData{
+func (jsonProcessor *JsonProcessor) MakeRpcRequest(seq uint64,rpcMethodId uint32,serviceMethod string,noReply bool,inParam []byte) IRpcRequestData{
 	jsonRpcRequestData := rpcJsonRequestDataPool.Get().(*JsonRpcRequestData)
 	jsonRpcRequestData.Seq = seq
+	jsonRpcRequestData.rpcMethodId = rpcMethodId
 	jsonRpcRequestData.ServiceMethod = serviceMethod
 	jsonRpcRequestData.NoReply = noReply
 	jsonRpcRequestData.InParam = inParam
@@ -90,6 +87,10 @@ func (jsonRpcRequestData *JsonRpcRequestData) IsNoReply() bool{
 
 func (jsonRpcRequestData *JsonRpcRequestData) GetSeq() uint64{
 	return jsonRpcRequestData.Seq
+}
+
+func (jsonRpcRequestData *JsonRpcRequestData) GetRpcMethodId() uint32{
+	return jsonRpcRequestData.rpcMethodId
 }
 
 func (jsonRpcRequestData *JsonRpcRequestData) GetServiceMethod() string{

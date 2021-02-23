@@ -2,17 +2,16 @@ package rpc
 
 import (
 	"reflect"
-	"sync"
+	"github.com/duanhf2012/origin/util/sync"
 	"time"
 )
 
 type RpcRequest struct {
+	ref bool
 	RpcRequestData IRpcRequestData
 
-	bLocalRequest bool
+	inParam interface{}
 	localReply interface{}
-	localParam interface{} //本地调用的参数列表
-	inputArgs IRawInputArgs
 
 	requestHandle RequestHandler
 	callback *reflect.Value
@@ -29,9 +28,13 @@ func (r *Responder) IsInvalid() bool {
 	return reflect.ValueOf(*r).Pointer() == reflect.ValueOf(reqHandlerNull).Pointer()
 }
 
-//var rpcResponsePool sync.Pool
-var rpcRequestPool sync.Pool
-var rpcCallPool sync.Pool
+var rpcRequestPool = sync.NewPoolEx(make(chan sync.IPoolData,10240),func()sync.IPoolData{
+	return &RpcRequest{}
+})
+
+var rpcCallPool =  sync.NewPoolEx(make(chan sync.IPoolData,10240),func()sync.IPoolData{
+	return &Call{done:make(chan *Call,1)}
+})
 
 
 type IRpcRequestData interface {
@@ -39,6 +42,7 @@ type IRpcRequestData interface {
 	GetServiceMethod() string
 	GetInParam() []byte
 	IsNoReply() bool
+	GetRpcMethodId() uint32
 }
 
 type IRpcResponseData interface {
@@ -49,7 +53,8 @@ type IRpcResponseData interface {
 
 type IRawInputArgs interface {
 	GetRawData() []byte  //获取原始数据
-	DoGc()           //处理完成,回收内存
+	DoFree()           	 //处理完成,回收内存
+	DoEscape()         	 //逃逸,GC自动回收
 }
 
 type RpcHandleFinder interface {
@@ -59,6 +64,7 @@ type RpcHandleFinder interface {
 type RequestHandler func(Returns interface{},Err RpcError)
 
 type Call struct {
+	ref           bool
 	Seq           uint64
 	ServiceMethod string
 	Reply         interface{}
@@ -71,26 +77,30 @@ type Call struct {
 	callTime      time.Time
 }
 
-func init(){
-	rpcRequestPool.New = func() interface{} {
-		return &RpcRequest{}
-	}
-
-	rpcCallPool.New = func() interface{} {
-		return &Call{done:make(chan *Call,1)}
-	}
-}
-
 func (slf *RpcRequest) Clear() *RpcRequest{
 	slf.RpcRequestData = nil
 	slf.localReply = nil
-	slf.localParam = nil
+	slf.inParam = nil
 	slf.requestHandle = nil
 	slf.callback = nil
-	slf.bLocalRequest = false
-	slf.inputArgs = nil
 	slf.rpcProcessor = nil
 	return slf
+}
+
+func (slf *RpcRequest) Reset() {
+	slf.Clear()
+}
+
+func (slf *RpcRequest) IsRef()bool{
+	return slf.ref
+}
+
+func (slf *RpcRequest) Ref(){
+	slf.ref = true
+}
+
+func (slf *RpcRequest) UnRef(){
+	slf.ref = false
 }
 
 func (rpcResponse *RpcResponse) Clear() *RpcResponse{
@@ -114,20 +124,41 @@ func (call *Call) Clear() *Call{
 	return call
 }
 
+func (call *Call) Reset() {
+	call.Clear()
+}
+
+func (call *Call) IsRef()bool{
+	return call.ref
+}
+
+func (call *Call) Ref(){
+	call.ref = true
+}
+
+func (call *Call) UnRef(){
+	call.ref = false
+}
+
 func (call *Call) Done() *Call{
 	return <-call.done
 }
 
-func MakeRpcRequest() *RpcRequest{
-	return rpcRequestPool.Get().(*RpcRequest).Clear()
-}
+func MakeRpcRequest(rpcProcessor IRpcProcessor,seq uint64,rpcMethodId uint32,serviceMethod string,noReply bool,inParam []byte) *RpcRequest{
+	rpcRequest := rpcRequestPool.Get().(*RpcRequest)
+	rpcRequest.rpcProcessor = rpcProcessor
+	rpcRequest.RpcRequestData = rpcRequest.rpcProcessor.MakeRpcRequest(seq,rpcMethodId,serviceMethod,noReply,inParam)
 
-func MakeCall() *Call {
-	return rpcCallPool.Get().(*Call).Clear()
+	return rpcRequest
 }
 
 func ReleaseRpcRequest(rpcRequest *RpcRequest){
+	rpcRequest.rpcProcessor.ReleaseRpcRequest(rpcRequest.RpcRequestData)
 	rpcRequestPool.Put(rpcRequest)
+}
+
+func MakeCall() *Call {
+	return rpcCallPool.Get().(*Call)
 }
 
 func ReleaseCall(call *Call){

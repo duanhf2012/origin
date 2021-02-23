@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
-	"github.com/duanhf2012/origin/util/timewheel"
+	"github.com/duanhf2012/origin/util/timer"
 	"math"
 	"reflect"
 	"runtime"
@@ -26,6 +26,7 @@ type Client struct {
 	pendingTimer         *list.List
 	callRpcTimeout       time.Duration
 	maxCheckCallRpcCount int
+	TriggerRpcEvent
 }
 
 func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
@@ -61,27 +62,29 @@ func (client *Client) Connect(id int,addr string) error {
 }
 
 func (client *Client) startCheckRpcCallTimer(){
-	timer:=timewheel.NewTimer(3*time.Second)
+	t:=timer.NewTimer(3*time.Second)
 	for{
 		select {
-			case <- timer.C:
-				timewheel.ReleaseTimer(timer)
-				timer=timewheel.NewTimer(3*time.Second)
+			case timer:=<- t.C:
+				timer.SetupTimer(time.Now())
 				client.checkRpcCallTimeout()
 		}
 	}
 
-	timer.Close()
-	timewheel.ReleaseTimer(timer)
+	t.Cancel()
+	timer.ReleaseTimer(t)
 }
 
 func (client *Client) makeCallFail(call *Call){
+	client.removePending(call.Seq)
 	if call.callback!=nil && call.callback.IsValid() {
 		call.rpcHandler.(*RpcHandler).callResponseCallBack <-call
 	}else{
 		call.done <- call
 	}
-	client.removePending(call.Seq)
+
+
+
 }
 
 func (client *Client) checkRpcCallTimeout(){
@@ -128,6 +131,9 @@ func (client *Client) AddPending(call *Call){
 }
 
 func (client *Client) RemovePending(seq uint64)  *Call{
+	if seq == 0 {
+		return nil
+	}
 	client.pendingLock.Lock()
 	call := client.removePending(seq)
 	client.pendingLock.Unlock()
@@ -139,9 +145,10 @@ func (client *Client) removePending(seq uint64) *Call{
 	if ok == false{
 		return nil
 	}
+	call := v.Value.(*Call)
 	client.pendingTimer.Remove(v)
 	delete(client.pending,seq)
-	return v.Value.(*Call)
+	return call
 }
 
 func (client *Client) FindPending(seq uint64) *Call{
@@ -163,75 +170,71 @@ func (client *Client) generateSeq() uint64{
 }
 
 func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
+	processorType, processor := GetProcessorType(args)
+	InParam,herr := processor.Marshal(args)
+	if herr != nil {
+		return herr
+	}
+
+	seq := client.generateSeq()
+	request:=MakeRpcRequest(processor,seq,0,serviceMethod,false,InParam)
+	bytes,err := processor.Marshal(request.RpcRequestData)
+	ReleaseRpcRequest(request)
+	if err != nil {
+		return err
+	}
+
+	if client.conn == nil {
+		return fmt.Errorf("Rpc server is disconnect,call %s is fail!",serviceMethod)
+	}
+
 	call := MakeCall()
 	call.Reply = replyParam
 	call.callback = &callback
 	call.rpcHandler = rpcHandler
 	call.ServiceMethod = serviceMethod
-
-	processorType, processor := GetProcessorType(args)
-	InParam,herr := processor.Marshal(args)
-	if herr != nil {
-		ReleaseCall(call)
-		return herr
-	}
-
-	request := &RpcRequest{}
-	call.Seq = client.generateSeq()
-	request.RpcRequestData = processor.MakeRpcRequest(client.startSeq,serviceMethod,false,InParam)
+	call.Seq = seq
 	client.AddPending(call)
 
-	bytes,err := processor.Marshal(request.RpcRequestData)
-	processor.ReleaseRpcRequest(request.RpcRequestData)
+	err = client.conn.WriteMsg([]byte{uint8(processorType)},bytes)
 	if err != nil {
 		client.RemovePending(call.Seq)
 		ReleaseCall(call)
 		return err
 	}
 
-	if client.conn == nil {
-		client.RemovePending(call.Seq)
-		ReleaseCall(call)
-		return fmt.Errorf("Rpc server is disconnect,call %s is fail!",serviceMethod)
-	}
-
-	err = client.conn.WriteMsg([]byte{uint8(processorType)},bytes)
-	if err != nil {
-		client.RemovePending(call.Seq)
-		ReleaseCall(call)
-	}
-
-	return err
+	return nil
 }
 
-func (client *Client) RawGo(processor IRpcProcessor,noReply bool,serviceMethod string,args []byte,reply interface{}) *Call {
+func (client *Client) RawGo(processor IRpcProcessor,noReply bool,rpcMethodId uint32,serviceMethod string,args []byte,reply interface{}) *Call {
 	call := MakeCall()
 	call.ServiceMethod = serviceMethod
 	call.Reply = reply
-
-	request := &RpcRequest{}
 	call.Seq = client.generateSeq()
-	if noReply == false {
-		client.AddPending(call)
-	}
-	request.RpcRequestData = processor.MakeRpcRequest(client.startSeq,serviceMethod,noReply,args)
+
+	request := MakeRpcRequest(processor,call.Seq,rpcMethodId,serviceMethod,noReply,args)
 	bytes,err := processor.Marshal(request.RpcRequestData)
-	processor.ReleaseRpcRequest(request.RpcRequestData)
+	ReleaseRpcRequest(request)
 	if err != nil {
+		call.Seq = 0
 		call.Err = err
-		client.RemovePending(call.Seq)
 		return call
 	}
 
 	if client.conn == nil {
+		call.Seq = 0
 		call.Err = fmt.Errorf("call %s is fail,rpc client is disconnect.",serviceMethod)
-		client.RemovePending(call.Seq)
 		return call
+	}
+
+	if noReply == false {
+		client.AddPending(call)
 	}
 
 	err = client.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())},bytes)
 	if err != nil {
 		client.RemovePending(call.Seq)
+		call.Seq = 0
 		call.Err = err
 	}
 
@@ -244,9 +247,10 @@ func (client *Client) Go(noReply bool,serviceMethod string, args interface{},rep
 	if err != nil {
 		call := MakeCall()
 		call.Err = err
+		return call
 	}
 
-	return client.RawGo(processor,noReply,serviceMethod,InParam,reply)
+	return client.RawGo(processor,noReply,0,serviceMethod,InParam,reply)
 }
 
 func (client *Client) Run(){
@@ -259,6 +263,7 @@ func (client *Client) Run(){
 		}
 	}()
 
+	client.TriggerRpcEvent(true,client.GetId())
 	for {
 		bytes,err := client.conn.ReadMsg()
 		if err != nil {
@@ -314,6 +319,7 @@ func (client *Client) Run(){
 }
 
 func (client *Client) OnClose(){
+	client.TriggerRpcEvent(false,client.GetId())
 }
 
 func (client *Client) IsConnected() bool {

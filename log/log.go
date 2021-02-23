@@ -6,9 +6,12 @@ import (
 	"log"
 	"os"
 	"path"
+	"runtime/debug"
 	"strings"
 	"time"
 )
+
+var OpenConsole bool = true
 
 // levels
 const (
@@ -16,7 +19,8 @@ const (
 	releaseLevel = 1
 	warningLevel = 2
 	errorLevel   = 3
-	fatalLevel   = 4
+	stackLevel   = 4
+	fatalLevel   = 5
 )
 
 const (
@@ -24,6 +28,7 @@ const (
 	printReleaseLevel = "[release] "
 	printWarningLevel = "[warning] "
 	printErrorLevel   = "[error  ] "
+	printStackLevel   = "[stack  ] "
 	printFatalLevel   = "[fatal  ] "
 )
 
@@ -31,6 +36,7 @@ type Logger struct {
 	filePath   string
 	logTime    time.Time
 	level      int
+	stdLogger   *log.Logger
 	baseLogger *log.Logger
 	baseFile   *os.File
 	flag       int
@@ -48,6 +54,8 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 		level = warningLevel
 	case "error":
 		level = errorLevel
+	case "stack":
+		level = stackLevel
 	case "fatal":
 		level = fatalLevel
 	default:
@@ -76,11 +84,12 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 		baseFile = file
 	} else {
 		baseLogger = log.New(os.Stdout, "", flag)
+		OpenConsole = false
 	}
-
 	// new
 	logger := new(Logger)
 	logger.level = level
+	logger.stdLogger = log.New(os.Stdout, "", flag)
 	logger.baseLogger = baseLogger
 	logger.baseFile = baseFile
 	logger.logTime = now
@@ -131,7 +140,9 @@ func (logger *Logger) doPrintf(level int, printLevel string, format string, a ..
 
 	format = printLevel + format
 	logger.baseLogger.Output(3, fmt.Sprintf(format, a...))
-
+	if OpenConsole == true {
+		logger.stdLogger.Output(3, fmt.Sprintf(format, a...))
+	}
 	if level == fatalLevel {
 		os.Exit(1)
 	}
@@ -151,6 +162,10 @@ func (logger *Logger) Warning(format string, a ...interface{}) {
 
 func (logger *Logger) Error(format string, a ...interface{}) {
 	logger.doPrintf(errorLevel, printErrorLevel, format, a...)
+}
+
+func (logger *Logger) Stack(format string, a ...interface{}) {
+	logger.doPrintf(stackLevel, printStackLevel, format, a...)
 }
 
 func (logger *Logger) Fatal(format string, a ...interface{}) {
@@ -180,6 +195,11 @@ func Warning(format string, a ...interface{}) {
 
 func Error(format string, a ...interface{}) {
 	gLogger.doPrintf(errorLevel, printErrorLevel, format, a...)
+}
+
+func Stack(format string, a ...interface{}) {
+	s := string(debug.Stack())
+	gLogger.doPrintf(stackLevel, printStackLevel, s+"\n"+format, a...)
 }
 
 func Fatal(format string, a ...interface{}) {

@@ -10,18 +10,25 @@ import (
 const DefaultEventChannelLen = 10000
 
 //事件接受器
-type EventCallBack func(event *Event)
+type EventCallBack func(event IEvent)
 
+type IEvent interface {
+	GetEventType() EventType
+}
 
 type Event struct {
 	Type EventType
 	Data interface{}
 }
 
+func (e *Event) GetEventType() EventType{
+	return e.Type
+}
+
 type IEventHandler interface {
 	Init(processor IEventProcessor)
 	GetEventProcessor() IEventProcessor  //获得事件
-	NotifyEvent(*Event)
+	NotifyEvent(IEvent)
 	Destroy()
 	//注册了事件
 	addRegInfo(eventType EventType,eventProcessor IEventProcessor)
@@ -29,19 +36,19 @@ type IEventHandler interface {
 }
 
 type IEventProcessor interface {
-	EventHandler(ev *Event)
+	EventHandler(ev IEvent)
 	//同一个IEventHandler，只能接受一个EventType类型回调
 	RegEventReciverFunc(eventType EventType,reciver IEventHandler,callback EventCallBack)
 	UnRegEventReciverFun(eventType EventType,reciver IEventHandler)
 	SetEventChannel(channelNum int) bool
 
-	castEvent(event *Event) //广播事件
-	pushEvent(event *Event)
+	castEvent(event IEvent) //广播事件
+	pushEvent(event IEvent)
 	addBindEvent(eventType EventType,reciver IEventHandler,callback EventCallBack)
 	addListen(eventType EventType,reciver IEventHandler)
 	removeBindEvent(eventType EventType,reciver IEventHandler)
 	removeListen(eventType EventType,reciver IEventHandler)
-	GetEventChan() chan Event
+	GetEventChan() chan IEvent
 }
 
 type EventHandler struct {
@@ -55,7 +62,7 @@ type EventHandler struct {
 
 
 type EventProcessor struct {
-	eventChannel chan Event
+	eventChannel chan IEvent
 
 	locker sync.RWMutex
 	mapListenerEvent map[EventType]map[IEventProcessor]int           //监听者信息
@@ -100,7 +107,7 @@ func (handler *EventHandler) GetEventProcessor() IEventProcessor{
 	return handler.eventProcessor
 }
 
-func (handler *EventHandler) NotifyEvent(ev *Event){
+func (handler *EventHandler) NotifyEvent(ev IEvent){
 	handler.GetEventProcessor().castEvent(ev)
 }
 
@@ -120,7 +127,7 @@ func (processor *EventProcessor) SetEventChannel(channelNum int) bool{
 		channelNum = DefaultEventChannelLen
 	}
 
-	processor.eventChannel = make(chan Event,channelNum)
+	processor.eventChannel = make(chan IEvent,channelNum)
 	return true
 }
 
@@ -194,18 +201,18 @@ func (handler *EventHandler) Destroy(){
 	}
 }
 
-func (processor *EventProcessor) GetEventChan() chan Event{
+func (processor *EventProcessor) GetEventChan() chan IEvent{
 	processor.locker.Lock()
 	defer processor.locker.Unlock()
 
 	if processor.eventChannel == nil {
-		processor.eventChannel =make(chan Event,DefaultEventChannelLen)
+		processor.eventChannel =make(chan IEvent,DefaultEventChannelLen)
 	}
 
 	return processor.eventChannel
 }
 
-func (processor *EventProcessor) EventHandler(ev *Event) {
+func (processor *EventProcessor) EventHandler(ev IEvent) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -215,7 +222,7 @@ func (processor *EventProcessor) EventHandler(ev *Event) {
 		}
 	}()
 
-	mapCallBack,ok := processor.mapBindHandlerEvent[ev.Type]
+	mapCallBack,ok := processor.mapBindHandlerEvent[ev.GetEventType()]
 	if ok == false {
 		return
 	}
@@ -224,24 +231,24 @@ func (processor *EventProcessor) EventHandler(ev *Event) {
 	}
 }
 
-func (processor *EventProcessor) pushEvent(event *Event){
+func (processor *EventProcessor) pushEvent(event IEvent){
 	if len(processor.eventChannel)>=cap(processor.eventChannel){
 		log.Error("event process channel is full.")
 		return
 	}
 
-	processor.eventChannel<-*event
+	processor.eventChannel<-event
 }
 
-func (processor *EventProcessor) castEvent(event *Event){
+func (processor *EventProcessor) castEvent(event IEvent){
 	if processor.mapListenerEvent == nil {
 		log.Error("mapListenerEvent not init!")
 		return
 	}
 
-	eventProcessor,ok := processor.mapListenerEvent[event.Type]
+	eventProcessor,ok := processor.mapListenerEvent[event.GetEventType()]
 	if ok == false || processor == nil{
-		log.Debug("event type %d not listen.",event.Type)
+		log.Debug("event type %d not listen.",event.GetEventType())
 		return
 	}
 

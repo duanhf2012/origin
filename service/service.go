@@ -7,7 +7,6 @@ import (
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
-	"github.com/duanhf2012/origin/util/timewheel"
 	"reflect"
 	"runtime"
 	"sync"
@@ -16,7 +15,7 @@ import (
 
 
 var closeSig chan bool
-var timerDispatcherLen = 10000
+var timerDispatcherLen = 100000
 
 type IService interface {
 	Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})
@@ -35,7 +34,7 @@ type IService interface {
 
 type Service struct {
 	Module
-	rpc.RpcHandler           //rpc
+	rpcHandler rpc.RpcHandler           //rpc
 	name           string    //service name
 	wg             sync.WaitGroup
 	serviceCfg     interface{}
@@ -61,7 +60,8 @@ func (s *Service) OpenProfiler()  {
 func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
 	s.dispatcher =timer.NewDispatcher(timerDispatcherLen)
 
-	s.InitRpcHandler(iService.(rpc.IRpcHandler),getClientFun,getServerFun)
+	s.rpcHandler.InitRpcHandler(iService.(rpc.IRpcHandler),getClientFun,getServerFun)
+	s.IRpcHandler = &s.rpcHandler
 	s.self = iService.(IModule)
 	//初始化祖先
 	s.ancestor = iService.(IModule)
@@ -74,7 +74,7 @@ func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServe
 	s.eventHandler.Init(s.eventProcessor)
 }
 
-func (s *Service) SetGoRouterNum(goroutineNum int32) bool {
+func (s *Service) SetGoRoutineNum(goroutineNum int32) bool {
 	//已经开始状态不允许修改协程数量,打开性能分析器不允许开多线程
 	if s.startStatus == true || s.profiler!=nil {
 		log.Error("open profiler mode is not allowed to set Multi-coroutine.")
@@ -128,25 +128,21 @@ func (s *Service) Run() {
 			}
 		case ev := <- eventChan:
 			if s.profiler!=nil {
-				analyzer = s.profiler.Push(fmt.Sprintf("[Event]%d", int(ev.Type)))
+				analyzer = s.profiler.Push(fmt.Sprintf("[Event]%d", int(ev.GetEventType())))
 			}
-			s.eventProcessor.EventHandler(&ev)
+			s.eventProcessor.EventHandler(ev)
 			if analyzer!=nil {
 				analyzer.Pop()
 				analyzer = nil
 			}
 		case t := <- s.dispatcher.ChanTimer:
-			if t.IsClose() == false {
-				time := t.AdditionData.(timer.ITime)
-				if s.profiler != nil {
-					analyzer = s.profiler.Push("[timer]"+time.GetName())
-				}
-				time.Do()
-				if analyzer != nil {
-					analyzer.Pop()
-					analyzer = nil
-				}
-				timewheel.ReleaseTimer(t)
+			if s.profiler != nil {
+				analyzer = s.profiler.Push("[timer]"+t.GetName())
+			}
+			t.Do()
+			if analyzer != nil {
+				analyzer.Pop()
+				analyzer = nil
 			}
 		}
 
@@ -211,4 +207,8 @@ func (s *Service) UnRegEventReceiverFunc(eventType event.EventType, receiver eve
 
 func (s *Service) IsSingleCoroutine() bool {
 	return s.goroutineNum == 1
+}
+
+func (s *Service) RegRawRpc(rpcMethodId uint32,rawRpcCB rpc.RawRpcCallBack){
+	s.rpcHandler.RegRawRpc(rpcMethodId,rawRpcCB)
 }

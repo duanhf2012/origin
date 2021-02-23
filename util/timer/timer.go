@@ -1,53 +1,26 @@
 package timer
 
 import (
-	"github.com/duanhf2012/origin/util/timewheel"
+	"fmt"
+	"github.com/duanhf2012/origin/util/sync"
 	"reflect"
 	"runtime"
-	"sync"
+
 	"time"
 )
 
-var timerPool = sync.Pool{New: func() interface{}{
-	return &Timer{}
-}}
-
-var cronPool = sync.Pool{New: func() interface{}{
-	return &Cron{}
-}}
-
-var tickerPool = sync.Pool{New: func() interface{}{
-	return &Ticker{}
-}}
-
-// one dispatcher per goroutine (goroutine not safe)
-type Dispatcher struct {
-	ChanTimer chan *timewheel.Timer
-}
-
-func NewDispatcher(l int) *Dispatcher {
-	disp := new(Dispatcher)
-	disp.ChanTimer = make(chan *timewheel.Timer, l)
-	return disp
-}
-
-type ITime interface {
-	Close ()
-	Do()
-	GetName() string
-}
-
 // Timer
 type Timer struct {
-	t  *timewheel.Timer
-	cb func()
-	name string
-	onClose func(timer  *timewheel.Timer)
-}
+	name 		string
+	cancelled    bool        //是否关闭
+	C            chan *Timer    //定时器管道
+	interval  	 time.Duration     // 时间间隔（用于循环定时器）
+	fireTime  	 time.Time         // 触发时间
+	cb 			 func()
+	AdditionData interface{}    //定时器附加数据
+	rOpen        bool           //是否重新打开
 
-// Cron
-type Cron struct {
-	Timer
+	ref          bool
 }
 
 // Ticker
@@ -55,163 +28,244 @@ type Ticker struct {
 	Timer
 }
 
-func NewTimer(t *timewheel.Timer,cb func(),name string,onClose func(timer  *timewheel.Timer)) *Timer {
-	timer := timerPool.Get().(*Timer)
-	timer.t = t
-	timer.cb = cb
-	timer.onClose = onClose
-	timer.name = name
+// Cron
+type Cron struct {
+	Timer
+}
 
+var timerPool = sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolData{
+	return &Timer{}
+})
+
+var cronPool = sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolData{
+	return &Cron{}
+})
+
+var tickerPool =sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolData{
+	return &Ticker{}
+})
+
+func newTimer(d time.Duration,c chan *Timer,cb func(),name string,additionData interface{}) *Timer{
+	if c == nil {
+		return nil
+	}
+
+	timer := timerPool.Get().(*Timer)
+	timer.AdditionData = additionData
+	timer.C = c
+	timer.fireTime = Now().Add(d)
+	timer.cb = cb
+	timer.name = name
+	timer.interval = d
+	timer.rOpen = false
 	return timer
 }
 
-func ReleaseTimer(timer *Timer) {
+func releaseTimer(timer *Timer) {
 	timerPool.Put(timer)
 }
 
-func (t *Timer) Close(){
-	if t.t!=nil {
-		t.t.Close()
-	}
-	if t.onClose!=nil {
-		t.onClose(t.t)
-	}
-	ReleaseTimer(t)
+func newTicker() *Ticker {
+	ticker := tickerPool.Get().(*Ticker)
+	return ticker
+}
+
+func releaseTicker(ticker *Ticker) {
+	tickerPool.Put(ticker)
+}
+
+func newCron() *Cron {
+	cron := cronPool.Get().(*Cron)
+	return cron
+}
+
+func releaseCron(cron *Cron) {
+	cronPool.Put(cron)
+}
+
+// one dispatcher per goroutine (goroutine not safe)
+type Dispatcher struct {
+	ChanTimer chan *Timer
 }
 
 func (t *Timer) Do(){
-	t.Close()
-	t.cb()
+	if t.cb != nil {
+		t.cb()
+	}
+}
+
+func (t *Timer) SetupTimer(now time.Time) error{
+	t.fireTime = now.Add(t.interval)
+	if SetupTimer(t) == nil {
+		return fmt.Errorf("failed to install timer")
+	}
+	return nil
+}
+
+func (t *Timer) GetInterval() time.Duration{
+	return t.interval
+}
+
+func (t *Timer) Cancel() {
+	t.cancelled = true
+}
+
+// 判断定时器是否已经取消
+func (t *Timer) IsActive() bool {
+	return !t.cancelled
 }
 
 func (t *Timer) GetName() string{
 	return t.name
 }
 
-func NewCron(t *timewheel.Timer,cb func(),name string,onClose func(timer  *timewheel.Timer)) *Cron {
-	cron := cronPool.Get().(*Cron)
-	cron.t = t
-	cron.cb = cb
-	cron.onClose = onClose
-	cron.name = name
-	return cron
+func (t *Timer) Reset(){
+	t.name = ""
+	t.cancelled = false
+	t.C    = nil
+	t.interval  = 0
+	t.cb = nil
+	t.AdditionData = nil
+	t.rOpen = false
 }
 
-func ReleaseCron(cron *Cron) {
-	cronPool.Put(cron)
+func (t *Timer) IsRef()bool{
+	return t.ref
 }
 
-func (c *Cron) Do(){
-	if c.onClose!=nil {
-		c.onClose(c.t)
-	}
-
-	c.cb()
+func (t *Timer) Ref(){
+	t.ref = true
 }
 
-func (c *Cron) Close() {
-	if c.t != nil {
-		c.t.Close()
-	}
-
-	if c.onClose!=nil {
-		c.onClose(c.t)
-	}
-
-	ReleaseCron(c)
+func (t *Timer) UnRef(){
+	t.ref = false
 }
 
-func NewTicker(t *timewheel.Timer,cb func(),name string,onClose func(timer  *timewheel.Timer)) *Ticker {
-	ticker := tickerPool.Get().(*Ticker)
-	ticker.t = t
-	ticker.cb = cb
-	ticker.onClose = onClose
-	ticker.name = name
-
-	return ticker
+func (c *Cron) Reset(){
 }
 
-func ReleaseTicker(ticker *Ticker) {
-	tickerPool.Put(ticker)
+func (c *Cron) IsRef()bool{
+	return c.ref
 }
 
-func (tk *Ticker) Do(){
-	//通知当前timer删除
-	if tk.onClose!=nil {
-		tk.onClose(tk.t)
-	}
-	tk.cb()
+func (c *Cron) Ref(){
+	c.ref = true
 }
 
-func (tk *Ticker) Close() {
-	if tk.t != nil {
-		tk.t.Close()
-	}
-
-	if tk.onClose!=nil {
-		tk.onClose(tk.t)
-	}
-
-	ReleaseTicker(tk)
+func (c *Cron) UnRef(){
+	c.ref = false
 }
 
-func (disp *Dispatcher) AfterFunc(d time.Duration, cb func(),onCloseTimer func(timer *timewheel.Timer),onAddTimer func(timer *timewheel.Timer)) *Timer {
+func (c *Ticker) Reset(){
+}
+
+func (c *Ticker) IsRef()bool{
+	return c.ref
+}
+
+func (c *Ticker) Ref(){
+	c.ref = true
+}
+
+func (c *Ticker) UnRef(){
+	c.ref = false
+}
+
+func NewDispatcher(l int) *Dispatcher {
+	dispatcher := new(Dispatcher)
+	dispatcher.ChanTimer = make(chan *Timer, l)
+	return dispatcher
+}
+
+type OnTimerClose func(timer *Timer)
+func (dispatcher *Dispatcher) AfterFunc(d time.Duration, cb func(*Timer),onTimerClose OnTimerClose,onAddTimer func(timer *Timer)) *Timer {
 	funName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
-	t := NewTimer(nil,cb,funName,onCloseTimer)
-	t.t = timewheel.NewTimerEx(d,disp.ChanTimer,t)
-	onAddTimer(t.t)
+	timer := newTimer(d,dispatcher.ChanTimer,nil,funName,nil)
+	cbFunc := func() {
+		if timer.IsActive() == false {
+			onTimerClose(timer)
+			releaseTimer(timer)
+			return
+		}
+
+		cb(timer)
+
+		if timer.rOpen ==false {
+			onTimerClose(timer)
+			releaseTimer(timer)
+		}
+	}
+
+	timer.cb = cbFunc
+	t := SetupTimer(timer)
+	onAddTimer(t)
 
 	return t
 }
 
-func (disp *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(),onCloseTimer func(timer *timewheel.Timer),onAddTimer func(timer *timewheel.Timer))  *Cron {
-	now := time.Now()
+func (dispatcher *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(*Cron),onTimerClose OnTimerClose,onAddTimer func(timer *Timer))  *Cron {
+	now := Now()
 	nextTime := cronExpr.Next(now)
 	if nextTime.IsZero() {
 		return nil
 	}
 
 	funcName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
-	cron := NewCron(nil,nil,funcName,onCloseTimer)
+	cron := newCron()
 	// callback
 	var cbFunc func()
 	cbFunc = func() {
-		now := time.Now()
-		nextTime := cronExpr.Next(now)
-		if nextTime.IsZero() {
-			cb()
+		if cron.IsActive() == false{
+			onTimerClose(&cron.Timer)
+			releaseCron(cron)
 			return
 		}
 
-		interval := nextTime.Sub(now)
-		minTimeInterval := time.Millisecond*time.Duration(timewheel.GRANULARITY)
-		if interval < minTimeInterval {
-			interval =  minTimeInterval
+		now := Now()
+		nextTime := cronExpr.Next(now)
+		if nextTime.IsZero() {
+			cb(cron)
+			return
 		}
 
-		cron.t = timewheel.NewTimerEx(interval,disp.ChanTimer,cron)
-		onAddTimer(cron.t)
-		cb()
+		cron.interval = nextTime.Sub(now)
+		cron.fireTime = now.Add(cron.interval)
+		SetupTimer(&cron.Timer)
+		cb(cron)
 	}
+	cron.C = dispatcher.ChanTimer
 	cron.cb = cbFunc
-	cron.t = timewheel.NewTimerEx(nextTime.Sub(now),disp.ChanTimer,cron)
-	onAddTimer(cron.t)
+	cron.name = funcName
+	cron.interval = nextTime.Sub(now)
+	cron.fireTime = Now().Add(cron.interval)
+	SetupTimer(&cron.Timer)
+	onAddTimer(&cron.Timer)
 	return cron
 }
 
-func (disp *Dispatcher) TickerFunc(d time.Duration, cb func(),onCloseTimer func(timer *timewheel.Timer),onAddTimer func(timer *timewheel.Timer))  *Ticker {
+func (dispatcher *Dispatcher) TickerFunc(d time.Duration, cb func(*Ticker),onTimerClose OnTimerClose,onAddTimer func(timer *Timer))  *Ticker {
 	funcName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
-	ticker := NewTicker(nil,nil,funcName,onCloseTimer)
-	// callback
-	var cbFunc func()
-	cbFunc = func() {
-		ticker.t = timewheel.NewTimerEx(d,disp.ChanTimer,ticker)
-		onAddTimer(ticker.t)
-		cb()
+	ticker := newTicker()
+	cbFunc := func() {
+		cb(ticker)
+		if ticker.Timer.IsActive() == true{
+			ticker.fireTime = Now().Add(d)
+			SetupTimer(&ticker.Timer)
+		}else{
+			onTimerClose(&ticker.Timer)
+			releaseTicker(ticker)
+		}
 	}
 
+	ticker.C = dispatcher.ChanTimer
+	ticker.fireTime = Now().Add(d)
 	ticker.cb = cbFunc
-	ticker.t = timewheel.NewTimerEx(d,disp.ChanTimer,ticker)
-	onAddTimer(ticker.t)
+	ticker.name = funcName
+	ticker.interval = d
+
+	// callback
+	SetupTimer(&ticker.Timer)
+	onAddTimer(&ticker.Timer)
+
 	return ticker
 }
