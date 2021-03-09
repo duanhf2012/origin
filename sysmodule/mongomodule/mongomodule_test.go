@@ -90,6 +90,6 @@ func Test_Example(t *testing.T) {
 	selector1 := bson.M{"_id":bson.ObjectIdHex("60473de655f1012e7453b369")}
 	update1 := bson.M{"$set":bson.M{"name":"xxxxx","age":1111}}
 	c.Update(selector1,update1)
-	
+
 	fmt.Println(info,uErr)
 }
