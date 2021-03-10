@@ -39,7 +39,7 @@ func init() {
 
 	console.RegisterCommandBool("help",false,"<-help> This help.",usage)
 	console.RegisterCommandString("start","","<-start nodeid=nodeid> Run originserver.",startNode)
-	console.RegisterCommandBool("stop",false,"<-stop> Stop originserver process.",stopNode)
+	console.RegisterCommandString("stop","","<-stop nodeid=nodeid> Stop originserver process.",stopNode)
 	console.RegisterCommandString("config","","<-config path> Configuration file path.",setConfigPath)
 	console.RegisterCommandString("console", "", "<-console true|false> Turn on or off screen log output.", openConsole)
 	console.RegisterCommandString("loglevel", "debug", "<-loglevel debug|release|warning|error|fatal> Set loglevel.", setLevel)
@@ -91,8 +91,8 @@ func setConfigPath(val interface{}) error{
 	return nil
 }
 
-func  getRunProcessPid() (int,error) {
-	f, err := os.OpenFile(os.Args[0]+".pid", os.O_RDONLY, 0600)
+func  getRunProcessPid(nodeId int) (int,error) {
+	f, err := os.OpenFile(fmt.Sprintf("%s_%d.pid",os.Args[0],nodeId), os.O_RDONLY, 0600)
 	defer f.Close()
 	if err!= nil {
 		return 0,err
@@ -106,9 +106,9 @@ func  getRunProcessPid() (int,error) {
 	return strconv.Atoi(string(pidByte))
 }
 
-func writeProcessPid() {
+func writeProcessPid(nodeId int) {
 	//pid
-	f, err := os.OpenFile(os.Args[0]+".pid", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0600)
+	f, err := os.OpenFile(fmt.Sprintf("%s_%d.pid",os.Args[0],nodeId), os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0600)
 	defer f.Close()
 	if err != nil {
 		fmt.Println(err.Error())
@@ -174,12 +174,25 @@ func Start() {
 }
 
 func stopNode(args interface{}) error {
-	isStop := args.(bool)
-	if isStop == false{
+	//1.解析参数
+	param := args.(string)
+	if param == "" {
 		return nil
 	}
 
-	processId,err := getRunProcessPid()
+	sParam := strings.Split(param,"=")
+	if len(sParam) != 2 {
+		return fmt.Errorf("invalid option %s",param)
+	}
+	if sParam[0]!="nodeid" {
+		return fmt.Errorf("invalid option %s",param)
+	}
+	nodeId,err:= strconv.Atoi(sParam[1])
+	if err != nil {
+		return fmt.Errorf("invalid option %s",param)
+	}
+
+	processId,err := getRunProcessPid(nodeId)
 	if err != nil {
 		return err
 	}
@@ -224,7 +237,7 @@ func startNode(args interface{}) error{
 	service.Start()
 
 	//5.记录进程id号
-	writeProcessPid()
+	writeProcessPid(nodeId)
 
 	//6.监听程序退出信号&性能报告
 	bRun := true
