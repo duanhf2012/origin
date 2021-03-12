@@ -28,7 +28,7 @@ type MongoModule struct {
 
 func (slf *MongoModule) Init(url string,sessionNum uint32,dialTimeout time.Duration, timeout time.Duration) error {
 	var err error
-	slf.dailContext, err = dialWithTimeout(url, sessionNum, dialTimeout*time.Second, timeout*time.Second)
+	slf.dailContext, err = dialWithTimeout(url, sessionNum, dialTimeout, timeout)
 
 	return err
 }
