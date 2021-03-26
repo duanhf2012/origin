@@ -142,6 +142,7 @@ func (t *Timer) UnRef(){
 }
 
 func (c *Cron) Reset(){
+	c.Timer.Reset()
 }
 
 func (c *Cron) IsRef()bool{
@@ -157,6 +158,7 @@ func (c *Cron) UnRef(){
 }
 
 func (c *Ticker) Reset(){
+	c.Timer.Reset()
 }
 
 func (c *Ticker) IsRef()bool{
