@@ -232,6 +232,10 @@ func (handler *RpcHandler) HandlerRpcResponseCB(call *Call){
 }
 
 func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
+	if request.requestHandle == nil {
+		defer ReleaseRpcRequest(request)
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 				buf := make([]byte, 4096)
@@ -245,9 +249,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}()
 
-	if request.requestHandle == nil {
-		defer ReleaseRpcRequest(request)
-	}
+
 
 	//如果是原始RPC请求
 	rawRpcId := request.RpcRequestData.GetRpcMethodId()
