@@ -2,10 +2,10 @@ package timer
 
 import (
 	"fmt"
+	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/util/sync"
 	"reflect"
 	"runtime"
-
 	"time"
 )
 
@@ -90,6 +90,14 @@ type Dispatcher struct {
 
 func (t *Timer) Do(){
 	if t.cb != nil {
+		defer func() {
+			if r := recover(); r != nil {
+				buf := make([]byte, 4096)
+				l := runtime.Stack(buf, false)
+				err := fmt.Errorf("%v: %s", r, buf[:l])
+				log.Error("core dump info:%+v\n", err)
+			}
+		}()
 		t.cb()
 	}
 }
