@@ -34,6 +34,7 @@ const (
 
 type Logger struct {
 	filePath   string
+	filepre 	string
 	logTime    time.Time
 	level      int
 	stdLogger   *log.Logger
@@ -42,7 +43,7 @@ type Logger struct {
 	flag       int
 }
 
-func New(strLevel string, pathname string, flag int) (*Logger, error) {
+func New(strLevel string, pathname string, filepre string, flag int) (*Logger, error) {
 	// level
 	var level int
 	switch strings.ToLower(strLevel) {
@@ -75,7 +76,7 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 			now.Minute(),
 			now.Second())
 
-		file, err := os.Create(path.Join(pathname, filename))
+		file, err := os.Create(path.Join(pathname, filepre+filename))
 		if err != nil {
 			return nil, err
 		}
@@ -95,6 +96,7 @@ func New(strLevel string, pathname string, flag int) (*Logger, error) {
 	logger.logTime = now
 	logger.filePath = pathname
 	logger.flag = flag
+	logger.filepre = filepre
 
 	return logger, nil
 }
@@ -128,7 +130,7 @@ func (logger *Logger) doPrintf(level int, printLevel string, format string, a ..
 				now.Minute(),
 				now.Second())
 
-			file, err := os.Create(path.Join(logger.filePath, filename))
+			file, err := os.Create(path.Join(logger.filePath, logger.filepre+filename))
 			if err == nil {
 				logger.baseFile.Close()
 				logger.baseLogger = log.New(file, "", logger.flag)
@@ -172,7 +174,7 @@ func (logger *Logger) Fatal(format string, a ...interface{}) {
 	logger.doPrintf(fatalLevel, printFatalLevel, format, a...)
 }
 
-var gLogger, _ = New("debug", "", log.LstdFlags|log.Lshortfile)
+var gLogger, _ = New("debug", "", "", log.LstdFlags|log.Lshortfile)
 
 // It's dangerous to call the method on logging
 func Export(logger *Logger) {

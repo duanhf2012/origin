@@ -134,6 +134,11 @@ func initNode(id int){
 		log.Fatal("read system config is error %+v",err)
 	}
 
+	err = initLog()
+	if err != nil{
+		return
+	}
+
 	//2.setup service
 	for _,s := range preSetupService {
 		//是否配置的service
@@ -156,7 +161,9 @@ func initLog() error{
 		setLogPath("./log")
 	}
 
-	logger,err := log.New(logLevel,logPath,slog.LstdFlags|slog.Lshortfile)
+	localnodeinfo := cluster.GetCluster().GetLocalNodeInfo()
+	filepre := fmt.Sprintf("%s[%d]", localnodeinfo.NodeName, localnodeinfo.NodeId)
+	logger,err := log.New(logLevel,logPath,filepre,slog.LstdFlags|slog.Lshortfile)
 	if err != nil {
 		fmt.Printf("cannot create log file!\n")
 		return err
@@ -220,11 +227,6 @@ func startNode(args interface{}) error{
 		return fmt.Errorf("invalid option %s",param)
 	}
 
-	err = initLog()
-	if err != nil {
-		return err
-	}
-
 	timer.StartTimer(10*time.Millisecond,100000)
 	log.Release("Start running server.")
 	//2.初始化node
@@ -285,7 +287,7 @@ func GetConfigDir() string {
 }
 
 func SetSysLog(strLevel string, pathname string, flag int){
-	logs,_:= log.New(strLevel,pathname,flag)
+	logs,_:= log.New(strLevel,pathname, "", flag)
 	log.Export(logs)
 }
 
