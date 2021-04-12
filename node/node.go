@@ -162,7 +162,7 @@ func initLog() error{
 	}
 
 	localnodeinfo := cluster.GetCluster().GetLocalNodeInfo()
-	filepre := fmt.Sprintf("%s[%d]", localnodeinfo.NodeName, localnodeinfo.NodeId)
+	filepre := fmt.Sprintf("%s_%d_", localnodeinfo.NodeName, localnodeinfo.NodeId)
 	logger,err := log.New(logLevel,logPath,filepre,slog.LstdFlags|slog.Lshortfile)
 	if err != nil {
 		fmt.Printf("cannot create log file!\n")
