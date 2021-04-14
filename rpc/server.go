@@ -162,8 +162,9 @@ func (agent *RpcAgent) Run() {
 			if req.RpcRequestData.IsNoReply()==false {
 				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,rpcError)
 			}
-			ReleaseRpcRequest(req)
+
 			log.Error("service method %s not config!", req.RpcRequestData.GetServiceMethod())
+			ReleaseRpcRequest(req)
 			continue
 		}
 
