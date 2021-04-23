@@ -125,6 +125,42 @@ func (m *RedisModule) TestPingRedis() error {
 	return nil
 }
 
+func (m *RedisModule) HSetStruct(key string, val interface{}) error {
+	conn, err := m.getConn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+
+	_, err = conn.Do("HSET", redis.Args{}.Add(key).AddFlat(val)...)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *RedisModule) HGetStruct(key string, out_val interface{}) error {
+	conn, err := m.getConn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	v, err := redis.Values(conn.Do("HGETALL", key))
+	if err != nil {
+		return err
+	}
+	err = redis.ScanStruct(v, out_val)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+
+
 func (m *RedisModule) SetString(key, value interface{}) (err error) {
 	err = m.setStringByExpire(key, value, "-1")
 
