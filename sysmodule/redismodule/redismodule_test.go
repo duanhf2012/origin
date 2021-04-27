@@ -24,12 +24,28 @@ func Test_Example(t *testing.T) {
 	module.SetString(1000,2*1000)
 	module.SetStringExpire("key2","value2","60")
 
-	//支持直接存储struct数据
+	//支持直接存储struct数据(json string)
 	jsonData := struct{
 		A string
 		B string
 	}{"Aaaa","Bbbb"}
 	module.SetStringJSON("key3",&jsonData)
+
+	// struct 2 redis hash
+	a := struct{
+		A string `redis:"a"`
+		B int	`redis:"b"`
+	}{
+		"ccc",
+		1,
+	}
+	module.HSetStruct("skey", &a)
+	a.A = "xx"
+	module.HGetStruct("skey", &a)
+	if a.A == "xx"{
+		fmt.Println("struct 2 hash failed.")
+	}
+
 
 	//支持存储map数据结构，map中的key与value与redis的key,value对象
 	mapData := map[interface{}]interface{}{}

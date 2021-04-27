@@ -231,3 +231,7 @@ func (cls *Cluster) triggerRpcEvent (bConnect bool,nodeId int) {
 	}
 }
 
+func (cls *Cluster) GetLocalNodeInfo() *NodeInfo {
+	return &cls.localNodeInfo
+}
+

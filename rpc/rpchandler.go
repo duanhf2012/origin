@@ -232,6 +232,10 @@ func (handler *RpcHandler) HandlerRpcResponseCB(call *Call){
 }
 
 func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
+	if request.requestHandle == nil {
+		defer ReleaseRpcRequest(request)
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 				buf := make([]byte, 4096)
@@ -245,9 +249,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}()
 
-	if request.requestHandle == nil {
-		defer ReleaseRpcRequest(request)
-	}
+
 
 	//如果是原始RPC请求
 	rawRpcId := request.RpcRequestData.GetRpcMethodId()
@@ -341,11 +343,11 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,s
 	var pClientList [maxClusterNode]*Client
 	err,count := handler.funcRpcClient(nodeId,serviceMethod,pClientList[:])
 	if count==0||err != nil {
-		log.Error("Call serviceMethod is error:%+v!",err)
+		log.Error("Call %s is error:%+v!",serviceMethod,err)
 		return err
 	}
 	if count > 1 && bCast == false{
-		log.Error("Cannot call more then 1 node!")
+		log.Error("Cannot call %s more then 1 node!",serviceMethod)
 		return fmt.Errorf("Cannot call more then 1 node!")
 	}
 

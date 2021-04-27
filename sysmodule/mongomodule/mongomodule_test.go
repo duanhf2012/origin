@@ -18,9 +18,14 @@ type Student struct {
 	Status int     `bson: "status"`
 }
 
+type StudentName struct {
+	Name   string  `bson: "name"`
+}
+
+
 func Test_Example(t *testing.T) {
 	module:=MongoModule{}
-	module.Init("mongodb://admin:123456@127.0.0.1:27017",100, 5*time.Second,5*time.Second)
+	module.Init("mongodb://admin:123456@192.168.2.119:27017",100, 5*time.Second,5*time.Second)
 
 	// take session
 	s := module.Take()
@@ -41,6 +46,7 @@ func Test_Example(t *testing.T) {
 		Sid:    "s20180907",
 		Status: 1,
 	}
+
 
 	//3.插入数据
 	err := c.Insert(&insertData)
@@ -78,5 +84,12 @@ func Test_Example(t *testing.T) {
 	//8.setoninsert使用
 	info,uErr := c.Upsert(bson.M{"_id":bson.ObjectIdHex("5f252f09999c622d36198951")},bson.M{
 		"$setOnInsert":bson.M{"Name":"setoninsert","Age":55}})
+
+
+	//9.修改部分数字数据
+	selector1 := bson.M{"_id":bson.ObjectIdHex("60473de655f1012e7453b369")}
+	update1 := bson.M{"$set":bson.M{"name":"xxxxx","age":1111}}
+	c.Update(selector1,update1)
+
 	fmt.Println(info,uErr)
 }

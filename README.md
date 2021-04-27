@@ -541,8 +541,9 @@ func (slf *TestModule) OnInit() error{
 	return nil
 }
 
-func (slf *TestModule) OnModuleEvent(ev *event.Event){
-	fmt.Printf("OnModuleEvent type :%d data:%+v\n",ev.Type,ev.Data)
+func (slf *TestModule) OnModuleEvent(ev event.IEvent){
+	event := ev.(*event.Event)
+	fmt.Printf("OnModuleEvent type :%d data:%+v\n",event.GetEventType(),event.Data)
 }
 
 
@@ -557,8 +558,9 @@ func (slf *TestService5) OnInit() error {
 	return nil
 }
 
-func (slf *TestService5) OnServiceEvent(ev *event.Event){
-	fmt.Printf("OnServiceEvent type :%d data:%+v\n",ev.Type,ev.Data)
+func (slf *TestService5) OnServiceEvent(ev event.IEvent){
+	event := ev.(*event.Event)
+	fmt.Printf("OnServiceEvent type :%d data:%+v\n",event.Type,event.Data)
 }
 
 
@@ -853,5 +855,11 @@ func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
 
 提交bug及特性: https://github.com/duanhf2012/origin/issues
 
-[因服务器是由个人维护，如果这个项目对您有帮助，您可以点我进行捐赠，感谢！](https://github.com/duanhf2012/other/blob/master/pay.png "Thanks!")
+[因服务器是由个人维护，如果这个项目对您有帮助，您可以点我进行捐赠，感谢！](http://www.cppblog.com/images/cppblog_com/API/21416/r_pay.jpg "Thanks!")
 
+特别感谢以下赞助网友：
+```
+咕咕兽
+_
+死磕代码
+```
