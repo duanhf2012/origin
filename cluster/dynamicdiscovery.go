@@ -52,7 +52,7 @@ func (ds *DynamicDiscoveryMaster) addNodeInfo(nodeInfo *rpc.NodeInfo){
 
 func (ds *DynamicDiscoveryMaster) OnInit() error{
 	ds.mapNodeInfo = make(map[int32] *rpc.NodeInfo,20)
-	ds.RegisterRpcListener(ds)
+	ds.RegRpcListener(ds)
 
 	return nil
 }
@@ -126,7 +126,7 @@ func (ds *DynamicDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscove
 }
 
 func (dc *DynamicDiscoveryClient) OnInit() error{
-	dc.RegisterRpcListener(dc)
+	dc.RegRpcListener(dc)
 	return nil
 }
 

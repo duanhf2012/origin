@@ -237,13 +237,13 @@ func (s *Service) OnRpcEvent(ev event.IEvent){
 	}
 }
 
-func (s *Service) RegisterRpcListener (rpcEventLister rpc.IRpcListener) {
+func (s *Service) RegRpcListener(rpcEventLister rpc.IRpcListener) {
 	s.rpcEventLister = rpcEventLister
 	s.RegEventReceiverFunc(event.Sys_Event_Rpc_Event,s.GetEventHandler(),s.OnRpcEvent)
 	RegRpcEventFun(s.GetName())
 }
 
-func (s *Service) UnRegisterRpcListener (rpcLister rpc.IRpcListener) {
+func (s *Service) UnRegRpcListener(rpcLister rpc.IRpcListener) {
 	s.UnRegEventReceiverFunc(event.Sys_Event_Rpc_Event,s.GetEventHandler())
 	RegRpcEventFun(s.GetName())
 }
