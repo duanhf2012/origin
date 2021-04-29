@@ -72,7 +72,7 @@ func (ds *DynamicDiscoveryMaster) OnStart(){
 	ds.addNodeInfo(&nodeInfo)
 }
 
-func (ds *DynamicDiscoveryMaster) OnRpcConnected(nodeId int){
+func (ds *DynamicDiscoveryMaster) OnNodeConnected(nodeId int){
 	//向它发布所有服务列表信息
 	var notifyDiscover rpc.SubscribeDiscoverNotify
 	notifyDiscover.IsFull = true
@@ -80,7 +80,7 @@ func (ds *DynamicDiscoveryMaster) OnRpcConnected(nodeId int){
 	ds.GoNode(nodeId,DynamicDiscoveryClientNameRpcMethod,&notifyDiscover)
 }
 
-func (ds *DynamicDiscoveryMaster) OnRpcDisconnect(nodeId int){
+func (ds *DynamicDiscoveryMaster) OnNodeDisconnect(nodeId int){
 	var notifyDiscover rpc.SubscribeDiscoverNotify
 	notifyDiscover.DelNodeId = int32(nodeId)
 	//删除结点
@@ -195,7 +195,7 @@ func (dc *DynamicDiscoveryClient) isDiscoverNode(nodeId int) bool{
 	return false
 }
 
-func (dc *DynamicDiscoveryClient) OnRpcConnected(nodeId int) {
+func (dc *DynamicDiscoveryClient) OnNodeConnected(nodeId int) {
 	if dc.isDiscoverNode(nodeId) == false {
 		return
 	}
@@ -252,7 +252,7 @@ func (dc *DynamicDiscoveryClient) setNodeInfo(nodeInfo *rpc.NodeInfo){
 }
 
 
-func (dc *DynamicDiscoveryClient) OnRpcDisconnect(nodeId int){
+func (dc *DynamicDiscoveryClient) OnNodeDisconnect(nodeId int){
 }
 
 func (dc *DynamicDiscoveryClient) InitDiscovery(localNodeId int,funDelNode FunDelNode,funSetNodeInfo FunSetNodeInfo) error{

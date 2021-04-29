@@ -231,9 +231,9 @@ func (s *Service) OnStart(){
 func (s *Service) OnRpcEvent(ev event.IEvent){
 	event := ev.(*RpcEventData)
 	if event.IsConnect {
-		s.rpcEventLister.OnRpcConnected(event.NodeId)
+		s.rpcEventLister.OnNodeConnected(event.NodeId)
 	}else{
-		s.rpcEventLister.OnRpcDisconnect(event.NodeId)
+		s.rpcEventLister.OnNodeDisconnect(event.NodeId)
 	}
 }
 
