@@ -15,6 +15,7 @@ import (
 )
 
 type Client struct {
+	clientSeq uint32
 	id int
 	bSelfNode bool
 	network.TCPClient
@@ -29,6 +30,8 @@ type Client struct {
 	TriggerRpcEvent
 }
 
+var clientSeq uint32
+
 func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 	client.conn = conn
 	client.ResetPending()
@@ -37,6 +40,7 @@ func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 }
 
 func (client *Client) Connect(id int,addr string) error {
+	client.clientSeq = atomic.AddUint32(&clientSeq,1)
 	client.id = id
 	client.Addr = addr
 	client.maxCheckCallRpcCount = 1000
@@ -82,9 +86,6 @@ func (client *Client) makeCallFail(call *Call){
 	}else{
 		call.done <- call
 	}
-
-
-
 }
 
 func (client *Client) checkRpcCallTimeout(){
@@ -263,7 +264,7 @@ func (client *Client) Run(){
 		}
 	}()
 
-	client.TriggerRpcEvent(true,client.GetId())
+	client.TriggerRpcEvent(true,client.GetClientSeq(),client.GetId())
 	for {
 		bytes,err := client.conn.ReadMsg()
 		if err != nil {
@@ -319,7 +320,7 @@ func (client *Client) Run(){
 }
 
 func (client *Client) OnClose(){
-	client.TriggerRpcEvent(false,client.GetId())
+	client.TriggerRpcEvent(false,client.GetClientSeq(),client.GetId())
 }
 
 func (client *Client) IsConnected() bool {
@@ -328,4 +329,12 @@ func (client *Client) IsConnected() bool {
 
 func (client *Client) GetId() int{
 	return client.id
+}
+
+func (client *Client) Close(waitDone bool){
+	client.TCPClient.Close(waitDone)
+}
+
+func (client *Client) GetClientSeq() uint32 {
+	return client.clientSeq
 }

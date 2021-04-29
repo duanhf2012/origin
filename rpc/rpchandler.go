@@ -63,7 +63,7 @@ type RpcHandler struct {
 	callResponseCallBack chan *Call //异步返回的回调
 }
 
-type TriggerRpcEvent func(bConnect bool,nodeId int)
+type TriggerRpcEvent func(bConnect bool,clientSeq uint32,nodeId int)
 type IRpcListener interface {
 	OnRpcConnected(nodeId int)
 	OnRpcDisconnect(nodeId int)
@@ -467,6 +467,9 @@ func (handler *RpcHandler) asyncCallRpc(nodeid int,serviceMethod string,args int
 	var pClientList [maxClusterNode]*Client
 	err,count := handler.funcRpcClient(nodeid,serviceMethod,pClientList[:])
 	if count==0||err != nil {
+		if err == nil {
+			err = fmt.Errorf("cannot find rpcclient from nodeid %d serviceMethod %s",nodeid,serviceMethod)
+		}
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return nil

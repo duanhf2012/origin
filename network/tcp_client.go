@@ -79,7 +79,7 @@ func (client *TCPClient) dial() net.Conn {
 			return conn
 		}
 
-		log.Release("connect to %v error: %v", client.Addr, err)
+		log.Warning("connect to %v error: %v", client.Addr, err)
 		time.Sleep(client.ConnectInterval)
 		continue
 	}

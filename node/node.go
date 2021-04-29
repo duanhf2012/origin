@@ -129,7 +129,7 @@ func GetNodeId() int {
 func initNode(id int){
 	//1.初始化集群
 	nodeId = id
-	err := cluster.GetCluster().Init(GetNodeId())
+	err := cluster.GetCluster().Init(GetNodeId(),Setup)
 	if err != nil {
 		log.Fatal("read system config is error %+v",err)
 	}
