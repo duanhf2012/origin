@@ -84,7 +84,7 @@ func (ds *DynamicDiscoveryMaster) OnNodeDisconnect(nodeId int){
 	var notifyDiscover rpc.SubscribeDiscoverNotify
 	notifyDiscover.DelNodeId = int32(nodeId)
 	//删除结点
-	cluster.DelNode(nodeId)
+	cluster.DelNode(nodeId,true)
 	ds.CastGo(DynamicDiscoveryClientNameRpcMethod,&notifyDiscover)
 }
 
@@ -115,7 +115,7 @@ func (ds *DynamicDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscove
 	nodeInfo.ListenAddr = req.NodeInfo.ListenAddr
 
 	//主动删除已经存在的结点,确保先断开，再连接
-	cluster.serviceDiscoveryDelNode(nodeInfo.NodeId)
+	cluster.serviceDiscoveryDelNode(nodeInfo.NodeId,true)
 
 	//加入到本地Cluster模块中，将连接该结点
 	//如果本结点不为master结点，而且没有可使用的服务，不加入
@@ -174,7 +174,7 @@ func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDisco
 
 	//删除不必要的结点
 	for _,nodeId := range willDelNodeId {
-		dc.funDelService(nodeId)
+		dc.funDelService(nodeId,false)
 	}
 
 	//发现新结点
@@ -210,6 +210,7 @@ func (dc *DynamicDiscoveryClient) OnNodeConnected(nodeId int) {
 	//如果是连接发现主服成功，则同步服务信息
 	err := dc.AsyncCallNode(nodeId, DynamicDiscoveryMasterNameRpcMethod, &req, func(res *rpc.ServiceDiscoverRes, err error) {
 		if err != nil {
+			cluster.DelNode(nodeId,true)
 			log.Error("call %s is fail :%s", DynamicDiscoveryMasterNameRpcMethod, err.Error())
 			return
 		}
@@ -253,6 +254,8 @@ func (dc *DynamicDiscoveryClient) setNodeInfo(nodeInfo *rpc.NodeInfo){
 
 
 func (dc *DynamicDiscoveryClient) OnNodeDisconnect(nodeId int){
+	//将Discard结点清理
+	cluster.DiscardNode(nodeId)
 }
 
 func (dc *DynamicDiscoveryClient) InitDiscovery(localNodeId int,funDelNode FunDelNode,funSetNodeInfo FunSetNodeInfo) error{

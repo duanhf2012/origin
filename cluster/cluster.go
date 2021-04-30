@@ -13,6 +13,12 @@ var configDir = "./config/"
 
 type SetupServiceFun func(s ...service.IService)
 
+type NodeStatus int
+const(
+	Normal NodeStatus   = 0 //正常
+	Discard NodeStatus  = 1 //丢弃
+)
+
 type NodeInfo struct {
 	NodeId int
 	NodeName string
@@ -21,6 +27,7 @@ type NodeInfo struct {
 	ServiceList []string       //所有的服务列表
 	PublicServiceList []string //对外公开的服务列表
 	DiscoveryService []string  //筛选发现的服务，如果不配置，不进行筛选
+	status NodeStatus
 }
 
 type NodeRpcInfo struct {
@@ -66,7 +73,17 @@ func (cls *Cluster) Stop() {
 	cls.serviceDiscovery.OnNodeStop()
 }
 
-func (cls *Cluster) DelNode(nodeId int){
+func (cls *Cluster) DiscardNode(nodeId int){
+	cls.locker.Lock()
+	nodeInfo,ok := cls.mapIdNode[nodeId]
+	cls.locker.Unlock()
+
+	if ok==true && nodeInfo.status == Discard {
+		cls.DelNode(nodeId,true)
+	}
+}
+
+func (cls *Cluster) DelNode(nodeId int,immediately bool){
 	cls.locker.Lock()
 	nodeInfo,ok := cls.mapIdNode[nodeId]
 	if ok == false {
@@ -74,26 +91,43 @@ func (cls *Cluster) DelNode(nodeId int){
 		return
 	}
 
+	rpc,ok := cls.mapRpc[nodeId]
+	for{
+		//立即删除
+		if immediately || ok == false {
+			break
+		}
+
+		rpc.client.Lock()
+		//正在连接中不主动断开，只断开没有连接中的
+		if rpc.client.IsConnected() {
+			nodeInfo.status = Discard
+			rpc.client.Unlock()
+			cls.locker.Unlock()
+			return
+		}
+		rpc.client.Unlock()
+		break
+	}
+
 	for _,serviceName := range nodeInfo.ServiceList{
 		cls.delServiceNode(serviceName,nodeId)
 	}
 
-	rpc,ok := cls.mapRpc[nodeId]
 	delete(cls.mapIdNode,nodeId)
 	delete(cls.mapRpc,nodeId)
-
 	cls.locker.Unlock()
 	if ok == true {
 		rpc.client.Close(false)
 	}
 }
 
-func (cls *Cluster) serviceDiscoveryDelNode (nodeId int){
+func (cls *Cluster) serviceDiscoveryDelNode (nodeId int,immediately bool){
 	if nodeId == 0 {
 		return
 	}
 
-	cls.DelNode(nodeId)
+	cls.DelNode(nodeId,immediately)
 }
 
 func (cls *Cluster) delServiceNode(serviceName string,nodeId int){
@@ -151,6 +185,10 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
 	rpcInfo.client.TriggerRpcEvent = cls.triggerRpcEvent
 	rpcInfo.client.Connect(nodeInfo.NodeId,nodeInfo.ListenAddr)
 	cls.mapRpc[nodeInfo.NodeId] = rpcInfo
+
+	//debug
+	fmt.Printf("xxxxxxxxxxxx")
+	fmt.Println(nodeInfo)
 }
 
 func (cls *Cluster) buildLocalRpc(){
@@ -339,4 +377,17 @@ func (cls *Cluster) FetchAllNodeId(fetchFun func(nodeId int)){
 		fetchFun(nodeId)
 	}
 	cls.locker.Unlock()
+}
+
+func HasService(nodeId int,serviceName string) bool{
+	cluster.locker.RLock()
+	defer cluster.locker.RUnlock()
+
+	mapNode,_ := cluster.mapServiceNode[serviceName]
+	if mapNode!=nil {
+		_,ok := mapNode[nodeId]
+		return ok
+	}
+
+	return false
 }

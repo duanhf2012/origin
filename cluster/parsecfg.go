@@ -167,7 +167,7 @@ func (cls *Cluster) parseLocalCfg(){
 
 func (cls *Cluster) checkDiscoveryNodeList(discoverMasterNode []NodeInfo) bool{
 	for i:=0;i<len(discoverMasterNode)-1;i++{
-		for j:=i+1;i<len(discoverMasterNode);j++{
+		for j:=i+1;j<len(discoverMasterNode);j++{
 			if discoverMasterNode[i].NodeId == discoverMasterNode[j].NodeId ||
 				discoverMasterNode[i].ListenAddr == discoverMasterNode[j].ListenAddr {
 				return false
