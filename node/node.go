@@ -232,11 +232,11 @@ func startNode(args interface{}) error{
 	//2.初始化node
 	initNode(nodeId)
 
-	//3.运行集群
-	cluster.GetCluster().Start()
-
-	//4.运行service
+	//3.运行service
 	service.Start()
+
+	//4.运行集群
+	cluster.GetCluster().Start()
 
 	//5.记录进程id号
 	writeProcessPid(nodeId)

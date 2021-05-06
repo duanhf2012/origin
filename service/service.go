@@ -98,6 +98,8 @@ func (s *Service) SetGoRoutineNum(goroutineNum int32) bool {
 
 func (s *Service) Start() {
 	s.startStatus = true
+	s.eventProcessor.SetEventChannel(0)
+	
 	for i:=int32(0);i< s.goroutineNum;i++{
 		s.wg.Add(1)
 		go func(){

@@ -175,6 +175,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
 	}
 	cls.mapIdNode[nodeInfo.NodeId] = *nodeInfo
 
+	log.Debug("Discovery nodeId: %d discovery service:%+v",nodeInfo.NodeId,nodeInfo.PublicServiceList)
 	//已经存在连接，则不需要进行设置
 	if _,rpcInfoOK := cls.mapRpc[nodeInfo.NodeId];rpcInfoOK == true {
 		return
@@ -186,9 +187,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
 	rpcInfo.client.Connect(nodeInfo.NodeId,nodeInfo.ListenAddr)
 	cls.mapRpc[nodeInfo.NodeId] = rpcInfo
 
-	//debug
-	fmt.Printf("xxxxxxxxxxxx")
-	fmt.Println(nodeInfo)
+
 }
 
 func (cls *Cluster) buildLocalRpc(){
