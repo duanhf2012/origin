@@ -708,10 +708,17 @@ func (slf *TestService7) GoTest(){
 origin引擎默认使用读取所有结点配置的进行确认结点有哪些Service。引擎也支持动态服务发现的方式，使用了内置的DiscoveryMaster服务用于中心Service，DiscoveryClient用于向DiscoveryMaster获取整个origin网络中所有的结点以及服务信息。具体实现细节请查看这两部分的服务实现。具体使用方式，在以下cluster配置中加入以下内容：
 ```
 {
-	"DiscoveryNode": [{
+	"MasterDiscoveryNode": [{
+		"NodeId": 2,
+		"ListenAddr": "127.0.0.1:10001",
+		"NeighborService":["HttpGateService"]
+	},
+	{
 		"NodeId": 1,
-		"ListenAddr": "127.0.0.1:8803"
+		"ListenAddr": "127.0.0.1:8801"
 	}],
+	
+	
 	"NodeList": [{
 		"NodeId": 1,
 		"ListenAddr": "127.0.0.1:8801",
@@ -723,9 +730,11 @@ origin引擎默认使用读取所有结点配置的进行确认结点有哪些Se
 	}]
 }
 ```
-新上有两新不同的字段分别为DiscoveryNode与DiscoveryService。其中:
+新上有两新不同的字段分别为MasterDiscoveryNode与DiscoveryService。其中:
 
-DiscoveryNode中配置了结点Id为1的为服务发现Master，他的监听地址ListenAddr为127.0.0.1:8803
+MasterDiscoveryNode中配置了结点Id为1的服务发现Master，他的监听地址ListenAddr为127.0.0.1:8801，结点为2的也是一个服务发现Master，不同在于多了"NeighborService":["HttpGateService"]配置。如果"NeighborService"有配置具体的服务时，则表示该结点是一个邻居Master结点。当前运行的Node结点会从该Master结点上筛选HttpGateService的服务，并且当前运行的Node结点不会向上同步本地所有公开的服务，和邻居结点关系是单向的。
+
+NeighborService可以用在当有多个以Master中心结点的网络，发现跨网络的服务场景。
 DiscoveryService表示将筛选origin网络中的TestService8服务，注意如果DiscoveryService不配置，则筛选功能不生效。
 
 
