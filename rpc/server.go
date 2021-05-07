@@ -112,7 +112,7 @@ func (agent *RpcAgent) Run() {
 	for {
 		data,err := agent.conn.ReadMsg()
 		if err != nil {
-			log.Error("read message: %v,remoteAddress:%s", err,agent.conn.RemoteAddr().String())
+			log.Error("remoteAddress:%s,read message: %v,",agent.conn.RemoteAddr().String(),err)
 			//will close tcpconn
 			break
 		}
