@@ -26,7 +26,7 @@ type IModule interface {
 	GetService() IService
 	GetModuleName() string
 	GetEventProcessor()event.IEventProcessor
-	NotifyEvent(ev *event.Event)
+	NotifyEvent(ev event.IEvent)
 }
 
 type IModuleTimer interface {
@@ -213,7 +213,7 @@ func (m *Module) GetEventProcessor() event.IEventProcessor{
 	return m.eventHandler.GetEventProcessor()
 }
 
-func (m *Module) NotifyEvent(ev *event.Event){
+func (m *Module) NotifyEvent(ev event.IEvent){
 	m.eventHandler.NotifyEvent(ev)
 }
 

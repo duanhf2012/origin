@@ -4,6 +4,9 @@ package service
 var mapServiceName map[string]IService
 var setupServiceList []IService
 
+type RegRpcEventFunType func(serviceName string)
+var RegRpcEventFun RegRpcEventFunType
+
 func init(){
 	mapServiceName = map[string]IService{}
 	setupServiceList = []IService{}

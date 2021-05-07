@@ -129,7 +129,7 @@ func GetNodeId() int {
 func initNode(id int){
 	//1.初始化集群
 	nodeId = id
-	err := cluster.GetCluster().Init(GetNodeId())
+	err := cluster.GetCluster().Init(GetNodeId(),Setup)
 	if err != nil {
 		log.Fatal("read system config is error %+v",err)
 	}
@@ -232,11 +232,11 @@ func startNode(args interface{}) error{
 	//2.初始化node
 	initNode(nodeId)
 
-	//3.运行集群
-	cluster.GetCluster().Start()
-
-	//4.运行service
+	//3.运行service
 	service.Start()
+
+	//4.运行集群
+	cluster.GetCluster().Start()
 
 	//5.记录进程id号
 	writeProcessPid(nodeId)

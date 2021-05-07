@@ -11,6 +11,7 @@ import (
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 type NodeInfoList struct {
+	DiscoveryNode []NodeInfo  //用于服务发现Node
 	NodeList []NodeInfo
 }
 
@@ -62,12 +63,13 @@ func (cls *Cluster) readServiceConfig(filepath string)  (map[string]interface{},
 	return serviceConfig,mapNodeService,nil
 }
 
-func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,error) {
-	var nodeInfoList [] NodeInfo
+func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,[]NodeInfo,error) {
+	var nodeInfoList []NodeInfo
+	var discoverNodeList []NodeInfo
 	clusterCfgPath :=strings.TrimRight(configDir,"/")  +"/cluster"
 	fileInfoList,err := ioutil.ReadDir(clusterCfgPath)
 	if err != nil {
-		return nil,fmt.Errorf("Read dir %s is fail :%+v",clusterCfgPath,err)
+		return nil,nil,fmt.Errorf("Read dir %s is fail :%+v",clusterCfgPath,err)
 	}
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
@@ -76,9 +78,9 @@ func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,error) {
 			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath,"/"),"\\")+"/"+f.Name()
 			localNodeInfoList,err := cls.ReadClusterConfig(filePath)
 			if err != nil {
-				return nil,fmt.Errorf("read file path %s is error:%+v" ,filePath,err)
+				return nil,nil,fmt.Errorf("read file path %s is error:%+v" ,filePath,err)
 			}
-
+			discoverNodeList = append(discoverNodeList,localNodeInfoList.DiscoveryNode...)
 			for _,nodeInfo := range localNodeInfoList.NodeList {
 				if nodeInfo.NodeId == nodeId || nodeId == 0 {
 					nodeInfoList = append(nodeInfoList,nodeInfo)
@@ -88,10 +90,22 @@ func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,error) {
 	}
 
 	if nodeId != 0 &&  (len(nodeInfoList)!=1){
-		return nil,fmt.Errorf("%d configurations were found for the configuration with node ID %d!",len(nodeInfoList),nodeId)
+		return nil,nil,fmt.Errorf("%d configurations were found for the configuration with node ID %d!",len(nodeInfoList),nodeId)
 	}
 
-	return nodeInfoList,nil
+	for i,_ := range nodeInfoList{
+		for j,s := range nodeInfoList[i].ServiceList{
+			//私有结点不加入到Public服务列表中
+			if strings.HasPrefix(s,"_") == false && nodeInfoList[i].Private==false {
+				nodeInfoList[i].PublicServiceList = append(nodeInfoList[i].PublicServiceList,strings.TrimLeft(s,"_"))
+			}else{
+				nodeInfoList[i].ServiceList[j] = strings.TrimLeft(s,"_")
+			}
+		}
+	}
+
+
+	return discoverNodeList,nodeInfoList,nil
 }
 
 func (cls *Cluster) readLocalService(localNodeId int) error {
@@ -142,29 +156,44 @@ func (cls *Cluster) parseLocalCfg(){
 	cls.mapIdNode[cls.localNodeInfo.NodeId] = cls.localNodeInfo
 
 	for _,sName := range cls.localNodeInfo.ServiceList{
-		cls.mapServiceNode[sName] = append(cls.mapServiceNode[sName], cls.localNodeInfo.NodeId)
+		if _,ok:=cls.mapServiceNode[sName];ok==false{
+			cls.mapServiceNode[sName] = make(map[int]struct{})
+		}
+
+		cls.mapServiceNode[sName][cls.localNodeInfo.NodeId]= struct{}{}
 	}
 }
 
-func (cls *Cluster) localPrivateService(localNodeInfo *NodeInfo){
-	for i:=0;i<len(localNodeInfo.ServiceList);i++{
-		localNodeInfo.ServiceList[i] = strings.TrimLeft(localNodeInfo.ServiceList[i],"_")
+
+func (cls *Cluster) checkDiscoveryNodeList(discoverMasterNode []NodeInfo) bool{
+	for i:=0;i<len(discoverMasterNode)-1;i++{
+		for j:=i+1;j<len(discoverMasterNode);j++{
+			if discoverMasterNode[i].NodeId == discoverMasterNode[j].NodeId ||
+				discoverMasterNode[i].ListenAddr == discoverMasterNode[j].ListenAddr {
+				return false
+			}
+		}
 	}
+
+	return true
 }
 
 func (cls *Cluster) InitCfg(localNodeId int) error{
 	cls.localServiceCfg = map[string]interface{}{}
 	cls.mapRpc = map[int] NodeRpcInfo{}
 	cls.mapIdNode = map[int]NodeInfo{}
-	cls.mapServiceNode = map[string][]int{}
+	cls.mapServiceNode = map[string]map[int]struct{}{}
 
 	//加载本地结点的NodeList配置
-	nodeInfoList,err := cls.readLocalClusterConfig(localNodeId)
+	discoveryNode,nodeInfoList,err := cls.readLocalClusterConfig(localNodeId)
 	if err != nil {
 		return err
 	}
 	cls.localNodeInfo = nodeInfoList[0]
-	cls.localPrivateService(&cls.localNodeInfo)
+	if cls.checkDiscoveryNodeList(discoveryNode) ==false {
+		return fmt.Errorf("DiscoveryNode config is error!")
+	}
+	cls.discoveryNodeList = discoveryNode
 
 	//读取本地服务配置
 	err = cls.readLocalService(localNodeId)
@@ -180,28 +209,23 @@ func (cls *Cluster) InitCfg(localNodeId int) error{
 func (cls *Cluster) IsConfigService(serviceName string) bool {
 	cls.locker.RLock()
 	defer cls.locker.RUnlock()
-	nodeList,ok := cls.mapServiceNode[serviceName]
+	mapNode,ok := cls.mapServiceNode[serviceName]
 	if ok == false {
 		return false
 	}
 
-	for _,nodeId := range nodeList{
-		if cls.localNodeInfo.NodeId == nodeId {
-			return true
-		}
-	}
-
-	return false
+	_,ok = mapNode[cls.localNodeInfo.NodeId]
+	return ok
 }
 
 func (cls *Cluster) GetNodeIdByService(serviceName string,rpcClientList []*rpc.Client,bAll bool) (error,int) {
 	cls.locker.RLock()
 	defer cls.locker.RUnlock()
-	nodeIdList,ok := cls.mapServiceNode[serviceName]
+	mapNodeId,ok := cls.mapServiceNode[serviceName]
 	count := 0
 	if ok == true {
-		for _,nodeId := range nodeIdList {
-			pClient := GetCluster().GetRpcClient(nodeId)
+		for nodeId,_ := range mapNodeId {
+			pClient := GetCluster().getRpcClient(nodeId)
 			if pClient==nil  || (bAll == false && pClient.IsConnected()==false) {
 				continue
 			}

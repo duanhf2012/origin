@@ -1,0 +1,29 @@
+syntax = "proto3";
+package rpc;
+option go_package = "./rpc";
+
+message NodeInfo{
+    int32 NodeId = 1;
+    string NodeName = 2;
+    string ListenAddr  = 3;
+    bool Private = 4;
+    repeated string PublicServiceList = 5;
+}
+
+//Client->Master
+message ServiceDiscoverReq{
+    NodeInfo nodeInfo = 1;
+}
+
+//Master->Client
+message SubscribeDiscoverNotify{
+    bool IsFull = 1;
+    int32 DelNodeId    = 2;
+    repeated NodeInfo nodeInfo = 3;
+}
+
+
+//Master->Client
+message ServiceDiscoverRes{
+    repeated NodeInfo nodeInfo = 1;
+}

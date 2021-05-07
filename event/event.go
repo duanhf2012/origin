@@ -233,7 +233,7 @@ func (processor *EventProcessor) EventHandler(ev IEvent) {
 
 func (processor *EventProcessor) pushEvent(event IEvent){
 	if len(processor.eventChannel)>=cap(processor.eventChannel){
-		log.Error("event process channel is full.")
+		log.Error("event process channel is full,data:%+v!",event)
 		return
 	}
 

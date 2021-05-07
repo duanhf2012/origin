@@ -23,6 +23,7 @@ type IService interface {
 	GetName() string
 	OnSetup(iService IService)
 	OnInit() error
+	OnStart()
 	OnRelease()
 	Wait()
 	Start()
@@ -42,6 +43,16 @@ type Service struct {
 	startStatus    bool
 	eventProcessor event.IEventProcessor
 	profiler *profiler.Profiler //性能分析器
+	rpcEventLister rpc.IRpcListener
+}
+
+type RpcEventData struct{
+	IsConnect bool
+	NodeId int
+}
+
+func (rpcEventData *RpcEventData) GetEventType() event.EventType{
+	return event.Sys_Event_Rpc_Event
 }
 
 func (s *Service) OnSetup(iService IService){
@@ -87,6 +98,8 @@ func (s *Service) SetGoRoutineNum(goroutineNum int32) bool {
 
 func (s *Service) Start() {
 	s.startStatus = true
+	s.eventProcessor.SetEventChannel(0)
+	
 	for i:=int32(0);i< s.goroutineNum;i++{
 		s.wg.Add(1)
 		go func(){
@@ -99,6 +112,7 @@ func (s *Service) Run() {
 	log.Debug("Start running Service %s.", s.GetName())
 	defer s.wg.Done()
 	var bStop = false
+	s.self.(IService).OnStart()
 	for{
 		rpcRequestChan := s.GetRpcRequestChan()
 		rpcResponseCallBack := s.GetRpcResponseChan()
@@ -212,3 +226,27 @@ func (s *Service) IsSingleCoroutine() bool {
 func (s *Service) RegRawRpc(rpcMethodId uint32,rawRpcCB rpc.RawRpcCallBack){
 	s.rpcHandler.RegRawRpc(rpcMethodId,rawRpcCB)
 }
+
+func (s *Service) OnStart(){
+}
+
+func (s *Service) OnRpcEvent(ev event.IEvent){
+	event := ev.(*RpcEventData)
+	if event.IsConnect {
+		s.rpcEventLister.OnNodeConnected(event.NodeId)
+	}else{
+		s.rpcEventLister.OnNodeDisconnect(event.NodeId)
+	}
+}
+
+func (s *Service) RegRpcListener(rpcEventLister rpc.IRpcListener) {
+	s.rpcEventLister = rpcEventLister
+	s.RegEventReceiverFunc(event.Sys_Event_Rpc_Event,s.GetEventHandler(),s.OnRpcEvent)
+	RegRpcEventFun(s.GetName())
+}
+
+func (s *Service) UnRegRpcListener(rpcLister rpc.IRpcListener) {
+	s.UnRegEventReceiverFunc(event.Sys_Event_Rpc_Event,s.GetEventHandler())
+	RegRpcEventFun(s.GetName())
+}
+
