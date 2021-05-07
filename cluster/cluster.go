@@ -150,6 +150,7 @@ func (cls *Cluster) delServiceNode(serviceName string,nodeId int){
 	}
 }
 
+
 func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
 	//本地结点不加入
 	if nodeInfo.NodeId == cls.localNodeInfo.NodeId {
@@ -270,6 +271,10 @@ func (cls *Cluster) GetMasterDiscoveryNodeInfo(nodeId int)  *NodeInfo{
 	}
 
 	return nil
+}
+
+func (cls *Cluster) IsMasterDiscoveryNode() bool{
+	return cls.GetMasterDiscoveryNodeInfo(cls.GetLocalNodeInfo().NodeId)!=nil
 }
 
 func (cls *Cluster) SetupServiceDiscovery(localNodeId int,setupServiceFun SetupServiceFun) {

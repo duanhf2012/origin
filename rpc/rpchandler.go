@@ -396,11 +396,14 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor,bCast bool,nodeId int,s
 func (handler *RpcHandler) callRpc(nodeId int,serviceMethod string,args interface{},reply interface{}) error {
 	var pClientList [maxClusterNode]*Client
 	err,count := handler.funcRpcClient(nodeId,serviceMethod,pClientList[:])
-	if count==0||err != nil {
+	if err != nil {
 		log.Error("Call serviceMethod is error:%+v!",err)
 		return err
-	}
-	if count > 1 {
+	}else if count <=0 {
+		err  = fmt.Errorf("Call serviceMethod is error:cannot find %s",serviceMethod)
+		log.Error("%s",err.Error())
+		return err
+	}else if count > 1 {
 		log.Error("Cannot call more then 1 node!")
 		return fmt.Errorf("Cannot call more then 1 node!")
 	}

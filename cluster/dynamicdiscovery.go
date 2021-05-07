@@ -12,8 +12,10 @@ const maxTryCount = 30             //最大重试次数
 const perTrySecond = 2*time.Second //每次重试间隔2秒
 const DynamicDiscoveryMasterName = "DiscoveryMaster"
 const DynamicDiscoveryClientName = "DiscoveryClient"
-const DynamicDiscoveryMasterNameRpcMethod = DynamicDiscoveryMasterName+".RPC_RegServiceDiscover"
-const DynamicDiscoveryClientNameRpcMethod = DynamicDiscoveryClientName+".RPC_SubServiceDiscover"
+const RegServiceDiscover = DynamicDiscoveryMasterName+".RPC_RegServiceDiscover"
+const SubServiceDiscover = DynamicDiscoveryClientName+".RPC_SubServiceDiscover"
+const AddSubServiceDiscover = DynamicDiscoveryMasterName+".RPC_AddSubServiceDiscover"
+
 type DynamicDiscoveryMaster struct {
 	service.Service
 
@@ -43,12 +45,21 @@ func init(){
 }
 
 func (ds *DynamicDiscoveryMaster) addNodeInfo(nodeInfo *rpc.NodeInfo){
+	if len(nodeInfo.PublicServiceList)==0 {
+		return
+	}
+
 	_,ok := ds.mapNodeInfo[nodeInfo.NodeId]
 	if ok == true {
 		return
 	}
 	ds.mapNodeInfo[nodeInfo.NodeId] = struct{}{}
 	ds.nodeInfo = append(ds.nodeInfo,nodeInfo)
+}
+
+func (ds *DynamicDiscoveryMaster) RPC_AddSubServiceDiscover(nodeInfo *rpc.NodeInfo,ret *rpc.Empty) error{
+	ds.addNodeInfo(nodeInfo)
+	return nil
 }
 
 func (ds *DynamicDiscoveryMaster) OnInit() error{
@@ -79,7 +90,7 @@ func (ds *DynamicDiscoveryMaster) OnNodeConnected(nodeId int){
 	notifyDiscover.IsFull = true
 	notifyDiscover.NodeInfo = ds.nodeInfo
 	notifyDiscover.MasterNodeId = int32(cluster.GetLocalNodeInfo().NodeId)
-	ds.GoNode(nodeId,DynamicDiscoveryClientNameRpcMethod,&notifyDiscover)
+	ds.GoNode(nodeId,SubServiceDiscover,&notifyDiscover)
 }
 
 func (ds *DynamicDiscoveryMaster) OnNodeDisconnect(nodeId int){
@@ -88,7 +99,7 @@ func (ds *DynamicDiscoveryMaster) OnNodeDisconnect(nodeId int){
 	notifyDiscover.DelNodeId = int32(nodeId)
 	//删除结点
 	cluster.DelNode(nodeId,true)
-	ds.CastGo(DynamicDiscoveryClientNameRpcMethod,&notifyDiscover)
+	ds.CastGo(SubServiceDiscover,&notifyDiscover)
 }
 
 // 收到注册过来的结点
@@ -104,7 +115,7 @@ func (ds *DynamicDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscove
 	var notifyDiscover rpc.SubscribeDiscoverNotify
 	notifyDiscover.MasterNodeId = int32(cluster.GetLocalNodeInfo().NodeId)
 	notifyDiscover.NodeInfo = append(notifyDiscover.NodeInfo,req.NodeInfo)
-	ds.CastGo(DynamicDiscoveryClientNameRpcMethod,&notifyDiscover)
+	ds.CastGo(SubServiceDiscover,&notifyDiscover)
 
 	//存入本地
 	ds.addNodeInfo(req.NodeInfo)
@@ -145,7 +156,6 @@ func (dc *DynamicDiscoveryClient)  addDiscoveryMaster(){
 			continue
 		}
 		dc.funSetService(&discoveryNodeList[i])
-		//cluster.serviceDiscoverySetNodeInfo(&discoveryNodeList[i])
 	}
 }
 
@@ -218,10 +228,13 @@ func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDisco
 		}
 	}
 
+
+
 	//设置新结点
 	for _, nodeInfo := range mapNodeInfo {
 		dc.setNodeInfo(nodeInfo)
 	}
+
 
 	return nil
 }
@@ -250,17 +263,19 @@ func (dc *DynamicDiscoveryClient) OnNodeConnected(nodeId int) {
 	//DiscoveryNode配置中没有配置NeighborService，则同步当前结点所有服务
 	if len(nodeInfo.NeighborService)==0{
 		req.NodeInfo.PublicServiceList = cluster.localNodeInfo.PublicServiceList
+	}else{
+		req.NodeInfo.PublicServiceList = append(req.NodeInfo.PublicServiceList,DynamicDiscoveryClientName)
 	}
 
 	//向Master服务同步本Node服务信息
-	err := dc.AsyncCallNode(nodeId, DynamicDiscoveryMasterNameRpcMethod, &req, func(res *rpc.Empty, err error) {
+	err := dc.AsyncCallNode(nodeId, RegServiceDiscover, &req, func(res *rpc.Empty, err error) {
 		if err != nil {
-			log.Error("call %s is fail :%s", DynamicDiscoveryMasterNameRpcMethod, err.Error())
+			log.Error("call %s is fail :%s", RegServiceDiscover, err.Error())
 			return
 		}
 	})
 	if err != nil {
-		log.Error("call %s is fail :%s", DynamicDiscoveryMasterNameRpcMethod, err.Error())
+		log.Error("call %s is fail :%s", RegServiceDiscover, err.Error())
 	}
 }
 
@@ -285,6 +300,11 @@ func (dc *DynamicDiscoveryClient) setNodeInfo(nodeInfo *rpc.NodeInfo){
 
 	if len(nodeInfo.PublicServiceList)==0{
 		return
+	}
+
+	if cluster.IsMasterDiscoveryNode() {
+		var ret rpc.Empty
+		dc.Call(AddSubServiceDiscover,nodeInfo,&ret)
 	}
 
 	var nInfo NodeInfo
