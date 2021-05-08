@@ -85,7 +85,7 @@ func (cls *Cluster) DiscardNode(nodeId int){
 }
 
 func (cls *Cluster) DelNode(nodeId int,immediately bool){
-	//不删除
+	//MasterDiscover结点与本地结点不删除
 	if cls.GetMasterDiscoveryNodeInfo(nodeId)!=nil || nodeId == cls.localNodeInfo.NodeId {
 		return
 	}
