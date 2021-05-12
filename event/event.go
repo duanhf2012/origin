@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-const DefaultEventChannelLen = 10000
+const DefaultEventChannelLen = 1000000
 
 //事件接受器
 type EventCallBack func(event IEvent)
