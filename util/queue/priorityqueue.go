@@ -17,7 +17,7 @@ func (pq PriorityQueueSlice) Len() int { return len(pq) }
 
 func (pq PriorityQueueSlice) Less(i, j int) bool {
 	// We want Pop to give us the highest, not lowest, Priority so we use greater than here.
-	return pq[i].Priority < pq[j].Priority
+	return pq[i].Priority > pq[j].Priority
 }
 
 func (pq PriorityQueueSlice) Swap(i, j int) {
