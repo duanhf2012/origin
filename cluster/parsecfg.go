@@ -11,7 +11,7 @@ import (
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 type NodeInfoList struct {
-	DiscoveryNode []NodeInfo  //用于服务发现Node
+	MasterDiscoveryNode []NodeInfo  //用于服务发现Node
 	NodeList []NodeInfo
 }
 
@@ -65,7 +65,7 @@ func (cls *Cluster) readServiceConfig(filepath string)  (map[string]interface{},
 
 func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,[]NodeInfo,error) {
 	var nodeInfoList []NodeInfo
-	var discoverNodeList []NodeInfo
+	var masterDiscoverNodeList []NodeInfo
 	clusterCfgPath :=strings.TrimRight(configDir,"/")  +"/cluster"
 	fileInfoList,err := ioutil.ReadDir(clusterCfgPath)
 	if err != nil {
@@ -80,7 +80,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,[]NodeInfo,er
 			if err != nil {
 				return nil,nil,fmt.Errorf("read file path %s is error:%+v" ,filePath,err)
 			}
-			discoverNodeList = append(discoverNodeList,localNodeInfoList.DiscoveryNode...)
+			masterDiscoverNodeList = append(masterDiscoverNodeList,localNodeInfoList.MasterDiscoveryNode...)
 			for _,nodeInfo := range localNodeInfoList.NodeList {
 				if nodeInfo.NodeId == nodeId || nodeId == 0 {
 					nodeInfoList = append(nodeInfoList,nodeInfo)
@@ -105,7 +105,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo,[]NodeInfo,er
 	}
 
 
-	return discoverNodeList,nodeInfoList,nil
+	return masterDiscoverNodeList,nodeInfoList,nil
 }
 
 func (cls *Cluster) readLocalService(localNodeId int) error {
@@ -193,7 +193,7 @@ func (cls *Cluster) InitCfg(localNodeId int) error{
 	if cls.checkDiscoveryNodeList(discoveryNode) ==false {
 		return fmt.Errorf("DiscoveryNode config is error!")
 	}
-	cls.discoveryNodeList = discoveryNode
+	cls.masterDiscoveryNodeList = discoveryNode
 
 	//读取本地服务配置
 	err = cls.readLocalService(localNodeId)

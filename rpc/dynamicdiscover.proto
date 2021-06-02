@@ -17,13 +17,12 @@ message ServiceDiscoverReq{
 
 //Master->Client
 message SubscribeDiscoverNotify{
-    bool IsFull = 1;
-    int32 DelNodeId    = 2;
-    repeated NodeInfo nodeInfo = 3;
+    int32 MasterNodeId = 1;
+    bool IsFull = 2;
+    int32 DelNodeId    = 3;
+    repeated NodeInfo nodeInfo = 4;
 }
 
-
 //Master->Client
-message ServiceDiscoverRes{
-    repeated NodeInfo nodeInfo = 1;
+message Empty{
 }
