@@ -47,7 +47,7 @@ func (client *Client) Connect(id int,addr string) error {
 	client.callRpcTimeout = 15*time.Second
 	client.ConnNum = 1
 	client.ConnectInterval = time.Second*2
-	client.PendingWriteNum = 2000000
+	client.PendingWriteNum = 200000
 	client.AutoReconnect = true
 	client.LenMsgLen = 2
 	client.MinMsgLen = 2
