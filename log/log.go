@@ -3,17 +3,17 @@ package log
 import (
 	"errors"
 	"fmt"
+	jsoniter "github.com/json-iterator/go"
+	"io"
 	"log"
+	syslog "log"
 	"os"
 	"path"
+	"runtime"
 	"runtime/debug"
 	"strings"
-	"time"
 	"sync"
-	"io"
-	"runtime"
-	syslog "log"
-	jsoniter "github.com/json-iterator/go"
+	"time"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -186,30 +186,211 @@ func (logger *Logger) doSPrintf(level int, printLevel string, a []interface{}) {
 
 		case int:
 			logger.buf.AppendInt(int64(s.(int)))
+		case []int:
+			intSlice := s.([]int)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendInt(int64(v))
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case int8:
 			logger.buf.AppendInt(int64(s.(int8)))
+		case []int8:
+			intSlice := s.([]int8)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendInt(int64(v))
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case int16:
 			logger.buf.AppendInt(int64(s.(int16)))
+		case []int16:
+			intSlice := s.([]int16)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendInt(int64(v))
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case int32:
 			logger.buf.AppendInt(int64(s.(int32)))
+		case []int32:
+			intSlice := s.([]int32)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendInt(int64(v))
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case int64:
 			logger.buf.AppendInt(s.(int64))
+		case []int64:
+			intSlice := s.([]int64)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendInt(v)
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case uint:
 			logger.buf.AppendUint(uint64(s.(uint)))
+
+		case []uint:
+			intSlice := s.([]uint)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendUint(uint64(v))
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
+
 		case uint8:
 			logger.buf.AppendUint(uint64(s.(uint8)))
+		case []uint8:
+			intSlice := s.([]uint8)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendUint(uint64(v))
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
+
 		case uint16:
 			logger.buf.AppendUint(uint64(s.(uint16)))
+		case []uint16:
+			intSlice := s.([]uint16)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendUint(uint64(v))
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case uint32:
 			logger.buf.AppendUint(uint64(s.(uint32)))
+		case []uint32:
+			intSlice := s.([]uint32)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendUint(uint64(v))
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case uint64:
 			logger.buf.AppendUint(s.(uint64))
+		case []uint64:
+			intSlice := s.([]uint64)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendUint(v)
+				logger.buf.AppendByte(',')
+			}
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case float32:
 			logger.buf.AppendFloat(float64(s.(float32)),32)
+		case []float32:
+			intSlice := s.([]float32)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendFloat(float64(v),32)
+				logger.buf.AppendByte(',')
+			}
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case float64:
 			logger.buf.AppendFloat(s.(float64),64)
+		case []float64:
+			intSlice := s.([]float64)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendFloat(v,64)
+				logger.buf.AppendByte(',')
+			}
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case bool:
 			logger.buf.AppendBool(s.(bool))
+		case []bool:
+			intSlice := s.([]bool)
+			logger.buf.AppendByte('[')
+			for _,v := range intSlice {
+				logger.buf.AppendBool(v)
+				logger.buf.AppendByte(',')
+			}
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
 		case string:
 			logger.buf.AppendString(s.(string))
 		case *int:
@@ -310,8 +491,8 @@ func (logger *Logger) doSPrintf(level int, printLevel string, a []interface{}) {
 			}else{
 				logger.buf.AppendString("nil<*string>")
 			}
-		case []byte:
-			logger.buf.AppendBytes(s.([]byte))
+		//case []byte:
+		//	logger.buf.AppendBytes(s.([]byte))
 		default:
 			//b,err := json.MarshalToString(s)
 			//if err != nil {
@@ -422,10 +603,10 @@ func SFatal(a ...interface{}) {
 }
 
 const timeFlag = syslog.Ldate|syslog.Ltime|syslog.Lmicroseconds
-func (l *Logger) formatHeader(calldepth int,t *time.Time) {
+func (logger *Logger) formatHeader(calldepth int,t *time.Time) {
 	var file string
 	var line int
-	if l.flag&(syslog.Lshortfile|syslog.Llongfile) != 0 {
+	if logger.flag&(syslog.Lshortfile|syslog.Llongfile) != 0 {
 		// Release lock while getting caller info - it's expensive.
 		var ok bool
 		_, file, line, ok = runtime.Caller(calldepth)
@@ -435,38 +616,38 @@ func (l *Logger) formatHeader(calldepth int,t *time.Time) {
 		}
 	}
 
-	if l.flag&syslog.Lmsgprefix != 0 {
-		l.buf.AppendString(l.filepre)
+	if logger.flag&syslog.Lmsgprefix != 0 {
+		logger.buf.AppendString(logger.filepre)
 	}
-	if l.flag&timeFlag != 0 {
-		if l.flag&syslog.Ldate != 0 {
+	if logger.flag&timeFlag != 0 {
+		if logger.flag&syslog.Ldate != 0 {
 			year, month, day := t.Date()
-			l.buf.AppendInt(int64(year))
-			l.buf.AppendByte('/')
-			l.buf.AppendInt(int64(month))
-			l.buf.AppendByte('/')
-			l.buf.AppendInt(int64(day))
-			l.buf.AppendByte(' ')
+			logger.buf.AppendInt(int64(year))
+			logger.buf.AppendByte('/')
+			logger.buf.AppendInt(int64(month))
+			logger.buf.AppendByte('/')
+			logger.buf.AppendInt(int64(day))
+			logger.buf.AppendByte(' ')
 		}
 
-		if l.flag&(syslog.Ltime|syslog.Lmicroseconds) != 0 {
+		if logger.flag&(syslog.Ltime|syslog.Lmicroseconds) != 0 {
 			hour, min, sec := t.Clock()
-			l.buf.AppendInt(int64(hour))
-			l.buf.AppendByte(':')
-			l.buf.AppendInt(int64(min))
-			l.buf.AppendByte(':')
+			logger.buf.AppendInt(int64(hour))
+			logger.buf.AppendByte(':')
+			logger.buf.AppendInt(int64(min))
+			logger.buf.AppendByte(':')
 
-			l.buf.AppendInt(int64(sec))
+			logger.buf.AppendInt(int64(sec))
 
-			if l.flag&syslog.Lmicroseconds != 0 {
-				l.buf.AppendByte('.')
-				l.buf.AppendInt(int64(t.Nanosecond()/1e3))
+			if logger.flag&syslog.Lmicroseconds != 0 {
+				logger.buf.AppendByte('.')
+				logger.buf.AppendInt(int64(t.Nanosecond()/1e3))
 			}
-			l.buf.AppendByte(' ')
+			logger.buf.AppendByte(' ')
 		}
 	}
-	if l.flag&(syslog.Lshortfile|syslog.Llongfile) != 0 {
-		if l.flag&syslog.Lshortfile != 0 {
+	if logger.flag&(syslog.Lshortfile|syslog.Llongfile) != 0 {
+		if logger.flag&syslog.Lshortfile != 0 {
 			short := file
 			for i := len(file) - 1; i > 0; i-- {
 				if file[i] == '/' {
@@ -476,13 +657,13 @@ func (l *Logger) formatHeader(calldepth int,t *time.Time) {
 			}
 			file = short
 		}
-		l.buf.AppendString(file)
-		l.buf.AppendByte(':')
-		l.buf.AppendInt(int64(line))
-		l.buf.AppendString(": ")
+		logger.buf.AppendString(file)
+		logger.buf.AppendByte(':')
+		logger.buf.AppendInt(int64(line))
+		logger.buf.AppendString(": ")
 	}
 
-	if l.flag&syslog.Lmsgprefix != 0 {
-		l.buf.AppendString(l.filepre)
+	if logger.flag&syslog.Lmsgprefix != 0 {
+		logger.buf.AppendString(logger.filepre)
 	}
 }
