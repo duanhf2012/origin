@@ -109,7 +109,7 @@ func (cls *Cluster) DelNode(nodeId int,immediately bool){
 			nodeInfo.status = Discard
 			rpc.client.Unlock()
 			cls.locker.Unlock()
-			log.Release("Discard node %d %s",nodeInfo.NodeId,nodeInfo.ListenAddr)
+			log.SRelease("Discard node ",nodeInfo.NodeId," ",nodeInfo.ListenAddr)
 			return
 		}
 		rpc.client.Unlock()
@@ -127,7 +127,7 @@ func (cls *Cluster) DelNode(nodeId int,immediately bool){
 		rpc.client.Close(false)
 	}
 
-	log.Release("remove node %d %s",nodeInfo.NodeId,nodeInfo.ListenAddr)
+	log.SRelease("remove node ",nodeInfo.NodeId," ",nodeInfo.ListenAddr)
 }
 
 func (cls *Cluster) serviceDiscoveryDelNode (nodeId int,immediately bool){
@@ -173,7 +173,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
 	for _,serviceName := range nodeInfo.PublicServiceList {
 		if _,ok :=  mapDuplicate[serviceName];ok == true {
 			//存在重复
-			log.Error("Bad duplicate Service Cfg.")
+			log.SError("Bad duplicate Service Cfg.")
 			continue
 		}
 		mapDuplicate[serviceName] = nil
@@ -184,7 +184,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo (nodeInfo *NodeInfo){
 	}
 	cls.mapIdNode[nodeInfo.NodeId] = *nodeInfo
 
-	log.Release("Discovery nodeId: %d services:%+v",nodeInfo.NodeId,nodeInfo.PublicServiceList)
+	log.SRelease("Discovery nodeId: ",nodeInfo.NodeId," services:",nodeInfo.PublicServiceList)
 	
 	//已经存在连接，则不需要进行设置
 	if _,rpcInfoOK := cls.mapRpc[nodeInfo.NodeId];rpcInfoOK == true {
@@ -366,7 +366,7 @@ func (cls *Cluster) triggerRpcEvent (bConnect bool,clientSeq uint32,nodeId int) 
 	for serviceName,_:= range cls.mapServiceListenRpcEvent{
 		ser := service.GetService(serviceName)
 		if ser == nil {
-			log.Error("cannot find service name %s",serviceName)
+			log.SError("cannot find service name ",serviceName)
 			continue
 		}
 

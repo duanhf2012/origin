@@ -110,7 +110,7 @@ func (m *Module) AddModule(module IModule) (int64,error){
 	m.child[module.GetModuleId()] = module
 	m.ancestor.getBaseModule().(*Module).descendants[module.GetModuleId()] = module
 
-	log.Debug("Add module %s completed", m.GetModuleName())
+	log.SDebug("Add module ",module.GetModuleName()," completed")
 	return module.GetModuleId(),nil
 }
 
@@ -124,7 +124,7 @@ func (m *Module) ReleaseModule(moduleId int64){
 
 	pModule.GetEventHandler().Destroy()
 	pModule.self.OnRelease()
-	log.Debug("Release module %s.", m.GetModuleName())
+	log.SDebug("Release module ", pModule.GetModuleName())
 	for pTimer,_ := range pModule.mapActiveTimer {
 		pTimer.Cancel()
 	}

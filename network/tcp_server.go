@@ -35,19 +35,19 @@ func (server *TCPServer) Start() {
 func (server *TCPServer) init() {
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		log.Fatal("%v", err)
+		log.SFatal("Listen tcp error:", err.Error())
 	}
 
 	if server.MaxConnNum <= 0 {
 		server.MaxConnNum = 100
-		log.Release("invalid MaxConnNum, reset to %v", server.MaxConnNum)
+		log.SRelease("invalid MaxConnNum, reset to ", server.MaxConnNum)
 	}
 	if server.PendingWriteNum <= 0 {
 		server.PendingWriteNum = 100
-		log.Release("invalid PendingWriteNum, reset to %v", server.PendingWriteNum)
+		log.SRelease("invalid PendingWriteNum, reset to ", server.PendingWriteNum)
 	}
 	if server.NewAgent == nil {
-		log.Fatal("NewAgent must not be nil")
+		log.SFatal("NewAgent must not be nil")
 	}
 
 	server.ln = ln
@@ -89,7 +89,7 @@ func (server *TCPServer) run() {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				log.Release("accept error: %v; retrying in %v", err, tempDelay)
+				log.SRelease("accept error:",err.Error(),"; retrying in ", tempDelay)
 				time.Sleep(tempDelay)
 				continue
 			}
@@ -102,7 +102,7 @@ func (server *TCPServer) run() {
 		if len(server.conns) >= server.MaxConnNum {
 			server.mutexConns.Unlock()
 			conn.Close()
-			log.Debug("too many connections")
+			log.SWarning("too many connections")
 			continue
 		}
 		server.conns[conn] = struct{}{}

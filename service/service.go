@@ -64,7 +64,7 @@ func (s *Service) OnSetup(iService IService){
 func (s *Service) OpenProfiler()  {
 	s.profiler = profiler.RegProfiler(s.GetName())
 	if s.profiler==nil {
-		log.Fatal("rofiler.RegProfiler %s fail.", s.GetName())
+		log.SFatal("rofiler.RegProfiler ",s.GetName()," fail.")
 	}
 }
 
@@ -88,7 +88,7 @@ func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServe
 func (s *Service) SetGoRoutineNum(goroutineNum int32) bool {
 	//已经开始状态不允许修改协程数量,打开性能分析器不允许开多线程
 	if s.startStatus == true || s.profiler!=nil {
-		log.Error("open profiler mode is not allowed to set Multi-coroutine.")
+		log.SError("open profiler mode is not allowed to set Multi-coroutine.")
 		return false
 	}
 
@@ -109,7 +109,7 @@ func (s *Service) Start() {
 }
 
 func (s *Service) Run() {
-	log.Debug("Start running Service %s.", s.GetName())
+	log.SDebug("Start running Service ", s.GetName())
 	defer s.wg.Done()
 	var bStop = false
 	s.self.(IService).OnStart()
@@ -184,12 +184,11 @@ func (s *Service) Release(){
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
-			err := fmt.Errorf("%v: %s", r, buf[:l])
-			log.Error("core dump info:%+v\n",err)
+			log.SError("core dump info:",r," : ",string(buf[:l]))
 		}
 	}()
 	s.self.OnRelease()
-	log.Debug("Release Service %s.", s.GetName())
+	log.SDebug("Release Service ", s.GetName())
 }
 
 func (s *Service) OnRelease(){

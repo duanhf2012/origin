@@ -1,7 +1,7 @@
 package cluster
 
 import (
-	"fmt"
+	"errors"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/service"
@@ -121,8 +121,8 @@ func (ds *DynamicDiscoveryMaster) RpcCastGo(serviceMethod string, args interface
 // 收到注册过来的结点
 func (ds *DynamicDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscoverReq, res *rpc.Empty) error {
 	if req.NodeInfo == nil {
-		err := fmt.Errorf("RPC_RegServiceDiscover req is error.")
-		log.Error(err.Error())
+		err := errors.New("RPC_RegServiceDiscover req is error.")
+		log.SError(err.Error())
 
 		return err
 	}
@@ -335,12 +335,12 @@ func (dc *DynamicDiscoveryClient) OnNodeConnected(nodeId int) {
 	//向Master服务同步本Node服务信息
 	err := dc.AsyncCallNode(nodeId, RegServiceDiscover, &req, func(res *rpc.Empty, err error) {
 		if err != nil {
-			log.Error("call %s is fail :%s", RegServiceDiscover, err.Error())
+			log.SError("call ",RegServiceDiscover," is fail :", err.Error())
 			return
 		}
 	})
 	if err != nil {
-		log.Error("call %s is fail :%s", RegServiceDiscover, err.Error())
+		log.SError("call ",RegServiceDiscover," is fail :", err.Error())
 	}
 }
 

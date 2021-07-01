@@ -1,7 +1,6 @@
 package event
 
 import (
-	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"runtime"
 	"sync"
@@ -217,8 +216,7 @@ func (processor *EventProcessor) EventHandler(ev IEvent) {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
-			err := fmt.Errorf("%v: %s", r, buf[:l])
-			log.Error("core dump info:%+v\n",err)
+			log.SError("core dump info:",r,":",string(buf[:l]))
 		}
 	}()
 
@@ -233,7 +231,7 @@ func (processor *EventProcessor) EventHandler(ev IEvent) {
 
 func (processor *EventProcessor) pushEvent(event IEvent){
 	if len(processor.eventChannel)>=cap(processor.eventChannel){
-		log.Error("event process channel is full,data:%+v!",event)
+		log.SError("event process channel is full,data:",event.GetEventType())
 		return
 	}
 
@@ -242,13 +240,13 @@ func (processor *EventProcessor) pushEvent(event IEvent){
 
 func (processor *EventProcessor) castEvent(event IEvent){
 	if processor.mapListenerEvent == nil {
-		log.Error("mapListenerEvent not init!")
+		log.SError("mapListenerEvent not init!")
 		return
 	}
 
 	eventProcessor,ok := processor.mapListenerEvent[event.GetEventType()]
 	if ok == false || processor == nil{
-		log.Debug("event type %d not listen.",event.GetEventType())
+		log.SDebug("event type ",event.GetEventType()," not listen.")
 		return
 	}
 

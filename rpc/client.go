@@ -259,8 +259,7 @@ func (client *Client) Run(){
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
-			err := fmt.Errorf("%v: %s\n", r, buf[:l])
-			log.Error("core dump info:%+v",err)
+			log.SError("core dump info:",r,":", string(buf[:l]))
 		}
 	}()
 
@@ -268,14 +267,14 @@ func (client *Client) Run(){
 	for {
 		bytes,err := client.conn.ReadMsg()
 		if err != nil {
-			log.Error("rpcClient %s ReadMsg error:%+v", client.Addr,err)
+			log.SError("rpcClient ",client.Addr," ReadMsg error:",err.Error())
 			return
 		}
 
 		processor := GetProcessor(uint8(bytes[0]))
 		if processor==nil {
 			client.conn.ReleaseReadMsg(bytes)
-			log.Error("rpcClient %s ReadMsg head error:%+v", client.Addr,err)
+			log.SError("rpcClient ",client.Addr," ReadMsg head error:",err.Error())
 			return
 		}
 
@@ -287,19 +286,19 @@ func (client *Client) Run(){
 		client.conn.ReleaseReadMsg(bytes)
 		if err != nil {
 			processor.ReleaseRpcResponse(response.RpcResponseData)
-			log.Error("rpcClient Unmarshal head error,error:%+v",err)
+			log.SError("rpcClient Unmarshal head error:",err.Error())
 			continue
 		}
 
 		v := client.RemovePending(response.RpcResponseData.GetSeq())
 		if v == nil {
-			log.Error("rpcClient cannot find seq %d in pending", response.RpcResponseData.GetSeq())
+			log.SError("rpcClient cannot find seq ",response.RpcResponseData.GetSeq()," in pending")
 		}else  {
 			v.Err = nil
 			if len(response.RpcResponseData.GetReply()) >0 {
 				err = processor.Unmarshal(response.RpcResponseData.GetReply(),v.Reply)
 				if err != nil {
-					log.Error("rpcClient Unmarshal body error,error:%+v",err)
+					log.SError("rpcClient Unmarshal body error:",err.Error())
 					v.Err = err
 				}
 			}

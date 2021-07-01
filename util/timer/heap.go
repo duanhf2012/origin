@@ -95,7 +95,7 @@ func tick() bool{
 	t := heap.Pop(&timerHeap).(*Timer)
 	timerHeapLock.Unlock()
 	if len(t.C)>= cap(t.C) {
-		log.Error("Timer channel full!")
+		log.SError("Timer channel full!")
 
 		return true
 	}

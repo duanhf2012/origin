@@ -167,6 +167,23 @@ func (logger *Logger) doSPrintf(level int, printLevel string, a []interface{}) {
 	logger.buf.AppendString(printLevel)
 	for _,s := range a {
 		switch s.(type) {
+		//case error:
+		//	logger.buf.AppendString(s.(error).Error())
+		case []string:
+			strSlice := s.([]string)
+			logger.buf.AppendByte('[')
+			for _,str := range strSlice {
+				logger.buf.AppendString(str)
+				logger.buf.AppendByte(',')
+			}
+
+			lastIdx := logger.buf.Len()-1
+			if logger.buf.Bytes()[lastIdx] == ',' {
+				logger.buf.Bytes()[lastIdx] = ']'
+			}else{
+				logger.buf.AppendByte(']')
+			}
+
 		case int:
 			logger.buf.AppendInt(int64(s.(int)))
 		case int8:
@@ -293,14 +310,15 @@ func (logger *Logger) doSPrintf(level int, printLevel string, a []interface{}) {
 			}else{
 				logger.buf.AppendString("nil<*string>")
 			}
+		case []byte:
+			logger.buf.AppendBytes(s.([]byte))
 		default:
-			b,err := json.Marshal(s)
-			if err != nil {
-				logger.buf.AppendString("<unknown type>")
-			}else{
-				logger.buf.AppendBytes(b)
-			}
-
+			//b,err := json.MarshalToString(s)
+			//if err != nil {
+			logger.buf.AppendString("<unknown type>")
+			//}else{
+				//logger.buf.AppendBytes(b)
+			//}
 		}
 	}
 	logger.buf.AppendByte('\n')

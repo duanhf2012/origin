@@ -189,7 +189,7 @@ func (slf *Client) Run() {
 		slf.tcpConn.SetReadDeadline(slf.tcpService.ReadDeadline)
 		bytes,err := slf.tcpConn.ReadMsg()
 		if err != nil {
-			log.Debug("read client id %d is error:%+v",slf.id,err)
+			log.SDebug("read client id ",slf.id," is error:",err.Error())
 			break
 		}
 		data,err:=slf.tcpService.process.Unmarshal(bytes)

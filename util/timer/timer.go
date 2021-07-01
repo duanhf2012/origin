@@ -95,7 +95,7 @@ func (t *Timer) Do(){
 				buf := make([]byte, 4096)
 				l := runtime.Stack(buf, false)
 				err := fmt.Errorf("%v: %s", r, buf[:l])
-				log.Error("core dump info:%+v\n", err)
+				log.SError("core dump info:", err.Error())
 			}
 		}()
 		t.cb()
