@@ -1,15 +1,27 @@
 package log // import "go.uber.org/zap/buffer"
 
-import "strconv"
+import (
+	"strconv"
+	"sync"
+)
 
 const _size = 9216
 
 type Buffer struct {
 	bs   []byte
+	mu     sync.Mutex // ensures atomic writes; protects the following fields
 }
 
 func (buff *Buffer) Init(){
 	buff.bs = make([]byte,_size)
+}
+
+func (buff *Buffer) Locker() {
+	buff.mu.Lock()
+}
+
+func (buff *Buffer) UnLocker() {
+	buff.mu.Unlock()
 }
 
 // AppendByte writes a single byte to the Buffer.

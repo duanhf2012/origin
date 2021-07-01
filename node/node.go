@@ -163,7 +163,7 @@ func initLog() error{
 
 	localnodeinfo := cluster.GetCluster().GetLocalNodeInfo()
 	filepre := fmt.Sprintf("%s_%d_", localnodeinfo.NodeName, localnodeinfo.NodeId)
-	logger,err := log.New(logLevel,logPath,filepre,slog.LstdFlags|slog.Lshortfile)
+	logger,err := log.New(logLevel,logPath,filepre,slog.LstdFlags|slog.Lshortfile,10)
 	if err != nil {
 		fmt.Printf("cannot create log file!\n")
 		return err
@@ -287,7 +287,7 @@ func GetConfigDir() string {
 }
 
 func SetSysLog(strLevel string, pathname string, flag int){
-	logs,_:= log.New(strLevel,pathname, "", flag)
+	logs,_:= log.New(strLevel,pathname, "", flag,10)
 	log.Export(logs)
 }
 
