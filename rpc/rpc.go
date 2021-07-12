@@ -1,8 +1,8 @@
 package rpc
 
 import (
-	"reflect"
 	"github.com/duanhf2012/origin/util/sync"
+	"reflect"
 	"time"
 )
 

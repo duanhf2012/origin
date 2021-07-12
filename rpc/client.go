@@ -2,13 +2,14 @@ package rpc
 
 import (
 	"container/list"
-	"fmt"
+	"errors"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/util/timer"
 	"math"
 	"reflect"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -100,7 +101,8 @@ func (client *Client) checkRpcCallTimeout(){
 		}
 		pCall := pElem.Value.(*Call)
 		if now.Sub(pCall.callTime) > client.callRpcTimeout {
-			pCall.Err = fmt.Errorf("RPC call takes more than %d seconds!", client.callRpcTimeout/time.Second)
+			strTimeout := strconv.FormatInt(int64(client.callRpcTimeout/time.Second), 10)
+			pCall.Err = errors.New("RPC call takes more than "+strTimeout+ " seconds")
 			client.makeCallFail(pCall)
 			client.pendingLock.Unlock()
 			continue
@@ -113,7 +115,7 @@ func (client *Client) ResetPending(){
 	client.pendingLock.Lock()
 	if client.pending != nil {
 		for _,v := range client.pending {
-			v.Value.(*Call).Err = fmt.Errorf("node is disconnect.")
+			v.Value.(*Call).Err = errors.New("node is disconnect")
 			v.Value.(*Call).done <- v.Value.(*Call)
 		}
 	}
@@ -186,7 +188,7 @@ func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,call
 	}
 
 	if client.conn == nil {
-		return fmt.Errorf("Rpc server is disconnect,call %s is fail!",serviceMethod)
+		return errors.New("Rpc server is disconnect,call "+serviceMethod)
 	}
 
 	call := MakeCall()
@@ -224,7 +226,7 @@ func (client *Client) RawGo(processor IRpcProcessor,noReply bool,rpcMethodId uin
 
 	if client.conn == nil {
 		call.Seq = 0
-		call.Err = fmt.Errorf("call %s is fail,rpc client is disconnect.",serviceMethod)
+		call.Err = errors.New(serviceMethod+"  was called failed,rpc client is disconnect")
 		return call
 	}
 
@@ -271,7 +273,7 @@ func (client *Client) Run(){
 			return
 		}
 
-		processor := GetProcessor(uint8(bytes[0]))
+		processor := GetProcessor(bytes[0])
 		if processor==nil {
 			client.conn.ReleaseReadMsg(bytes)
 			log.SError("rpcClient ",client.Addr," ReadMsg head error:",err.Error())
@@ -280,7 +282,7 @@ func (client *Client) Run(){
 
 		//1.解析head
 		response := RpcResponse{}
-		response.RpcResponseData =processor.MakeRpcResponse(0,RpcError(""),nil)
+		response.RpcResponseData =processor.MakeRpcResponse(0,"",nil)
 
 		err = processor.Unmarshal(bytes[1:], response.RpcResponseData)
 		client.conn.ReleaseReadMsg(bytes)

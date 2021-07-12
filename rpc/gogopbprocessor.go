@@ -81,7 +81,9 @@ func (slf *GoGoPBRpcResponseData)		GetErr() *RpcError {
 	if slf.GetError() == "" {
 		return nil
 	}
-	return Errorf(slf.GetError())
+
+	err := RpcError(slf.GetError())
+	return &err
 }
 
 

@@ -24,7 +24,6 @@ var LittleEndian bool
 
 type Server struct {
 	functions       map[interface{}]interface{}
-	cmdChannel      chan *Call
 	rpcHandleFinder RpcHandleFinder
 	rpcServer       *network.TCPServer
 }
@@ -58,7 +57,6 @@ func GetProcessor(processorType uint8) IRpcProcessor{
 }
 
 func (server *Server) Init(rpcHandleFinder RpcHandleFinder) {
-	server.cmdChannel = make(chan *Call,100000)
 	server.rpcHandleFinder = rpcHandleFinder
 	server.rpcServer = &network.TCPServer{}
 }
@@ -118,10 +116,10 @@ func (agent *RpcAgent) Run() {
 			break
 		}
 
-		processor := GetProcessor(uint8(data[0]))
+		processor := GetProcessor(data[0])
 		if processor==nil {
 			agent.conn.ReleaseReadMsg(data)
-			log.SError("remote rpc  ",agent.conn.RemoteAddr()," data head error:",err.Error())
+			log.SError("remote rpc  ",agent.conn.RemoteAddr()," cannot find processor:",data[0])
 			return
 		}
 
