@@ -107,7 +107,7 @@ func New(strLevel string, pathName string, filePre string, flag int,buffNum uint
 		return nil, errors.New("unknown level: " + strLevel)
 	}
 
-	// new
+	// new111
 	logger := new(Logger)
 	logger.level = level
 	logger.filePath = pathName
