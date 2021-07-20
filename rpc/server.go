@@ -185,7 +185,7 @@ func (agent *RpcAgent) Run() {
 			continue
 		}
 
-		err = rpcHandler.PushRequest(req)
+		err = rpcHandler.PushRpcRequest(req)
 		if err != nil {
 			rpcError := RpcError(err.Error())
 
@@ -268,7 +268,6 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 			return pCall
 		}
 	}
-	//req.inputArgs = inputArgs
 
 	if noReply == false {
 		client.AddPending(pCall)
@@ -303,7 +302,7 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 		}
 	}
 
-	err := rpcHandler.PushRequest(req)
+	err := rpcHandler.PushRpcRequest(req)
 	if err != nil {
 		ReleaseRpcRequest(req)
 		pCall.Err = err
@@ -352,12 +351,12 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler 
 			if Returns!=nil {
 				pCall.Reply = Returns
 			}
-			pCall.rpcHandler.(*RpcHandler).callResponseCallBack <-pCall
+			pCall.rpcHandler.PushRpcResponse(pCall)
 			ReleaseRpcRequest(req)
 		}
 	}
 
-	err := rpcHandler.PushRequest(req)
+	err := rpcHandler.PushRpcRequest(req)
 	if err != nil {
 		ReleaseRpcRequest(req)
 		return err

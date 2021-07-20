@@ -67,11 +67,11 @@ func (client *Client) Connect(id int,addr string) error {
 }
 
 func (client *Client) startCheckRpcCallTimer(){
-	t:=timer.NewTimer(3*time.Second)
+	t:=timer.NewTimer(5*time.Second)
 	for{
 		select {
-			case timer:=<- t.C:
-				timer.SetupTimer(time.Now())
+			case cTimer:=<- t.C:
+				cTimer.SetupTimer(time.Now())
 				client.checkRpcCallTimeout()
 		}
 	}
@@ -83,7 +83,7 @@ func (client *Client) startCheckRpcCallTimer(){
 func (client *Client) makeCallFail(call *Call){
 	client.removePending(call.Seq)
 	if call.callback!=nil && call.callback.IsValid() {
-		call.rpcHandler.(*RpcHandler).callResponseCallBack <-call
+		call.rpcHandler.PushRpcResponse(call)
 	}else{
 		call.done <- call
 	}
@@ -310,7 +310,7 @@ func (client *Client) Run(){
 			}
 
 			if v.callback!=nil && v.callback.IsValid() {
-				 v.rpcHandler.(*RpcHandler).callResponseCallBack <-v
+				 v.rpcHandler.PushRpcResponse(v)
 			}else{
 				v.done <- v
 			}

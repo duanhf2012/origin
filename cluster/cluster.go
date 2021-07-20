@@ -370,7 +370,7 @@ func (cls *Cluster) triggerRpcEvent (bConnect bool,clientSeq uint32,nodeId int) 
 			continue
 		}
 
-		var eventData service.RpcEventData
+		var eventData service.RpcConnEvent
 		eventData.IsConnect = bConnect
 		eventData.NodeId = nodeId
 		ser.(service.IModule).NotifyEvent(&eventData)

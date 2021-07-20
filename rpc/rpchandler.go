@@ -46,15 +46,19 @@ type RawRpcCallBack interface {
 	CB(data interface{})
 }
 
+type IRpcHandlerChannel interface {
+	PushRpcResponse(call *Call) error
+	PushRpcRequest(rpcRequest *RpcRequest) error
+}
+
 type RpcHandler struct {
-	callRequest   chan *RpcRequest
+	IRpcHandlerChannel
+
 	rpcHandler    IRpcHandler
 	mapFunctions  map[string]RpcMethodInfo
 	mapRawFunctions map[uint32] RawRpcCallBack
 	funcRpcClient FuncRpcClient
 	funcRpcServer FuncRpcServer
-
-	callResponseCallBack chan *Call //异步返回的回调
 }
 
 type TriggerRpcEvent func(bConnect bool,clientSeq uint32,nodeId int)
@@ -64,17 +68,13 @@ type IRpcListener interface {
 }
 
 type IRpcHandler interface {
+	IRpcHandlerChannel
 	GetName() string
-	InitRpcHandler(rpcHandler IRpcHandler,getClientFun FuncRpcClient,getServerFun FuncRpcServer)
+	InitRpcHandler(rpcHandler IRpcHandler,getClientFun FuncRpcClient,getServerFun FuncRpcServer,rpcHandlerChannel IRpcHandlerChannel)
 	GetRpcHandler() IRpcHandler
-	PushRequest(callInfo *RpcRequest) error
 	HandlerRpcRequest(request *RpcRequest)
 	HandlerRpcResponseCB(call *Call)
-
-	GetRpcRequestChan() chan *RpcRequest
-	GetRpcResponseChan() chan *Call
 	CallMethod(ServiceMethod string,param interface{},reply interface{}) error
-	
 	AsyncCall(serviceMethod string,args interface{},callback interface{}) error
 	Call(serviceMethod string,args interface{},reply interface{}) error
 	Go(serviceMethod string,args interface{}) error
@@ -100,9 +100,8 @@ func (handler *RpcHandler) GetRpcHandler() IRpcHandler{
 	return handler.rpcHandler
 }
 
-func (handler *RpcHandler) InitRpcHandler(rpcHandler IRpcHandler,getClientFun FuncRpcClient,getServerFun FuncRpcServer) {
-	handler.callRequest = make(chan *RpcRequest,1000000)
-	handler.callResponseCallBack = make(chan *Call,1000000)
+func (handler *RpcHandler) InitRpcHandler(rpcHandler IRpcHandler,getClientFun FuncRpcClient,getServerFun FuncRpcServer,rpcHandlerChannel IRpcHandlerChannel) {
+	handler.IRpcHandlerChannel = rpcHandlerChannel
 	handler.mapRawFunctions = make(map[uint32] RawRpcCallBack)
 	handler.rpcHandler = rpcHandler
 	handler.mapFunctions = map[string]RpcMethodInfo{}
@@ -114,8 +113,8 @@ func (handler *RpcHandler) InitRpcHandler(rpcHandler IRpcHandler,getClientFun Fu
 
 // Is this an exported - upper case - name?
 func isExported(name string) bool {
-	rune, _ := utf8.DecodeRuneInString(name)
-	return unicode.IsUpper(rune)
+	r, _ := utf8.DecodeRuneInString(name)
+	return unicode.IsUpper(r)
 }
 
 // Is this type exported or a builtin?
@@ -188,23 +187,6 @@ func  (handler *RpcHandler) RegisterRpc(rpcHandler IRpcHandler) error {
 	}
 
 	return nil
-}
-
-func (handler *RpcHandler) PushRequest(req *RpcRequest) error{
-	if len(handler.callRequest) >= cap(handler.callRequest){
-		return fmt.Errorf("RpcHandler %s Rpc Channel is full", handler.GetName())
-	}
-
-	handler.callRequest <- req
-	return nil
-}
-
-func (handler *RpcHandler) GetRpcRequestChan() chan *RpcRequest {
-	return handler.callRequest
-}
-
-func (handler *RpcHandler) GetRpcResponseChan() chan *Call{
-	return handler.callResponseCallBack
 }
 
 func (handler *RpcHandler) HandlerRpcResponseCB(call *Call){

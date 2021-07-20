@@ -35,8 +35,6 @@ type IModuleTimer interface {
 	NewTicker(d time.Duration, cb func(*timer.Ticker)) *timer.Ticker
 }
 
-//1.管理各模块树层关系
-//2.提供定时器常用工具
 type Module struct {
 	rpcHandle.IRpcHandler
 	moduleId int64                              //模块Id
@@ -80,8 +78,9 @@ func (m *Module) OnInit() error{
 func (m *Module) AddModule(module IModule) (int64,error){
 	//没有事件处理器不允许加入其他模块
 	if m.GetEventProcessor() == nil {
-		return 0,fmt.Errorf("module %+v is not Event Processor is nil", m.self)
+		return 0,fmt.Errorf("module %+v Event Processor is nil", m.self)
 	}
+
 	pAddModule := module.getBaseModule().(*Module)
 	if pAddModule.GetModuleId()==0 {
 		pAddModule.moduleId = m.NewModuleId()
@@ -92,7 +91,7 @@ func (m *Module) AddModule(module IModule) (int64,error){
 	}
 	_,ok := m.child[module.GetModuleId()]
 	if ok == true {
-		return 0,fmt.Errorf("Exists module id %d",module.GetModuleId())
+		return 0,fmt.Errorf("exists module id %d",module.GetModuleId())
 	}
 	pAddModule.IRpcHandler = m.IRpcHandler
 	pAddModule.self = module
@@ -118,14 +117,14 @@ func (m *Module) ReleaseModule(moduleId int64){
 	pModule := m.GetModule(moduleId).getBaseModule().(*Module)
 
 	//释放子孙
-	for id,_ := range pModule.child {
+	for id := range pModule.child {
 		m.ReleaseModule(id)
 	}
 
 	pModule.GetEventHandler().Destroy()
 	pModule.self.OnRelease()
 	log.SDebug("Release module ", pModule.GetModuleName())
-	for pTimer,_ := range pModule.mapActiveTimer {
+	for pTimer := range pModule.mapActiveTimer {
 		pTimer.Cancel()
 	}
 
