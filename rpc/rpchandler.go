@@ -194,7 +194,8 @@ func (handler *RpcHandler) HandlerRpcResponseCB(call *Call){
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
-			log.SError("core dump info:",r,":",string(buf[:l]))
+			errString := fmt.Sprint(r)
+			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
 		}
 	}()
 
@@ -215,7 +216,8 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		if r := recover(); r != nil {
 				buf := make([]byte, 4096)
 				l := runtime.Stack(buf, false)
-				log.SError("Handler Rpc ",request.RpcRequestData.GetServiceMethod()," Core dump info:",r,":",string(buf[:l]))
+				errString := fmt.Sprint(r)
+				log.SError("Handler Rpc ",request.RpcRequestData.GetServiceMethod()," Core dump info[",errString,"]\n",string(buf[:l]))
 				rpcErr := RpcError("call error : core dumps")
 				if request.requestHandle!=nil {
 					request.requestHandle(nil,rpcErr)

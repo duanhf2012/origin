@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"github.com/duanhf2012/origin/event"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/profiler"
@@ -213,7 +214,8 @@ func (s *Service) Release(){
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
-			log.SError("core dump info:",r," : ",string(buf[:l]))
+			errString := fmt.Sprint(r)
+			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
 		}
 	}()
 	s.self.OnRelease()

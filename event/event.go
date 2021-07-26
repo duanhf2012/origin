@@ -1,6 +1,7 @@
 package event
 
 import (
+	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"runtime"
 	"sync"
@@ -214,7 +215,8 @@ func (processor *EventProcessor) EventHandler(ev IEvent) {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
-			log.SError("core dump info:",r,":",string(buf[:l]))
+			errString := fmt.Sprint(r)
+			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
 		}
 	}()
 

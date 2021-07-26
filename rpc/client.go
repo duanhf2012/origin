@@ -3,6 +3,7 @@ package rpc
 import (
 	"container/list"
 	"errors"
+	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/util/timer"
@@ -261,7 +262,8 @@ func (client *Client) Run(){
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
-			log.SError("core dump info:",r,":", string(buf[:l]))
+			errString := fmt.Sprint(r)
+			log.SError("core dump info[",errString,"]\n", string(buf[:l]))
 		}
 	}()
 
