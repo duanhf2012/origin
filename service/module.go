@@ -7,18 +7,19 @@ import (
 	rpcHandle "github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
 	"reflect"
+	"sync/atomic"
 	"time"
 )
-const InitModuleId = 1e17
+const InitModuleId = 1e9
 
 type IModule interface {
-	SetModuleId(moduleId int64) bool
-	GetModuleId() int64
-	AddModule(module IModule) (int64,error)
-	GetModule(moduleId int64) IModule
+	SetModuleId(moduleId uint32) bool
+	GetModuleId() uint32
+	AddModule(module IModule) (uint32,error)
+	GetModule(moduleId uint32) IModule
 	GetAncestor()IModule
-	ReleaseModule(moduleId int64)
-	NewModuleId() int64
+	ReleaseModule(moduleId uint32)
+	NewModuleId() uint32
 	GetParent()IModule
 	OnInit() error
 	OnRelease()
@@ -37,24 +38,25 @@ type IModuleTimer interface {
 
 type Module struct {
 	rpcHandle.IRpcHandler
-	moduleId int64                              //模块Id
+	moduleId uint32                              //模块Id
 	moduleName string                           //模块名称
 	parent IModule        						//父亲
 	self IModule        						//自己
-	child map[int64]IModule 					//孩子们
-	mapActiveTimer map[*timer.Timer]interface{}
+	child map[uint32]IModule 					//孩子们
+	mapActiveTimer map[timer.ITimer]struct{}
+	mapActiveIdTimer map[uint64]timer.ITimer
 	dispatcher         *timer.Dispatcher 		//timer
 
 	//根结点
 	ancestor IModule      						//始祖
-	seedModuleId int64    						//模块id种子
-	descendants map[int64]IModule				//始祖的后裔们
+	seedModuleId uint32    						//模块id种子
+	descendants map[uint32]IModule				//始祖的后裔们
 
 	//事件管道
 	eventHandler event.IEventHandler
 }
 
-func (m *Module) SetModuleId(moduleId int64) bool{
+func (m *Module) SetModuleId(moduleId uint32) bool{
 	if m.moduleId > 0 {
 		return false
 	}
@@ -63,7 +65,7 @@ func (m *Module) SetModuleId(moduleId int64) bool{
 	return true
 }
 
-func (m *Module) GetModuleId() int64{
+func (m *Module) GetModuleId() uint32{
 	return m.moduleId
 }
 
@@ -75,7 +77,7 @@ func (m *Module) OnInit() error{
  	return nil
 }
 
-func (m *Module) AddModule(module IModule) (int64,error){
+func (m *Module) AddModule(module IModule) (uint32,error){
 	//没有事件处理器不允许加入其他模块
 	if m.GetEventProcessor() == nil {
 		return 0,fmt.Errorf("module %+v Event Processor is nil", m.self)
@@ -87,7 +89,7 @@ func (m *Module) AddModule(module IModule) (int64,error){
 	}
 
 	if m.child == nil {
-		m.child = map[int64]IModule{}
+		m.child = map[uint32]IModule{}
 	}
 	_,ok := m.child[module.GetModuleId()]
 	if ok == true {
@@ -113,7 +115,7 @@ func (m *Module) AddModule(module IModule) (int64,error){
 	return module.GetModuleId(),nil
 }
 
-func (m *Module) ReleaseModule(moduleId int64){
+func (m *Module) ReleaseModule(moduleId uint32){
 	pModule := m.GetModule(moduleId).getBaseModule().(*Module)
 
 	//释放子孙
@@ -128,6 +130,10 @@ func (m *Module) ReleaseModule(moduleId int64){
 		pTimer.Cancel()
 	}
 
+	for _,t := range pModule.mapActiveIdTimer {
+		t.Cancel()
+	}
+
 	delete(m.child,moduleId)
 	delete (m.ancestor.getBaseModule().(*Module).descendants,moduleId)
 
@@ -140,18 +146,32 @@ func (m *Module) ReleaseModule(moduleId int64){
 	pModule.ancestor = nil
 	pModule.descendants = nil
 	pModule.IRpcHandler = nil
+	pModule.mapActiveIdTimer = nil
 }
 
-func (m *Module) NewModuleId() int64{
+func (m *Module) NewModuleId() uint32{
 	m.ancestor.getBaseModule().(*Module).seedModuleId+=1
 	return m.ancestor.getBaseModule().(*Module).seedModuleId
 }
+
+var timerSeedId uint32
+func (m *Module) GenTimerId() uint64{
+	for{
+		newTimerId :=  (uint64(m.GetModuleId())<<32)|uint64(atomic.AddUint32(&timerSeedId,1))
+		if _,ok := m.mapActiveIdTimer[newTimerId];ok == true {
+			continue
+		}
+
+		return newTimerId
+	}
+}
+
 
 func (m *Module) GetAncestor()IModule{
 	return m.ancestor
 }
 
-func (m *Module) GetModule(moduleId int64) IModule{
+func (m *Module) GetModule(moduleId uint32) IModule{
 	iModule,ok := m.GetAncestor().getBaseModule().(*Module).descendants[moduleId]
 	if ok == false {
 		return nil
@@ -167,39 +187,107 @@ func (m *Module) GetParent()IModule{
 	return m.parent
 }
 
-func (m *Module) OnCloseTimer(timer *timer.Timer){
-	delete(m.mapActiveTimer,timer)
+func (m *Module) OnCloseTimer(t timer.ITimer){
+	delete(m.mapActiveIdTimer,t.GetId())
+	delete(m.mapActiveTimer,t)
 }
 
-func (m *Module) OnAddTimer(t *timer.Timer){
+func (m *Module) OnAddTimer(t timer.ITimer){
 	if t != nil {
-		m.mapActiveTimer[t] = nil
+		if m.mapActiveTimer == nil {
+			m.mapActiveTimer = map[timer.ITimer]struct{}{}
+		}
+
+		m.mapActiveTimer[t] = struct{}{}
 	}
 }
 
 func (m *Module) AfterFunc(d time.Duration, cb func(*timer.Timer)) *timer.Timer {
 	if m.mapActiveTimer == nil {
-		m.mapActiveTimer =map[*timer.Timer]interface{}{}
+		m.mapActiveTimer =map[timer.ITimer]struct{}{}
 	}
 
-	return m.dispatcher.AfterFunc(d,cb,m.OnCloseTimer,m.OnAddTimer)
+	return m.dispatcher.AfterFunc(d,nil,cb,m.OnCloseTimer,m.OnAddTimer)
 }
 
 func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func(*timer.Cron)) *timer.Cron {
 	if m.mapActiveTimer == nil {
-		m.mapActiveTimer =map[*timer.Timer]interface{}{}
+		m.mapActiveTimer =map[timer.ITimer]struct{}{}
 	}
 
-	return m.dispatcher.CronFunc(cronExpr,cb,m.OnCloseTimer,m.OnAddTimer)
+	return m.dispatcher.CronFunc(cronExpr,nil,cb,m.OnCloseTimer,m.OnAddTimer)
 }
 
 func (m *Module) NewTicker(d time.Duration, cb func(*timer.Ticker)) *timer.Ticker {
 	if m.mapActiveTimer == nil {
-		m.mapActiveTimer =map[*timer.Timer]interface{}{}
+		m.mapActiveTimer =map[timer.ITimer]struct{}{}
 	}
 
-	return m.dispatcher.TickerFunc(d,cb,m.OnCloseTimer,m.OnAddTimer)
+	return m.dispatcher.TickerFunc(d,nil,cb,m.OnCloseTimer,m.OnAddTimer)
 }
+
+func (m *Module) cb(*timer.Timer){
+
+}
+
+func (m *Module) SafeAfterFunc(timerId *uint64,d time.Duration, AdditionData interface{},cb func(interface{}))  {
+	if m.mapActiveIdTimer == nil {
+		m.mapActiveIdTimer = map[uint64]timer.ITimer{}
+	}
+
+	if *timerId != 0 {
+		m.CancelTimerId(timerId)
+	}
+
+	*timerId = m.GenTimerId()
+	t :=  m.dispatcher.AfterFunc(d,cb,nil,m.OnCloseTimer,m.OnAddTimer)
+	t.AdditionData = AdditionData
+	t.Id = *timerId
+	m.mapActiveIdTimer[*timerId] = t
+}
+
+func (m *Module) SafeCronFunc(cronId *uint64,cronExpr *timer.CronExpr, AdditionData interface{}, cb func(interface{}))  {
+	if m.mapActiveIdTimer == nil {
+		m.mapActiveIdTimer = map[uint64]timer.ITimer{}
+	}
+
+	*cronId = m.GenTimerId()
+	c := m.dispatcher.CronFunc(cronExpr,cb,nil,m.OnCloseTimer,m.OnAddTimer)
+	c.AdditionData = AdditionData
+	c.Id = *cronId
+	m.mapActiveIdTimer[*cronId] = c
+}
+
+func (m *Module) SafeNewTicker(tickerId *uint64,d time.Duration, AdditionData interface{}, cb func(interface{})) {
+	if m.mapActiveIdTimer == nil {
+		m.mapActiveIdTimer = map[uint64]timer.ITimer{}
+	}
+
+	*tickerId = m.GenTimerId()
+	t := m.dispatcher.TickerFunc(d,cb,nil,m.OnCloseTimer,m.OnAddTimer)
+	t.AdditionData = AdditionData
+	t.Id = *tickerId
+	m.mapActiveIdTimer[*tickerId] = t
+}
+
+func (m *Module) CancelTimerId(timerId *uint64) bool{
+	if m.mapActiveIdTimer == nil {
+		log.SError("mapActiveIdTimer is nil")
+		return false
+	}
+
+	t,ok := m.mapActiveIdTimer[*timerId]
+	if ok == false {
+		log.SError("cannot find timer id ",timerId)
+		return false
+	}
+
+	t.Cancel()
+	*timerId = 0
+	return true
+}
+
+
 
 func (m *Module) OnRelease(){
 }

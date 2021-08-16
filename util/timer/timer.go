@@ -9,14 +9,36 @@ import (
 	"time"
 )
 
+// ITimer
+type ITimer interface {
+	GetId() uint64
+	Cancel()
+	GetName()string
+	IsActive() bool
+	IsOpen() bool
+	Open(bOpen bool)
+	AppendChannel(timer ITimer)
+	Do()
+	GetFireTime() time.Time
+	SetupTimer(now time.Time) error
+}
+
+type OnCloseTimer func(timer ITimer)
+type OnAddTimer func(timer ITimer)
+
 // Timer
 type Timer struct {
-	name 		string
+	Id uint64
 	cancelled    bool        //是否关闭
-	C            chan *Timer    //定时器管道
+	C            chan ITimer    //定时器管道
 	interval  	 time.Duration     // 时间间隔（用于循环定时器）
 	fireTime  	 time.Time         // 触发时间
-	cb 			 func()
+	cb 			 func(interface{})
+	cbEx         func(t *Timer)
+	cbCronEx     func(t *Cron)
+	cbTickerEx   func(t *Ticker)
+	cbOnCloseTimer 	OnCloseTimer
+	cronExpr *CronExpr
 	AdditionData interface{}    //定时器附加数据
 	rOpen        bool           //是否重新打开
 
@@ -45,17 +67,12 @@ var tickerPool =sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolD
 	return &Ticker{}
 })
 
-func newTimer(d time.Duration,c chan *Timer,cb func(),name string,additionData interface{}) *Timer{
-	if c == nil {
-		return nil
-	}
-
+func newTimer(d time.Duration,c chan ITimer,cb func(interface{}),additionData interface{}) *Timer{
 	timer := timerPool.Get().(*Timer)
 	timer.AdditionData = additionData
 	timer.C = c
 	timer.fireTime = Now().Add(d)
 	timer.cb = cb
-	timer.name = name
 	timer.interval = d
 	timer.rOpen = false
 	return timer
@@ -85,20 +102,59 @@ func releaseCron(cron *Cron) {
 
 // one dispatcher per goroutine (goroutine not safe)
 type Dispatcher struct {
-	ChanTimer chan *Timer
+	ChanTimer chan ITimer
+}
+
+func (t *Timer) GetId() uint64{
+	return t.Id
+}
+
+func (t *Timer) GetFireTime() time.Time{
+	return t.fireTime
+}
+
+func (t *Timer) Open(bOpen bool){
+	t.rOpen = bOpen
+}
+
+func (t *Timer) AppendChannel(timer ITimer){
+	t.C <- timer
+}
+
+func (t *Timer) IsOpen() bool{
+	return t.rOpen
 }
 
 func (t *Timer) Do(){
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 4096)
+			l := runtime.Stack(buf, false)
+			errString := fmt.Sprint(r)
+			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
+		}
+	}()
+
+	if t.IsActive() == false {
+		if t.cbOnCloseTimer!=nil {
+			t.cbOnCloseTimer(t)
+		}
+
+		releaseTimer(t)
+		return
+	}
+
 	if t.cb != nil {
-		defer func() {
-			if r := recover(); r != nil {
-				buf := make([]byte, 4096)
-				l := runtime.Stack(buf, false)
-				errString := fmt.Sprint(r)
-				log.SError("core dump info[",errString,"]\n",string(buf[:l]))
-			}
-		}()
-		t.cb()
+		t.cb(t.AdditionData)
+	}else if t.cbEx != nil {
+		t.cbEx(t)
+	}
+
+	if t.rOpen ==false {
+		if t.cbOnCloseTimer!=nil {
+			t.cbOnCloseTimer(t)
+		}
+		releaseTimer(t)
 	}
 }
 
@@ -124,17 +180,18 @@ func (t *Timer) IsActive() bool {
 }
 
 func (t *Timer) GetName() string{
-	return t.name
+	if t.cb!=nil {
+		return runtime.FuncForPC(reflect.ValueOf(t.cb).Pointer()).Name()
+	}else if t.cbEx!=nil {
+		return runtime.FuncForPC(reflect.ValueOf(t.cbEx).Pointer()).Name()
+	}
+
+	return ""
 }
 
+var emptyTimer Timer
 func (t *Timer) Reset(){
-	t.name = ""
-	t.cancelled = false
-	t.C    = nil
-	t.interval  = 0
-	t.cb = nil
-	t.AdditionData = nil
-	t.rOpen = false
+	*t = emptyTimer
 }
 
 func (t *Timer) IsRef()bool{
@@ -153,6 +210,50 @@ func (c *Cron) Reset(){
 	c.Timer.Reset()
 }
 
+func (c *Cron) Do() {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 4096)
+			l := runtime.Stack(buf, false)
+			errString := fmt.Sprint(r)
+			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
+		}
+	}()
+
+	if c.IsActive() == false{
+		if c.cbOnCloseTimer != nil {
+			c.cbOnCloseTimer(c)
+		}
+		releaseCron(c)
+		return
+	}
+
+	now := Now()
+	nextTime := c.cronExpr.Next(now)
+	if nextTime.IsZero() {
+		c.cbCronEx(c)
+		return
+	}
+
+	if c.cb!=nil {
+		c.cb(c.AdditionData)
+	}else if c.cbEx !=nil {
+		c.cbCronEx(c)
+	}
+
+	if c.IsActive() == true{
+		c.interval = nextTime.Sub(now)
+		c.fireTime = now.Add(c.interval)
+		SetupTimer(c)
+	}else{
+		if c.cbOnCloseTimer!=nil {
+			c.cbOnCloseTimer(c)
+		}
+		releaseCron(c)
+		return
+	}
+}
+
 func (c *Cron) IsRef()bool{
 	return c.ref
 }
@@ -163,6 +264,42 @@ func (c *Cron) Ref(){
 
 func (c *Cron) UnRef(){
 	c.ref = false
+}
+
+func (c *Ticker) Do() {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 4096)
+			l := runtime.Stack(buf, false)
+			errString := fmt.Sprint(r)
+			log.SError("core dump info[", errString, "]\n", string(buf[:l]))
+		}
+	}()
+
+	if c.IsActive() == false {
+		if c.cbOnCloseTimer!=nil {
+			c.cbOnCloseTimer(c)
+		}
+
+		releaseTicker(c)
+		return
+	}
+
+	if c.cb!=nil{
+		c.cb(c.AdditionData)
+	} else if c.cbTickerEx != nil{
+		c.cbTickerEx(c)
+	}
+
+	if c.IsActive() == true{
+		c.fireTime = Now().Add(c.interval)
+		SetupTimer(c)
+	}else{
+		if c.cbOnCloseTimer!=nil {
+			c.cbOnCloseTimer(c)
+		}
+		releaseTicker(c)
+	}
 }
 
 func (c *Ticker) Reset(){
@@ -183,99 +320,55 @@ func (c *Ticker) UnRef(){
 
 func NewDispatcher(l int) *Dispatcher {
 	dispatcher := new(Dispatcher)
-	dispatcher.ChanTimer = make(chan *Timer, l)
+	dispatcher.ChanTimer = make(chan ITimer, l)
 	return dispatcher
 }
 
-type OnTimerClose func(timer *Timer)
-func (dispatcher *Dispatcher) AfterFunc(d time.Duration, cb func(*Timer),onTimerClose OnTimerClose,onAddTimer func(timer *Timer)) *Timer {
-	funName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
-	timer := newTimer(d,dispatcher.ChanTimer,nil,funName,nil)
-	cbFunc := func() {
-		if timer.IsActive() == false {
-			onTimerClose(timer)
-			releaseTimer(timer)
-			return
-		}
+func (dispatcher *Dispatcher) AfterFunc(d time.Duration, cb func(data interface{}),cbEx func(*Timer),onTimerClose OnCloseTimer,onAddTimer OnAddTimer) *Timer {
+	timer := newTimer(d,dispatcher.ChanTimer,nil,nil)
+	timer.cb = cb
+	timer.cbEx = cbEx
+	timer.cbOnCloseTimer = onTimerClose
 
-		cb(timer)
-
-		if timer.rOpen ==false {
-			onTimerClose(timer)
-			releaseTimer(timer)
-		}
+	t := SetupTimer(timer)
+	if onAddTimer!= nil && t!=nil {
+		onAddTimer(t)
 	}
 
-	timer.cb = cbFunc
-	t := SetupTimer(timer)
-	onAddTimer(t)
-
-	return t
+	return timer
 }
 
-func (dispatcher *Dispatcher) CronFunc(cronExpr *CronExpr, cb func(*Cron),onTimerClose OnTimerClose,onAddTimer func(timer *Timer))  *Cron {
+func (dispatcher *Dispatcher) CronFunc(cronExpr *CronExpr,cb func(data interface{}), cbEx func(*Cron),onTimerClose OnCloseTimer,onAddTimer OnAddTimer)  *Cron {
 	now := Now()
 	nextTime := cronExpr.Next(now)
 	if nextTime.IsZero() {
 		return nil
 	}
 
-	funcName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
 	cron := newCron()
-	// callback
-	var cbFunc func()
-	cbFunc = func() {
-		if cron.IsActive() == false{
-			onTimerClose(&cron.Timer)
-			releaseCron(cron)
-			return
-		}
-
-		now := Now()
-		nextTime := cronExpr.Next(now)
-		if nextTime.IsZero() {
-			cb(cron)
-			return
-		}
-
-		cron.interval = nextTime.Sub(now)
-		cron.fireTime = now.Add(cron.interval)
-		SetupTimer(&cron.Timer)
-		cb(cron)
-	}
+	cron.cb = cb
+	cron.cbCronEx = cbEx
+	cron.cbOnCloseTimer = onTimerClose
+	cron.cronExpr = cronExpr
 	cron.C = dispatcher.ChanTimer
-	cron.cb = cbFunc
-	cron.name = funcName
 	cron.interval = nextTime.Sub(now)
 	cron.fireTime = Now().Add(cron.interval)
-	SetupTimer(&cron.Timer)
-	onAddTimer(&cron.Timer)
+	SetupTimer(cron)
+	onAddTimer(cron)
 	return cron
 }
 
-func (dispatcher *Dispatcher) TickerFunc(d time.Duration, cb func(*Ticker),onTimerClose OnTimerClose,onAddTimer func(timer *Timer))  *Ticker {
-	funcName :=  runtime.FuncForPC(reflect.ValueOf(cb).Pointer()).Name()
+func (dispatcher *Dispatcher) TickerFunc(d time.Duration,cb func(data interface{}), cbEx func(*Ticker),onTimerClose OnCloseTimer,onAddTimer OnAddTimer)  *Ticker {
 	ticker := newTicker()
-	cbFunc := func() {
-		cb(ticker)
-		if ticker.Timer.IsActive() == true{
-			ticker.fireTime = Now().Add(d)
-			SetupTimer(&ticker.Timer)
-		}else{
-			onTimerClose(&ticker.Timer)
-			releaseTicker(ticker)
-		}
-	}
-
 	ticker.C = dispatcher.ChanTimer
 	ticker.fireTime = Now().Add(d)
-	ticker.cb = cbFunc
-	ticker.name = funcName
+	ticker.cb = cb
+	ticker.cbTickerEx = cbEx
 	ticker.interval = d
 
 	// callback
-	SetupTimer(&ticker.Timer)
-	onAddTimer(&ticker.Timer)
+	SetupTimer(ticker)
+	onAddTimer(ticker)
 
 	return ticker
 }

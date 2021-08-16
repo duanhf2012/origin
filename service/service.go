@@ -95,7 +95,7 @@ func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServe
 	//初始化祖先
 	s.ancestor = iService.(IModule)
 	s.seedModuleId =InitModuleId
-	s.descendants = map[int64]IModule{}
+	s.descendants = map[uint32]IModule{}
 	s.serviceCfg = serviceCfg
 	s.goroutineNum = 1
 	s.eventProcessor = event.NewEventProcessor()
