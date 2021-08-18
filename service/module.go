@@ -230,7 +230,7 @@ func (m *Module) cb(*timer.Timer){
 
 }
 
-func (m *Module) SafeAfterFunc(timerId *uint64,d time.Duration, AdditionData interface{},cb func(interface{}))  {
+func (m *Module) SafeAfterFunc(timerId *uint64,d time.Duration, AdditionData interface{},cb func(uint64,interface{}))  {
 	if m.mapActiveIdTimer == nil {
 		m.mapActiveIdTimer = map[uint64]timer.ITimer{}
 	}
@@ -246,7 +246,7 @@ func (m *Module) SafeAfterFunc(timerId *uint64,d time.Duration, AdditionData int
 	m.mapActiveIdTimer[*timerId] = t
 }
 
-func (m *Module) SafeCronFunc(cronId *uint64,cronExpr *timer.CronExpr, AdditionData interface{}, cb func(interface{}))  {
+func (m *Module) SafeCronFunc(cronId *uint64,cronExpr *timer.CronExpr, AdditionData interface{}, cb func(uint64,interface{}))  {
 	if m.mapActiveIdTimer == nil {
 		m.mapActiveIdTimer = map[uint64]timer.ITimer{}
 	}
@@ -258,7 +258,7 @@ func (m *Module) SafeCronFunc(cronId *uint64,cronExpr *timer.CronExpr, AdditionD
 	m.mapActiveIdTimer[*cronId] = c
 }
 
-func (m *Module) SafeNewTicker(tickerId *uint64,d time.Duration, AdditionData interface{}, cb func(interface{})) {
+func (m *Module) SafeNewTicker(tickerId *uint64,d time.Duration, AdditionData interface{}, cb func(uint64,interface{})) {
 	if m.mapActiveIdTimer == nil {
 		m.mapActiveIdTimer = map[uint64]timer.ITimer{}
 	}

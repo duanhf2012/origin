@@ -33,7 +33,7 @@ type Timer struct {
 	C            chan ITimer    //定时器管道
 	interval  	 time.Duration     // 时间间隔（用于循环定时器）
 	fireTime  	 time.Time         // 触发时间
-	cb 			 func(interface{})
+	cb 			 func(uint64,interface{})
 	cbEx         func(t *Timer)
 	cbCronEx     func(t *Cron)
 	cbTickerEx   func(t *Ticker)
@@ -67,7 +67,7 @@ var tickerPool =sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolD
 	return &Ticker{}
 })
 
-func newTimer(d time.Duration,c chan ITimer,cb func(interface{}),additionData interface{}) *Timer{
+func newTimer(d time.Duration,c chan ITimer,cb func(uint64,interface{}),additionData interface{}) *Timer{
 	timer := timerPool.Get().(*Timer)
 	timer.AdditionData = additionData
 	timer.C = c
@@ -145,7 +145,7 @@ func (t *Timer) Do(){
 	}
 
 	if t.cb != nil {
-		t.cb(t.AdditionData)
+		t.cb(t.Id,t.AdditionData)
 	}else if t.cbEx != nil {
 		t.cbEx(t)
 	}
@@ -236,7 +236,7 @@ func (c *Cron) Do() {
 	}
 
 	if c.cb!=nil {
-		c.cb(c.AdditionData)
+		c.cb(c.Id,c.AdditionData)
 	}else if c.cbEx !=nil {
 		c.cbCronEx(c)
 	}
@@ -286,7 +286,7 @@ func (c *Ticker) Do() {
 	}
 
 	if c.cb!=nil{
-		c.cb(c.AdditionData)
+		c.cb(c.Id,c.AdditionData)
 	} else if c.cbTickerEx != nil{
 		c.cbTickerEx(c)
 	}
@@ -324,7 +324,7 @@ func NewDispatcher(l int) *Dispatcher {
 	return dispatcher
 }
 
-func (dispatcher *Dispatcher) AfterFunc(d time.Duration, cb func(data interface{}),cbEx func(*Timer),onTimerClose OnCloseTimer,onAddTimer OnAddTimer) *Timer {
+func (dispatcher *Dispatcher) AfterFunc(d time.Duration, cb func(uint64,interface{}),cbEx func(*Timer),onTimerClose OnCloseTimer,onAddTimer OnAddTimer) *Timer {
 	timer := newTimer(d,dispatcher.ChanTimer,nil,nil)
 	timer.cb = cb
 	timer.cbEx = cbEx
@@ -338,7 +338,7 @@ func (dispatcher *Dispatcher) AfterFunc(d time.Duration, cb func(data interface{
 	return timer
 }
 
-func (dispatcher *Dispatcher) CronFunc(cronExpr *CronExpr,cb func(data interface{}), cbEx func(*Cron),onTimerClose OnCloseTimer,onAddTimer OnAddTimer)  *Cron {
+func (dispatcher *Dispatcher) CronFunc(cronExpr *CronExpr,cb func(uint64,interface{}), cbEx func(*Cron),onTimerClose OnCloseTimer,onAddTimer OnAddTimer)  *Cron {
 	now := Now()
 	nextTime := cronExpr.Next(now)
 	if nextTime.IsZero() {
@@ -358,7 +358,7 @@ func (dispatcher *Dispatcher) CronFunc(cronExpr *CronExpr,cb func(data interface
 	return cron
 }
 
-func (dispatcher *Dispatcher) TickerFunc(d time.Duration,cb func(data interface{}), cbEx func(*Ticker),onTimerClose OnCloseTimer,onAddTimer OnAddTimer)  *Ticker {
+func (dispatcher *Dispatcher) TickerFunc(d time.Duration,cb func(uint64,interface{}), cbEx func(*Ticker),onTimerClose OnCloseTimer,onAddTimer OnAddTimer)  *Ticker {
 	ticker := newTicker()
 	ticker.C = dispatcher.ChanTimer
 	ticker.fireTime = Now().Add(d)
