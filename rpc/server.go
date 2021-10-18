@@ -179,9 +179,10 @@ func (agent *RpcAgent) Run() {
 			rErr := "Call Rpc "+req.RpcRequestData.GetServiceMethod()+" Param error "+err.Error()
 			if req.requestHandle!=nil {
 				req.requestHandle(nil, RpcError(rErr))
+			}else{
+				ReleaseRpcRequest(req)
 			}
 			log.SError(rErr)
-			ReleaseRpcRequest(req)
 			continue
 		}
 
