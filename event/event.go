@@ -7,7 +7,6 @@ import (
 	"sync"
 )
 
-const DefaultEventChannelLen = 1000000
 
 //事件接受器
 type EventCallBack func(event IEvent)
@@ -19,6 +18,24 @@ type IEvent interface {
 type Event struct {
 	Type EventType
 	Data interface{}
+	ref bool
+}
+
+var emptyEvent Event
+func (e *Event) Reset() {
+	*e = emptyEvent
+}
+
+func (e *Event) IsRef() bool {
+	return e.ref
+}
+
+func (e *Event) Ref() {
+	e.ref = true
+}
+
+func (e *Event) UnRef() {
+	e.ref = false
 }
 
 func (e *Event) GetEventType() EventType{
@@ -35,20 +52,23 @@ type IEventHandler interface {
 	removeRegInfo(eventType EventType,eventProcessor IEventProcessor)
 }
 
+type IEventChannel interface {
+	PushEvent(ev IEvent) error
+}
+
 type IEventProcessor interface {
+	IEventChannel
+
+	Init(eventChannel IEventChannel)
 	EventHandler(ev IEvent)
-	//同一个IEventHandler，只能接受一个EventType类型回调
-	RegEventReciverFunc(eventType EventType,reciver IEventHandler,callback EventCallBack)
-	UnRegEventReciverFun(eventType EventType,reciver IEventHandler)
-	SetEventChannel(channelNum int) bool
+	RegEventReceiverFunc(eventType EventType, receiver IEventHandler,callback EventCallBack)
+	UnRegEventReceiverFun(eventType EventType, receiver IEventHandler)
 
 	castEvent(event IEvent) //广播事件
-	pushEvent(event IEvent)
-	addBindEvent(eventType EventType,reciver IEventHandler,callback EventCallBack)
-	addListen(eventType EventType,reciver IEventHandler)
-	removeBindEvent(eventType EventType,reciver IEventHandler)
-	removeListen(eventType EventType,reciver IEventHandler)
-	GetEventChan() chan IEvent
+	addBindEvent(eventType EventType, receiver IEventHandler,callback EventCallBack)
+	addListen(eventType EventType, receiver IEventHandler)
+	removeBindEvent(eventType EventType, receiver IEventHandler)
+	removeListen(eventType EventType, receiver IEventHandler)
 }
 
 type EventHandler struct {
@@ -60,9 +80,8 @@ type EventHandler struct {
 	mapRegEvent map[EventType]map[IEventProcessor]interface{}  //向其他事件处理器监听的事件类型
 }
 
-
 type EventProcessor struct {
-	eventChannel chan IEvent
+	IEventChannel
 
 	locker sync.RWMutex
 	mapListenerEvent map[EventType]map[IEventProcessor]int           //监听者信息
@@ -116,22 +135,12 @@ func (handler *EventHandler) Init(processor IEventProcessor){
 	handler.mapRegEvent =map[EventType]map[IEventProcessor]interface{}{}
 }
 
-func (processor *EventProcessor) SetEventChannel(channelNum int) bool{
-	processor.locker.Lock()
-	defer processor.locker.Unlock()
-	if processor.eventChannel!=nil {
-		return false
-	}
 
-	if channelNum == 0 {
-		channelNum = DefaultEventChannelLen
-	}
-
-	processor.eventChannel = make(chan IEvent,channelNum)
-	return true
+func (processor *EventProcessor) Init(eventChannel IEventChannel){
+	processor.IEventChannel = eventChannel
 }
 
-func (processor *EventProcessor) addBindEvent(eventType EventType,reciver IEventHandler,callback EventCallBack){
+func (processor *EventProcessor) addBindEvent(eventType EventType, receiver IEventHandler,callback EventCallBack){
 	processor.locker.Lock()
 	defer processor.locker.Unlock()
 
@@ -139,10 +148,10 @@ func (processor *EventProcessor) addBindEvent(eventType EventType,reciver IEvent
 		processor.mapBindHandlerEvent[eventType] = map[IEventHandler]EventCallBack{}
 	}
 
-	processor.mapBindHandlerEvent[eventType][reciver] = callback
+	processor.mapBindHandlerEvent[eventType][receiver] = callback
 }
 
-func (processor *EventProcessor) addListen(eventType EventType,reciver IEventHandler){
+func (processor *EventProcessor) addListen(eventType EventType, receiver IEventHandler){
 	processor.locker.Lock()
 	defer processor.locker.Unlock()
 
@@ -150,41 +159,41 @@ func (processor *EventProcessor) addListen(eventType EventType,reciver IEventHan
 		processor.mapListenerEvent[eventType] = map[IEventProcessor]int{}
 	}
 
-	processor.mapListenerEvent[eventType][reciver.GetEventProcessor()] += 1
+	processor.mapListenerEvent[eventType][receiver.GetEventProcessor()] += 1
 }
 
-func (processor *EventProcessor) removeBindEvent(eventType EventType,reciver IEventHandler){
+func (processor *EventProcessor) removeBindEvent(eventType EventType, receiver IEventHandler){
 	processor.locker.Lock()
 	defer processor.locker.Unlock()
 	if _,ok := processor.mapBindHandlerEvent[eventType];ok == true{
-		delete(processor.mapBindHandlerEvent[eventType],reciver)
+		delete(processor.mapBindHandlerEvent[eventType], receiver)
 	}
 }
 
-func (processor *EventProcessor) removeListen(eventType EventType,reciver IEventHandler){
+func (processor *EventProcessor) removeListen(eventType EventType, receiver IEventHandler){
 	processor.locker.Lock()
 	defer processor.locker.Unlock()
 	if _,ok := processor.mapListenerEvent[eventType];ok == true{
-		processor.mapListenerEvent[eventType][reciver.GetEventProcessor()]-=1
-		if processor.mapListenerEvent[eventType][reciver.GetEventProcessor()] <= 0 {
-			delete(processor.mapListenerEvent[eventType],reciver.GetEventProcessor())
+		processor.mapListenerEvent[eventType][receiver.GetEventProcessor()]-=1
+		if processor.mapListenerEvent[eventType][receiver.GetEventProcessor()] <= 0 {
+			delete(processor.mapListenerEvent[eventType], receiver.GetEventProcessor())
 		}
 	}
 }
 
-func (processor *EventProcessor) RegEventReciverFunc(eventType EventType,reciver IEventHandler,callback EventCallBack){
-	//记录reciver自己注册过的事件
-	reciver.addRegInfo(eventType, processor)
+func (processor *EventProcessor) RegEventReceiverFunc(eventType EventType, receiver IEventHandler,callback EventCallBack){
+	//记录receiver自己注册过的事件
+	receiver.addRegInfo(eventType, processor)
 	//记录当前所属IEventProcessor注册的回调
-	reciver.GetEventProcessor().addBindEvent(eventType,reciver,callback)
+	receiver.GetEventProcessor().addBindEvent(eventType, receiver,callback)
 	//将注册加入到监听中
-	processor.addListen(eventType,reciver)
+	processor.addListen(eventType, receiver)
 }
 
-func (processor *EventProcessor) UnRegEventReciverFun(eventType EventType,reciver IEventHandler) {
-	processor.removeListen(eventType,reciver)
-	reciver.GetEventProcessor().removeBindEvent(eventType,reciver)
-	reciver.removeRegInfo(eventType, processor)
+func (processor *EventProcessor) UnRegEventReceiverFun(eventType EventType, receiver IEventHandler) {
+	processor.removeListen(eventType, receiver)
+	receiver.GetEventProcessor().removeBindEvent(eventType, receiver)
+	receiver.removeRegInfo(eventType, processor)
 }
 
 func (handler *EventHandler) Destroy(){
@@ -195,21 +204,10 @@ func (handler *EventHandler) Destroy(){
 			continue
 		}
 
-		for eventProcess,_ := range mapEventProcess {
-			eventProcess.UnRegEventReciverFun(eventTyp, handler)
+		for eventProcess := range mapEventProcess {
+			eventProcess.UnRegEventReceiverFun(eventTyp, handler)
 		}
 	}
-}
-
-func (processor *EventProcessor) GetEventChan() chan IEvent{
-	processor.locker.Lock()
-	defer processor.locker.Unlock()
-
-	if processor.eventChannel == nil {
-		processor.eventChannel =make(chan IEvent,DefaultEventChannelLen)
-	}
-
-	return processor.eventChannel
 }
 
 func (processor *EventProcessor) EventHandler(ev IEvent) {
@@ -217,8 +215,8 @@ func (processor *EventProcessor) EventHandler(ev IEvent) {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
-			err := fmt.Errorf("%v: %s", r, buf[:l])
-			log.Error("core dump info:%+v\n",err)
+			errString := fmt.Sprint(r)
+			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
 		}
 	}()
 
@@ -231,28 +229,20 @@ func (processor *EventProcessor) EventHandler(ev IEvent) {
 	}
 }
 
-func (processor *EventProcessor) pushEvent(event IEvent){
-	if len(processor.eventChannel)>=cap(processor.eventChannel){
-		log.Error("event process channel is full,data:%+v!",event)
-		return
-	}
-
-	processor.eventChannel<-event
-}
 
 func (processor *EventProcessor) castEvent(event IEvent){
 	if processor.mapListenerEvent == nil {
-		log.Error("mapListenerEvent not init!")
+		log.SError("mapListenerEvent not init!")
 		return
 	}
 
 	eventProcessor,ok := processor.mapListenerEvent[event.GetEventType()]
 	if ok == false || processor == nil{
-		log.Debug("event type %d not listen.",event.GetEventType())
+		log.SDebug("event type ",event.GetEventType()," not listen.")
 		return
 	}
 
-	for proc,_ := range eventProcessor {
-		proc.pushEvent(event)
+	for proc := range eventProcessor {
+		proc.PushEvent(event)
 	}
 }

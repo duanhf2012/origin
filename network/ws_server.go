@@ -41,7 +41,7 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := handler.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Debug("upgrade error: %v", err)
+		log.SError("upgrade error: ", err.Error())
 		return
 	}
 	conn.SetReadLimit(int64(handler.maxMsgLen))
@@ -58,7 +58,7 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(handler.conns) >= handler.maxConnNum {
 		handler.mutexConns.Unlock()
 		conn.Close()
-		log.Debug("too many connections")
+		log.SWarning("too many connections")
 		return
 	}
 	handler.conns[conn] = struct{}{}
@@ -79,27 +79,27 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (server *WSServer) Start() {
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		log.Fatal("%v", err)
+		log.SFatal("WSServer Listen fail:", err.Error())
 	}
 
 	if server.MaxConnNum <= 0 {
 		server.MaxConnNum = 100
-		log.Release("invalid MaxConnNum, reset to %v", server.MaxConnNum)
+		log.SRelease("invalid MaxConnNum, reset to ", server.MaxConnNum)
 	}
 	if server.PendingWriteNum <= 0 {
 		server.PendingWriteNum = 100
-		log.Release("invalid PendingWriteNum, reset to %v", server.PendingWriteNum)
+		log.SRelease("invalid PendingWriteNum, reset to ", server.PendingWriteNum)
 	}
 	if server.MaxMsgLen <= 0 {
 		server.MaxMsgLen = 4096
-		log.Release("invalid MaxMsgLen, reset to %v", server.MaxMsgLen)
+		log.SRelease("invalid MaxMsgLen, reset to ", server.MaxMsgLen)
 	}
 	if server.HTTPTimeout <= 0 {
 		server.HTTPTimeout = 10 * time.Second
-		log.Release("invalid HTTPTimeout, reset to %v", server.HTTPTimeout)
+		log.SRelease("invalid HTTPTimeout, reset to ", server.HTTPTimeout)
 	}
 	if server.NewAgent == nil {
-		log.Fatal("NewAgent must not be nil")
+		log.SFatal("NewAgent must not be nil")
 	}
 
 	if server.CertFile != "" || server.KeyFile != "" {
@@ -110,7 +110,7 @@ func (server *WSServer) Start() {
 		config.Certificates = make([]tls.Certificate, 1)
 		config.Certificates[0], err = tls.LoadX509KeyPair(server.CertFile, server.KeyFile)
 		if err != nil {
-			log.Fatal("%v", err)
+			log.SFatal("LoadX509KeyPair fail:", err.Error())
 		}
 
 		ln = tls.NewListener(ln, config)

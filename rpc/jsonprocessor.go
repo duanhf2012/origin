@@ -1,8 +1,8 @@
 package rpc
 
 import (
-	jsoniter "github.com/json-iterator/go"
 	"github.com/duanhf2012/origin/util/sync"
+	jsoniter "github.com/json-iterator/go"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -110,7 +110,8 @@ func (jsonRpcResponseData *JsonRpcResponseData)		GetErr() *RpcError {
 		return nil
 	}
 
-	return Errorf(jsonRpcResponseData.Err)
+	err := RpcError(jsonRpcResponseData.Err)
+	return &err
 }
 
 func (jsonRpcResponseData *JsonRpcResponseData)		GetReply() []byte{

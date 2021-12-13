@@ -2,17 +2,16 @@ package timer
 
 import (
 	"container/heap"
-	"github.com/duanhf2012/origin/log"
 	"sync"
 	"time"
 )
 
-func SetupTimer(timer *Timer) *Timer{
-	if timer.rOpen == true {
+func SetupTimer(timer ITimer) ITimer{
+	if timer.IsOpen() == true {
 		return nil
 	}
 
-	timer.rOpen = true
+	timer.Open(true)
 	timerHeapLock.Lock() // 使用锁规避竞争条件
 	heap.Push(&timerHeap,timer)
 	timerHeapLock.Unlock()
@@ -20,9 +19,10 @@ func SetupTimer(timer *Timer) *Timer{
 }
 
 func NewTimer(d time.Duration) *Timer{
-	c := make(chan *Timer,1)
-	timer := newTimer(d,c,nil,"",nil)
+	c := make(chan ITimer,1)
+	timer := newTimer(d,c,nil,"")
 	SetupTimer(timer)
+
 	return timer
 }
 
@@ -31,7 +31,7 @@ func ReleaseTimer(timer *Timer) {
 }
 
 type _TimerHeap struct {
-	timers []*Timer
+	timers []ITimer
 }
 
 func (h *_TimerHeap) Len() int {
@@ -39,7 +39,7 @@ func (h *_TimerHeap) Len() int {
 }
 
 func (h *_TimerHeap) Less(i, j int) bool {
-	return h.timers[i].fireTime.Before(h.timers[j].fireTime)
+	return h.timers[i].GetFireTime().Before(h.timers[j].GetFireTime())
 }
 
 func (h *_TimerHeap) Swap(i, j int) {
@@ -47,7 +47,7 @@ func (h *_TimerHeap) Swap(i, j int) {
 }
 
 func (h *_TimerHeap) Push(x interface{}) {
-	h.timers = append(h.timers, x.(*Timer))
+	h.timers = append(h.timers, x.(ITimer))
 }
 
 func (h *_TimerHeap) Pop() (ret interface{}) {
@@ -63,7 +63,7 @@ var (
 )
 
 func StartTimer(minTimerInterval time.Duration,maxTimerNum int){
-	timerHeap.timers = make([]*Timer,0,maxTimerNum)
+	timerHeap.timers = make([]ITimer,0,maxTimerNum)
 	heap.Init(&timerHeap) // 初始化定时器heap
 
 	go  tickRoutine(minTimerInterval)
@@ -86,21 +86,17 @@ func tick() bool{
 		timerHeapLock.Unlock()
 		return false
 	}
-	nextFireTime := timerHeap.timers[0].fireTime
+	nextFireTime := timerHeap.timers[0].GetFireTime()
 	if nextFireTime.After(now) { // 没有到时间的定时器，返回
 		timerHeapLock.Unlock()
 		return false
 	}
 
-	t := heap.Pop(&timerHeap).(*Timer)
+	t := heap.Pop(&timerHeap).(ITimer)
 	timerHeapLock.Unlock()
-	if len(t.C)>= cap(t.C) {
-		log.Error("Timer channel full!")
+	t.Open(false)
+	t.AppendChannel(t)
 
-		return true
-	}
-	t.rOpen = false
-	t.C <- t
 	return true
 }
 

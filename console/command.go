@@ -89,3 +89,22 @@ func PrintDefaults(){
 		fmt.Fprintf(os.Stderr, "  -%-10s%10s\n",val.name,val.usage)
 	}
 }
+
+func GetParamStringVal(paramName string) string{
+	for _,cmd := range commandList {
+		if cmd.name == paramName{
+			return cmd.strValue
+		}
+	}
+	return ""
+}
+
+func GetParamBoolVal(paramName string) bool {
+	for _,cmd := range commandList {
+		if cmd.name == paramName{
+			return cmd.bValue
+		}
+	}
+
+	return false
+}

@@ -331,7 +331,7 @@ func (slf *TestService1) OnInit() error {
 	fmt.Printf("TestService1 OnInit.\n")
 	
 	//打开多线程处理模式，10个协程并发处理
-	slf.SetGoRouterNum(10)
+	slf.SetGoRoutineNum(10)
 	return nil
 }
 ```
@@ -356,7 +356,7 @@ func (slf *TestService1) OnInit() error {
 
 	slf.AfterFunc(time.Second*2,slf.Loop)
 	//打开多线程处理模式，10个协程并发处理
-	//slf.SetGoRouterNum(10)
+	//slf.SetGoRoutineNum(10)
 	return nil
 }
 
@@ -915,4 +915,5 @@ func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
 咕咕兽
 _
 死磕代码
+bp-li
 ```
