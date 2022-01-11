@@ -453,7 +453,7 @@ func (handler *RpcHandler) asyncCallRpc(nodeId int,serviceMethod string,args int
 			err = errors.New("cannot find rpcClient from nodeId "+strNodeId+" "+serviceMethod)
 		}
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply),reflect.ValueOf(err)})
-		log.SError("Call serviceMethod is error:%+v!",err.Error())
+		log.SError("Call serviceMethod is error:",err.Error())
 		return nil
 	}
 

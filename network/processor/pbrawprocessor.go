@@ -38,14 +38,14 @@ func (pbRawProcessor *PBRawProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor ) MsgRoute(msg interface{},userdata interface{}) error{
+func (pbRawProcessor *PBRawProcessor ) MsgRoute(clientId uint64, msg interface{}) error{
 	pPackInfo := msg.(*PBRawPackInfo)
-	pbRawProcessor.msgHandler(userdata.(uint64),pPackInfo.typ,pPackInfo.rawMsg)
+	pbRawProcessor.msgHandler(clientId,pPackInfo.typ,pPackInfo.rawMsg)
 	return nil
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor ) Unmarshal(data []byte) (interface{}, error) {
+func (pbRawProcessor *PBRawProcessor ) Unmarshal(clientId uint64,data []byte) (interface{}, error) {
 	var msgType uint16
 	if pbRawProcessor.LittleEndian == true {
 		msgType = binary.LittleEndian.Uint16(data[:2])
@@ -57,7 +57,7 @@ func (pbRawProcessor *PBRawProcessor ) Unmarshal(data []byte) (interface{}, erro
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor ) Marshal(msg interface{}) ([]byte, error){
+func (pbRawProcessor *PBRawProcessor ) Marshal(clientId uint64,msg interface{}) ([]byte, error){
 	pMsg := msg.(*PBRawPackInfo)
 
 	buff := make([]byte, 2, len(pMsg.rawMsg)+RawMsgTypeSize)
@@ -81,20 +81,20 @@ func (pbRawProcessor *PBRawProcessor) MakeRawMsg(msgType uint16,msg []byte,pbRaw
 	//return &PBRawPackInfo{typ:msgType,rawMsg:msg}
 }
 
-func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(msg interface{}, userData interface{}){
+func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(clientId uint64,msg interface{}){
 	if pbRawProcessor.unknownMessageHandler == nil {
 		return
 	}
-	pbRawProcessor.unknownMessageHandler(userData.(uint64),msg.([]byte))
+	pbRawProcessor.unknownMessageHandler(clientId,msg.([]byte))
 }
 
 // connect event
-func (pbRawProcessor *PBRawProcessor) ConnectedRoute(userData interface{}){
-	pbRawProcessor.connectHandler(userData.(uint64))
+func (pbRawProcessor *PBRawProcessor) ConnectedRoute(clientId uint64){
+	pbRawProcessor.connectHandler(clientId)
 }
 
-func (pbRawProcessor *PBRawProcessor) DisConnectedRoute(userData interface{}){
-	pbRawProcessor.disconnectHandler(userData.(uint64))
+func (pbRawProcessor *PBRawProcessor) DisConnectedRoute(clientId uint64){
+	pbRawProcessor.disconnectHandler(clientId)
 }
 
 func (pbRawProcessor *PBRawProcessor) SetUnknownMsgHandler(unknownMessageHandler UnknownRawMessageHandler){
