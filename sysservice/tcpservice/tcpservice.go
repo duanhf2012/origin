@@ -263,6 +263,7 @@ func (tcpService *TcpService) GetClientIp(clientid uint64) string{
 	return pClient.tcpConn.GetRemoteIp()
 }
 
+
 func (tcpService *TcpService) SendRawMsg(clientId uint64,msg []byte) error{
 	tcpService.mapClientLocker.Lock()
 	client,ok := tcpService.mapClient[clientId]
@@ -272,8 +273,21 @@ func (tcpService *TcpService) SendRawMsg(clientId uint64,msg []byte) error{
 	}
 	tcpService.mapClientLocker.Unlock()
 	client.tcpConn.SetWriteDeadline(tcpService.WriteDeadline)
-	return client.tcpConn.WriteRawMsg(msg)
+	return client.tcpConn.WriteMsg(msg)
 }
+
+func (tcpService *TcpService) SendRawData(clientId uint64,data []byte) error{
+	tcpService.mapClientLocker.Lock()
+	client,ok := tcpService.mapClient[clientId]
+	if ok == false{
+		tcpService.mapClientLocker.Unlock()
+		return fmt.Errorf("client %d is disconnect!",clientId)
+	}
+	tcpService.mapClientLocker.Unlock()
+	client.tcpConn.SetWriteDeadline(tcpService.WriteDeadline)
+	return client.tcpConn.WriteRawMsg(data)
+}
+
 
 func (tcpService *TcpService) GetConnNum() int {
 	tcpService.mapClientLocker.Lock()
