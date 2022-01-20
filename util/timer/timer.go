@@ -55,15 +55,15 @@ type Cron struct {
 	Timer
 }
 
-var timerPool = sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolData{
+var timerPool = sync.NewPoolEx(make(chan sync.IPoolData,102400),func() sync.IPoolData{
 	return &Timer{}
 })
 
-var cronPool = sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolData{
+var cronPool = sync.NewPoolEx(make(chan sync.IPoolData,10240),func() sync.IPoolData{
 	return &Cron{}
 })
 
-var tickerPool =sync.NewPoolEx(make(chan sync.IPoolData,1000),func() sync.IPoolData{
+var tickerPool =sync.NewPoolEx(make(chan sync.IPoolData,102400),func() sync.IPoolData{
 	return &Ticker{}
 })
 
