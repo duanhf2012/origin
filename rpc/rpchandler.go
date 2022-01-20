@@ -59,6 +59,8 @@ type RpcHandler struct {
 	mapRawFunctions map[uint32] RawRpcCallBack
 	funcRpcClient FuncRpcClient
 	funcRpcServer FuncRpcServer
+
+	pClientList []*Client
 }
 
 type TriggerRpcEvent func(bConnect bool,clientSeq uint32,nodeId int)
@@ -107,7 +109,7 @@ func (handler *RpcHandler) InitRpcHandler(rpcHandler IRpcHandler,getClientFun Fu
 	handler.mapFunctions = map[string]RpcMethodInfo{}
 	handler.funcRpcClient = getClientFun
 	handler.funcRpcServer = getServerFun
-
+	handler.pClientList = make([]*Client,maxClusterNode)
 	handler.RegisterRpc(rpcHandler)
 }
 
@@ -542,8 +544,7 @@ func (handler *RpcHandler) CastGo(serviceMethod string,args interface{})  error{
 
 func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId int,rpcMethodId uint32,serviceName string,rawArgs IRawInputArgs) error {
 	processor := GetProcessor(uint8(rpcProcessorType))
-	var pClientList [maxClusterNode]*Client
-	err,count := handler.funcRpcClient(nodeId,serviceName,pClientList[:])
+	err,count := handler.funcRpcClient(nodeId,serviceName,handler.pClientList)
 	if count==0||err != nil {
 		//args.DoGc()
 		log.SError("Call serviceMethod is error:",err.Error())
@@ -559,7 +560,7 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 	//2.rpcClient调用
 	//如果调用本结点服务
 	for i:=0;i<count;i++{
-		if pClientList[i].bSelfNode == true {
+		if handler.pClientList[i].bSelfNode == true {
 			pLocalRpcServer:= handler.funcRpcServer()
 			//调用自己rpcHandler处理器
 			if serviceName == handler.rpcHandler.GetName() { //自己服务调用
@@ -569,23 +570,23 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType,nodeId in
 			}
 
 			//其他的rpcHandler的处理器
-			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,pClientList[i],true,serviceName,rpcMethodId,serviceName,nil,nil,rawArgs.GetRawData())
+			pCall := pLocalRpcServer.selfNodeRpcHandlerGo(processor,handler.pClientList[i],true,serviceName,rpcMethodId,serviceName,nil,nil,rawArgs.GetRawData())
 			rawArgs.DoEscape()
 			if pCall.Err!=nil {
 				err = pCall.Err
 			}
-			pClientList[i].RemovePending(pCall.Seq)
+			handler.pClientList[i].RemovePending(pCall.Seq)
 			ReleaseCall(pCall)
 			continue
 		}
 
 		//跨node调用
-		pCall := pClientList[i].RawGo(processor,true,rpcMethodId,serviceName,rawArgs.GetRawData(),nil)
+		pCall := handler.pClientList[i].RawGo(processor,true,rpcMethodId,serviceName,rawArgs.GetRawData(),nil)
 		rawArgs.DoFree()
 		if pCall.Err!=nil {
 			err = pCall.Err
 		}
-		pClientList[i].RemovePending(pCall.Seq)
+		handler.pClientList[i].RemovePending(pCall.Seq)
 		ReleaseCall(pCall)
 	}
 
