@@ -194,7 +194,6 @@ func (s *Service) Run() {
 			if atomic.AddInt32(&s.goroutineNum,-1)<=0 {
 				s.startStatus = false
 				s.Release()
-				s.OnRelease()
 			}
 			break
 		}
