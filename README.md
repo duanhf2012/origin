@@ -75,7 +75,7 @@ cluster.json如下：
 * NodeId: 表示origin程序的结点Id标识，不允许重复。
 * Private: 是否私有结点，如果为true，表示其他结点不会发现它，但可以自我运行。
 * ListenAddr:Rpc通信服务的监听地址
-* MaxRpcParamLen:Rpc参数数据包最大长度，该参数可以不填，默认一次Rpc调用支持最大4294967295byte长度数据。
+* MaxRpcParamLen:Rpc参数数据包最大长度，该参数可以缺省，默认一次Rpc调用支持最大4294967295byte长度数据。
 * NodeName:结点名称
 * remark:备注，可选项
 * ServiceList:该Node将安装的服务列表
