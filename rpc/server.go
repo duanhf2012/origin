@@ -10,15 +10,16 @@ import (
 	"reflect"
 	"strings"
 )
+
 type RpcProcessorType uint8
 
 const (
-	RpcProcessorJson 	RpcProcessorType = 0
-	RpcProcessorGoGoPB 	RpcProcessorType = 1
+	RpcProcessorJson   RpcProcessorType = 0
+	RpcProcessorGoGoPB RpcProcessorType = 1
 )
 
 //var processor IRpcProcessor = &JsonProcessor{}
-var arrayProcessor  = []IRpcProcessor{&JsonProcessor{},&GoGoPBProcessor{}}
+var arrayProcessor = []IRpcProcessor{&JsonProcessor{}, &GoGoPBProcessor{}}
 var arrayProcessorLen uint8 = 2
 var LittleEndian bool
 
@@ -35,22 +36,22 @@ type RpcAgent struct {
 }
 
 func AppendProcessor(rpcProcessor IRpcProcessor) {
-	arrayProcessor = append(arrayProcessor,rpcProcessor)
+	arrayProcessor = append(arrayProcessor, rpcProcessor)
 	arrayProcessorLen++
 }
 
-func GetProcessorType(param interface{}) (RpcProcessorType,IRpcProcessor){
-	for i:=uint8(1);i<arrayProcessorLen;i++{
+func GetProcessorType(param interface{}) (RpcProcessorType, IRpcProcessor) {
+	for i := uint8(1); i < arrayProcessorLen; i++ {
 		if arrayProcessor[i].IsParse(param) == true {
-			return RpcProcessorType(i),arrayProcessor[i]
+			return RpcProcessorType(i), arrayProcessor[i]
 		}
 	}
 
-	return RpcProcessorJson,arrayProcessor[RpcProcessorJson]
+	return RpcProcessorJson, arrayProcessor[RpcProcessorJson]
 }
 
-func GetProcessor(processorType uint8) IRpcProcessor{
-	if processorType>=arrayProcessorLen{
+func GetProcessor(processorType uint8) IRpcProcessor {
+	if processorType >= arrayProcessorLen {
 		return nil
 	}
 	return arrayProcessor[processorType]
@@ -61,16 +62,21 @@ func (server *Server) Init(rpcHandleFinder RpcHandleFinder) {
 	server.rpcServer = &network.TCPServer{}
 }
 
-func (server *Server) Start(listenAddr string) {
-	 splitAddr := strings.Split(listenAddr,":")
-	 if len(splitAddr)!=2{
-	 	log.SFatal("listen addr is error :",listenAddr)
-	 }
+func (server *Server) Start(listenAddr string, maxRpcParamLen uint32) {
+	splitAddr := strings.Split(listenAddr, ":")
+	if len(splitAddr) != 2 {
+		log.SFatal("listen addr is error :", listenAddr)
+	}
 
-	server.rpcServer.Addr = ":"+splitAddr[1]
-	server.rpcServer.LenMsgLen = 2 //uint16
+	server.rpcServer.Addr = ":" + splitAddr[1]
+	server.rpcServer.LenMsgLen = 4 //uint16
 	server.rpcServer.MinMsgLen = 2
-	server.rpcServer.MaxMsgLen = math.MaxUint16
+	if maxRpcParamLen > 0 {
+		server.rpcServer.MaxMsgLen = maxRpcParamLen
+	} else {
+		server.rpcServer.MaxMsgLen = math.MaxUint32
+	}
+
 	server.rpcServer.MaxConnNum = 10000
 	server.rpcServer.PendingWriteNum = 2000000
 	server.rpcServer.NewAgent = server.NewAgent
@@ -80,63 +86,63 @@ func (server *Server) Start(listenAddr string) {
 
 func (agent *RpcAgent) OnDestroy() {}
 
-func (agent *RpcAgent) WriteResponse(processor IRpcProcessor,serviceMethod string,seq uint64,reply interface{},rpcError RpcError) {
+func (agent *RpcAgent) WriteResponse(processor IRpcProcessor, serviceMethod string, seq uint64, reply interface{}, rpcError RpcError) {
 	var mReply []byte
 	var errM error
 
-	if reply!=nil {
-		mReply,errM = processor.Marshal(reply)
+	if reply != nil {
+		mReply, errM = processor.Marshal(reply)
 		if errM != nil {
 			rpcError = ConvertError(errM)
 		}
 	}
 
 	var rpcResponse RpcResponse
-	rpcResponse.RpcResponseData = processor.MakeRpcResponse(seq,rpcError,mReply)
-	bytes,errM :=  processor.Marshal(rpcResponse.RpcResponseData)
+	rpcResponse.RpcResponseData = processor.MakeRpcResponse(seq, rpcError, mReply)
+	bytes, errM := processor.Marshal(rpcResponse.RpcResponseData)
 	defer processor.ReleaseRpcResponse(rpcResponse.RpcResponseData)
 
 	if errM != nil {
-		log.SError("service method ",serviceMethod," Marshal error:",errM.Error())
+		log.SError("service method ", serviceMethod, " Marshal error:", errM.Error())
 		return
 	}
 
-	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())},bytes)
+	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())}, bytes)
 	if errM != nil {
-		log.SError("Rpc ",serviceMethod," return is error:",errM.Error())
+		log.SError("Rpc ", serviceMethod, " return is error:", errM.Error())
 	}
 }
 
 func (agent *RpcAgent) Run() {
 	for {
-		data,err := agent.conn.ReadMsg()
+		data, err := agent.conn.ReadMsg()
 		if err != nil {
-			log.SError("remoteAddress:",agent.conn.RemoteAddr().String(),",read message: ",err.Error())
+			log.SError("remoteAddress:", agent.conn.RemoteAddr().String(), ",read message: ", err.Error())
 			//will close tcpconn
 			break
 		}
 
 		processor := GetProcessor(data[0])
-		if processor==nil {
+		if processor == nil {
 			agent.conn.ReleaseReadMsg(data)
-			log.SError("remote rpc  ",agent.conn.RemoteAddr()," cannot find processor:",data[0])
+			log.SError("remote rpc  ", agent.conn.RemoteAddr(), " cannot find processor:", data[0])
 			return
 		}
 
 		//解析head
-		req := MakeRpcRequest(processor,0,0,"",false,nil)
-		err = processor.Unmarshal(data[1:],req.RpcRequestData)
+		req := MakeRpcRequest(processor, 0, 0, "", false, nil)
+		err = processor.Unmarshal(data[1:], req.RpcRequestData)
 		agent.conn.ReleaseReadMsg(data)
 		if err != nil {
 			log.SError("rpc Unmarshal request is error:", err.Error())
-			if req.RpcRequestData.GetSeq()>0 {
+			if req.RpcRequestData.GetSeq() > 0 {
 				rpcError := RpcError(err.Error())
-				if req.RpcRequestData.IsNoReply()==false {
+				if req.RpcRequestData.IsNoReply() == false {
 					agent.WriteResponse(processor, req.RpcRequestData.GetServiceMethod(), req.RpcRequestData.GetSeq(), nil, rpcError)
 				}
 				ReleaseRpcRequest(req)
 				continue
-			}else{
+			} else {
 				//will close tcpconn
 				ReleaseRpcRequest(req)
 				break
@@ -144,10 +150,10 @@ func (agent *RpcAgent) Run() {
 		}
 
 		//交给程序处理
-		serviceMethod := strings.Split(req.RpcRequestData.GetServiceMethod(),".")
+		serviceMethod := strings.Split(req.RpcRequestData.GetServiceMethod(), ".")
 		if len(serviceMethod) < 1 {
 			rpcError := RpcError("rpc request req.ServiceMethod is error")
-			if req.RpcRequestData.IsNoReply()==false {
+			if req.RpcRequestData.IsNoReply() == false {
 				agent.WriteResponse(processor, req.RpcRequestData.GetServiceMethod(), req.RpcRequestData.GetSeq(), nil, rpcError)
 			}
 			ReleaseRpcRequest(req)
@@ -156,30 +162,30 @@ func (agent *RpcAgent) Run() {
 		}
 
 		rpcHandler := agent.rpcServer.rpcHandleFinder.FindRpcHandler(serviceMethod[0])
-		if rpcHandler== nil {
+		if rpcHandler == nil {
 			rpcError := RpcError(fmt.Sprintf("service method %s not config!", req.RpcRequestData.GetServiceMethod()))
-			if req.RpcRequestData.IsNoReply()==false {
-				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,rpcError)
+			if req.RpcRequestData.IsNoReply() == false {
+				agent.WriteResponse(processor, req.RpcRequestData.GetServiceMethod(), req.RpcRequestData.GetSeq(), nil, rpcError)
 			}
 
-			log.SError("service method ",req.RpcRequestData.GetServiceMethod()," not config!")
+			log.SError("service method ", req.RpcRequestData.GetServiceMethod(), " not config!")
 			ReleaseRpcRequest(req)
 			continue
 		}
 
-		if req.RpcRequestData.IsNoReply()==false {
-			req.requestHandle = func(Returns interface{},Err RpcError){
-				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),Returns,Err)
+		if req.RpcRequestData.IsNoReply() == false {
+			req.requestHandle = func(Returns interface{}, Err RpcError) {
+				agent.WriteResponse(processor, req.RpcRequestData.GetServiceMethod(), req.RpcRequestData.GetSeq(), Returns, Err)
 				ReleaseRpcRequest(req)
 			}
 		}
 
-		req.inParam,err = rpcHandler.UnmarshalInParam(req.rpcProcessor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetRpcMethodId(),req.RpcRequestData.GetInParam())
+		req.inParam, err = rpcHandler.UnmarshalInParam(req.rpcProcessor, req.RpcRequestData.GetServiceMethod(), req.RpcRequestData.GetRpcMethodId(), req.RpcRequestData.GetInParam())
 		if err != nil {
-			rErr := "Call Rpc "+req.RpcRequestData.GetServiceMethod()+" Param error "+err.Error()
-			if req.requestHandle!=nil {
+			rErr := "Call Rpc " + req.RpcRequestData.GetServiceMethod() + " Param error " + err.Error()
+			if req.requestHandle != nil {
 				req.requestHandle(nil, RpcError(rErr))
-			}else{
+			} else {
 				ReleaseRpcRequest(req)
 			}
 			log.SError(rErr)
@@ -191,7 +197,7 @@ func (agent *RpcAgent) Run() {
 			rpcError := RpcError(err.Error())
 
 			if req.RpcRequestData.IsNoReply() {
-				agent.WriteResponse(processor,req.RpcRequestData.GetServiceMethod(),req.RpcRequestData.GetSeq(),nil,rpcError)
+				agent.WriteResponse(processor, req.RpcRequestData.GetServiceMethod(), req.RpcRequestData.GetSeq(), nil, rpcError)
 			}
 
 			ReleaseRpcRequest(req)
@@ -213,7 +219,7 @@ func (agent *RpcAgent) RemoteAddr() net.Addr {
 	return agent.conn.RemoteAddr()
 }
 
-func (agent *RpcAgent)  Close() {
+func (agent *RpcAgent) Close() {
 	agent.conn.Close()
 }
 
@@ -227,26 +233,25 @@ func (server *Server) NewAgent(c *network.TCPConn) network.Agent {
 	return agent
 }
 
-func (server *Server) myselfRpcHandlerGo(handlerName string,serviceMethod string, args interface{},reply interface{}) error {
+func (server *Server) myselfRpcHandlerGo(handlerName string, serviceMethod string, args interface{}, reply interface{}) error {
 	rpcHandler := server.rpcHandleFinder.FindRpcHandler(handlerName)
-	if rpcHandler== nil {
-		err := errors.New("service method "+serviceMethod+" not config!")
+	if rpcHandler == nil {
+		err := errors.New("service method " + serviceMethod + " not config!")
 		log.SError(err.Error())
 		return err
 	}
 
-	return rpcHandler.CallMethod(serviceMethod,args,reply)
+	return rpcHandler.CallMethod(serviceMethod, args, reply)
 }
 
-
-func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Client,noReply bool,handlerName string,rpcMethodId uint32,serviceMethod string, args interface{},reply interface{},rawArgs []byte) *Call {
+func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Client, noReply bool, handlerName string, rpcMethodId uint32, serviceMethod string, args interface{}, reply interface{}, rawArgs []byte) *Call {
 	pCall := MakeCall()
 	pCall.Seq = client.generateSeq()
 
 	rpcHandler := server.rpcHandleFinder.FindRpcHandler(handlerName)
-	if rpcHandler== nil {
+	if rpcHandler == nil {
 		pCall.Seq = 0
-		pCall.Err = errors.New("service method "+serviceMethod+" not config!")
+		pCall.Err = errors.New("service method " + serviceMethod + " not config!")
 		log.SError(pCall.Err.Error())
 		pCall.done <- pCall
 
@@ -254,14 +259,14 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 	}
 
 	if processor == nil {
-		_,processor = GetProcessorType(args)
+		_, processor = GetProcessorType(args)
 	}
-	req :=  MakeRpcRequest(processor,0,rpcMethodId, serviceMethod,noReply,nil)
+	req := MakeRpcRequest(processor, 0, rpcMethodId, serviceMethod, noReply, nil)
 	req.inParam = args
 	req.localReply = reply
-	if rawArgs!=nil {
+	if rawArgs != nil {
 		var err error
-		req.inParam,err = rpcHandler.UnmarshalInParam(processor,serviceMethod,rpcMethodId,rawArgs)
+		req.inParam, err = rpcHandler.UnmarshalInParam(processor, serviceMethod, rpcMethodId, rawArgs)
 		if err != nil {
 			ReleaseRpcRequest(req)
 			pCall.Err = err
@@ -272,30 +277,30 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 
 	if noReply == false {
 		client.AddPending(pCall)
-		req.requestHandle = func(Returns interface{},Err RpcError){
+		req.requestHandle = func(Returns interface{}, Err RpcError) {
 			if reply != nil && Returns != reply && Returns != nil {
 				byteReturns, err := req.rpcProcessor.Marshal(Returns)
 				if err != nil {
-					log.SError("returns data cannot be marshal ",pCall.Seq)
+					log.SError("returns data cannot be marshal ", pCall.Seq)
 					ReleaseRpcRequest(req)
 				}
 
 				err = req.rpcProcessor.Unmarshal(byteReturns, reply)
 				if err != nil {
-					log.SError("returns data cannot be Unmarshal ",pCall.Seq)
+					log.SError("returns data cannot be Unmarshal ", pCall.Seq)
 					ReleaseRpcRequest(req)
 				}
 			}
 
 			v := client.RemovePending(pCall.Seq)
 			if v == nil {
-				log.SError("rpcClient cannot find seq ",pCall.Seq," in pending")
+				log.SError("rpcClient cannot find seq ", pCall.Seq, " in pending")
 				ReleaseRpcRequest(req)
 				return
 			}
 			if len(Err) == 0 {
 				pCall.Err = nil
-			}else{
+			} else {
 				pCall.Err = Err
 			}
 			pCall.done <- pCall
@@ -313,16 +318,16 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor,client *Clien
 	return pCall
 }
 
-func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler IRpcHandler,noReply bool,handlerName string,serviceMethod string,args interface{},reply interface{},callback reflect.Value) error {
+func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client, callerRpcHandler IRpcHandler, noReply bool, handlerName string, serviceMethod string, args interface{}, reply interface{}, callback reflect.Value) error {
 	rpcHandler := server.rpcHandleFinder.FindRpcHandler(handlerName)
-	if rpcHandler== nil {
-		err := errors.New("service method "+serviceMethod+" not config!")
+	if rpcHandler == nil {
+		err := errors.New("service method " + serviceMethod + " not config!")
 		log.SError(err.Error())
 		return err
 	}
 
-	_,processor := GetProcessorType(args)
-	req := MakeRpcRequest(processor,0,0,serviceMethod,noReply,nil)
+	_, processor := GetProcessorType(args)
+	req := MakeRpcRequest(processor, 0, 0, serviceMethod, noReply, nil)
 	req.inParam = args
 	req.localReply = reply
 
@@ -335,21 +340,21 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client,callerRpcHandler 
 		pCall.Reply = reply
 
 		client.AddPending(pCall)
-		req.requestHandle = func(Returns interface{},Err RpcError){
+		req.requestHandle = func(Returns interface{}, Err RpcError) {
 			v := client.RemovePending(callSeq)
 			if v == nil {
-				log.SError("rpcClient cannot find seq ",pCall.Seq," in pending")
+				log.SError("rpcClient cannot find seq ", pCall.Seq, " in pending")
 				//ReleaseCall(pCall)
 				ReleaseRpcRequest(req)
 				return
 			}
 			if len(Err) == 0 {
 				pCall.Err = nil
-			}else{
+			} else {
 				pCall.Err = Err
 			}
 
-			if Returns!=nil {
+			if Returns != nil {
 				pCall.Reply = Returns
 			}
 			pCall.rpcHandler.PushRpcResponse(pCall)

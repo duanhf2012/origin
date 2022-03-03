@@ -78,7 +78,8 @@ func (ds *DynamicDiscoveryMaster) OnStart() {
 	nodeInfo.NodeName = localNodeInfo.NodeName
 	nodeInfo.ListenAddr = localNodeInfo.ListenAddr
 	nodeInfo.PublicServiceList = localNodeInfo.PublicServiceList
-
+	nodeInfo.MaxRpcParamLen = localNodeInfo.MaxRpcParamLen
+	
 	ds.addNodeInfo(&nodeInfo)
 }
 
@@ -144,7 +145,7 @@ func (ds *DynamicDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscove
 	nodeInfo.ServiceList = req.NodeInfo.PublicServiceList
 	nodeInfo.PublicServiceList = req.NodeInfo.PublicServiceList
 	nodeInfo.ListenAddr = req.NodeInfo.ListenAddr
-
+	nodeInfo.MaxRpcParamLen = req.NodeInfo.MaxRpcParamLen
 	//主动删除已经存在的结点,确保先断开，再连接
 	cluster.serviceDiscoveryDelNode(nodeInfo.NodeId, true)
 
@@ -264,6 +265,7 @@ func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDisco
 				nInfo.NodeId = nodeInfo.NodeId
 				nInfo.NodeName = nodeInfo.NodeName
 				nInfo.ListenAddr = nodeInfo.ListenAddr
+				nInfo.MaxRpcParamLen = nodeInfo.MaxRpcParamLen
 				mapNodeInfo[nodeInfo.NodeId] = nInfo
 			}
 
@@ -324,6 +326,7 @@ func (dc *DynamicDiscoveryClient) OnNodeConnected(nodeId int) {
 	req.NodeInfo.NodeId = int32(cluster.localNodeInfo.NodeId)
 	req.NodeInfo.NodeName = cluster.localNodeInfo.NodeName
 	req.NodeInfo.ListenAddr = cluster.localNodeInfo.ListenAddr
+	req.NodeInfo.MaxRpcParamLen = cluster.localNodeInfo.MaxRpcParamLen
 
 	//MasterDiscoveryNode配置中没有配置NeighborService，则同步当前结点所有服务
 	if len(nodeInfo.NeighborService) == 0 {
@@ -335,12 +338,12 @@ func (dc *DynamicDiscoveryClient) OnNodeConnected(nodeId int) {
 	//向Master服务同步本Node服务信息
 	err := dc.AsyncCallNode(nodeId, RegServiceDiscover, &req, func(res *rpc.Empty, err error) {
 		if err != nil {
-			log.SError("call ",RegServiceDiscover," is fail :", err.Error())
+			log.SError("call ", RegServiceDiscover, " is fail :", err.Error())
 			return
 		}
 	})
 	if err != nil {
-		log.SError("call ",RegServiceDiscover," is fail :", err.Error())
+		log.SError("call ", RegServiceDiscover, " is fail :", err.Error())
 	}
 }
 
@@ -373,6 +376,7 @@ func (dc *DynamicDiscoveryClient) setNodeInfo(nodeInfo *rpc.NodeInfo) {
 	nInfo.NodeId = int(nodeInfo.NodeId)
 	nInfo.NodeName = nodeInfo.NodeName
 	nInfo.ListenAddr = nodeInfo.ListenAddr
+	nInfo.MaxRpcParamLen = nodeInfo.MaxRpcParamLen
 	dc.funSetService(&nInfo)
 }
 
