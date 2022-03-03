@@ -54,6 +54,7 @@ cluster.json如下：
           "NodeId": 1,
           "Private": false,
           "ListenAddr":"127.0.0.1:8001",
+          "MaxRpcParamLen": 409600,
           "NodeName": "Node_Test1",
 		  "remark":"//以_打头的，表示只在本机进程，不对整个子网开发",
           "ServiceList": ["TestService1","TestService2","TestServiceCall","GateService","_TcpService","HttpService","WSService"]
@@ -62,6 +63,7 @@ cluster.json如下：
           "NodeId": 2,
           "Private": false,
           "ListenAddr":"127.0.0.1:8002",
+          "MaxRpcParamLen": 409600,
           "NodeName": "Node_Test1",
 		  "remark":"//以_打头的，表示只在本机进程，不对整个子网开发",
           "ServiceList": ["TestService1","TestService2","TestServiceCall","GateService","TcpService","HttpService","WSService"]
@@ -73,6 +75,7 @@ cluster.json如下：
 * NodeId: 表示origin程序的结点Id标识，不允许重复。
 * Private: 是否私有结点，如果为true，表示其他结点不会发现它，但可以自我运行。
 * ListenAddr:Rpc通信服务的监听地址
+* MaxRpcParamLen:Rpc参数数据包最大长度，该参数可以不填，默认一次Rpc调用支持最大4294967295byte长度数据。
 * NodeName:结点名称
 * remark:备注，可选项
 * ServiceList:该Node将安装的服务列表
@@ -711,17 +714,20 @@ origin引擎默认使用读取所有结点配置的进行确认结点有哪些Se
 	"MasterDiscoveryNode": [{
 		"NodeId": 2,
 		"ListenAddr": "127.0.0.1:10001",
+		"MaxRpcParamLen": 409600,
 		"NeighborService":["HttpGateService"]
 	},
 	{
 		"NodeId": 1,
-		"ListenAddr": "127.0.0.1:8801"
+		"ListenAddr": "127.0.0.1:8801",
+		"MaxRpcParamLen": 409600
 	}],
 	
 	
 	"NodeList": [{
 		"NodeId": 1,
 		"ListenAddr": "127.0.0.1:8801",
+		"MaxRpcParamLen": 409600,
 		"NodeName": "Node_Test1",
 		"Private": false,
 		"remark": "//以_打头的，表示只在本机进程，不对整个子网开发",
