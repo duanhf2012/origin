@@ -81,10 +81,10 @@ func (s *Session) EnsureUniqueIndex(db string, collection string, indexKeys [][]
 
 //keys[索引][每个索引key字段]
 func (s *Session) ensureIndex(db string, collection string, indexKeys [][]string, bBackground bool, unique bool) error {
-	keysDoc := bsonx.Doc{}
 
 	var indexes []mongo.IndexModel
 	for _, keys := range indexKeys {
+		keysDoc := bsonx.Doc{}
 		for _, key := range keys {
 			keysDoc = keysDoc.Append(key, bsonx.Int32(1))
 		}
@@ -103,4 +103,8 @@ func (s *Session) ensureIndex(db string, collection string, indexKeys [][]string
 
 func (s *Session) GetDefaultContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), s.maxOperatorTimeOut)
+}
+
+func (s *Session) Collection(db string, collection string) *mongo.Collection {
+	return s.Database(db).Collection(collection)
 }
