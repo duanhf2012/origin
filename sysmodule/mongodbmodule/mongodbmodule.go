@@ -70,18 +70,17 @@ func (s *Session) NextSeq(db string, collection string, id interface{}) (int, er
 }
 
 //indexKeys[索引][每个索引key字段]
-func (s *Session) EnsureIndex(db string, collection string, indexKeys [][]string, bBackground bool) error {
-	return s.ensureIndex(db, collection, indexKeys, bBackground, false)
+func (s *Session) EnsureIndex(db string, collection string, indexKeys [][]string, bBackground bool,sparse bool) error {
+	return s.ensureIndex(db, collection, indexKeys, bBackground, false,sparse)
 }
 
 //indexKeys[索引][每个索引key字段]
-func (s *Session) EnsureUniqueIndex(db string, collection string, indexKeys [][]string, bBackground bool) error {
-	return s.ensureIndex(db, collection, indexKeys, bBackground, true)
+func (s *Session) EnsureUniqueIndex(db string, collection string, indexKeys [][]string, bBackground bool,sparse bool) error {
+	return s.ensureIndex(db, collection, indexKeys, bBackground, true,sparse)
 }
 
 //keys[索引][每个索引key字段]
-func (s *Session) ensureIndex(db string, collection string, indexKeys [][]string, bBackground bool, unique bool) error {
-
+func (s *Session) ensureIndex(db string, collection string, indexKeys [][]string, bBackground bool, unique bool,sparse bool) error {
 	var indexes []mongo.IndexModel
 	for _, keys := range indexKeys {
 		keysDoc := bsonx.Doc{}
@@ -89,10 +88,11 @@ func (s *Session) ensureIndex(db string, collection string, indexKeys [][]string
 			keysDoc = keysDoc.Append(key, bsonx.Int32(1))
 		}
 
-		indexes = append(indexes, mongo.IndexModel{
-			Keys:    keysDoc,
-			Options: options.Index().SetUnique(unique).SetBackground(bBackground),
-		})
+		options:= options.Index().SetUnique(unique).SetBackground(bBackground)
+		if sparse == true {
+			options.SetSparse(true)
+		}
+		indexes = append(indexes, mongo.IndexModel{Keys:    keysDoc,	Options:options	})
 	}
 
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), s.maxOperatorTimeOut)
