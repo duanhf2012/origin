@@ -65,7 +65,10 @@ func (s *Session) NextSeq(db string, collection string, id interface{}) (int, er
 
 	ctxTimeout, cancel := s.GetDefaultContext()
 	defer cancel()
-	err := s.Client.Database(db).Collection(collection).FindOneAndUpdate(ctxTimeout, bson.M{"_id": id}, bson.M{"$inc": bson.M{"Seq": 1}}).Decode(&res)
+
+	after := options.After
+	updateOpts := options.FindOneAndUpdateOptions{ReturnDocument: &after}
+	err := s.Client.Database(db).Collection(collection).FindOneAndUpdate(ctxTimeout, bson.M{"_id": id}, bson.M{"$inc": bson.M{"Seq": 1}},&updateOpts).Decode(&res)
 	return res.Seq, err
 }
 
