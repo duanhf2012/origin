@@ -41,8 +41,9 @@ type NodeRpcInfo struct {
 var cluster Cluster
 
 type Cluster struct {
-	localNodeInfo           NodeInfo   //本结点配置信息
-	masterDiscoveryNodeList []NodeInfo //配置发现Master结点
+	localNodeInfo           NodeInfo    //本结点配置信息
+	masterDiscoveryNodeList []NodeInfo  //配置发现Master结点
+	globalCfg               interface{} //全局配置
 
 	localServiceCfg  map[string]interface{} //map[serviceName]配置数据*
 	mapRpc           map[int]NodeRpcInfo    //nodeId
@@ -417,4 +418,8 @@ func HasService(nodeId int, serviceName string) bool {
 	}
 
 	return false
+}
+
+func (cls *Cluster) GetGlobalCfg() interface{} {
+	return cls.globalCfg
 }
