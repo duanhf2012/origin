@@ -87,6 +87,9 @@ service.json如下：
 ---------------
 ```
 {
+"Global": {
+		"AreaId": 1
+	},
   "Service":{
 	  "HttpService":{
 		"ListenAddr":"0.0.0.0:9402",
@@ -157,7 +160,7 @@ service.json如下：
 ```
 
 ---------------
-以上配置分为两个部分：Service与NodeService，NodeService中配置的对应结点中服务的配置，如果启动程序中根据nodeid查找该域的对应的服务，如果找不到时，从Service公共部分查找。
+以上配置分为两个部分：Global,Service与NodeService。Global是全局配置，在任何服务中都可以通过cluster.GetCluster().GetGlobalCfg()获取，NodeService中配置的对应结点中服务的配置，如果启动程序中根据nodeid查找该域的对应的服务，如果找不到时，从Service公共部分查找。
 
 **HttpService配置**
 * ListenAddr:Http监听地址
