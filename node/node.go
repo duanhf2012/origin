@@ -9,6 +9,7 @@ import (
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/service"
 	"github.com/duanhf2012/origin/util/timer"
+	"github.com/duanhf2012/origin/util/buildtime"
 	"io/ioutil"
 	slog "log"
 	"net/http"
@@ -53,9 +54,7 @@ func usage(val interface{}) error{
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, `orgin version: orgin/2.14.20201029
-Usage: originserver [-help] [-start node=1] [-stop] [-config path] [-pprof 0.0.0.0:6060]...
-`)
+	fmt.Fprintf(os.Stderr, "Welcome to Origin(build time: %s)\nUsage: originserver [-help] [-start node=1] [-stop] [-config path] [-pprof 0.0.0.0:6060]...\n",buildtime.GetBuildDateTime())
 	console.PrintDefaults()
 	return nil
 }
