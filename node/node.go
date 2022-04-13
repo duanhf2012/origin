@@ -54,7 +54,12 @@ func usage(val interface{}) error{
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "Welcome to Origin(build time: %s)\nUsage: originserver [-help] [-start node=1] [-stop] [-config path] [-pprof 0.0.0.0:6060]...\n",buildtime.GetBuildDateTime())
+	if len(buildtime.GetBuildDateTime())>0 {
+		fmt.Fprintf(os.Stderr, "Welcome to Origin(build info: %s)\nUsage: originserver [-help] [-start node=1] [-stop] [-config path] [-pprof 0.0.0.0:6060]...\n",buildtime.GetBuildDateTime())
+	}else{
+		fmt.Fprintf(os.Stderr, "Welcome to Origin\nUsage: originserver [-help] [-start node=1] [-stop] [-config path] [-pprof 0.0.0.0:6060]...\n")
+	}
+
 	console.PrintDefaults()
 	return nil
 }
