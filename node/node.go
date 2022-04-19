@@ -39,6 +39,7 @@ func init() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM,syscall.Signal(10))
 
 	console.RegisterCommandBool("help",false,"<-help> This help.",usage)
+	console.RegisterCommandString("name","","<-name nodeName> Node's name.",setName)
 	console.RegisterCommandString("start","","<-start nodeid=nodeid> Run originserver.",startNode)
 	console.RegisterCommandString("stop","","<-stop nodeid=nodeid> Stop originserver process.",stopNode)
 	console.RegisterCommandString("config","","<-config path> Configuration file path.",setConfigPath)
@@ -61,6 +62,10 @@ func usage(val interface{}) error{
 	}
 
 	console.PrintDefaults()
+	return nil
+}
+
+func setName(val interface{}) error {
 	return nil
 }
 
