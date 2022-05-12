@@ -175,10 +175,12 @@ func (slf *HttpSession) Write(msg []byte) {
 
 func (slf *HttpSession) WriteJsonDone(statusCode int,msgJson interface{}) error {
 	msg, err := json.Marshal(msgJson)
-	if err == nil {
-		slf.Write(msg)
+	if err != nil {
+		return err
 	}
 
+	slf.statusCode = statusCode
+	slf.Write(msg)
 	slf.Done()
 	return err
 }
