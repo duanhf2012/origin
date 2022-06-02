@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/network"
 	"reflect"
+	"github.com/duanhf2012/origin/log"
 )
 
 type MessageJsonInfo struct {
@@ -104,15 +105,25 @@ func (jsonProcessor *JsonProcessor) MakeRawMsg(msgType uint16,msg []byte) *JsonP
 }
 
 func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId uint64,msg interface{}){
+	if jsonProcessor.unknownMessageHandler==nil {
+		log.SDebug("Unknown message received from ",clientId)
+		return
+	}
+
 	jsonProcessor.unknownMessageHandler(clientId,msg.([]byte))
+
 }
 
 func (jsonProcessor *JsonProcessor) ConnectedRoute(clientId uint64){
-	jsonProcessor.connectHandler(clientId)
+	if jsonProcessor.connectHandler != nil {
+		jsonProcessor.connectHandler(clientId)
+	}
 }
 
 func (jsonProcessor *JsonProcessor) DisConnectedRoute(clientId uint64){
-	jsonProcessor.disconnectHandler(clientId)
+	if jsonProcessor.disconnectHandler != nil {
+		jsonProcessor.disconnectHandler(clientId)
+	}
 }
 
 func (jsonProcessor *JsonProcessor) RegisterUnknownMsg(unknownMessageHandler UnknownMessageJsonHandler){

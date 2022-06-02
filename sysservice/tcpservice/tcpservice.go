@@ -8,6 +8,7 @@ import (
 	"github.com/duanhf2012/origin/network/processor"
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
+	"sync/atomic"
 	"sync"
 	"time"
 	"runtime"
@@ -42,12 +43,12 @@ const Default_ReadDeadline = 180  //30s
 const Default_WriteDeadline = 180 //30s
 
 const (
-	MaxNodeId = 1<<10 - 1 //Uint10
-	MaxSeed   = 1<<22 - 1 //MaxUint24
+	MaxNodeId = 1<<14 - 1  //最大值 16383
+	MaxSeed   = 1<<19 - 1  //最大值 524287
+	MaxTime   = 1<<31 - 1  //最大值 2147483647
 )
 
 var seed uint32
-var seedLocker sync.Mutex
 
 type TcpPack struct {
 	Type         TcpPackType //0表示连接 1表示断开 2表示数据
@@ -66,13 +67,11 @@ func (tcpService *TcpService) genId() uint64 {
 		panic("nodeId exceeds the maximum!")
 	}
 
-	seedLocker.Lock()
-	seed = (seed+1)%MaxSeed
-	seedLocker.Unlock()
-
-	nowTime := uint64(time.Now().Second())
-	return (uint64(node.GetNodeId())<<54)|(nowTime<<22)|uint64(seed)
+	newSeed := atomic.AddUint32(&seed,1) % MaxSeed
+	nowTime := uint64(time.Now().Unix())%MaxTime
+	return (uint64(node.GetNodeId())<<50)|(nowTime<<19)|uint64(newSeed)
 }
+
 
 func GetNodeId(agentId uint64) int {
 	return int(agentId>>54)

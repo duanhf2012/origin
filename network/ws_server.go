@@ -21,6 +21,7 @@ type WSServer struct {
 	NewAgent        func(*WSConn) Agent
 	ln              net.Listener
 	handler         *WSHandler
+	messageType 	int
 }
 
 type WSHandler struct {
@@ -32,6 +33,11 @@ type WSHandler struct {
 	conns           WebsocketConnSet
 	mutexConns      sync.Mutex
 	wg              sync.WaitGroup
+	messageType 	int
+}
+
+func (handler *WSHandler) SetMessageType(messageType int){
+	handler.messageType = messageType
 }
 
 func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +51,7 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(int64(handler.maxMsgLen))
+	handler.messageType = websocket.TextMessage
 
 	handler.wg.Add(1)
 	defer handler.wg.Done()
@@ -64,7 +71,7 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	handler.conns[conn] = struct{}{}
 	handler.mutexConns.Unlock()
 
-	wsConn := newWSConn(conn, handler.pendingWriteNum, handler.maxMsgLen)
+	wsConn := newWSConn(conn, handler.pendingWriteNum, handler.maxMsgLen,handler.messageType)
 	agent := handler.newAgent(wsConn)
 	agent.Run()
 
@@ -74,6 +81,13 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	delete(handler.conns, conn)
 	handler.mutexConns.Unlock()
 	agent.OnClose()
+}
+
+func (server *WSServer) SetMessageType(messageType int){
+	server.messageType = messageType
+	if server.handler!= nil {
+		server.handler.SetMessageType(messageType)
+	}
 }
 
 func (server *WSServer) Start() {
