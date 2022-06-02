@@ -74,7 +74,7 @@ func (tcpService *TcpService) genId() uint64 {
 
 
 func GetNodeId(agentId uint64) int {
-	return int(agentId>>54)
+	return int(agentId>>50)
 }
 
 func (tcpService *TcpService) OnInit() error{
