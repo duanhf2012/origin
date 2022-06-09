@@ -244,15 +244,6 @@ func (cls *Cluster) GetNodeIdByService(serviceName string, rpcClientList []*rpc.
 	return nil, count
 }
 
-func (cls *Cluster) getServiceCfg(serviceName string) interface{} {
-	v, ok := cls.localServiceCfg[serviceName]
-	if ok == false {
-		return nil
-	}
-
-	return v
-}
-
 func (cls *Cluster) GetServiceCfg(serviceName string) interface{} {
 	serviceCfg, ok := cls.localServiceCfg[serviceName]
 	if ok == false {
