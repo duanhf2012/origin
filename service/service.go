@@ -88,7 +88,10 @@ func (s *Service) OpenProfiler()  {
 
 func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
 	s.dispatcher =timer.NewDispatcher(timerDispatcherLen)
-	s.chanEvent = make(chan event.IEvent,maxServiceEventChannel)
+	if s.chanEvent == nil {
+		s.chanEvent = make(chan event.IEvent,maxServiceEventChannel)
+	}
+
 	s.rpcHandler.InitRpcHandler(iService.(rpc.IRpcHandler),getClientFun,getServerFun,iService.(rpc.IRpcHandlerChannel))
 	s.IRpcHandler = &s.rpcHandler
 	s.self = iService.(IModule)
@@ -311,6 +314,21 @@ func (s *Service) pushEvent(ev event.IEvent) error{
 	return nil
 }
 
+func (s *Service) GetServiceEventChannelNum() int{
+	return len(s.chanEvent)
+}
+
+func (s *Service) GetServiceTimerChannel() int{
+	return len(s.dispatcher.ChanTimer)
+}
+
+func (s *Service) SetEventChannelNum(num int){
+	if s.chanEvent == nil {
+		s.chanEvent = make(chan event.IEvent,num)
+	}else {
+		panic("this stage cannot be set")
+	}
+}
 
 func (s *Service) SetGoRoutineNum(goroutineNum int32) bool {
 	//已经开始状态不允许修改协程数量,打开性能分析器不允许开多线程
