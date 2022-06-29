@@ -22,18 +22,24 @@ var timerDispatcherLen = 100000
 
 type IService interface {
 	Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})
-	SetName(serviceName string)
-	GetName() string
+	Wait()
+	Start()
+
 	OnSetup(iService IService)
 	OnInit() error
 	OnStart()
 	OnRelease()
-	Wait()
-	Start()
+
+	SetName(serviceName string)
+	GetName() string
 	GetRpcHandler() rpc.IRpcHandler
 	GetServiceCfg()interface{}
-	OpenProfiler()
 	GetProfiler() *profiler.Profiler
+	GetServiceEventChannelNum() int
+	GetServiceTimerChannelNum() int
+
+	SetEventChannelNum(num int)
+	OpenProfiler()
 }
 
 // eventPool的内存池,缓存Event
@@ -318,7 +324,7 @@ func (s *Service) GetServiceEventChannelNum() int{
 	return len(s.chanEvent)
 }
 
-func (s *Service) GetServiceTimerChannel() int{
+func (s *Service) GetServiceTimerChannelNum() int{
 	return len(s.dispatcher.ChanTimer)
 }
 
