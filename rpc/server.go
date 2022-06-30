@@ -338,7 +338,7 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client, callerRpcHandler
 		pCall.rpcHandler = callerRpcHandler
 		pCall.callback = &callback
 		pCall.Reply = reply
-
+		pCall.ServiceMethod = serviceMethod
 		client.AddPending(pCall)
 		req.requestHandle = func(Returns interface{}, Err RpcError) {
 			v := client.RemovePending(callSeq)
