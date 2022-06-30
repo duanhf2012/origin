@@ -53,8 +53,12 @@ func (s *SQueue[ElementType]) Len() int {
 	s.locker.RLock()
 	defer s.locker.RUnlock()
 
+	return s.len()
+}
+
+func (s *SQueue[ElementType]) len() int {
 	if s.head <= s.tail {
-		return s.head - s.tail
+		return s.tail - s.head
 	}
 
 	//(len(s.elements)-1-s.head)+(s.tail+1)
@@ -101,11 +105,15 @@ func (s *SQueue[ElementType]) RemoveElement(elementNum int) (removeNum int) {
 	s.locker.Lock()
 	defer s.locker.Unlock()
 
-	for ;s.head == s.tail && removeNum >= elementNum;{
-		removeNum++
-		s.head++
-		s.head = s.head%len(s.elements)
+	lens :=  s.len()
+	if elementNum > lens{
+		removeNum = lens
+	}else{
+		removeNum = elementNum
 	}
+
+
+	s.head = (s.head + removeNum)%len(s.elements)
 
 	return
 }
