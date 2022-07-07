@@ -290,6 +290,8 @@ func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDisco
 
 	//删除不必要的结点
 	for _, nodeId := range willDelNodeId {
+		nodeInfo,_ := cluster.GetNodeInfo(int(nodeId))
+		cluster.TriggerDiscoveryEvent(false,int(nodeId),nodeInfo.PublicServiceList)
 		dc.removeMasterNode(req.MasterNodeId, int32(nodeId))
 		if dc.findNodeId(nodeId) == false {
 			dc.funDelService(int(nodeId), false)
@@ -300,6 +302,7 @@ func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDisco
 	for _, nodeInfo := range mapNodeInfo {
 		dc.addMasterNode(req.MasterNodeId, nodeInfo.NodeId)
 		dc.setNodeInfo(nodeInfo)
+		cluster.TriggerDiscoveryEvent(true,int(nodeInfo.NodeId),nodeInfo.PublicServiceList)
 	}
 
 	return nil

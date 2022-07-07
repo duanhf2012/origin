@@ -5,7 +5,12 @@ var mapServiceName map[string]IService
 var setupServiceList []IService
 
 type RegRpcEventFunType func(serviceName string)
+type RegDiscoveryServiceEventFunType func(serviceName string)
 var RegRpcEventFun RegRpcEventFunType
+var UnRegRpcEventFun RegRpcEventFunType
+
+var RegDiscoveryServiceEventFun RegDiscoveryServiceEventFunType
+var UnRegDiscoveryServiceEventFun RegDiscoveryServiceEventFunType
 
 func init(){
 	mapServiceName = map[string]IService{}

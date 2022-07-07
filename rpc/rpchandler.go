@@ -68,9 +68,14 @@ type RpcHandler struct {
 }
 
 type TriggerRpcEvent func(bConnect bool, clientSeq uint32, nodeId int)
-type IRpcListener interface {
+type INodeListener interface {
 	OnNodeConnected(nodeId int)
 	OnNodeDisconnect(nodeId int)
+}
+
+type IDiscoveryServiceListener interface {
+	OnDiscoveryService(nodeId int, serviceName []string)
+	OnUnDiscoveryService(nodeId int, serviceName []string)
 }
 
 type IRpcHandler interface {
