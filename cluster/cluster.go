@@ -465,7 +465,7 @@ func GetNodeByServiceName(serviceName string) map[int]struct{} {
 		return nil
 	}
 
-	var mapNodeId map[int]struct{}
+	mapNodeId := map[int]struct{}{}
 	for nodeId,_ := range mapNode {
 		mapNodeId[nodeId] = struct{}{}
 	}
