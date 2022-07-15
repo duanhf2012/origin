@@ -2,6 +2,7 @@ package coroutine
 
 import (
 	"fmt"
+	"github.com/duanhf2012/origin/log"
 	"reflect"
 	"runtime/debug"
 )
@@ -12,10 +13,11 @@ func F(callback interface{},recoverNum int, args ...interface{}) {
 			var coreInfo string
 			coreInfo = string(debug.Stack())
 			coreInfo += "\n" + fmt.Sprintf("Core information is %v\n", r)
-			fmt.Print(coreInfo)
-
-			if recoverNum==-1 ||recoverNum-1 >= 0 {
+			log.SError(coreInfo)
+			if recoverNum > 0{
 				recoverNum -= 1
+			}
+			if recoverNum == -1 || recoverNum > 0 {
 				go F(callback,recoverNum, args...)
 			}
 		}
