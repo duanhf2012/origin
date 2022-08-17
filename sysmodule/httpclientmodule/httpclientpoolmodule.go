@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -64,7 +64,7 @@ func (m *HttpClientModule) Init(maxpool int, proxyUrl string) {
 			Proxy:               proxyFun,
 			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		},
-		Timeout:   5 * time.Second,
+		Timeout: 5 * time.Second,
 	}
 }
 
@@ -103,7 +103,7 @@ func (m *HttpClientModule) Request(method string, url string, body []byte, heade
 	}
 	defer rsp.Body.Close()
 
-	ret.Body, err = ioutil.ReadAll(rsp.Body)
+	ret.Body, err = io.ReadAll(rsp.Body)
 	if err != nil {
 		ret.Err = err
 		return ret

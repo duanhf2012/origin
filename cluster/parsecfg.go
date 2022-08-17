@@ -5,7 +5,7 @@ import (
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/rpc"
 	jsoniter "github.com/json-iterator/go"
-	"io/ioutil"
+	"os"
 	"strings"
 )
 
@@ -18,7 +18,7 @@ type NodeInfoList struct {
 
 func (cls *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList, error) {
 	c := &NodeInfoList{}
-	d, err := ioutil.ReadFile(filepath)
+	d, err := os.ReadFile(filepath)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func (cls *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList, error) {
 func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]interface{}, map[int]map[string]interface{}, error) {
 	c := map[string]interface{}{}
 	//读取配置
-	d, err := ioutil.ReadFile(filepath)
+	d, err := os.ReadFile(filepath)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -69,7 +69,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo, []NodeInfo, 
 	var nodeInfoList []NodeInfo
 	var masterDiscoverNodeList []NodeInfo
 	clusterCfgPath := strings.TrimRight(configDir, "/") + "/cluster"
-	fileInfoList, err := ioutil.ReadDir(clusterCfgPath)
+	fileInfoList, err := os.ReadDir(clusterCfgPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Read dir %s is fail :%+v", clusterCfgPath, err)
 	}
@@ -111,7 +111,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo, []NodeInfo, 
 
 func (cls *Cluster) readLocalService(localNodeId int) error {
 	clusterCfgPath := strings.TrimRight(configDir, "/") + "/cluster"
-	fileInfoList, err := ioutil.ReadDir(clusterCfgPath)
+	fileInfoList, err := os.ReadDir(clusterCfgPath)
 	if err != nil {
 		return fmt.Errorf("Read dir %s is fail :%+v", clusterCfgPath, err)
 	}
