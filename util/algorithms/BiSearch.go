@@ -10,7 +10,7 @@ type Element[ValueType NumberType] interface {
 }
 
 //BiSearch 二分查找,切片必需有序号。matchUp表示是否向上范围查找。比如：数列10 20  30 ，当value传入25时，返回结果是2,表示落到3的范围
-func BiSearch[ValueType NumberType, T Element[ValueType]](sElement []T, value ValueType, matchUp bool) int {
+func BiSearch[ValueType NumberType, T Element[ValueType]](sElement []T, value ValueType, matchUp int) int {
 	low, high := 0, len(sElement)-1
 	if high == -1 {
 		return -1
@@ -28,12 +28,29 @@ func BiSearch[ValueType NumberType, T Element[ValueType]](sElement []T, value Va
 		}
 	}
 
-	if matchUp == true {
+	switch matchUp {
+	case 1:
 		if (sElement[mid].GetValue()) < value &&
 			(mid+1 < len(sElement)-1) {
 			return mid + 1
 		}
 		return mid
+	case -1:
+		if (sElement[mid].GetValue()) > value {
+			if mid - 1 < 0 {
+				return -1
+			} else {
+				return mid - 1
+			}
+		} else if (sElement[mid].GetValue()) < value {
+			if (mid+1 < len(sElement)-1) {
+				return mid + 1
+			} else {
+				return mid
+			}
+		} else {
+			return mid
+		}
 	}
 
 	return -1
