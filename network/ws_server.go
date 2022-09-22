@@ -2,12 +2,13 @@ package network
 
 import (
 	"crypto/tls"
-	"github.com/duanhf2012/origin/log"
-	"github.com/gorilla/websocket"
 	"net"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/duanhf2012/origin/log"
+	"github.com/gorilla/websocket"
 )
 
 type WSServer struct {
@@ -139,6 +140,7 @@ func (server *WSServer) Start() {
 		maxMsgLen:       server.MaxMsgLen,
 		newAgent:        server.NewAgent,
 		conns:           make(WebsocketConnSet),
+		messageType:     server.messageType,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: server.HTTPTimeout,
 			CheckOrigin:      func(_ *http.Request) bool { return true },
