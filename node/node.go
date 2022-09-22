@@ -31,6 +31,13 @@ var bValid bool
 var configDir = "./config/"
 var logLevel string = "debug"
 var logPath string
+type BuildOSType = int8
+
+const(
+	Windows BuildOSType = 0
+	Linux 	BuildOSType = 1
+	Mac   	BuildOSType = 2
+)
 
 func init() {
 
