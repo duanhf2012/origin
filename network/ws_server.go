@@ -139,6 +139,7 @@ func (server *WSServer) Start() {
 		maxMsgLen:       server.MaxMsgLen,
 		newAgent:        server.NewAgent,
 		conns:           make(WebsocketConnSet),
+		messageType:server.messageType,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: server.HTTPTimeout,
 			CheckOrigin:      func(_ *http.Request) bool { return true },
