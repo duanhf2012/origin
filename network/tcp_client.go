@@ -13,6 +13,8 @@ type TCPClient struct {
 	ConnNum         int
 	ConnectInterval time.Duration
 	PendingWriteNum int
+	ReadDeadline    time.Duration
+	WriteDeadline 	time.Duration
 	AutoReconnect   bool
 	NewAgent        func(*TCPConn) Agent
 	cons            ConnSet
@@ -51,6 +53,14 @@ func (client *TCPClient) init() {
 	if client.PendingWriteNum <= 0 {
 		client.PendingWriteNum = 1000
 		log.SRelease("invalid PendingWriteNum, reset to ", client.PendingWriteNum)
+	}
+	if client.ReadDeadline == 0 {
+		client.ReadDeadline = 15*time.Second
+		log.SRelease("invalid ReadDeadline, reset to ", client.ReadDeadline,"s")
+	}
+	if client.WriteDeadline == 0 {
+		client.WriteDeadline = 15*time.Second
+		log.SRelease("invalid WriteDeadline, reset to ", client.WriteDeadline,"s")
 	}
 	if client.NewAgent == nil {
 		log.SFatal("NewAgent must not be nil")
@@ -93,7 +103,7 @@ reconnect:
 	if conn == nil {
 		return
 	}
-
+	
 	client.Lock()
 	if client.closeFlag {
 		client.Unlock()
@@ -103,7 +113,7 @@ reconnect:
 	client.cons[conn] = struct{}{}
 	client.Unlock()
 
-	tcpConn := newTCPConn(conn, client.PendingWriteNum, client.msgParser)
+	tcpConn := newTCPConn(conn, client.PendingWriteNum, client.msgParser,client.WriteDeadline)
 	agent := client.NewAgent(tcpConn)
 	agent.Run()
 

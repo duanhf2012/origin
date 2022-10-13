@@ -27,7 +27,7 @@ func freeChannel(conn *TCPConn){
 	}
 }
 
-func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser) *TCPConn {
+func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser,writeDeadline time.Duration) *TCPConn {
 	tcpConn := new(TCPConn)
 	tcpConn.conn = conn
 	tcpConn.writeChan = make(chan []byte, pendingWriteNum)
@@ -37,6 +37,8 @@ func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser) *TCPCo
 			if b == nil {
 				break
 			}
+
+			conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 			_, err := conn.Write(b)
 			tcpConn.msgParser.ReleaseByteSlice(b)
 

@@ -62,6 +62,7 @@ func (server *Server) Init(rpcHandleFinder RpcHandleFinder) {
 	server.rpcServer = &network.TCPServer{}
 }
 
+
 func (server *Server) Start(listenAddr string, maxRpcParamLen uint32) {
 	splitAddr := strings.Split(listenAddr, ":")
 	if len(splitAddr) != 2 {
@@ -77,7 +78,7 @@ func (server *Server) Start(listenAddr string, maxRpcParamLen uint32) {
 		server.rpcServer.MaxMsgLen = math.MaxUint32
 	}
 
-	server.rpcServer.MaxConnNum = 10000
+	server.rpcServer.MaxConnNum = 100000
 	server.rpcServer.PendingWriteNum = 2000000
 	server.rpcServer.NewAgent = server.NewAgent
 	server.rpcServer.LittleEndian = LittleEndian
