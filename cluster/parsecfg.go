@@ -6,6 +6,7 @@ import (
 	"github.com/duanhf2012/origin/rpc"
 	jsoniter "github.com/json-iterator/go"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -123,6 +124,10 @@ func (cls *Cluster) readLocalService(localNodeId int) error {
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
 	for _, f := range fileInfoList {
 		if f.IsDir() == true {
+			continue
+		}
+
+		if filepath.Ext(f.Name())!= ".json" {
 			continue
 		}
 
