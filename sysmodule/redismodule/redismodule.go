@@ -42,17 +42,17 @@ type RedisModule struct {
 
 // ConfigRedis 服务器配置
 type ConfigRedis struct {
-	IP            string
-	Port          int
-	Password      string
-	DbIndex       int
-	MaxIdle       int //最大的空闲连接数，表示即使没有redis连接时依然可以保持N个空闲的连接，而不被清除，随时处于待命状态。
-	MaxActive     int //最大的激活连接数，表示同时最多有N个连接
-	IdleTimeout   int //最大的空闲连接等待时间，超过此时间后，空闲连接将被关闭
+	IP          string
+	Port        int
+	Password    string
+	DbIndex     int
+	MaxIdle     int //最大的空闲连接数，表示即使没有redis连接时依然可以保持N个空闲的连接，而不被清除，随时处于待命状态。
+	MaxActive   int //最大的激活连接数，表示同时最多有N个连接
+	IdleTimeout int //最大的空闲连接等待时间，超过此时间后，空闲连接将被关闭
 }
 
 func (m *RedisModule) Init(redisCfg *ConfigRedis) {
-	redisServer := fmt.Sprintf("%s:%d",redisCfg.IP, redisCfg.Port)
+	redisServer := fmt.Sprintf("%s:%d", redisCfg.IP, redisCfg.Port)
 	m.redisPool = &redis.Pool{
 		Wait:        true,
 		MaxIdle:     redisCfg.MaxIdle,
@@ -192,7 +192,6 @@ func (m *RedisModule) HSetStruct(key string, val interface{}) error {
 	}
 	defer conn.Close()
 
-
 	_, err = conn.Do("HSET", redis.Args{}.Add(key).AddFlat(val)...)
 	if err != nil {
 		return err
@@ -254,11 +253,11 @@ func (m *RedisModule) setMuchStringByExpire(mapInfo map[interface{}]interface{},
 		}
 	}
 
-	if serr!=nil {
+	if serr != nil {
 		log.Error("setMuchStringByExpire fail,reason:%v", serr)
 		conn.Do("DISCARD")
 		return serr
-	}else{
+	} else {
 		_, err = conn.Do("EXEC")
 	}
 
@@ -287,7 +286,7 @@ func (m *RedisModule) GetString(key interface{}) (string, error) {
 		return "", err
 	}
 
-	return redis.String(ret,nil)
+	return redis.String(ret, nil)
 }
 
 func (m *RedisModule) GetStringJSON(key string, st interface{}) error {
@@ -345,7 +344,7 @@ func (m *RedisModule) GetStringMap(keys []string) (retMap map[string]string, err
 		if err != nil {
 			log.Error("GetMuchString fail,reason:%v", err)
 			conn.Do("DISCARD")
-			return nil,err
+			return nil, err
 		}
 	}
 
@@ -442,7 +441,7 @@ func (m *RedisModule) DelStringKeyList(keys []interface{}) (map[interface{}]bool
 		if err != nil {
 			log.Error("DelMuchString fail,reason:%v", err)
 			conn.Do("DISCARD")
-			return nil,err
+			return nil, err
 		}
 	}
 	// 执行命令
@@ -491,7 +490,7 @@ func (m *RedisModule) SetHash(redisKey, hashKey, value interface{}) error {
 	return retErr
 }
 
-//GetRedisAllHashJSON ...
+// GetRedisAllHashJSON ...
 func (m *RedisModule) GetAllHashJSON(redisKey string) (map[string]string, error) {
 	if redisKey == "" {
 		return nil, errors.New("Key Is Empty")
@@ -531,7 +530,7 @@ func (m *RedisModule) GetHash(redisKey interface{}, fieldKey interface{}) (strin
 		return "", errors.New("Reids Get Hash nil")
 	}
 
-	return redis.String(value,nil)
+	return redis.String(value, nil)
 }
 
 func (m *RedisModule) GetMuchHash(args ...interface{}) ([]string, error) {
@@ -556,7 +555,7 @@ func (m *RedisModule) GetMuchHash(args ...interface{}) ([]string, error) {
 
 	valueList := value.([]interface{})
 	retList := []string{}
-	for _, valueItem := range valueList{
+	for _, valueItem := range valueList {
 		valueByte, ok := valueItem.([]byte)
 		if !ok {
 			retList = append(retList, "")
@@ -618,8 +617,8 @@ func (m *RedisModule) SetHashMapJSON(redisKey string, mapFieldValue map[interfac
 	for symbol, val := range mapFieldValue {
 		temp, err := json.Marshal(val)
 		if err == nil {
-			_,err = conn.Do("HSET", redisKey, symbol, temp)
-			if err!=nil {
+			_, err = conn.Do("HSET", redisKey, symbol, temp)
+			if err != nil {
 				log.Error("SetMuchHashJSON fail,reason:%v", err)
 				conn.Send("DISCARD")
 				return err
@@ -650,25 +649,25 @@ func (m *RedisModule) DelHash(args ...interface{}) error {
 }
 
 func (m *RedisModule) LPushList(args ...interface{}) error {
-	err := m.setListPush("LPUSH",args...)
+	err := m.setListPush("LPUSH", args...)
 	return err
 }
 
 func (m *RedisModule) LPushListJSON(key interface{}, value ...interface{}) error {
-	return m.setListJSONPush("LPUSH",key,value...)
+	return m.setListJSONPush("LPUSH", key, value...)
 }
 
 func (m *RedisModule) RPushList(args ...interface{}) error {
-	err := m.setListPush("RPUSH",args...)
+	err := m.setListPush("RPUSH", args...)
 	return err
 }
 
 func (m *RedisModule) RPushListJSON(key interface{}, value ...interface{}) error {
-	return m.setListJSONPush("RPUSH",key,value...)
+	return m.setListJSONPush("RPUSH", key, value...)
 }
 
-//LPUSH和RPUSH
-func (m *RedisModule) setListPush(setType string,args...interface{}) error {
+// LPUSH和RPUSH
+func (m *RedisModule) setListPush(setType string, args ...interface{}) error {
 	if setType != "LPUSH" && setType != "RPUSH" {
 		return errors.New("Redis List Push Type Error,Must Be LPUSH or RPUSH")
 	}
@@ -685,17 +684,17 @@ func (m *RedisModule) setListPush(setType string,args...interface{}) error {
 	return retErr
 }
 
-func (m *RedisModule) setListJSONPush(setType string,key interface{}, value ...interface{}) error {
+func (m *RedisModule) setListJSONPush(setType string, key interface{}, value ...interface{}) error {
 	args := []interface{}{key}
-	for _,v := range value{
+	for _, v := range value {
 		jData, err := json.Marshal(v)
 		if err != nil {
 			return err
 		}
-		args = append(args,string(jData))
+		args = append(args, string(jData))
 	}
 
-	return m.setListPush(setType,args...)
+	return m.setListPush(setType, args...)
 }
 
 // Lrange ...
@@ -715,7 +714,7 @@ func (m *RedisModule) LRangeList(key string, start, end int) ([]string, error) {
 	return redis.Strings(reply, err)
 }
 
-//获取List的长度
+// 获取List的长度
 func (m *RedisModule) GetListLen(key string) (int, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -731,11 +730,11 @@ func (m *RedisModule) GetListLen(key string) (int, error) {
 	return redis.Int(reply, err)
 }
 
-//弹出List最后条记录
-func (m *RedisModule) RPOPListValue(key string) (string,error) {
+// 弹出List最后条记录
+func (m *RedisModule) RPOPListValue(key string) (string, error) {
 	conn, err := m.getConn()
 	if err != nil {
-		return "",err
+		return "", err
 	}
 	defer conn.Close()
 
@@ -783,7 +782,7 @@ func (m *RedisModule) LRange(key string, start, stop int) ([]byte, error) {
 	return makeListJson(reply.([]interface{}), false), nil
 }
 
-//弹出list(消息队列)数据,数据放入out fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
+// 弹出list(消息队列)数据,数据放入out fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
 func (m *RedisModule) ListPopJson(key string, fromLeft, block bool, timeout int, out interface{}) error {
 	b, err := m.ListPop(key, fromLeft, block, timeout)
 	if err != nil {
@@ -796,7 +795,7 @@ func (m *RedisModule) ListPopJson(key string, fromLeft, block bool, timeout int,
 	return nil
 }
 
-//弹出list(消息队列)数据 fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
+// 弹出list(消息队列)数据 fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
 func (m *RedisModule) ListPop(key string, fromLeft, block bool, timeout int) ([]byte, error) {
 	cmd := ""
 	if fromLeft {
@@ -838,7 +837,7 @@ func (m *RedisModule) ListPop(key string, fromLeft, block bool, timeout int) ([]
 	return b, nil
 }
 
-//有序集合插入Json
+// 有序集合插入Json
 func (m *RedisModule) ZADDInsertJson(key string, score float64, value interface{}) error {
 
 	conn, err := m.getConn()
@@ -858,7 +857,7 @@ func (m *RedisModule) ZADDInsertJson(key string, score float64, value interface{
 	return nil
 }
 
-//有序集合插入
+// 有序集合插入
 func (m *RedisModule) ZADDInsert(key string, score float64, Data interface{}) error {
 	conn, err := m.getConn()
 	if err != nil {
@@ -898,7 +897,7 @@ func (m *RedisModule) ZRangeJSON(key string, start, stop int, ascend bool, withS
 	return nil
 }
 
-//取有序set指定排名 ascend=true表示按升序遍历 否则按降序遍历
+// 取有序set指定排名 ascend=true表示按升序遍历 否则按降序遍历
 func (m *RedisModule) ZRange(key string, start, stop int, ascend bool, withScores bool) ([]byte, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -922,7 +921,7 @@ func (m *RedisModule) ZRange(key string, start, stop int, ascend bool, withScore
 	return makeListJson(reply.([]interface{}), withScores), nil
 }
 
-//获取有序集合长度
+// 获取有序集合长度
 func (m *RedisModule) Zcard(key string) (int, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -937,7 +936,7 @@ func (m *RedisModule) Zcard(key string) (int, error) {
 	return int(reply.(int64)), nil
 }
 
-//["123","234"]
+// ["123","234"]
 func makeListJson(redisReply []interface{}, withScores bool) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("[")
@@ -1006,7 +1005,7 @@ func (m *RedisModule) ZRangeByScore(key string, start, stop float64, ascend bool
 	return makeListJson(reply.([]interface{}), withScores), nil
 }
 
-//获取指定member的排名
+// 获取指定member的排名
 func (m *RedisModule) ZScore(key string, member interface{}) (float64, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -1022,7 +1021,7 @@ func (m *RedisModule) ZScore(key string, member interface{}) (float64, error) {
 	return redis.Float64(reply, err)
 }
 
-//获取指定member的排名
+// 获取指定member的排名
 func (m *RedisModule) ZRank(key string, member interface{}, ascend bool) (int, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -1100,17 +1099,17 @@ func (m *RedisModule) HincrbyHashInt(redisKey, hashKey string, value int) error 
 func (m *RedisModule) EXPlREInsert(key string, TTl int) error {
 	conn, err := m.getConn()
 	if err != nil {
-	  return err
+		return err
 	}
 	defer conn.Close()
-  
+
 	_, err = conn.Do("expire", key, TTl)
 	if err != nil {
-	  log.Error("expire fail,reason:%v", err)
-	  return err
+		log.Error("expire fail,reason:%v", err)
+		return err
 	}
 	return nil
-  }
+}
 
 func (m *RedisModule) Zremrangebyrank(redisKey string, start, end interface{}) (int, error) {
 	conn, err := m.getConn()
@@ -1150,4 +1149,10 @@ func (m *RedisModule) Keys(key string) ([]string, error) {
 		strs = append(strs, string(strVal))
 	}
 	return strs, nil
+}
+
+func (m *RedisModule) OnRelease() {
+	if m.redisPool != nil {
+		m.redisPool.Close()
+	}
 }
