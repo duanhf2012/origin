@@ -234,7 +234,7 @@ func (server *Server) NewAgent(c *network.TCPConn) network.Agent {
 	return agent
 }
 
-func (server *Server) myselfRpcHandlerGo(handlerName string, serviceMethod string, args interface{}, reply interface{}) error {
+func (server *Server) myselfRpcHandlerGo(handlerName string, serviceMethod string, args interface{},callBack reflect.Value, reply interface{}) error {
 	rpcHandler := server.rpcHandleFinder.FindRpcHandler(handlerName)
 	if rpcHandler == nil {
 		err := errors.New("service method " + serviceMethod + " not config!")
@@ -242,7 +242,9 @@ func (server *Server) myselfRpcHandlerGo(handlerName string, serviceMethod strin
 		return err
 	}
 
-	return rpcHandler.CallMethod(serviceMethod, args, reply)
+
+
+	return rpcHandler.CallMethod(serviceMethod, args,callBack, reply)
 }
 
 func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Client, noReply bool, handlerName string, rpcMethodId uint32, serviceMethod string, args interface{}, reply interface{}, rawArgs []byte) *Call {
