@@ -93,6 +93,7 @@ type HttpService struct {
 	listenAddr     string
 	corsHeader     *CORSHeader
 	processTimeout time.Duration
+	manualStart 	bool
 }
 
 type HttpFiltrate func(session *HttpSession) bool //true is pass
@@ -347,30 +348,36 @@ func (httpService *HttpService) OnInit() error {
 	if iConfig == nil {
 		return fmt.Errorf("%s service config is error!", httpService.GetName())
 	}
-	tcpCfg := iConfig.(map[string]interface{})
-	addr, ok := tcpCfg["ListenAddr"]
+	httpCfg := iConfig.(map[string]interface{})
+	addr, ok := httpCfg["ListenAddr"]
 	if ok == false {
 		return fmt.Errorf("%s service config is error!", httpService.GetName())
 	}
 	var readTimeout time.Duration = DefaultReadTimeout
 	var writeTimeout time.Duration = DefaultWriteTimeout
 
-	if cfgRead, ok := tcpCfg["ReadTimeout"]; ok == true {
+	if cfgRead, ok := httpCfg["ReadTimeout"]; ok == true {
 		readTimeout = time.Duration(cfgRead.(float64)) * time.Millisecond
 	}
 
-	if cfgWrite, ok := tcpCfg["WriteTimeout"]; ok == true {
+	if cfgWrite, ok := httpCfg["WriteTimeout"]; ok == true {
 		writeTimeout = time.Duration(cfgWrite.(float64)) * time.Millisecond
 	}
 
+	if manualStart, ok := httpCfg["ManualStart"]; ok == true {
+		httpService.manualStart = manualStart.(bool)
+	}else{
+		manualStart =false
+	}
+
 	httpService.processTimeout = DefaultProcessTimeout
-	if cfgProcessTimeout, ok := tcpCfg["ProcessTimeout"]; ok == true {
+	if cfgProcessTimeout, ok := httpCfg["ProcessTimeout"]; ok == true {
 		httpService.processTimeout = time.Duration(cfgProcessTimeout.(float64)) * time.Millisecond
 	}
 
 	httpService.httpServer.Init(addr.(string), httpService, readTimeout, writeTimeout)
 	//Set CAFile
-	caFileList, ok := tcpCfg["CAFile"]
+	caFileList, ok := httpCfg["CAFile"]
 	if ok == false {
 		return nil
 	}
@@ -395,8 +402,18 @@ func (httpService *HttpService) OnInit() error {
 		}
 	}
 	httpService.httpServer.SetCAFile(caFile)
-	httpService.httpServer.Start()
+
+	if httpService.manualStart == false {
+		httpService.httpServer.Start()
+	}
+
 	return nil
+}
+
+func (httpService *HttpService) StartListen() {
+	if httpService.manualStart {
+		httpService.httpServer.Start()
+	}
 }
 
 func (httpService *HttpService) SetAllowCORS(corsHeader *CORSHeader) {
