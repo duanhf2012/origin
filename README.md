@@ -96,6 +96,7 @@ service.json如下：
 		"ReadTimeout":10000,
 		"WriteTimeout":10000,
 		"ProcessTimeout":10000,
+		"ManualStart": false,
 		"CAFile":[
 		{
 			"Certfile":"",
@@ -167,6 +168,7 @@ service.json如下：
 * ReadTimeout:读网络超时毫秒
 * WriteTimeout:写网络超时毫秒
 * ProcessTimeout: 处理超时毫秒
+* ManualStart: 是否手动控制开始监听，如果true，需要手动调用StartListen()函数
 * CAFile: 证书文件，如果您的服务器通过web服务器代理配置https可以忽略该配置
 
 **TcpService配置**
@@ -777,11 +779,11 @@ type TestHttpService struct {
 
 func (slf *TestHttpService) OnInit() error {
 	//获取系统httpservice服务
-	httpervice := node.GetService("HttpService").(*sysservice.HttpService)
+	httpservice := node.GetService("HttpService").(*sysservice.HttpService)
 
 	//新建并设置路由对象
 	httpRouter := sysservice.NewHttpHttpRouter()
-	httpervice.SetHttpRouter(httpRouter,slf.GetEventHandler())
+	httpservice.SetHttpRouter(httpRouter,slf.GetEventHandler())
 
 	//GET方法，请求url:http://127.0.0.1:9402/get/query?nickname=boyce
 	//并header中新增key为uid,value为1000的头,则用postman测试返回结果为：
@@ -795,6 +797,8 @@ func (slf *TestHttpService) OnInit() error {
 	//GET方式获取目录下的资源，http://127.0.0.1:port/img/head/a.jpg
 	httpRouter.SetServeFile(sysservice.METHOD_GET,"/img/head/","d:/img")
 
+	//如果配置"ManualStart": true配置为true，则使用以下方法进行开启http监听
+	//httpservice.StartListen()
 	return nil
 }
 
