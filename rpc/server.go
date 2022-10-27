@@ -63,7 +63,7 @@ func (server *Server) Init(rpcHandleFinder RpcHandleFinder) {
 	server.rpcServer = &network.TCPServer{}
 }
 
-const Default_ReadWriteDeadline = 10*time.Second
+const Default_ReadWriteDeadline = 15*time.Second
 
 func (server *Server) Start(listenAddr string, maxRpcParamLen uint32) {
 	splitAddr := strings.Split(listenAddr, ":")
@@ -84,8 +84,8 @@ func (server *Server) Start(listenAddr string, maxRpcParamLen uint32) {
 	server.rpcServer.PendingWriteNum = 2000000
 	server.rpcServer.NewAgent = server.NewAgent
 	server.rpcServer.LittleEndian = LittleEndian
-	server.rpcServer.WriteDeadline = network.Default_WriteDeadline
-	server.rpcServer.ReadDeadline = network.Default_WriteDeadline
+	server.rpcServer.WriteDeadline = Default_ReadWriteDeadline
+	server.rpcServer.ReadDeadline = Default_ReadWriteDeadline
 	server.rpcServer.Start()
 }
 

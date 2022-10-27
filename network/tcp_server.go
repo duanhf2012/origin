@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-const Default_ReadDeadline = 30  //30s
-const Default_WriteDeadline = 30 //30s
+const Default_ReadDeadline  = time.Second*30  //30s
+const Default_WriteDeadline = time.Second*30 //30s
 const Default_MaxConnNum = 3000
 const Default_PendingWriteNum = 10000
 const Default_LittleEndian = false
@@ -70,11 +70,11 @@ func (server *TCPServer) init() {
 	}
 
 	if server.WriteDeadline == 0 {
-		server.WriteDeadline = time.Second*Default_WriteDeadline
+		server.WriteDeadline = Default_WriteDeadline
 		log.SRelease("invalid WriteDeadline, reset to ", server.WriteDeadline.Seconds(),"s")
 	}
 	if server.ReadDeadline == 0 {
-		server.ReadDeadline = time.Second*Default_ReadDeadline
+		server.ReadDeadline = Default_ReadDeadline
 		log.SRelease("invalid ReadDeadline, reset to ", server.ReadDeadline.Seconds(),"s")
 	}
 

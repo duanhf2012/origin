@@ -56,11 +56,11 @@ func (client *TCPClient) init() {
 	}
 	if client.ReadDeadline == 0 {
 		client.ReadDeadline = 15*time.Second
-		log.SRelease("invalid ReadDeadline, reset to ", client.ReadDeadline,"s")
+		log.SRelease("invalid ReadDeadline, reset to ", int64(client.ReadDeadline.Seconds()),"s")
 	}
 	if client.WriteDeadline == 0 {
 		client.WriteDeadline = 15*time.Second
-		log.SRelease("invalid WriteDeadline, reset to ", client.WriteDeadline,"s")
+		log.SRelease("invalid WriteDeadline, reset to ", int64(client.WriteDeadline.Seconds()),"s")
 	}
 	if client.NewAgent == nil {
 		log.SFatal("NewAgent must not be nil")
@@ -77,6 +77,13 @@ func (client *TCPClient) init() {
 	msgParser.SetMsgLen(client.LenMsgLen, client.MinMsgLen, client.MaxMsgLen)
 	msgParser.SetByteOrder(client.LittleEndian)
 	client.msgParser = msgParser
+}
+
+func (client *TCPClient) GetCloseFlag() bool{
+	client.Lock()
+	defer client.Unlock()
+
+	return client.closeFlag
 }
 
 func (client *TCPClient) dial() net.Conn {

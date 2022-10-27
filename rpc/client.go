@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
-	"github.com/duanhf2012/origin/util/timer"
 	"math"
 	"reflect"
 	"runtime"
@@ -32,6 +31,9 @@ type Client struct {
 	TriggerRpcEvent
 }
 
+const MaxCheckCallRpcCount = 1000
+const MaxPendingWriteNum = 200000
+const ConnectInterval = 2*time.Second
 var clientSeq uint32
 
 func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
@@ -41,18 +43,23 @@ func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 	return client
 }
 
+
 func (client *Client) Connect(id int, addr string, maxRpcParamLen uint32) error {
 	client.clientSeq = atomic.AddUint32(&clientSeq, 1)
 	client.id = id
 	client.Addr = addr
-	client.maxCheckCallRpcCount = 1000
+	client.maxCheckCallRpcCount = MaxCheckCallRpcCount
 	client.callRpcTimeout = 15 * time.Second
-	client.ConnNum = 1
-	client.ConnectInterval = time.Second * 2
-	client.PendingWriteNum = 200000
+	client.ConnectInterval = ConnectInterval
+	client.PendingWriteNum = MaxPendingWriteNum
 	client.AutoReconnect = true
+
+	client.ConnNum = 1
 	client.LenMsgLen = 4
 	client.MinMsgLen = 2
+	client.ReadDeadline = Default_ReadWriteDeadline
+	client.WriteDeadline = Default_ReadWriteDeadline
+
 	if maxRpcParamLen > 0 {
 		client.MaxMsgLen = maxRpcParamLen
 	} else {
@@ -73,17 +80,13 @@ func (client *Client) Connect(id int, addr string, maxRpcParamLen uint32) error 
 }
 
 func (client *Client) startCheckRpcCallTimer() {
-	t := timer.NewTimer(5 * time.Second)
 	for {
-		select {
-		case cTimer := <-t.C:
-			cTimer.SetupTimer(time.Now())
-			client.checkRpcCallTimeout()
+		time.Sleep(5 * time.Second)
+		if client.GetCloseFlag() == true {
+			break
 		}
+		client.checkRpcCallTimeout()
 	}
-
-	t.Cancel()
-	timer.ReleaseTimer(t)
 }
 
 func (client *Client) makeCallFail(call *Call) {
