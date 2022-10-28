@@ -302,6 +302,11 @@ func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDisco
 	for _, nodeInfo := range mapNodeInfo {
 		dc.addMasterNode(req.MasterNodeId, nodeInfo.NodeId)
 		dc.setNodeInfo(nodeInfo)
+
+		if len(nodeInfo.PublicServiceList) == 0 {
+			continue
+		}
+
 		cluster.TriggerDiscoveryEvent(true,int(nodeInfo.NodeId),nodeInfo.PublicServiceList)
 	}
 
