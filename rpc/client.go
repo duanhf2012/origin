@@ -164,6 +164,10 @@ func (client *Client) removePending(seq uint64) *Call {
 }
 
 func (client *Client) FindPending(seq uint64) *Call {
+	if seq == 0 {
+		return nil
+	}
+	
 	client.pendingLock.Lock()
 	v, ok := client.pending[seq]
 	if ok == false {
