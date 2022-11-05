@@ -13,29 +13,30 @@ type MessageInfo struct {
 	msgHandler MessageHandler
 }
 
-type MessageHandler func(clientId uint64,msg proto.Message)
+type MessageHandler func(clientId uint64, msg proto.Message)
 type ConnectHandler func(clientId uint64)
-type UnknownMessageHandler func(clientId uint64,msg []byte)
+type UnknownMessageHandler func(clientId uint64, msg []byte)
 
 const MsgTypeSize = 2
+
 type PBProcessor struct {
-	mapMsg map[uint16]MessageInfo
+	mapMsg       map[uint16]MessageInfo
 	LittleEndian bool
 
 	unknownMessageHandler UnknownMessageHandler
-	connectHandler ConnectHandler
-	disconnectHandler ConnectHandler
+	connectHandler        ConnectHandler
+	disconnectHandler     ConnectHandler
 	network.INetMempool
 }
 
 type PBPackInfo struct {
-	typ uint16
-	msg proto.Message
+	typ    uint16
+	msg    proto.Message
 	rawMsg []byte
 }
 
 func NewPBProcessor() *PBProcessor {
-	processor := &PBProcessor{mapMsg:map[uint16]MessageInfo{}}
+	processor := &PBProcessor{mapMsg: map[uint16]MessageInfo{}}
 	processor.INetMempool = network.NewMemAreaPool()
 	return processor
 }
@@ -53,65 +54,65 @@ func (slf *PBPackInfo) GetMsg() proto.Message {
 }
 
 // must goroutine safe
-func (pbProcessor *PBProcessor ) MsgRoute(msg interface{},userdata interface{}) error{
+func (pbProcessor *PBProcessor) MsgRoute(clientId uint64, msg interface{}) error {
 	pPackInfo := msg.(*PBPackInfo)
-	v,ok := pbProcessor.mapMsg[pPackInfo.typ]
+	v, ok := pbProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
-		return fmt.Errorf("Cannot find msgtype %d is register!",pPackInfo.typ)
+		return fmt.Errorf("Cannot find msgtype %d is register!", pPackInfo.typ)
 	}
 
-	v.msgHandler(userdata.(uint64),pPackInfo.msg)
+	v.msgHandler(clientId, pPackInfo.msg)
 	return nil
 }
 
 // must goroutine safe
-func (pbProcessor *PBProcessor ) Unmarshal(data []byte) (interface{}, error) {
+func (pbProcessor *PBProcessor) Unmarshal(clientId uint64, data []byte) (interface{}, error) {
 	defer pbProcessor.ReleaseByteSlice(data)
 	var msgType uint16
 	if pbProcessor.LittleEndian == true {
 		msgType = binary.LittleEndian.Uint16(data[:2])
-	}else{
+	} else {
 		msgType = binary.BigEndian.Uint16(data[:2])
 	}
 
-	info,ok := pbProcessor.mapMsg[msgType]
+	info, ok := pbProcessor.mapMsg[msgType]
 	if ok == false {
-		return nil,fmt.Errorf("cannot find register %d msgtype!",msgType)
+		return nil, fmt.Errorf("cannot find register %d msgtype!", msgType)
 	}
 	msg := reflect.New(info.msgType.Elem()).Interface()
 	protoMsg := msg.(proto.Message)
 	err := proto.Unmarshal(data[2:], protoMsg)
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
 
-	return &PBPackInfo{typ:msgType,msg:protoMsg},nil
+	return &PBPackInfo{typ: msgType, msg: protoMsg}, nil
 }
 
 // must goroutine safe
-func (pbProcessor *PBProcessor ) Marshal(msg interface{}) ([]byte, error){
+func (pbProcessor *PBProcessor) Marshal(clientId uint64, msg interface{}) ([]byte, error) {
 	pMsg := msg.(*PBPackInfo)
 
 	var err error
-	if pMsg.msg!=nil {
-		pMsg.rawMsg,err = proto.Marshal(pMsg.msg)
+	if pMsg.msg != nil {
+		pMsg.rawMsg, err = proto.Marshal(pMsg.msg)
 		if err != nil {
-			return nil,err
+			return nil, err
 		}
 	}
 
 	buff := make([]byte, 2, len(pMsg.rawMsg)+MsgTypeSize)
 	if pbProcessor.LittleEndian == true {
-		binary.LittleEndian.PutUint16(buff[:2],pMsg.typ)
-	}else{
-		binary.BigEndian.PutUint16(buff[:2],pMsg.typ)
+		binary.LittleEndian.PutUint16(buff[:2], pMsg.typ)
+	} else {
+		binary.BigEndian.PutUint16(buff[:2], pMsg.typ)
 	}
 
-	buff = append(buff,pMsg.rawMsg...)
-	return buff,nil
+	buff = append(buff, pMsg.rawMsg...)
+	return buff, nil
 }
 
-func (pbProcessor *PBProcessor) Register(msgtype uint16,msg proto.Message,handle MessageHandler)  {
+func (pbProcessor *PBProcessor) Register(msgtype uint16, msg proto.Message, handle MessageHandler) {
 	var info MessageInfo
 
 	info.msgType = reflect.TypeOf(msg.(proto.Message))
@@ -119,38 +120,35 @@ func (pbProcessor *PBProcessor) Register(msgtype uint16,msg proto.Message,handle
 	pbProcessor.mapMsg[msgtype] = info
 }
 
-func (pbProcessor *PBProcessor) MakeMsg(msgType uint16,protoMsg proto.Message) *PBPackInfo {
-	return &PBPackInfo{typ:msgType,msg:protoMsg}
+func (pbProcessor *PBProcessor) MakeMsg(msgType uint16, protoMsg proto.Message) *PBPackInfo {
+	return &PBPackInfo{typ: msgType, msg: protoMsg}
 }
 
-func (pbProcessor *PBProcessor) MakeRawMsg(msgType uint16,msg []byte) *PBPackInfo {
-	return &PBPackInfo{typ:msgType,rawMsg:msg}
+func (pbProcessor *PBProcessor) MakeRawMsg(msgType uint16, msg []byte) *PBPackInfo {
+	return &PBPackInfo{typ: msgType, rawMsg: msg}
 }
 
-func (pbProcessor *PBProcessor) UnknownMsgRoute(msg interface{}, userData interface{}){
-	pbProcessor.unknownMessageHandler(userData.(uint64),msg.([]byte))
+func (pbProcessor *PBProcessor) UnknownMsgRoute(clientId uint64, msg interface{}) {
+	pbProcessor.unknownMessageHandler(clientId, msg.([]byte))
 }
 
 // connect event
-func (pbProcessor *PBProcessor) ConnectedRoute(userData interface{}){
-	pbProcessor.connectHandler(userData.(uint64))
+func (pbProcessor *PBProcessor) ConnectedRoute(clientId uint64) {
+	pbProcessor.connectHandler(clientId)
 }
 
-func (pbProcessor *PBProcessor) DisConnectedRoute(userData interface{}){
-	pbProcessor.disconnectHandler(userData.(uint64))
+func (pbProcessor *PBProcessor) DisConnectedRoute(clientId uint64) {
+	pbProcessor.disconnectHandler(clientId)
 }
 
-func (pbProcessor *PBProcessor) RegisterUnknownMsg(unknownMessageHandler UnknownMessageHandler){
+func (pbProcessor *PBProcessor) RegisterUnknownMsg(unknownMessageHandler UnknownMessageHandler) {
 	pbProcessor.unknownMessageHandler = unknownMessageHandler
 }
 
-func (pbProcessor *PBProcessor) RegisterConnected(connectHandler ConnectHandler){
+func (pbProcessor *PBProcessor) RegisterConnected(connectHandler ConnectHandler) {
 	pbProcessor.connectHandler = connectHandler
 }
 
-func (pbProcessor *PBProcessor) RegisterDisConnected(disconnectHandler ConnectHandler){
+func (pbProcessor *PBProcessor) RegisterDisConnected(disconnectHandler ConnectHandler) {
 	pbProcessor.disconnectHandler = disconnectHandler
 }
-
-
-

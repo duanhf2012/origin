@@ -2,6 +2,7 @@ package network
 
 import (
 	"crypto/tls"
+	"errors"
 	"github.com/duanhf2012/origin/log"
 	"net/http"
 	"time"
@@ -37,6 +38,10 @@ func (slf *HttpServer) Start() {
 }
 
 func (slf *HttpServer) startListen() error {
+	if slf.httpServer != nil {
+		return errors.New("Duplicate start not allowed")
+	}
+
 	var tlsCaList []tls.Certificate
 	var tlsConfig *tls.Config
 	for _, caFile := range slf.caFileList {

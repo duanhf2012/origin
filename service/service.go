@@ -22,18 +22,24 @@ var timerDispatcherLen = 100000
 
 type IService interface {
 	Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})
-	SetName(serviceName string)
-	GetName() string
+	Wait()
+	Start()
+
 	OnSetup(iService IService)
 	OnInit() error
 	OnStart()
 	OnRelease()
-	Wait()
-	Start()
+
+	SetName(serviceName string)
+	GetName() string
 	GetRpcHandler() rpc.IRpcHandler
 	GetServiceCfg()interface{}
-	OpenProfiler()
 	GetProfiler() *profiler.Profiler
+	GetServiceEventChannelNum() int
+	GetServiceTimerChannelNum() int
+
+	SetEventChannelNum(num int)
+	OpenProfiler()
 }
 
 // eventPool的内存池,缓存Event
@@ -52,13 +58,21 @@ type Service struct {
 	startStatus    bool
 	eventProcessor event.IEventProcessor
 	profiler *profiler.Profiler //性能分析器
-	rpcEventLister rpc.IRpcListener
+	nodeEventLister rpc.INodeListener
+	discoveryServiceLister rpc.IDiscoveryServiceListener
 	chanEvent chan event.IEvent
 }
 
 // RpcConnEvent Node结点连接事件
 type RpcConnEvent struct{
 	IsConnect bool
+	NodeId int
+}
+
+// DiscoveryServiceEvent 发现服务结点
+type DiscoveryServiceEvent struct{
+	IsDiscovery bool
+	ServiceName []string
 	NodeId int
 }
 
@@ -69,8 +83,12 @@ func SetMaxServiceChannel(maxEventChannel int){
 	})
 }
 
+func (rpcEventData *DiscoveryServiceEvent)  GetEventType() event.EventType{
+	return event.Sys_Event_DiscoverService
+}
+
 func (rpcEventData *RpcConnEvent) GetEventType() event.EventType{
-	return event.Sys_Event_Rpc_Event
+	return event.Sys_Event_Node_Event
 }
 
 func (s *Service) OnSetup(iService IService){
@@ -88,7 +106,10 @@ func (s *Service) OpenProfiler()  {
 
 func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
 	s.dispatcher =timer.NewDispatcher(timerDispatcherLen)
-	s.chanEvent = make(chan event.IEvent,maxServiceEventChannel)
+	if s.chanEvent == nil {
+		s.chanEvent = make(chan event.IEvent,maxServiceEventChannel)
+	}
+
 	s.rpcHandler.InitRpcHandler(iService.(rpc.IRpcHandler),getClientFun,getServerFun,iService.(rpc.IRpcHandlerChannel))
 	s.IRpcHandler = &s.rpcHandler
 	s.self = iService.(IModule)
@@ -194,7 +215,6 @@ func (s *Service) Run() {
 			if atomic.AddInt32(&s.goroutineNum,-1)<=0 {
 				s.startStatus = false
 				s.Release()
-				s.OnRelease()
 			}
 			break
 		}
@@ -260,24 +280,44 @@ func (s *Service) RegRawRpc(rpcMethodId uint32,rawRpcCB rpc.RawRpcCallBack){
 func (s *Service) OnStart(){
 }
 
-func (s *Service) OnRpcEvent(ev event.IEvent){
+func (s *Service) OnNodeEvent(ev event.IEvent){
 	event := ev.(*RpcConnEvent)
 	if event.IsConnect {
-		s.rpcEventLister.OnNodeConnected(event.NodeId)
+		s.nodeEventLister.OnNodeConnected(event.NodeId)
 	}else{
-		s.rpcEventLister.OnNodeDisconnect(event.NodeId)
+		s.nodeEventLister.OnNodeDisconnect(event.NodeId)
 	}
 }
 
-func (s *Service) RegRpcListener(rpcEventLister rpc.IRpcListener) {
-	s.rpcEventLister = rpcEventLister
-	s.RegEventReceiverFunc(event.Sys_Event_Rpc_Event,s.GetEventHandler(),s.OnRpcEvent)
+func (s *Service) OnDiscoverServiceEvent(ev event.IEvent){
+	event := ev.(*DiscoveryServiceEvent)
+	if event.IsDiscovery {
+		s.discoveryServiceLister.OnDiscoveryService(event.NodeId,event.ServiceName)
+	}else{
+		s.discoveryServiceLister.OnUnDiscoveryService(event.NodeId,event.ServiceName)
+	}
+}
+
+func (s *Service) RegRpcListener(rpcEventLister rpc.INodeListener) {
+	s.nodeEventLister = rpcEventLister
+	s.RegEventReceiverFunc(event.Sys_Event_Node_Event,s.GetEventHandler(),s.OnNodeEvent)
 	RegRpcEventFun(s.GetName())
 }
 
-func (s *Service) UnRegRpcListener(rpcLister rpc.IRpcListener) {
-	s.UnRegEventReceiverFunc(event.Sys_Event_Rpc_Event,s.GetEventHandler())
-	RegRpcEventFun(s.GetName())
+func (s *Service) UnRegRpcListener(rpcLister rpc.INodeListener) {
+	s.UnRegEventReceiverFunc(event.Sys_Event_Node_Event,s.GetEventHandler())
+	UnRegRpcEventFun(s.GetName())
+}
+
+func (s *Service) RegDiscoverListener(discoveryServiceListener rpc.IDiscoveryServiceListener) {
+	s.discoveryServiceLister = discoveryServiceListener
+	s.RegEventReceiverFunc(event.Sys_Event_DiscoverService,s.GetEventHandler(),s.OnDiscoverServiceEvent)
+	RegDiscoveryServiceEventFun(s.GetName())
+}
+
+func (s *Service) UnRegDiscoverListener(rpcLister rpc.INodeListener) {
+	s.UnRegEventReceiverFunc(event.Sys_Event_DiscoverService,s.GetEventHandler())
+	UnRegDiscoveryServiceEventFun(s.GetName())
 }
 
 
@@ -312,6 +352,21 @@ func (s *Service) pushEvent(ev event.IEvent) error{
 	return nil
 }
 
+func (s *Service) GetServiceEventChannelNum() int{
+	return len(s.chanEvent)
+}
+
+func (s *Service) GetServiceTimerChannelNum() int{
+	return len(s.dispatcher.ChanTimer)
+}
+
+func (s *Service) SetEventChannelNum(num int){
+	if s.chanEvent == nil {
+		s.chanEvent = make(chan event.IEvent,num)
+	}else {
+		panic("this stage cannot be set")
+	}
+}
 
 func (s *Service) SetGoRoutineNum(goroutineNum int32) bool {
 	//已经开始状态不允许修改协程数量,打开性能分析器不允许开多线程

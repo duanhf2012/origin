@@ -6,8 +6,9 @@ message NodeInfo{
     int32 NodeId = 1;
     string NodeName = 2;
     string ListenAddr  = 3;
-    bool Private = 4;
-    repeated string PublicServiceList = 5;
+    uint32 MaxRpcParamLen = 4;
+    bool Private = 5;
+    repeated string PublicServiceList = 6;
 }
 
 //Client->Master

@@ -1,11 +1,11 @@
 package network
 
 import (
-	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"net"
 	"sync"
 	"time"
+	"errors"
 )
 
 type ConnSet map[net.Conn]struct{}
@@ -27,7 +27,7 @@ func freeChannel(conn *TCPConn){
 	}
 }
 
-func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser) *TCPConn {
+func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser,writeDeadline time.Duration) *TCPConn {
 	tcpConn := new(TCPConn)
 	tcpConn.conn = conn
 	tcpConn.writeChan = make(chan []byte, pendingWriteNum)
@@ -37,6 +37,8 @@ func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser) *TCPCo
 			if b == nil {
 				break
 			}
+
+			conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 			_, err := conn.Write(b)
 			tcpConn.msgParser.ReleaseByteSlice(b)
 
@@ -86,27 +88,28 @@ func (tcpConn *TCPConn) GetRemoteIp() string {
 	return tcpConn.conn.RemoteAddr().String()
 }
 
-func (tcpConn *TCPConn) doWrite(b []byte) {
+func (tcpConn *TCPConn) doWrite(b []byte) error{
 	if len(tcpConn.writeChan) == cap(tcpConn.writeChan) {
 		tcpConn.ReleaseReadMsg(b)
 		log.SError("close conn: channel full")
 		tcpConn.doDestroy()
-		return
+		return errors.New("close conn: channel full")
 	}
 
 	tcpConn.writeChan <- b
+	return nil
 }
 
 // b must not be modified by the others goroutines
-func (tcpConn *TCPConn) Write(b []byte) {
+func (tcpConn *TCPConn) Write(b []byte) error{
 	tcpConn.Lock()
 	defer tcpConn.Unlock()
 	if tcpConn.closeFlag || b == nil {
 		tcpConn.ReleaseReadMsg(b)
-		return
+		return errors.New("conn is close")
 	}
 
-	tcpConn.doWrite(b)
+	return tcpConn.doWrite(b)
 }
 
 func (tcpConn *TCPConn) Read(b []byte) (int, error) {
@@ -131,10 +134,19 @@ func (tcpConn *TCPConn) ReleaseReadMsg(byteBuff []byte){
 
 func (tcpConn *TCPConn) WriteMsg(args ...[]byte) error {
 	if tcpConn.closeFlag == true {
-		return fmt.Errorf("conn is close")
+		return errors.New("conn is close")
 	}
 	return tcpConn.msgParser.Write(tcpConn, args...)
 }
+
+func (tcpConn *TCPConn) WriteRawMsg(args []byte) error {
+	if tcpConn.closeFlag == true {
+		return errors.New("conn is close")
+	}
+
+	return tcpConn.Write(args)
+}
+
 
 func (tcpConn *TCPConn) IsConnected() bool {
 	return tcpConn.closeFlag == false

@@ -14,6 +14,7 @@ type WSClient struct {
 	ConnectInterval  time.Duration
 	PendingWriteNum  int
 	MaxMsgLen        uint32
+	MessageType		 int
 	HandshakeTimeout time.Duration
 	AutoReconnect    bool
 	NewAgent         func(*WSConn) Agent
@@ -21,6 +22,7 @@ type WSClient struct {
 	cons             WebsocketConnSet
 	wg               sync.WaitGroup
 	closeFlag        bool
+
 }
 
 func (client *WSClient) Start() {
@@ -63,6 +65,10 @@ func (client *WSClient) init() {
 		log.SFatal("client is running")
 	}
 
+	if client.MessageType == 0 {
+		client.MessageType = websocket.TextMessage
+	}
+
 	client.cons = make(WebsocketConnSet)
 	client.closeFlag = false
 	client.dialer = websocket.Dialer{
@@ -102,7 +108,7 @@ reconnect:
 	client.cons[conn] = struct{}{}
 	client.Unlock()
 
-	wsConn := newWSConn(conn, client.PendingWriteNum, client.MaxMsgLen)
+	wsConn := newWSConn(conn, client.PendingWriteNum, client.MaxMsgLen,client.MessageType)
 	agent := client.NewAgent(wsConn)
 	agent.Run()
 

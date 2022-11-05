@@ -161,19 +161,21 @@ func (s *Session) NextSeq(db string, collection string, id string) (int, error) 
 }
 
 // goroutine safe
-func (s *Session) EnsureIndex(db string, collection string, key []string) error {
+func (s *Session) EnsureIndex(db string, collection string, key []string, bBackground bool) error {
 	return s.DB(db).C(collection).EnsureIndex(mgo.Index{
 		Key:    key,
 		Unique: false,
 		Sparse: true,
+		Background: bBackground,
 	})
 }
 
 // goroutine safe
-func (s *Session) EnsureUniqueIndex(db string, collection string, key []string) error {
+func (s *Session) EnsureUniqueIndex(db string, collection string, key []string, bBackground bool) error {
 	return s.DB(db).C(collection).EnsureIndex(mgo.Index{
 		Key:    key,
 		Unique: true,
 		Sparse: true,
+		Background: bBackground,
 	})
 }

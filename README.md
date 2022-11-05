@@ -54,16 +54,18 @@ cluster.json如下：
           "NodeId": 1,
           "Private": false,
           "ListenAddr":"127.0.0.1:8001",
+          "MaxRpcParamLen": 409600,
           "NodeName": "Node_Test1",
-		  "remark":"//以_打头的，表示只在本机进程，不对整个子网开发",
+		  "remark":"//以_打头的，表示只在本机进程，不对整个子网公开",
           "ServiceList": ["TestService1","TestService2","TestServiceCall","GateService","_TcpService","HttpService","WSService"]
         },
 		 {
           "NodeId": 2,
           "Private": false,
           "ListenAddr":"127.0.0.1:8002",
+          "MaxRpcParamLen": 409600,
           "NodeName": "Node_Test1",
-		  "remark":"//以_打头的，表示只在本机进程，不对整个子网开发",
+		  "remark":"//以_打头的，表示只在本机进程，不对整个子网公开",
           "ServiceList": ["TestService1","TestService2","TestServiceCall","GateService","TcpService","HttpService","WSService"]
         }
     ]
@@ -73,6 +75,7 @@ cluster.json如下：
 * NodeId: 表示origin程序的结点Id标识，不允许重复。
 * Private: 是否私有结点，如果为true，表示其他结点不会发现它，但可以自我运行。
 * ListenAddr:Rpc通信服务的监听地址
+* MaxRpcParamLen:Rpc参数数据包最大长度，该参数可以缺省，默认一次Rpc调用支持最大4294967295byte长度数据。
 * NodeName:结点名称
 * remark:备注，可选项
 * ServiceList:该Node将安装的服务列表
@@ -84,12 +87,16 @@ service.json如下：
 ---------------
 ```
 {
+"Global": {
+		"AreaId": 1
+	},
   "Service":{
 	  "HttpService":{
 		"ListenAddr":"0.0.0.0:9402",
 		"ReadTimeout":10000,
 		"WriteTimeout":10000,
 		"ProcessTimeout":10000,
+		"ManualStart": false,
 		"CAFile":[
 		{
 			"Certfile":"",
@@ -154,13 +161,14 @@ service.json如下：
 ```
 
 ---------------
-以上配置分为两个部分：Service与NodeService，NodeService中配置的对应结点中服务的配置，如果启动程序中根据nodeid查找该域的对应的服务，如果找不到时，从Service公共部分查找。
+以上配置分为两个部分：Global,Service与NodeService。Global是全局配置，在任何服务中都可以通过cluster.GetCluster().GetGlobalCfg()获取，NodeService中配置的对应结点中服务的配置，如果启动程序中根据nodeid查找该域的对应的服务，如果找不到时，从Service公共部分查找。
 
 **HttpService配置**
 * ListenAddr:Http监听地址
 * ReadTimeout:读网络超时毫秒
 * WriteTimeout:写网络超时毫秒
 * ProcessTimeout: 处理超时毫秒
+* ManualStart: 是否手动控制开始监听，如果true，需要手动调用StartListen()函数
 * CAFile: 证书文件，如果您的服务器通过web服务器代理配置https可以忽略该配置
 
 **TcpService配置**
@@ -711,17 +719,20 @@ origin引擎默认使用读取所有结点配置的进行确认结点有哪些Se
 	"MasterDiscoveryNode": [{
 		"NodeId": 2,
 		"ListenAddr": "127.0.0.1:10001",
+		"MaxRpcParamLen": 409600,
 		"NeighborService":["HttpGateService"]
 	},
 	{
 		"NodeId": 1,
-		"ListenAddr": "127.0.0.1:8801"
+		"ListenAddr": "127.0.0.1:8801",
+		"MaxRpcParamLen": 409600
 	}],
 	
 	
 	"NodeList": [{
 		"NodeId": 1,
 		"ListenAddr": "127.0.0.1:8801",
+		"MaxRpcParamLen": 409600,
 		"NodeName": "Node_Test1",
 		"Private": false,
 		"remark": "//以_打头的，表示只在本机进程，不对整个子网开发",
@@ -768,11 +779,11 @@ type TestHttpService struct {
 
 func (slf *TestHttpService) OnInit() error {
 	//获取系统httpservice服务
-	httpervice := node.GetService("HttpService").(*sysservice.HttpService)
+	httpservice := node.GetService("HttpService").(*sysservice.HttpService)
 
 	//新建并设置路由对象
 	httpRouter := sysservice.NewHttpHttpRouter()
-	httpervice.SetHttpRouter(httpRouter,slf.GetEventHandler())
+	httpservice.SetHttpRouter(httpRouter,slf.GetEventHandler())
 
 	//GET方法，请求url:http://127.0.0.1:9402/get/query?nickname=boyce
 	//并header中新增key为uid,value为1000的头,则用postman测试返回结果为：
@@ -786,6 +797,8 @@ func (slf *TestHttpService) OnInit() error {
 	//GET方式获取目录下的资源，http://127.0.0.1:port/img/head/a.jpg
 	httpRouter.SetServeFile(sysservice.METHOD_GET,"/img/head/","d:/img")
 
+	//如果配置"ManualStart": true配置为true，则使用以下方法进行开启http监听
+	//httpservice.StartListen()
 	return nil
 }
 
@@ -916,4 +929,5 @@ func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
 _
 死磕代码
 bp-li
+阿正
 ```

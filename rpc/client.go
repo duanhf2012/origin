@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/network"
-	"github.com/duanhf2012/origin/util/timer"
 	"math"
 	"reflect"
 	"runtime"
@@ -18,7 +17,7 @@ import (
 
 type Client struct {
 	clientSeq uint32
-	id int
+	id        int
 	bSelfNode bool
 	network.TCPClient
 	conn *network.TCPConn
@@ -32,6 +31,9 @@ type Client struct {
 	TriggerRpcEvent
 }
 
+const MaxCheckCallRpcCount = 1000
+const MaxPendingWriteNum = 200000
+const ConnectInterval = 2*time.Second
 var clientSeq uint32
 
 func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
@@ -41,19 +43,29 @@ func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 	return client
 }
 
-func (client *Client) Connect(id int,addr string) error {
-	client.clientSeq = atomic.AddUint32(&clientSeq,1)
+
+func (client *Client) Connect(id int, addr string, maxRpcParamLen uint32) error {
+	client.clientSeq = atomic.AddUint32(&clientSeq, 1)
 	client.id = id
 	client.Addr = addr
-	client.maxCheckCallRpcCount = 1000
-	client.callRpcTimeout = 15*time.Second
-	client.ConnNum = 1
-	client.ConnectInterval = time.Second*2
-	client.PendingWriteNum = 200000
+	client.maxCheckCallRpcCount = MaxCheckCallRpcCount
+	client.callRpcTimeout = 15 * time.Second
+	client.ConnectInterval = ConnectInterval
+	client.PendingWriteNum = MaxPendingWriteNum
 	client.AutoReconnect = true
-	client.LenMsgLen = 2
+
+	client.ConnNum = 1
+	client.LenMsgLen = 4
 	client.MinMsgLen = 2
-	client.MaxMsgLen = math.MaxUint16
+	client.ReadDeadline = Default_ReadWriteDeadline
+	client.WriteDeadline = Default_ReadWriteDeadline
+
+	if maxRpcParamLen > 0 {
+		client.MaxMsgLen = maxRpcParamLen
+	} else {
+		client.MaxMsgLen = math.MaxUint32
+	}
+
 	client.NewAgent = client.NewClientAgent
 	client.LittleEndian = LittleEndian
 	client.ResetPending()
@@ -67,33 +79,29 @@ func (client *Client) Connect(id int,addr string) error {
 	return nil
 }
 
-func (client *Client) startCheckRpcCallTimer(){
-	t:=timer.NewTimer(5*time.Second)
-	for{
-		select {
-			case cTimer:=<- t.C:
-				cTimer.SetupTimer(time.Now())
-				client.checkRpcCallTimeout()
+func (client *Client) startCheckRpcCallTimer() {
+	for {
+		time.Sleep(5 * time.Second)
+		if client.GetCloseFlag() == true {
+			break
 		}
+		client.checkRpcCallTimeout()
 	}
-
-	t.Cancel()
-	timer.ReleaseTimer(t)
 }
 
-func (client *Client) makeCallFail(call *Call){
+func (client *Client) makeCallFail(call *Call) {
 	client.removePending(call.Seq)
-	if call.callback!=nil && call.callback.IsValid() {
+	if call.callback != nil && call.callback.IsValid() {
 		call.rpcHandler.PushRpcResponse(call)
-	}else{
+	} else {
 		call.done <- call
 	}
 }
 
-func (client *Client) checkRpcCallTimeout(){
+func (client *Client) checkRpcCallTimeout() {
 	now := time.Now()
 
-	for i:=0;i< client.maxCheckCallRpcCount;i++ {
+	for i := 0; i < client.maxCheckCallRpcCount; i++ {
 		client.pendingLock.Lock()
 		pElem := client.pendingTimer.Front()
 		if pElem == nil {
@@ -103,7 +111,7 @@ func (client *Client) checkRpcCallTimeout(){
 		pCall := pElem.Value.(*Call)
 		if now.Sub(pCall.callTime) > client.callRpcTimeout {
 			strTimeout := strconv.FormatInt(int64(client.callRpcTimeout/time.Second), 10)
-			pCall.Err = errors.New("RPC call takes more than "+strTimeout+ " seconds")
+			pCall.Err = errors.New("RPC call takes more than " + strTimeout + " seconds")
 			client.makeCallFail(pCall)
 			client.pendingLock.Unlock()
 			continue
@@ -112,21 +120,21 @@ func (client *Client) checkRpcCallTimeout(){
 	}
 }
 
-func (client *Client) ResetPending(){
+func (client *Client) ResetPending() {
 	client.pendingLock.Lock()
 	if client.pending != nil {
-		for _,v := range client.pending {
+		for _, v := range client.pending {
 			v.Value.(*Call).Err = errors.New("node is disconnect")
 			v.Value.(*Call).done <- v.Value.(*Call)
 		}
 	}
 
-	client.pending = make(map[uint64]*list.Element,4096)
+	client.pending = make(map[uint64]*list.Element, 4096)
 	client.pendingTimer = list.New()
 	client.pendingLock.Unlock()
 }
 
-func (client *Client) AddPending(call *Call){
+func (client *Client) AddPending(call *Call) {
 	client.pendingLock.Lock()
 	call.callTime = time.Now()
 	elemTimer := client.pendingTimer.PushBack(call)
@@ -134,7 +142,7 @@ func (client *Client) AddPending(call *Call){
 	client.pendingLock.Unlock()
 }
 
-func (client *Client) RemovePending(seq uint64)  *Call{
+func (client *Client) RemovePending(seq uint64) *Call {
 	if seq == 0 {
 		return nil
 	}
@@ -144,20 +152,24 @@ func (client *Client) RemovePending(seq uint64)  *Call{
 	return call
 }
 
-func (client *Client) removePending(seq uint64) *Call{
-	v,ok := client.pending[seq]
-	if ok == false{
+func (client *Client) removePending(seq uint64) *Call {
+	v, ok := client.pending[seq]
+	if ok == false {
 		return nil
 	}
 	call := v.Value.(*Call)
 	client.pendingTimer.Remove(v)
-	delete(client.pending,seq)
+	delete(client.pending, seq)
 	return call
 }
 
-func (client *Client) FindPending(seq uint64) *Call{
+func (client *Client) FindPending(seq uint64) *Call {
+	if seq == 0 {
+		return nil
+	}
+	
 	client.pendingLock.Lock()
-	v,ok := client.pending[seq]
+	v, ok := client.pending[seq]
 	if ok == false {
 		client.pendingLock.Unlock()
 		return nil
@@ -169,27 +181,27 @@ func (client *Client) FindPending(seq uint64) *Call{
 	return pCall
 }
 
-func (client *Client) generateSeq() uint64{
-	return atomic.AddUint64(&client.startSeq,1)
+func (client *Client) generateSeq() uint64 {
+	return atomic.AddUint64(&client.startSeq, 1)
 }
 
-func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,callback reflect.Value, args interface{},replyParam interface{}) error {
+func (client *Client) AsyncCall(rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{}) error {
 	processorType, processor := GetProcessorType(args)
-	InParam,herr := processor.Marshal(args)
+	InParam, herr := processor.Marshal(args)
 	if herr != nil {
 		return herr
 	}
 
 	seq := client.generateSeq()
-	request:=MakeRpcRequest(processor,seq,0,serviceMethod,false,InParam)
-	bytes,err := processor.Marshal(request.RpcRequestData)
+	request := MakeRpcRequest(processor, seq, 0, serviceMethod, false, InParam)
+	bytes, err := processor.Marshal(request.RpcRequestData)
 	ReleaseRpcRequest(request)
 	if err != nil {
 		return err
 	}
 
 	if client.conn == nil {
-		return errors.New("Rpc server is disconnect,call "+serviceMethod)
+		return errors.New("Rpc server is disconnect,call " + serviceMethod)
 	}
 
 	call := MakeCall()
@@ -200,7 +212,7 @@ func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,call
 	call.Seq = seq
 	client.AddPending(call)
 
-	err = client.conn.WriteMsg([]byte{uint8(processorType)},bytes)
+	err = client.conn.WriteMsg([]byte{uint8(processorType)}, bytes)
 	if err != nil {
 		client.RemovePending(call.Seq)
 		ReleaseCall(call)
@@ -210,14 +222,14 @@ func (client *Client) AsyncCall(rpcHandler IRpcHandler,serviceMethod string,call
 	return nil
 }
 
-func (client *Client) RawGo(processor IRpcProcessor,noReply bool,rpcMethodId uint32,serviceMethod string,args []byte,reply interface{}) *Call {
+func (client *Client) RawGo(processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, args []byte, reply interface{}) *Call {
 	call := MakeCall()
 	call.ServiceMethod = serviceMethod
 	call.Reply = reply
 	call.Seq = client.generateSeq()
 
-	request := MakeRpcRequest(processor,call.Seq,rpcMethodId,serviceMethod,noReply,args)
-	bytes,err := processor.Marshal(request.RpcRequestData)
+	request := MakeRpcRequest(processor, call.Seq, rpcMethodId, serviceMethod, noReply, args)
+	bytes, err := processor.Marshal(request.RpcRequestData)
 	ReleaseRpcRequest(request)
 	if err != nil {
 		call.Seq = 0
@@ -227,7 +239,7 @@ func (client *Client) RawGo(processor IRpcProcessor,noReply bool,rpcMethodId uin
 
 	if client.conn == nil {
 		call.Seq = 0
-		call.Err = errors.New(serviceMethod+"  was called failed,rpc client is disconnect")
+		call.Err = errors.New(serviceMethod + "  was called failed,rpc client is disconnect")
 		return call
 	}
 
@@ -235,7 +247,7 @@ func (client *Client) RawGo(processor IRpcProcessor,noReply bool,rpcMethodId uin
 		client.AddPending(call)
 	}
 
-	err = client.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())},bytes)
+	err = client.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())}, bytes)
 	if err != nil {
 		client.RemovePending(call.Seq)
 		call.Seq = 0
@@ -245,75 +257,75 @@ func (client *Client) RawGo(processor IRpcProcessor,noReply bool,rpcMethodId uin
 	return call
 }
 
-func (client *Client) Go(noReply bool,serviceMethod string, args interface{},reply interface{}) *Call {
-	_,processor := GetProcessorType(args)
-	InParam,err := processor.Marshal(args)
+func (client *Client) Go(noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
+	_, processor := GetProcessorType(args)
+	InParam, err := processor.Marshal(args)
 	if err != nil {
 		call := MakeCall()
 		call.Err = err
 		return call
 	}
 
-	return client.RawGo(processor,noReply,0,serviceMethod,InParam,reply)
+	return client.RawGo(processor, noReply, 0, serviceMethod, InParam, reply)
 }
 
-func (client *Client) Run(){
+func (client *Client) Run() {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.SError("core dump info[",errString,"]\n", string(buf[:l]))
+			log.SError("core dump info[", errString, "]\n", string(buf[:l]))
 		}
 	}()
 
-	client.TriggerRpcEvent(true,client.GetClientSeq(),client.GetId())
+	client.TriggerRpcEvent(true, client.GetClientSeq(), client.GetId())
 	for {
-		bytes,err := client.conn.ReadMsg()
+		bytes, err := client.conn.ReadMsg()
 		if err != nil {
-			log.SError("rpcClient ",client.Addr," ReadMsg error:",err.Error())
+			log.SError("rpcClient ", client.Addr, " ReadMsg error:", err.Error())
 			return
 		}
 
 		processor := GetProcessor(bytes[0])
-		if processor==nil {
+		if processor == nil {
 			client.conn.ReleaseReadMsg(bytes)
-			log.SError("rpcClient ",client.Addr," ReadMsg head error:",err.Error())
+			log.SError("rpcClient ", client.Addr, " ReadMsg head error:", err.Error())
 			return
 		}
 
 		//1.解析head
 		response := RpcResponse{}
-		response.RpcResponseData =processor.MakeRpcResponse(0,"",nil)
+		response.RpcResponseData = processor.MakeRpcResponse(0, "", nil)
 
 		err = processor.Unmarshal(bytes[1:], response.RpcResponseData)
 		client.conn.ReleaseReadMsg(bytes)
 		if err != nil {
 			processor.ReleaseRpcResponse(response.RpcResponseData)
-			log.SError("rpcClient Unmarshal head error:",err.Error())
+			log.SError("rpcClient Unmarshal head error:", err.Error())
 			continue
 		}
 
 		v := client.RemovePending(response.RpcResponseData.GetSeq())
 		if v == nil {
-			log.SError("rpcClient cannot find seq ",response.RpcResponseData.GetSeq()," in pending")
-		}else  {
+			log.SError("rpcClient cannot find seq ", response.RpcResponseData.GetSeq(), " in pending")
+		} else {
 			v.Err = nil
-			if len(response.RpcResponseData.GetReply()) >0 {
-				err = processor.Unmarshal(response.RpcResponseData.GetReply(),v.Reply)
+			if len(response.RpcResponseData.GetReply()) > 0 {
+				err = processor.Unmarshal(response.RpcResponseData.GetReply(), v.Reply)
 				if err != nil {
-					log.SError("rpcClient Unmarshal body error:",err.Error())
+					log.SError("rpcClient Unmarshal body error:", err.Error())
 					v.Err = err
 				}
 			}
 
 			if response.RpcResponseData.GetErr() != nil {
-				v.Err= response.RpcResponseData.GetErr()
+				v.Err = response.RpcResponseData.GetErr()
 			}
 
-			if v.callback!=nil && v.callback.IsValid() {
-				 v.rpcHandler.PushRpcResponse(v)
-			}else{
+			if v.callback != nil && v.callback.IsValid() {
+				v.rpcHandler.PushRpcResponse(v)
+			} else {
 				v.done <- v
 			}
 		}
@@ -322,19 +334,19 @@ func (client *Client) Run(){
 	}
 }
 
-func (client *Client) OnClose(){
-	client.TriggerRpcEvent(false,client.GetClientSeq(),client.GetId())
+func (client *Client) OnClose() {
+	client.TriggerRpcEvent(false, client.GetClientSeq(), client.GetId())
 }
 
 func (client *Client) IsConnected() bool {
-	return client.bSelfNode || (client.conn!=nil && client.conn.IsConnected()==true)
+	return client.bSelfNode || (client.conn != nil && client.conn.IsConnected() == true)
 }
 
-func (client *Client) GetId() int{
+func (client *Client) GetId() int {
 	return client.id
 }
 
-func (client *Client) Close(waitDone bool){
+func (client *Client) Close(waitDone bool) {
 	client.TCPClient.Close(waitDone)
 }
 

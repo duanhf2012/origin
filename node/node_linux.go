@@ -15,3 +15,7 @@ func KillProcess(processId int){
 		fmt.Printf("kill processid %d is successful.\n",processId)
 	}
 }
+
+func GetBuildOSType() BuildOSType{
+	return Linux
+}

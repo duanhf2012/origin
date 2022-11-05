@@ -7,8 +7,13 @@ import (
 	"github.com/duanhf2012/origin/network"
 	"github.com/duanhf2012/origin/network/processor"
 	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/node"
 	"sync"
+	"sync/atomic"
+	"time"
 )
+
+
 
 type WSService struct {
 	service.Service
@@ -16,9 +21,12 @@ type WSService struct {
 
 	mapClientLocker sync.RWMutex
 	mapClient       map[uint64] *WSClient
-	initClientId    uint64
 	process         processor.IProcessor
+
+
 }
+
+var seed uint32
 
 type WSPackType int8
 const(
@@ -31,6 +39,12 @@ const(
 const Default_WS_MaxConnNum = 3000
 const Default_WS_PendingWriteNum = 10000
 const Default_WS_MaxMsgLen = 65535
+
+const (
+	MaxNodeId = 1<<14 - 1  //最大值 16383
+	MaxSeed   = 1<<19 - 1  //最大值 524287
+	MaxTime   = 1<<31 - 1  //最大值 2147483647
+)
 
 type WSClient struct {
 	id uint64
@@ -46,6 +60,7 @@ type WSPack struct {
 }
 
 func (ws *WSService) OnInit() error{
+
 	iConfig := ws.GetServiceCfg()
 	if iConfig == nil {
 		return fmt.Errorf("%s service config is error!", ws.GetName())
@@ -80,6 +95,10 @@ func (ws *WSService) OnInit() error{
 	return nil
 }
 
+func (ws *WSService) SetMessageType(messageType int){
+	ws.wsServer.SetMessageType(messageType)
+}
+
 func (ws *WSService) WSEventHandler(ev event.IEvent) {
 	pack := ev.(*event.Event).Data.(*WSPack)
 	switch pack.Type {
@@ -88,9 +107,9 @@ func (ws *WSService) WSEventHandler(ev event.IEvent) {
 	case WPT_DisConnected:
 		pack.MsgProcessor.DisConnectedRoute(pack.ClientId)
 	case WPT_UnknownPack:
-		pack.MsgProcessor.UnknownMsgRoute(pack.Data,pack.ClientId)
+		pack.MsgProcessor.UnknownMsgRoute(pack.ClientId,pack.Data)
 	case WPT_Pack:
-		pack.MsgProcessor.MsgRoute(pack.Data, pack.ClientId)
+		pack.MsgProcessor.MsgRoute(pack.ClientId,pack.Data)
 	}
 }
 
@@ -99,20 +118,30 @@ func (ws *WSService) SetProcessor(process processor.IProcessor,handler event.IEv
 	ws.RegEventReceiverFunc(event.Sys_Event_WebSocket,handler, ws.WSEventHandler)
 }
 
+func (ws *WSService) genId() uint64 {
+	if node.GetNodeId()>MaxNodeId{
+		panic("nodeId exceeds the maximum!")
+	}
+
+	newSeed := atomic.AddUint32(&seed,1) % MaxSeed
+	nowTime := uint64(time.Now().Unix())%MaxTime
+	return (uint64(node.GetNodeId())<<50)|(nowTime<<19)|uint64(newSeed)
+}
+
 func (ws *WSService) NewWSClient(conn *network.WSConn) network.Agent {
 	ws.mapClientLocker.Lock()
 	defer ws.mapClientLocker.Unlock()
 
 	for {
-		ws.initClientId+=1
-		_,ok := ws.mapClient[ws.initClientId]
+		clientId := ws.genId()
+		_,ok := ws.mapClient[clientId]
 		if ok == true {
 			continue
 		}
 
-		pClient := &WSClient{wsConn:conn, id: ws.initClientId}
+		pClient := &WSClient{wsConn:conn, id: clientId}
 		pClient.wsService = ws
-		ws.mapClient[ws.initClientId] = pClient
+		ws.mapClient[clientId] = pClient
 		return pClient
 	}
 
@@ -131,7 +160,7 @@ func (slf *WSClient) Run() {
 			log.Debug("read client id %d is error:%+v",slf.id,err)
 			break
 		}
-		data,err:=slf.wsService.process.Unmarshal(bytes)
+		data,err:=slf.wsService.process.Unmarshal(slf.id,bytes)
 		if err != nil {
 			slf.wsService.NotifyEvent(&event.Event{Type:event.Sys_Event_WebSocket,Data:&WSPack{ClientId:slf.id,Type:WPT_UnknownPack,Data:bytes,MsgProcessor:slf.wsService.process}})
 			continue
@@ -156,7 +185,7 @@ func (ws *WSService) SendMsg(clientid uint64,msg interface{}) error{
 	}
 
 	ws.mapClientLocker.Unlock()
-	bytes,err := ws.process.Marshal(msg)
+	bytes,err := ws.process.Marshal(clientid,msg)
 	if err != nil {
 		return err
 	}

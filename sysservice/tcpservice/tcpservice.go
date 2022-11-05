@@ -8,8 +8,10 @@ import (
 	"github.com/duanhf2012/origin/network/processor"
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
+	"sync/atomic"
 	"sync"
 	"time"
+	"runtime"
 )
 
 type TcpService struct {
@@ -19,9 +21,6 @@ type TcpService struct {
 	mapClientLocker sync.RWMutex
 	mapClient       map[uint64] *Client
 	process processor.IProcessor
-
-	ReadDeadline time.Duration
-	WriteDeadline time.Duration
 }
 
 type TcpPackType int8
@@ -32,21 +31,13 @@ const(
 	TPT_UnknownPack TcpPackType = 3
 )
 
-const Default_MaxConnNum = 3000
-const Default_PendingWriteNum = 10000
-const Default_LittleEndian = false
-const Default_MinMsgLen = 2
-const Default_MaxMsgLen = 65535
-const Default_ReadDeadline = 180  //30s
-const Default_WriteDeadline = 180 //30s
-
 const (
-	MaxNodeId = 1<<10 - 1 //Uint10
-	MaxSeed   = 1<<22 - 1 //MaxUint24
+	MaxNodeId = 1<<14 - 1  //最大值 16383
+	MaxSeed   = 1<<19 - 1  //最大值 524287
+	MaxTime   = 1<<31 - 1  //最大值 2147483647
 )
 
 var seed uint32
-var seedLocker sync.Mutex
 
 type TcpPack struct {
 	Type         TcpPackType //0表示连接 1表示断开 2表示数据
@@ -65,16 +56,14 @@ func (tcpService *TcpService) genId() uint64 {
 		panic("nodeId exceeds the maximum!")
 	}
 
-	seedLocker.Lock()
-	seed = (seed+1)%MaxSeed
-	seedLocker.Unlock()
-
-	nowTime := uint64(time.Now().Second())
-	return (uint64(node.GetNodeId())<<54)|(nowTime<<22)|uint64(seed)
+	newSeed := atomic.AddUint32(&seed,1) % MaxSeed
+	nowTime := uint64(time.Now().Unix())%MaxTime
+	return (uint64(node.GetNodeId())<<50)|(nowTime<<19)|uint64(newSeed)
 }
 
+
 func GetNodeId(agentId uint64) int {
-	return int(agentId>>54)
+	return int(agentId>>50)
 }
 
 func (tcpService *TcpService) OnInit() error{
@@ -89,14 +78,6 @@ func (tcpService *TcpService) OnInit() error{
 	}
 
 	tcpService.tcpServer.Addr = addr.(string)
-	tcpService.tcpServer.MaxConnNum = Default_MaxConnNum
-	tcpService.tcpServer.PendingWriteNum = Default_PendingWriteNum
-	tcpService.tcpServer.LittleEndian = Default_LittleEndian
-	tcpService.tcpServer.MinMsgLen = Default_MinMsgLen
-	tcpService.tcpServer.MaxMsgLen = Default_MaxMsgLen
-	tcpService.ReadDeadline = Default_ReadDeadline
-	tcpService.WriteDeadline = Default_WriteDeadline
-
 	MaxConnNum,ok := tcpCfg["MaxConnNum"]
 	if ok == true {
 		tcpService.tcpServer.MaxConnNum = int(MaxConnNum.(float64))
@@ -120,12 +101,12 @@ func (tcpService *TcpService) OnInit() error{
 
 	readDeadline,ok := tcpCfg["ReadDeadline"]
 	if ok == true {
-		tcpService.ReadDeadline = time.Second*time.Duration(readDeadline.(float64))
+		tcpService.tcpServer.ReadDeadline = time.Second*time.Duration(readDeadline.(float64))
 	}
 
 	writeDeadline,ok := tcpCfg["WriteDeadline"]
 	if ok == true {
-		tcpService.WriteDeadline = time.Second*time.Duration(writeDeadline.(float64))
+		tcpService.tcpServer.WriteDeadline = time.Second*time.Duration(writeDeadline.(float64))
 	}
 
 	tcpService.mapClient = make( map[uint64] *Client, tcpService.tcpServer.MaxConnNum)
@@ -143,9 +124,9 @@ func (tcpService *TcpService) TcpEventHandler(ev event.IEvent) {
 	case TPT_DisConnected:
 		tcpService.process.DisConnectedRoute(pack.ClientId)
 	case TPT_UnknownPack:
-		tcpService.process.UnknownMsgRoute(pack.Data,pack.ClientId)
+		tcpService.process.UnknownMsgRoute(pack.ClientId,pack.Data)
 	case TPT_Pack:
-		tcpService.process.MsgRoute(pack.Data, pack.ClientId)
+		tcpService.process.MsgRoute(pack.ClientId,pack.Data)
 	}
 }
 
@@ -180,19 +161,28 @@ func (slf *Client) GetId() uint64 {
 }
 
 func (slf *Client) Run() {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 4096)
+			l := runtime.Stack(buf, false)
+			errString := fmt.Sprint(r)
+			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
+		}
+	}()
+
 	slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:TcpPack{ClientId:slf.id,Type:TPT_Connected}})
 	for{
 		if slf.tcpConn == nil {
 			break
 		}
 
-		slf.tcpConn.SetReadDeadline(slf.tcpService.ReadDeadline)
+		slf.tcpConn.SetReadDeadline(slf.tcpService.tcpServer.ReadDeadline)
 		bytes,err := slf.tcpConn.ReadMsg()
 		if err != nil {
 			log.SDebug("read client id ",slf.id," is error:",err.Error())
 			break
 		}
-		data,err:=slf.tcpService.process.Unmarshal(bytes)
+		data,err:=slf.tcpService.process.Unmarshal(slf.id,bytes)
 
 		if err != nil {
 			slf.tcpService.NotifyEvent(&event.Event{Type:event.Sys_Event_Tcp,Data:TcpPack{ClientId:slf.id,Type:TPT_UnknownPack,Data:bytes}})
@@ -218,11 +208,10 @@ func (tcpService *TcpService) SendMsg(clientId uint64,msg interface{}) error{
 	}
 
 	tcpService.mapClientLocker.Unlock()
-	bytes,err := tcpService.process.Marshal(msg)
+	bytes,err := tcpService.process.Marshal(clientId,msg)
 	if err != nil {
 		return err
 	}
-	client.tcpConn.SetWriteDeadline(tcpService.WriteDeadline)
 	return client.tcpConn.WriteMsg(bytes)
 }
 
@@ -253,6 +242,7 @@ func (tcpService *TcpService) GetClientIp(clientid uint64) string{
 	return pClient.tcpConn.GetRemoteIp()
 }
 
+
 func (tcpService *TcpService) SendRawMsg(clientId uint64,msg []byte) error{
 	tcpService.mapClientLocker.Lock()
 	client,ok := tcpService.mapClient[clientId]
@@ -261,9 +251,20 @@ func (tcpService *TcpService) SendRawMsg(clientId uint64,msg []byte) error{
 		return fmt.Errorf("client %d is disconnect!",clientId)
 	}
 	tcpService.mapClientLocker.Unlock()
-	client.tcpConn.SetWriteDeadline(tcpService.WriteDeadline)
 	return client.tcpConn.WriteMsg(msg)
 }
+
+func (tcpService *TcpService) SendRawData(clientId uint64,data []byte) error{
+	tcpService.mapClientLocker.Lock()
+	client,ok := tcpService.mapClient[clientId]
+	if ok == false{
+		tcpService.mapClientLocker.Unlock()
+		return fmt.Errorf("client %d is disconnect!",clientId)
+	}
+	tcpService.mapClientLocker.Unlock()
+	return client.tcpConn.WriteRawMsg(data)
+}
+
 
 func (tcpService *TcpService) GetConnNum() int {
 	tcpService.mapClientLocker.Lock()

@@ -3,30 +3,30 @@ package processor
 
 type IProcessor interface {
 	// must goroutine safe
-	MsgRoute(msg interface{}, userData interface{}) error
+	MsgRoute(clientId uint64,msg interface{}) error
 	//must goroutine safe
-	UnknownMsgRoute(msg interface{}, userData interface{})
+	UnknownMsgRoute(clientId uint64,msg interface{})
 	// connect event
-	ConnectedRoute(userData interface{})
-	DisConnectedRoute(userData interface{})
+	ConnectedRoute(clientId uint64)
+	DisConnectedRoute(clientId uint64)
 
 	// must goroutine safe
-	Unmarshal(data []byte) (interface{}, error)
+	Unmarshal(clientId uint64,data []byte) (interface{}, error)
 	// must goroutine safe
-	Marshal(msg interface{}) ([]byte, error)
+	Marshal(clientId uint64,msg interface{}) ([]byte, error)
 }
 
 type IRawProcessor interface {
 	SetByteOrder(littleEndian bool)
-	MsgRoute(msg interface{},userdata interface{}) error
-	Unmarshal(data []byte) (interface{}, error)
-	Marshal(msg interface{}) ([]byte, error)
+	MsgRoute(clientId uint64,msg interface{}) error
+	Unmarshal(clientId uint64,data []byte) (interface{}, error)
+	Marshal(clientId uint64,msg interface{}) ([]byte, error)
 
 	SetRawMsgHandler(handle RawMessageHandler)
 	MakeRawMsg(msgType uint16,msg []byte,pbRawPackInfo *PBRawPackInfo)
-	UnknownMsgRoute(msg interface{}, userData interface{})
-	ConnectedRoute(userData interface{})
-	DisConnectedRoute(userData interface{})
+	UnknownMsgRoute(clientId uint64,msg interface{})
+	ConnectedRoute(clientId uint64)
+	DisConnectedRoute(clientId uint64)
 
 	SetUnknownMsgHandler(unknownMessageHandler UnknownRawMessageHandler)
 	SetConnectedHandler(connectHandler RawConnectHandler)

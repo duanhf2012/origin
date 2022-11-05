@@ -13,6 +13,8 @@ type TCPClient struct {
 	ConnNum         int
 	ConnectInterval time.Duration
 	PendingWriteNum int
+	ReadDeadline    time.Duration
+	WriteDeadline 	time.Duration
 	AutoReconnect   bool
 	NewAgent        func(*TCPConn) Agent
 	cons            ConnSet
@@ -52,6 +54,14 @@ func (client *TCPClient) init() {
 		client.PendingWriteNum = 1000
 		log.SRelease("invalid PendingWriteNum, reset to ", client.PendingWriteNum)
 	}
+	if client.ReadDeadline == 0 {
+		client.ReadDeadline = 15*time.Second
+		log.SRelease("invalid ReadDeadline, reset to ", int64(client.ReadDeadline.Seconds()),"s")
+	}
+	if client.WriteDeadline == 0 {
+		client.WriteDeadline = 15*time.Second
+		log.SRelease("invalid WriteDeadline, reset to ", int64(client.WriteDeadline.Seconds()),"s")
+	}
 	if client.NewAgent == nil {
 		log.SFatal("NewAgent must not be nil")
 	}
@@ -67,6 +77,13 @@ func (client *TCPClient) init() {
 	msgParser.SetMsgLen(client.LenMsgLen, client.MinMsgLen, client.MaxMsgLen)
 	msgParser.SetByteOrder(client.LittleEndian)
 	client.msgParser = msgParser
+}
+
+func (client *TCPClient) GetCloseFlag() bool{
+	client.Lock()
+	defer client.Unlock()
+
+	return client.closeFlag
 }
 
 func (client *TCPClient) dial() net.Conn {
@@ -93,7 +110,7 @@ reconnect:
 	if conn == nil {
 		return
 	}
-
+	
 	client.Lock()
 	if client.closeFlag {
 		client.Unlock()
@@ -103,7 +120,7 @@ reconnect:
 	client.cons[conn] = struct{}{}
 	client.Unlock()
 
-	tcpConn := newTCPConn(conn, client.PendingWriteNum, client.msgParser)
+	tcpConn := newTCPConn(conn, client.PendingWriteNum, client.msgParser,client.WriteDeadline)
 	agent := client.NewAgent(tcpConn)
 	agent.Run()
 

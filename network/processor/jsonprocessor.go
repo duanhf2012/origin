@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/duanhf2012/origin/network"
 	"reflect"
+	"github.com/duanhf2012/origin/log"
 )
 
 type MessageJsonInfo struct {
@@ -44,18 +45,18 @@ func (jsonProcessor *JsonProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // must goroutine safe
-func (jsonProcessor *JsonProcessor ) MsgRoute(msg interface{},userdata interface{}) error{
+func (jsonProcessor *JsonProcessor ) MsgRoute(clientId uint64,msg interface{}) error{
 	pPackInfo := msg.(*JsonPackInfo)
 	v,ok := jsonProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
 		return fmt.Errorf("cannot find msgtype %d is register!",pPackInfo.typ)
 	}
 
-	v.msgHandler(userdata.(uint64),pPackInfo.msg)
+	v.msgHandler(clientId,pPackInfo.msg)
 	return nil
 }
 
-func (jsonProcessor *JsonProcessor) Unmarshal(data []byte) (interface{}, error) {
+func (jsonProcessor *JsonProcessor) Unmarshal(clientId uint64,data []byte) (interface{}, error) {
 	typeStruct := struct {Type int `json:"typ"`}{}
 	defer jsonProcessor.ReleaseByteSlice(data)
 	err := json.Unmarshal(data, &typeStruct)
@@ -78,7 +79,7 @@ func (jsonProcessor *JsonProcessor) Unmarshal(data []byte) (interface{}, error) 
 	return &JsonPackInfo{typ:msgType,msg:msgData},nil
 }
 
-func (jsonProcessor *JsonProcessor) Marshal(msg interface{}) ([]byte, error) {
+func (jsonProcessor *JsonProcessor) Marshal(clientId uint64,msg interface{}) ([]byte, error) {
 	rawMsg,err := json.Marshal(msg)
 	if err != nil {
 		return nil,err
@@ -103,16 +104,26 @@ func (jsonProcessor *JsonProcessor) MakeRawMsg(msgType uint16,msg []byte) *JsonP
 	return &JsonPackInfo{typ:msgType,rawMsg:msg}
 }
 
-func (jsonProcessor *JsonProcessor) UnknownMsgRoute(msg interface{}, userData interface{}){
-	jsonProcessor.unknownMessageHandler(userData.(uint64),msg.([]byte))
+func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId uint64,msg interface{}){
+	if jsonProcessor.unknownMessageHandler==nil {
+		log.SDebug("Unknown message received from ",clientId)
+		return
+	}
+
+	jsonProcessor.unknownMessageHandler(clientId,msg.([]byte))
+
 }
 
-func (jsonProcessor *JsonProcessor) ConnectedRoute(userData interface{}){
-	jsonProcessor.connectHandler(userData.(uint64))
+func (jsonProcessor *JsonProcessor) ConnectedRoute(clientId uint64){
+	if jsonProcessor.connectHandler != nil {
+		jsonProcessor.connectHandler(clientId)
+	}
 }
 
-func (jsonProcessor *JsonProcessor) DisConnectedRoute(userData interface{}){
-	jsonProcessor.disconnectHandler(userData.(uint64))
+func (jsonProcessor *JsonProcessor) DisConnectedRoute(clientId uint64){
+	if jsonProcessor.disconnectHandler != nil {
+		jsonProcessor.disconnectHandler(clientId)
+	}
 }
 
 func (jsonProcessor *JsonProcessor) RegisterUnknownMsg(unknownMessageHandler UnknownMessageJsonHandler){
