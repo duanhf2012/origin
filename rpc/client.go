@@ -82,9 +82,6 @@ func (client *Client) Connect(id int, addr string, maxRpcParamLen uint32) error 
 func (client *Client) startCheckRpcCallTimer() {
 	for {
 		time.Sleep(5 * time.Second)
-		if client.GetCloseFlag() == true {
-			break
-		}
 		client.checkRpcCallTimeout()
 	}
 }
@@ -348,6 +345,19 @@ func (client *Client) GetId() int {
 
 func (client *Client) Close(waitDone bool) {
 	client.TCPClient.Close(waitDone)
+
+	client.pendingLock.Lock()
+	for  {
+		pElem := client.pendingTimer.Front()
+		if pElem == nil {
+			break
+		}
+
+		pCall := pElem.Value.(*Call)
+		pCall.Err = errors.New("nodeid is disconnect ")
+		client.makeCallFail(pCall)
+	}
+	client.pendingLock.Unlock()
 }
 
 func (client *Client) GetClientSeq() uint32 {

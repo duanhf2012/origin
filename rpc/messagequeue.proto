@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+option go_package = ".;rpc";
+
+
+message DBQueuePopReq {
+    string CustomerId  = 1;
+    string QueueName   = 2;
+    int32 PopStartPos  = 3;
+    int32 PopNum       = 4;
+    bytes pushData = 5;
+}
+
+message DBQueuePopRes {
+    string QueueName   = 1;
+    repeated bytes pushData = 2;
+}
+
+enum SubscribeType {
+    Subscribe  = 0;
+    Unsubscribe = 1;
+}
+
+enum SubscribeMethod {
+    Method_Custom = 0;//自定义模式，以消费者设置的StartIndex开始获取或订阅
+    Method_Last   = 1;//Last模式，以该消费者上次记录的位置开始订阅
+}
+
+//订阅
+message DBQueueSubscribeReq {
+    SubscribeType SubType = 1; //订阅类型
+    SubscribeMethod Method = 2; //订阅方法
+    string  CustomerId     = 3; //消费者Id
+    int32 FromNodeId      = 4;
+    string RpcMethod       = 5;
+    string TopicName      = 6; //主题名称
+    uint64  StartIndex    = 7; //开始位置 ,格式前4位是时间戳秒，后面是序号。如果填0时，服务自动修改成：(4bit 当前时间秒)| (0000 4bit)
+    int32 OneBatchQuantity = 8;//订阅一次发送的数量，不设置有默认值1000条
+}
+
+message DBQueueSubscribeRes {
+
+}
+
+message DBQueuePublishReq {
+    string TopicName   = 1;  //主是，名称，数据
+    repeated bytes pushData = 2;
+}
+
+message DBQueuePublishRes {
+}
