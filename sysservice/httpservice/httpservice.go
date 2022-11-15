@@ -118,6 +118,10 @@ func NewHttpHttpRouter() IHttpRouter {
 	return httpRouter
 }
 
+func (slf *HttpSession) GetRawQuery() string{
+	return slf.r.URL.RawQuery
+}
+
 func (slf *HttpSession) Query(key string) (string, bool) {
 	if slf.mapParam == nil {
 		slf.mapParam = make(map[string]string)
