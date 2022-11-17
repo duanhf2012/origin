@@ -52,10 +52,10 @@ func (mm *MongoModule) TakeSession() Session {
 	return Session{Client: mm.client, maxOperatorTimeOut: mm.maxOperatorTimeOut}
 }
 
-func (s *Session) CountDocument(db string, collection string) (int64, error) {
+func (s *Session) CountDocument(db string, collection string, filter interface{}) (int64, error) {
 	ctxTimeout, cancel := s.GetDefaultContext()
 	defer cancel()
-	return s.Database(db).Collection(collection).CountDocuments(ctxTimeout, bson.D{})
+	return s.Database(db).Collection(collection).CountDocuments(ctxTimeout, filter)
 }
 
 func (s *Session) NextSeq(db string, collection string, id interface{}) (int, error) {
