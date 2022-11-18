@@ -1,0 +1,76 @@
+syntax = "proto3";
+package rpc;
+option go_package = ".;rpc";
+
+// RankData 排行数据
+message RankData {
+    uint64 Key                  = 1; //数据主建
+    repeated int64 SortData     = 2; //参与排行的数据
+    bytes Data                  = 3; //不参与排行的数据
+    int64  expireMs             = 4; //剩余有效时间毫秒，如果为0永不过期
+}
+
+// RankPosData 排行数据——查询返回
+message RankPosData {
+    uint64 Key                  = 1; //数据主建
+    uint64 RankPos              = 2; //名次
+    repeated int64 SortData     = 3; //参与排行的数据
+    bytes Data                  = 4; //不参与排行的数据
+}
+
+// RankList 排行榜数据
+message RankList {
+    uint64  RankId          = 1; //排行榜类型
+    int32   SkipListLevel   = 2; //排行榜level-生成的跳表的level, 8/16/32/64等
+    bool    IsDec           = 3; //不参与排行的数据
+    uint64  MaxRank         = 4; //最大排名
+}
+
+// UpsetRankData 更新排行榜数据
+message UpsetRankData {
+    uint64      RankId                 = 1; //排行榜的ID
+    repeated    RankData RankDataList  = 2; //排行数据
+}
+
+// DeleteByKey 更新排行榜数据
+message DeleteByKey {
+    uint64      RankId              = 1; //排行榜的分类ID
+    repeated    uint64 KeyList      = 2; //排行数据
+}
+
+// AddRankList 新增排行榜
+message AddRankList {
+    repeated RankList AddList = 1;  //添加的排行榜列表
+}
+
+// FindRankDataByKey 查找排行信息
+message FindRankDataByKey {
+    uint64 RankId  = 1; //排行榜的ID
+    uint64 Key     = 2; //排行的key
+}
+
+// FindRankDataByPos 查找排行信息
+message FindRankDataByPos {
+    uint64 RankId   = 1; //排行榜的ID
+    uint64 Pos      = 2; //排行名次
+}
+
+// FindRankDataListStartTo 查找排行信息,StartPos开始Count个
+message FindRankDataListStartTo {
+    uint64 RankId          = 1; //排行榜的ID
+    uint64 StartPos        = 2; //排行的位置 0开始
+    uint64 Count           = 3; //查询格式
+}
+
+// RankDataList
+message RankDataList {
+    uint64   RankDataCount                = 1; //排行长度
+    repeated RankPosData RankPosDataList  = 2; //排行数据
+}
+
+// RankResult
+message RankResult {
+    int32 AddCount = 1;    //增加记录
+    int32 RemoveCount = 2; //删除数量
+    int32 ModifyCount = 3; //修改数量
+}
