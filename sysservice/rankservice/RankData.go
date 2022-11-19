@@ -15,7 +15,7 @@ var RankDataPool = sync.NewPoolEx(make(chan sync.IPoolData, 10240), func() sync.
 
 type RankData struct {
 	*rpc.RankData
-
+	bRelease bool
 	ref         bool
 	compareFunc func(other skip.Comparator) int
 }

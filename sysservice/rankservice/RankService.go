@@ -3,22 +3,12 @@ package rankservice
 import (
 	"fmt"
 	"github.com/duanhf2012/origin/log"
-	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/service"
+	"time"
 )
 
-func init() {
-	node.Setup(&RankService{})
-}
-
 const PreMapRankSkipLen = 10
-const ManualAddRankSkip = "RPC_ManualAddRankSkip"
-const UpsetRank = "RPC_UpsetRank"
-const DeleteRankDataByKey = "RPC_DeleteRankDataByKey"
-const FindRankDataByKey = "RPC_FindRankDataByKey"
-const FindRankDataByPos = "RPC_FindRankDataByPos"
-const FindRankDataListStartTo = "RPC_FindRankDataListStartTo"
 
 type RankService struct {
 	service.Service
@@ -68,7 +58,7 @@ func (rs *RankService) RPC_ManualAddRankSkip(addInfo *rpc.AddRankList, addResult
 			return fmt.Errorf("RPC_AddRankSkip must has rank id")
 		}
 
-		newSkip := NewRankSkip(addRankListData.IsDec, transformLevel(addRankListData.SkipListLevel), addRankListData.MaxRank)
+		newSkip := NewRankSkip(addRankListData.IsDec, transformLevel(addRankListData.SkipListLevel), addRankListData.MaxRank,time.Duration(addRankListData.ExpireMs)*time.Millisecond)
 		rs.mapRankSkip[addRankListData.RankId] = newSkip
 		addList = append(addList, addRankListData.RankId)
 	}
@@ -91,7 +81,7 @@ func (rs *RankService) RPC_UpsetRank(upsetInfo *rpc.UpsetRankData, upsetResult *
 	return nil
 }
 
-// RPC_DeleteRankDataByKey 按排行的key进行删除
+// RPC_DeleteRankDataByKey 按key从排行榜中进行删除
 func (rs *RankService) RPC_DeleteRankDataByKey(delInfo *rpc.DeleteByKey, delResult *rpc.RankResult) error {
 	rankSkip, ok := rs.mapRankSkip[delInfo.RankId]
 	if ok == false || rankSkip == nil {
@@ -107,49 +97,49 @@ func (rs *RankService) RPC_DeleteRankDataByKey(delInfo *rpc.DeleteByKey, delResu
 	return nil
 }
 
-// RPC_FindRankDataByKey 按key查找
+// RPC_FindRankDataByKey 按key查找，返回对应的排行名次信息
 func (rs *RankService) RPC_FindRankDataByKey(findInfo *rpc.FindRankDataByKey, findResult *rpc.RankPosData) error {
 	rankObj, ok := rs.mapRankSkip[findInfo.RankId]
 	if ok == false || rankObj == nil {
 		return fmt.Errorf("RPC_FindRankDataByKey[", findInfo.RankId, "] no this rank type")
 	}
 
-	findRankData, rankPos := rankObj.GetRankNodeData(findInfo.Key)
+	findRankData, rank := rankObj.GetRankNodeData(findInfo.Key)
 	if findRankData != nil {
 		findResult.Data = findRankData.Data
 		findResult.Key = findRankData.Key
 		findResult.SortData = findRankData.SortData
-		findResult.RankPos = rankPos
+		findResult.Rank = rank
 	}
 	return nil
 }
 
-// RPC_FindRankDataByPos 按pos查找
-func (rs *RankService) RPC_FindRankDataByPos(findInfo *rpc.FindRankDataByPos, findResult *rpc.RankPosData) error {
+// RPC_FindRankDataByRank 按pos查找
+func (rs *RankService) RPC_FindRankDataByRank(findInfo *rpc.FindRankDataByRank, findResult *rpc.RankPosData) error {
 	rankObj, ok := rs.mapRankSkip[findInfo.RankId]
 	if ok == false || rankObj == nil {
 		return fmt.Errorf("RPC_FindRankDataByKey[", findInfo.RankId, "] no this rank type")
 	}
 
-	findRankData, rankPos := rankObj.GetRankNodeDataByPos(findInfo.Pos)
+	findRankData, rankPos := rankObj.GetRankNodeDataByRank(findInfo.Rank)
 	if findRankData != nil {
 		findResult.Data = findRankData.Data
 		findResult.Key = findRankData.Key
 		findResult.SortData = findRankData.SortData
-		findResult.RankPos = rankPos
+		findResult.Rank = rankPos
 	}
 	return nil
 }
 
-// RPC_FindRankDataListStartTo 按pos查找,start开始count个排行数据
-func (rs *RankService) RPC_FindRankDataListStartTo(findInfo *rpc.FindRankDataListStartTo, findResult *rpc.RankDataList) error {
+// RPC_FindRankDataList 按StartRank查找,从StartRank开始count个排行数据
+func (rs *RankService) RPC_FindRankDataList(findInfo *rpc.FindRankDataList, findResult *rpc.RankDataList) error {
 	rankObj, ok := rs.mapRankSkip[findInfo.RankId]
 	if ok == false || rankObj == nil {
 		return fmt.Errorf("RPC_FindRankDataListStartTo[", findInfo.RankId, "] no this rank type")
 	}
 
 	findResult.RankDataCount = rankObj.GetRankLen()
-	return rankObj.GetRankDataFromToLimit(findInfo.StartPos, findInfo.Count, findResult)
+	return rankObj.GetRankDataFromToLimit(findInfo.StartRank, findInfo.Count, findResult)
 }
 
 func (rs *RankService) deleteRankList(delIdList []uint64) {
@@ -187,9 +177,14 @@ func (rs *RankService) dealCfg() error {
 		level, _ := mapCfg["SkipListLevel"].(float64)
 		isDec, _ := mapCfg["IsDec"].(bool)
 		maxRank, _ := mapCfg["MaxRank"].(float64)
+		expireMs, _ := mapCfg["ExpireMs"].(float64)
 
-		newSkip := NewRankSkip(isDec, transformLevel(int32(level)), uint64(maxRank))
+		newSkip := NewRankSkip(isDec, transformLevel(int32(level)), uint64(maxRank),time.Duration(expireMs)*time.Millisecond)
 		rs.mapRankSkip[uint64(rankId)] = newSkip
 	}
+
+
 	return nil
 }
+
+

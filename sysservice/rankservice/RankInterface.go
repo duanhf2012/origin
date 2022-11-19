@@ -4,22 +4,12 @@ import "github.com/duanhf2012/origin/service"
 
 type RankDataChangeType int8
 
-const (
-	RankDataNone   RankDataChangeType = 0
-	RankDataAdd    RankDataChangeType = 1 //数据插入
-	RankDataUpdate RankDataChangeType = 2 //数据更新
-	RankDataDelete RankDataChangeType = 3 //数据删除
-)
+
 
 type IRankSkip interface {
 	GetRankID() uint64
 	GetRankLen() uint64
 }
-
-// RankDataChangeCallBack 排行数据变化时调用
-//type RankDataChangeCallBack interface {
-//	CB(iRankService service.IService, rankSkip IRankSkip, changeType RankDataChangeType, changed []*RankData)
-//}
 
 type IRankModule interface {
 	service.IModule
