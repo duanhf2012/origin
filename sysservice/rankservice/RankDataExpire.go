@@ -93,7 +93,7 @@ func (rd *rankDataHeap) PopExpireKey() uint64{
 	return  rankData.Key
 }
 
-func (rd *rankDataHeap) PushOrRefreshExpireKey(key uint64){
+func (rd *rankDataHeap) PushOrRefreshExpireKey(key uint64,refreshTimestamp int64){
 	//1.先删掉之前的
 	expData ,ok := rd.mapExpireData[key]
 	if ok == true {
@@ -105,7 +105,7 @@ func (rd *rankDataHeap) PushOrRefreshExpireKey(key uint64){
 	//2.直接插入
 	expData = expireDataPool.Get().(*ExpireData)
 	expData.Key = key
-	expData.RefreshTimestamp = time.Now().UnixNano()
+	expData.RefreshTimestamp = refreshTimestamp
 	rd.mapExpireData[key] = expData
 
 	heap.Push(rd,expData)

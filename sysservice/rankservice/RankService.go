@@ -18,14 +18,8 @@ type RankService struct {
 }
 
 func (rs *RankService) OnInit() error {
-	rs.mapRankSkip = make(map[uint64]*RankSkip, PreMapRankSkipLen)
-	err := rs.dealCfg()
-	if err != nil {
-		return err
-	}
-
 	if rs.rankModule != nil {
-		_, err = rs.AddModule(rs.rankModule)
+		_, err := rs.AddModule(rs.rankModule)
 		if err != nil {
 			return err
 		}
@@ -33,11 +27,19 @@ func (rs *RankService) OnInit() error {
 		rs.AddModule(&DefaultRankModule{})
 	}
 
+	rs.mapRankSkip = make(map[uint64]*RankSkip, PreMapRankSkipLen)
+	err := rs.dealCfg()
+	if err != nil {
+		return err
+	}
+
+
+
 	return nil
 }
 
 func (rs *RankService) OnStart() {
-	rs.rankModule.OnStart(rs.mapRankSkip)
+	rs.rankModule.OnStart()
 }
 
 func (rs *RankService) OnRelease() {
@@ -58,7 +60,8 @@ func (rs *RankService) RPC_ManualAddRankSkip(addInfo *rpc.AddRankList, addResult
 			return fmt.Errorf("RPC_AddRankSkip must has rank id")
 		}
 
-		newSkip := NewRankSkip(addRankListData.IsDec, transformLevel(addRankListData.SkipListLevel), addRankListData.MaxRank,time.Duration(addRankListData.ExpireMs)*time.Millisecond)
+		newSkip := NewRankSkip(addRankListData.RankId,"",addRankListData.IsDec, transformLevel(addRankListData.SkipListLevel), addRankListData.MaxRank,time.Duration(addRankListData.ExpireMs)*time.Millisecond)
+		newSkip.SetupRankModule(rs.rankModule)
 		rs.mapRankSkip[addRankListData.RankId] = newSkip
 		addList = append(addList, addRankListData.RankId)
 	}
@@ -75,7 +78,7 @@ func (rs *RankService) RPC_UpsetRank(upsetInfo *rpc.UpsetRankData, upsetResult *
 		return fmt.Errorf("RPC_UpsetRank[", upsetInfo.RankId, "] no this rank id")
 	}
 
-	addCount, updateCount := rankSkip.UpsetRank(upsetInfo.RankDataList)
+	addCount, updateCount := rankSkip.UpsetRankList(upsetInfo.RankDataList)
 	upsetResult.AddCount = addCount
 	upsetResult.ModifyCount = updateCount
 	return nil
@@ -135,11 +138,30 @@ func (rs *RankService) RPC_FindRankDataByRank(findInfo *rpc.FindRankDataByRank, 
 func (rs *RankService) RPC_FindRankDataList(findInfo *rpc.FindRankDataList, findResult *rpc.RankDataList) error {
 	rankObj, ok := rs.mapRankSkip[findInfo.RankId]
 	if ok == false || rankObj == nil {
-		return fmt.Errorf("RPC_FindRankDataListStartTo[", findInfo.RankId, "] no this rank type")
+		err := fmt.Errorf("not config rank %d",findInfo.RankId)
+		log.SError(err.Error())
+		return err
 	}
 
 	findResult.RankDataCount = rankObj.GetRankLen()
-	return rankObj.GetRankDataFromToLimit(findInfo.StartRank, findInfo.Count, findResult)
+	err := rankObj.GetRankDataFromToLimit(findInfo.StartRank-1, findInfo.Count, findResult)
+	if err != nil {
+		return err
+	}
+
+	//查询附带的key
+	if findInfo.Key!= 0 {
+		findRankData, rank := rankObj.GetRankNodeData(findInfo.Key)
+		if findRankData != nil {
+			findResult.KeyRank = &rpc.RankPosData{}
+			findResult.KeyRank.Data = findRankData.Data
+			findResult.KeyRank.Key = findRankData.Key
+			findResult.KeyRank.SortData = findRankData.SortData
+			findResult.KeyRank.Rank = rank
+		}
+	}
+
+	return nil
 }
 
 func (rs *RankService) deleteRankList(delIdList []uint64) {
@@ -170,8 +192,13 @@ func (rs *RankService) dealCfg() error {
 		}
 
 		rankId, okId := mapCfg["RankID"].(float64)
-		if okId == false {
+		if okId == false || uint64(rankId)==0 {
 			return fmt.Errorf("RankService SortCfg data must has RankID[number]")
+		}
+
+		rankName, okId := mapCfg["RankName"].(string)
+		if okId == false || len(rankName)==0 {
+			return fmt.Errorf("RankService SortCfg data must has RankName[string]")
 		}
 
 		level, _ := mapCfg["SkipListLevel"].(float64)
@@ -179,12 +206,13 @@ func (rs *RankService) dealCfg() error {
 		maxRank, _ := mapCfg["MaxRank"].(float64)
 		expireMs, _ := mapCfg["ExpireMs"].(float64)
 
-		newSkip := NewRankSkip(isDec, transformLevel(int32(level)), uint64(maxRank),time.Duration(expireMs)*time.Millisecond)
+
+		newSkip := NewRankSkip(uint64(rankId),rankName,isDec, transformLevel(int32(level)), uint64(maxRank),time.Duration(expireMs)*time.Millisecond)
+		newSkip.SetupRankModule(rs.rankModule)
 		rs.mapRankSkip[uint64(rankId)] = newSkip
 	}
 
-
-	return nil
+	return rs.rankModule.OnFinishSetupRank(rs.mapRankSkip)
 }
 
 
