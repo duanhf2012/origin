@@ -7,16 +7,12 @@ import (
 
 type RankDataChangeType int8
 
-
-
 type IRankSkip interface {
 	GetRankID() uint64
 	GetRankName() string
 	GetRankLen() uint64
-	UpsetRank(upsetData *rpc.RankData,refreshTimestamp int64,fromLoad bool) (*RankData, RankDataChangeType)
+	UpsetRank(upsetData *rpc.RankData,refreshTimestamp int64,fromLoad bool)  RankDataChangeType
 }
-
-
 
 type IRankModule interface {
 	service.IModule

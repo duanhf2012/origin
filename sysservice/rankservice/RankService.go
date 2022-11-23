@@ -9,7 +9,6 @@ import (
 )
 
 const PreMapRankSkipLen = 10
-
 type RankService struct {
 	service.Service
 
@@ -33,8 +32,6 @@ func (rs *RankService) OnInit() error {
 		return err
 	}
 
-
-
 	return nil
 }
 
@@ -49,26 +46,6 @@ func (rs *RankService) OnRelease() {
 // 安装排行模块
 func (rs *RankService) SetupRankModule(rankModule IRankModule) {
 	rs.rankModule = rankModule
-}
-
-// RPC_ManualAddRankSkip 提供手动添加排行榜
-func (rs *RankService) RPC_ManualAddRankSkip(addInfo *rpc.AddRankList, addResult *rpc.RankResult) error {
-	addList := make([]uint64, 0, PreMapRankSkipLen)
-	for _, addRankListData := range addInfo.AddList {
-		if addRankListData.RankId == 0 {
-			rs.deleteRankList(addList)
-			return fmt.Errorf("RPC_AddRankSkip must has rank id")
-		}
-
-		newSkip := NewRankSkip(addRankListData.RankId,"",addRankListData.IsDec, transformLevel(addRankListData.SkipListLevel), addRankListData.MaxRank,time.Duration(addRankListData.ExpireMs)*time.Millisecond)
-		newSkip.SetupRankModule(rs.rankModule)
-		rs.mapRankSkip[addRankListData.RankId] = newSkip
-		addList = append(addList, addRankListData.RankId)
-	}
-
-	addResult.AddCount = 1
-
-	return nil
 }
 
 // RPC_UpsetRank 更新排行榜

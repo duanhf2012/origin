@@ -2,9 +2,7 @@ package rankservice
 
 import (
 	"container/heap"
-
 	"github.com/duanhf2012/origin/util/sync"
-
 	"time"
 )
 
@@ -97,7 +95,7 @@ func (rd *rankDataHeap) PushOrRefreshExpireKey(key uint64,refreshTimestamp int64
 	//1.先删掉之前的
 	expData ,ok := rd.mapExpireData[key]
 	if ok == true {
-		expData.RefreshTimestamp = time.Now().UnixNano()
+		expData.RefreshTimestamp = refreshTimestamp
 		heap.Fix(rd,expData.Index)
 		return
 	}
