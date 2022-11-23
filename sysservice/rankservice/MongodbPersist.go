@@ -129,20 +129,23 @@ func (mp *MongoPersist) ReadCfg() error {
 func (mp *MongoPersist) OnStart() {
 }
 
-func (mp *MongoPersist)  OnFinishSetupRank(mapRankSkip map[uint64]*RankSkip) error{
-	mp.mapRankSkip = map[uint64]IRankSkip{}
-	for rankId,rank := range mapRankSkip {
-		mp.mapRankSkip[rankId] = rank
+func (mp *MongoPersist)  OnSetupRank(manual bool,rankSkip *RankSkip) error{
+	if mp.mapRankSkip == nil {
+		mp.mapRankSkip = map[uint64]IRankSkip{}
 	}
 
-	for rankId,rank := range mp.mapRankSkip{
-		err := mp.loadFromDB(rankId,rank.GetRankName())
-		if  err != nil {
-			log.SError("load from db is fail :%s",err.Error())
-			return err
-		}
+	mp.mapRankSkip[rankSkip.GetRankID()] = rankSkip
+	if manual == true {
+		return nil
 	}
 
+	log.SRelease("start load rank ",rankSkip.GetRankName()," from mongodb.")
+	err := mp.loadFromDB(rankSkip.GetRankID(),rankSkip.GetRankName())
+	if  err != nil {
+		log.SError("load from db is fail :%s",err.Error())
+		return err
+	}
+	log.SRelease("finish load rank ",rankSkip.GetRankName()," from mongodb.")
 	return nil
 }
 

@@ -48,6 +48,30 @@ func (rs *RankService) SetupRankModule(rankModule IRankModule) {
 	rs.rankModule = rankModule
 }
 
+// RPC_ManualAddRankSkip 提供手动添加排行榜
+func (rs *RankService) RPC_ManualAddRankSkip(addInfo *rpc.AddRankList, addResult *rpc.RankResult) error {
+	for _, addRankListData := range addInfo.AddList {
+		if addRankListData.RankId == 0 {
+			return fmt.Errorf("RPC_AddRankSkip must has rank id")
+		}
+
+		//重复的排行榜信息不允许添加
+		rank := rs.mapRankSkip[addRankListData.RankId]
+		if rank != nil {
+			continue
+		}
+
+		newSkip := NewRankSkip(addRankListData.RankId,addRankListData.RankName,addRankListData.IsDec, transformLevel(addRankListData.SkipListLevel), addRankListData.MaxRank,time.Duration(addRankListData.ExpireMs)*time.Millisecond)
+		newSkip.SetupRankModule(rs.rankModule)
+
+		rs.mapRankSkip[addRankListData.RankId] = newSkip
+		rs.rankModule.OnSetupRank(true,newSkip)
+	}
+
+	addResult.AddCount = 1
+	return nil
+}
+
 // RPC_UpsetRank 更新排行榜
 func (rs *RankService) RPC_UpsetRank(upsetInfo *rpc.UpsetRankData, upsetResult *rpc.RankResult) error {
 	rankSkip, ok := rs.mapRankSkip[upsetInfo.RankId]
@@ -187,9 +211,13 @@ func (rs *RankService) dealCfg() error {
 		newSkip := NewRankSkip(uint64(rankId),rankName,isDec, transformLevel(int32(level)), uint64(maxRank),time.Duration(expireMs)*time.Millisecond)
 		newSkip.SetupRankModule(rs.rankModule)
 		rs.mapRankSkip[uint64(rankId)] = newSkip
+		err := rs.rankModule.OnSetupRank(false,newSkip)
+		if err != nil {
+			return err
+		}
 	}
 
-	return rs.rankModule.OnFinishSetupRank(rs.mapRankSkip)
+	return nil
 }
 
 

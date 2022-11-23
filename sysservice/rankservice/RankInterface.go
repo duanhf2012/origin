@@ -17,7 +17,8 @@ type IRankSkip interface {
 type IRankModule interface {
 	service.IModule
 
-	OnFinishSetupRank(map[uint64]*RankSkip) error 			//当完成安装排行榜对象时
+
+	OnSetupRank(manual bool,rankSkip *RankSkip) error 			//当完成安装排行榜对象时
 	OnStart()               //服务开启时回调
 	OnEnterRank(rankSkip IRankSkip, enterData *RankData)       //进入排行
 	OnLeaveRank(rankSkip IRankSkip, leaveData *RankData)       //离开排行
