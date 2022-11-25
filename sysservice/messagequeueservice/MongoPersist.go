@@ -123,7 +123,6 @@ func (mp *MongoPersist) OnReceiveTopicData(topic string, topicData []TopicData) 
 
 // OnPushTopicDataToCustomer 当推送数据到Customer时回调
 func (mp *MongoPersist) OnPushTopicDataToCustomer(topic string, topicData []TopicData) {
-
 }
 
 // PersistTopicData 持久化数据
@@ -148,8 +147,13 @@ func (mp *MongoPersist) persistTopicData(collectionName string, topicData []Topi
 		return retryCount >= mp.retryCount
 	}
 
-	//log.SRelease("+++++++++====", time.Now().UnixNano())
 	return true
+}
+
+func (mp *MongoPersist) IsSameDay(timestamp1 int64,timestamp2 int64) bool{
+	t1 := time.Unix(timestamp1, 0)
+	t2 := time.Unix(timestamp2, 0)
+	return t1.Year() == t2.Year() && t1.Month() == t2.Month()&&t1.Day() == t2.Day()
 }
 
 // PersistTopicData 持久化数据
@@ -163,7 +167,7 @@ func (mp *MongoPersist) PersistTopicData(topic string, topicData []TopicData, re
 	for findPos = 1; findPos < len(topicData); findPos++ {
 		newDate := topicData[findPos].Seq >> 32
 		//说明换天了
-		if preDate != newDate {
+		if mp.IsSameDay(int64(preDate),int64(newDate)) == false {
 			break
 		}
 	}
