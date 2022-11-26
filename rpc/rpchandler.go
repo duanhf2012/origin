@@ -273,7 +273,25 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		}
 	}
 
-	paramList = append(paramList, reflect.ValueOf(request.inParam))
+	//复制输入参数
+	iParamValue := reflect.New(v.inParamValue.Type().Elem())
+	iParam := iParamValue.Interface()
+	_, processor := GetProcessorType(request.inParam)
+	bytes,err := processor.Marshal(request.inParam)
+	if err == nil {
+		err = processor.Unmarshal(bytes,iParam)
+	}
+	
+	if err != nil {
+		errM := "RpcHandler " + handler.rpcHandler.GetName() + "."+ request.RpcRequestData.GetServiceMethod()+" deep copy inParam is error:" + err.Error()
+		log.SError(errM)
+		if request.requestHandle != nil {
+			request.requestHandle(nil, RpcError(errM))
+		}
+		return
+	}
+
+	paramList = append(paramList, iParamValue)
 	var oParam reflect.Value
 	if v.outParamValue.IsValid() {
 		if request.localReply != nil {
@@ -288,6 +306,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		request.requestHandle(nil, RpcError(rErr))
 		return
 	}
+
 	returnValues := v.method.Func.Call(paramList)
 	errInter := returnValues[0].Interface()
 	if errInter != nil {
