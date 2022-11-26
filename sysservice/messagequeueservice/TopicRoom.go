@@ -113,25 +113,28 @@ func (tr *TopicRoom) topicRoomRun() {
 		}
 
 		//如果落地失败，最大重试maxTryPersistNum次数
-		var ret bool
-		for j := 0; j < maxTryPersistNum; {
+		for retryCount := 0; retryCount < maxTryPersistNum; {
 			//持久化处理
-			stagingBuff, ret = tr.PersistTopicData(tr.topic, stagingBuff, j+1)
-			//如果存档成功，并且有后续批次，则继续存档
-			if ret == true && len(stagingBuff) > 0 {
-				//二次存档不计次数
-				continue
-			}
-
-			//计数增加一次，并且等待100ms，继续重试
-			j += 1
-			if ret == false {
+			stagingBuff, savedBuff, ret := tr.PersistTopicData(tr.topic, stagingBuff, retryCount+1)
+			
+			if ret == true {
+				// 1. 把成功存储的数据放入内存中
+				if len(savedBuff) > 0 {
+					tr.PushTopicDataToQueue(tr.topic, savedBuff)
+				}
+				
+				// 2. 如果存档成功，并且有后续批次，则继续存档
+				if ret == true && len(stagingBuff) > 0 {
+					continue
+				}
+				
+				// 3. 成功了，跳出
+				break
+			} else {
+				//计数增加一次，并且等待100ms，继续重试
+				retryCount++
 				time.Sleep(time.Millisecond * 100)
-				continue
 			}
-
-			tr.PushTopicDataToQueue(tr.topic, stagingBuff)
-			break
 		}
 	}
 

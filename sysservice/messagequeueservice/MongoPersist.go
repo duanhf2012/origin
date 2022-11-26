@@ -157,9 +157,9 @@ func (mp *MongoPersist) IsSameDay(timestamp1 int64,timestamp2 int64) bool{
 }
 
 // PersistTopicData 持久化数据
-func (mp *MongoPersist) PersistTopicData(topic string, topicData []TopicData, retryCount int) ([]TopicData, bool) {
+func (mp *MongoPersist) PersistTopicData(topic string, topicData []TopicData, retryCount int) ([]TopicData, []TopicData, bool) {
 	if len(topicData) == 0 {
-		return nil, true
+		return nil, nil,true
 	}
 
 	preDate := topicData[0].Seq >> 32
@@ -176,11 +176,11 @@ func (mp *MongoPersist) PersistTopicData(topic string, topicData []TopicData, re
 	ret := mp.persistTopicData(collectName, topicData[:findPos], retryCount)
 	//如果失败，下次重试
 	if ret == false {
-		return nil, false
+		return nil, nil, false
 	}
 
 	//如果成功
-	return topicData[findPos:len(topicData)], true
+	return topicData[findPos:len(topicData)], topicData[0:findPos], true
 }
 
 // FindTopicData 查找数据

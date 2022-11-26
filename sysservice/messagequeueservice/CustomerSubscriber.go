@@ -156,7 +156,7 @@ func (cs *CustomerSubscriber) SubscribeRun() {
 
 func (cs *CustomerSubscriber) subscribe() bool {
 	//先从内存中查找
-	topicData, ret := cs.subscriber.queue.FindData(cs.StartIndex, cs.oneBatchQuantity)
+	topicData, ret := cs.subscriber.queue.FindData(cs.StartIndex+1, cs.oneBatchQuantity)
 	if ret == true {
 		cs.publishToCustomer(topicData)
 		return true

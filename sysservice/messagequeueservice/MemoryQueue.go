@@ -49,13 +49,22 @@ func (mq *MemoryQueue) findData(startPos int32, startIndex uint64, limit int32) 
 	if findStartPos <= mq.tail {
 		findEndPos = mq.tail + 1
 	} else {
-		findEndPos = int32(cap(mq.topicQueue))
+		findEndPos = int32(len(mq.topicQueue))
+	}
+	
+	if findStartPos >= findEndPos {
+		return nil, false
+	}
+
+	// 要取的Seq 比内存中最小的数据的Seq还小，那么需要返回错误
+	if mq.topicQueue[findStartPos].Seq > startIndex {
+		return nil, false
 	}
 
 	//二分查找位置
 	pos := int32(algorithms.BiSearch(mq.topicQueue[findStartPos:findEndPos], startIndex, 1))
 	if pos == -1 {
-		return nil, true
+		return nil, false
 	}
 
 	pos += findStartPos
@@ -76,22 +85,17 @@ func (mq *MemoryQueue) FindData(startIndex uint64, limit int32) ([]TopicData, bo
 	//队列为空时，应该从数据库查找
 	if mq.head == mq.tail {
 		return nil, false
-	}
-
-	/*
-		//先判断startIndex是否比第一个元素要大
-		headTopic := (mq.head + 1) % int32(len(mq.topicQueue))
-		//此时需要从持久化数据中取
-		if  startIndex+1 > mq.topicQueue[headTopic].Seq {
-			return nil, false
+	} else if mq.head < mq.tail {
+		// 队列没有折叠
+		return mq.findData(mq.head + 1, startIndex, limit)
+	} else {
+		// 折叠先找后面的部分
+		datas,ret := mq.findData(mq.head+1, startIndex, limit)
+		if ret {
+			return datas, ret
 		}
-	*/
 
-	retData, ret := mq.findData(mq.head+1, startIndex, limit)
-	if mq.head <= mq.tail || ret == true {
-		return retData, true
+		// 后面没找到，从前面开始找
+		return mq.findData(0, startIndex, limit)
 	}
-
-	//如果是正常head在后，尾在前，从数组0下标开始找到tail
-	return mq.findData(0, startIndex, limit)
 }
