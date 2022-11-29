@@ -268,8 +268,27 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Clie
 	if processor == nil {
 		_, processor = GetProcessorType(args)
 	}
+
+	inParamValue := reflect.New(reflect.ValueOf(args).Type().Elem())
+	//args
+	//复制输入参数
+	iParam := inParamValue.Interface()
+	bytes,err := processor.Marshal(args)
+	if err == nil {
+		err = processor.Unmarshal(bytes,iParam)
+	}
+
+	if err != nil {
+		pCall.Seq = 0
+		pCall.Err = errors.New("RpcHandler " + handlerName + "."+serviceMethod+" deep copy inParam is error:" + err.Error())
+		pCall.done <- pCall
+		log.SError(pCall.Err.Error())
+
+		return pCall
+	}
+
 	req := MakeRpcRequest(processor, 0, rpcMethodId, serviceMethod, noReply, nil)
-	req.inParam = args
+	req.inParam = iParam
 	req.localReply = reply
 	if rawArgs != nil {
 		var err error
@@ -316,7 +335,7 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Clie
 		}
 	}
 
-	err := rpcHandler.PushRpcRequest(req)
+	err = rpcHandler.PushRpcRequest(req)
 	if err != nil {
 		ReleaseRpcRequest(req)
 		pCall.Err = err
