@@ -398,8 +398,7 @@ func (mp *MongoPersist) PersistIndex(topic string, customerId string, index uint
 
 	ctx, cancel := s.GetDefaultContext()
 	defer cancel()
-	ret, err := s.Collection(mp.dbName, CustomerCollectName).UpdateOne(ctx, condition, updata, UpdateOptionsOpts...)
-	fmt.Println(ret)
+	_, err := s.Collection(mp.dbName, CustomerCollectName).UpdateOne(ctx, condition, updata, UpdateOptionsOpts...)
 	if err != nil {
 		log.SError("PersistIndex fail :", err.Error())
 	}
