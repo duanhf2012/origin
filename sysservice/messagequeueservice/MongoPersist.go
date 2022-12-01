@@ -141,7 +141,7 @@ func (mp *MongoPersist) persistTopicData(collectionName string, topicData []Topi
 
 	_, err := s.Collection(mp.dbName, collectionName).InsertMany(ctx, documents)
 	if err != nil {
-		log.SError("PersistTopicData InsertMany fail,collect name is ", collectionName)
+		log.SError("PersistTopicData InsertMany fail,collect name is ", collectionName," error:",err.Error())
 
 		//失败最大重试数量
 		return retryCount >= mp.retryCount
