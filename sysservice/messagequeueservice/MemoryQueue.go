@@ -78,7 +78,7 @@ func (mq *MemoryQueue) findData(startPos int32, startIndex uint64, limit int32) 
 }
 
 // FindData 返回参数[]TopicData 表示查找到的数据，nil表示无数据。bool表示是否不应该在内存中来查
-func (mq *MemoryQueue) FindData(startIndex uint64, limit int32) ([]TopicData, bool) {
+func (mq *MemoryQueue) FindData(startIndex uint64, limit int32, dataQueue []TopicData) ([]TopicData, bool) {
 	mq.locker.RLock()
 	defer mq.locker.RUnlock()
 
@@ -87,15 +87,22 @@ func (mq *MemoryQueue) FindData(startIndex uint64, limit int32) ([]TopicData, bo
 		return nil, false
 	} else if mq.head < mq.tail {
 		// 队列没有折叠
-		return mq.findData(mq.head + 1, startIndex, limit)
+		datas,ret := mq.findData(mq.head + 1, startIndex, limit)
+		if ret {
+			dataQueue = append(dataQueue, datas...)
+		}
+		return dataQueue, ret
 	} else {
 		// 折叠先找后面的部分
 		datas,ret := mq.findData(mq.head+1, startIndex, limit)
 		if ret {
-			return datas, ret
+			dataQueue = append(dataQueue, datas...)
+			return dataQueue, ret
 		}
 
 		// 后面没找到，从前面开始找
-		return mq.findData(0, startIndex, limit)
+		datas,ret = mq.findData(0, startIndex, limit)
+		dataQueue = append(dataQueue, datas...)
+		return dataQueue, ret
 	}
 }

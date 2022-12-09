@@ -25,6 +25,7 @@ type CustomerSubscriber struct {
 	customerId        string
 
 	isStop int32 //退出标记
+	topicCache []TopicData // 从消息队列中取出来的消息的缓存
 }
 
 const DefaultOneBatchQuantity = 1000
@@ -79,6 +80,7 @@ func (cs *CustomerSubscriber) trySetSubscriberBaseInfo(rpcHandler rpc.IRpcHandle
 		cs.StartIndex = uint64(zeroTime.Unix() << 32)
 	}
 
+	cs.topicCache = make([]TopicData, oneBatchQuantity)
 	return nil
 }
 
@@ -156,7 +158,7 @@ func (cs *CustomerSubscriber) SubscribeRun() {
 
 func (cs *CustomerSubscriber) subscribe() bool {
 	//先从内存中查找
-	topicData, ret := cs.subscriber.queue.FindData(cs.StartIndex+1, cs.oneBatchQuantity)
+	topicData, ret := cs.subscriber.queue.FindData(cs.StartIndex+1, cs.oneBatchQuantity, cs.topicCache[:0])
 	if ret == true {
 		cs.publishToCustomer(topicData)
 		return true
