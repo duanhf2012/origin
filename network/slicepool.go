@@ -34,7 +34,6 @@ func (areaPool *memAreaPool) makePool() {
 	for i := 0; i < poolLen; i++ {
 		memSize := (areaPool.minAreaValue - 1) + (i+1)*areaPool.growthValue
 		areaPool.pool[i] = sync.Pool{New: func() interface{} {
-			//fmt.Println("make memsize:",memSize)
 			return make([]byte, memSize)
 		}}
 	}

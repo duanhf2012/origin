@@ -17,17 +17,11 @@ type IProcessor interface {
 }
 
 type IRawProcessor interface {
-	SetByteOrder(littleEndian bool)
-	MsgRoute(clientId uint64,msg interface{}) error
-	Unmarshal(clientId uint64,data []byte) (interface{}, error)
-	Marshal(clientId uint64,msg interface{}) ([]byte, error)
+	IProcessor
 
+	SetByteOrder(littleEndian bool)
 	SetRawMsgHandler(handle RawMessageHandler)
 	MakeRawMsg(msgType uint16,msg []byte,pbRawPackInfo *PBRawPackInfo)
-	UnknownMsgRoute(clientId uint64,msg interface{})
-	ConnectedRoute(clientId uint64)
-	DisConnectedRoute(clientId uint64)
-
 	SetUnknownMsgHandler(unknownMessageHandler UnknownRawMessageHandler)
 	SetConnectedHandler(connectHandler RawConnectHandler)
 	SetDisConnectedHandler(disconnectHandler RawConnectHandler)

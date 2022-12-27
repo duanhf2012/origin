@@ -9,12 +9,12 @@ import (
 
 const Default_ReadDeadline  = time.Second*30  //30s
 const Default_WriteDeadline = time.Second*30 //30s
-const Default_MaxConnNum = 3000
+const Default_MaxConnNum = 9000
 const Default_PendingWriteNum = 10000
 const Default_LittleEndian = false
 const Default_MinMsgLen = 2
 const Default_MaxMsgLen = 65535
-
+const Default_LenMsgLen = 2
 
 type TCPServer struct {
 	Addr            string
@@ -22,21 +22,16 @@ type TCPServer struct {
 	PendingWriteNum int
 	ReadDeadline    time.Duration
 	WriteDeadline 	time.Duration
+
 	NewAgent        func(*TCPConn) Agent
 	ln              net.Listener
 	conns           ConnSet
 	mutexConns      sync.Mutex
 	wgLn            sync.WaitGroup
 	wgConns         sync.WaitGroup
-
-
+	
 	// msg parser
-	LenMsgLen    int
-	MinMsgLen    uint32
-	MaxMsgLen    uint32
-	LittleEndian bool
-	msgParser    *MsgParser
-	netMemPool   INetMempool
+	MsgParser
 }
 
 func (server *TCPServer) Start() {
@@ -73,9 +68,14 @@ func (server *TCPServer) init() {
 		server.WriteDeadline = Default_WriteDeadline
 		log.SRelease("invalid WriteDeadline, reset to ", server.WriteDeadline.Seconds(),"s")
 	}
+
 	if server.ReadDeadline == 0 {
 		server.ReadDeadline = Default_ReadDeadline
 		log.SRelease("invalid ReadDeadline, reset to ", server.ReadDeadline.Seconds(),"s")
+	}
+
+	if server.LenMsgLen == 0 {
+		server.LenMsgLen = Default_LenMsgLen
 	}
 
 	if server.NewAgent == nil {
@@ -84,24 +84,17 @@ func (server *TCPServer) init() {
 
 	server.ln = ln
 	server.conns = make(ConnSet)
+	server.INetMempool = NewMemAreaPool()
 
-	// msg parser
-	msgParser := NewMsgParser()
-	if msgParser.INetMempool == nil {
-		msgParser.INetMempool = NewMemAreaPool()
-	}
-
-	msgParser.SetMsgLen(server.LenMsgLen, server.MinMsgLen, server.MaxMsgLen)
-	msgParser.SetByteOrder(server.LittleEndian)
-	server.msgParser = msgParser
+	server.MsgParser.init()
 }
 
 func (server *TCPServer) SetNetMempool(mempool INetMempool){
-	server.msgParser.INetMempool = mempool
+	server.INetMempool = mempool
 }
 
 func (server *TCPServer) GetNetMempool() INetMempool{
-	return server.msgParser.INetMempool
+	return server.INetMempool
 }
 
 func (server *TCPServer) run() {
@@ -127,6 +120,7 @@ func (server *TCPServer) run() {
 			}
 			return
 		}
+
 		conn.(*net.TCPConn).SetNoDelay(true)
 		tempDelay = 0
 
@@ -137,16 +131,16 @@ func (server *TCPServer) run() {
 			log.SWarning("too many connections")
 			continue
 		}
+
 		server.conns[conn] = struct{}{}
 		server.mutexConns.Unlock()
-
 		server.wgConns.Add(1)
 
-		tcpConn := newTCPConn(conn, server.PendingWriteNum, server.msgParser,server.WriteDeadline)
+		tcpConn := newTCPConn(conn, server.PendingWriteNum, &server.MsgParser,server.WriteDeadline)
 		agent := server.NewAgent(tcpConn)
+
 		go func() {
 			agent.Run()
-
 			// cleanup
 			tcpConn.Close()
 			server.mutexConns.Lock()

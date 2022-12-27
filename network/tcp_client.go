@@ -22,11 +22,7 @@ type TCPClient struct {
 	closeFlag       bool
 
 	// msg parser
-	LenMsgLen    int
-	MinMsgLen    uint32
-	MaxMsgLen    uint32
-	LittleEndian bool
-	msgParser    *MsgParser
+	MsgParser
 }
 
 func (client *TCPClient) Start() {
@@ -68,15 +64,21 @@ func (client *TCPClient) init() {
 	if client.cons != nil {
 		log.SFatal("client is running")
 	}
+	if client.LenMsgLen == 0 {
+		client.LenMsgLen = Default_LenMsgLen
+	}
+	if client.MinMsgLen == 0 {
+		client.MinMsgLen = Default_MinMsgLen
+	}
+	if client.MaxMsgLen == 0 {
+		client.MaxMsgLen = Default_MaxMsgLen
+	}
 
 	client.cons = make(ConnSet)
 	client.closeFlag = false
 
 	// msg parser
-	msgParser := NewMsgParser()
-	msgParser.SetMsgLen(client.LenMsgLen, client.MinMsgLen, client.MaxMsgLen)
-	msgParser.SetByteOrder(client.LittleEndian)
-	client.msgParser = msgParser
+	client.MsgParser.init()
 }
 
 func (client *TCPClient) GetCloseFlag() bool{
@@ -120,7 +122,7 @@ reconnect:
 	client.cons[conn] = struct{}{}
 	client.Unlock()
 
-	tcpConn := newTCPConn(conn, client.PendingWriteNum, client.msgParser,client.WriteDeadline)
+	tcpConn := newTCPConn(conn, client.PendingWriteNum, &client.MsgParser,client.WriteDeadline)
 	agent := client.NewAgent(tcpConn)
 	agent.Run()
 
