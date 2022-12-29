@@ -163,9 +163,9 @@ func (cs *CustomerSubscriber) subscribe() bool {
 		cs.publishToCustomer(topicData)
 		return true
 	}
-
+	
 	//从持久化数据中来找
-	topicData = cs.subscriber.dataPersist.FindTopicData(cs.topic, cs.StartIndex, int64(cs.oneBatchQuantity))
+	topicData = cs.subscriber.dataPersist.FindTopicData(cs.topic, cs.StartIndex, int64(cs.oneBatchQuantity),cs.topicCache[:0])
 	return cs.publishToCustomer(topicData)
 }
 
