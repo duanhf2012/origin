@@ -46,7 +46,7 @@ func (mp *MongoPersist) OnInit() error {
 	keys = append(keys, "Customer", "Topic")
 	IndexKey = append(IndexKey, keys)
 	s := mp.mongo.TakeSession()
-	if err := s.EnsureUniqueIndex(mp.dbName, CustomerCollectName, IndexKey, true, true); err != nil {
+	if err := s.EnsureUniqueIndex(mp.dbName, CustomerCollectName, IndexKey, true, true,true); err != nil {
 		log.SError("EnsureUniqueIndex is fail ", err.Error())
 		return err
 	}
