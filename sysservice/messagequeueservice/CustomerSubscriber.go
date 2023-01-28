@@ -190,7 +190,7 @@ func (cs *CustomerSubscriber) publishToCustomer(topicData []TopicData) bool {
 
 	if len(topicData) == 0 {
 		//没有任何数据待一秒吧
-		time.Sleep(time.Millisecond * 100)
+		time.Sleep(time.Second * 1)
 		return true
 	}
 
