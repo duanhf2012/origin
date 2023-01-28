@@ -1,5 +1,7 @@
 package service
 
+import "errors"
+
 //本地所有的service
 var mapServiceName map[string]IService
 var setupServiceList []IService
@@ -23,7 +25,8 @@ func Init(chanCloseSig chan bool) {
 	for _,s := range setupServiceList {
 		err := s.OnInit()
 		if err != nil {
-			panic(err)
+			errs := errors.New("Failed to initialize "+s.GetName()+" service:"+err.Error())
+			panic(errs)
 		}
 	}
 }
