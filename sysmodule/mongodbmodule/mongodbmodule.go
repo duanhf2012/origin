@@ -68,34 +68,39 @@ func (s *Session) NextSeq(db string, collection string, id interface{}) (int, er
 
 	after := options.After
 	updateOpts := options.FindOneAndUpdateOptions{ReturnDocument: &after}
-	err := s.Client.Database(db).Collection(collection).FindOneAndUpdate(ctxTimeout, bson.M{"_id": id}, bson.M{"$inc": bson.M{"Seq": 1}},&updateOpts).Decode(&res)
+	err := s.Client.Database(db).Collection(collection).FindOneAndUpdate(ctxTimeout, bson.M{"_id": id}, bson.M{"$inc": bson.M{"Seq": 1}}, &updateOpts).Decode(&res)
 	return res.Seq, err
 }
 
-//indexKeys[索引][每个索引key字段]
-func (s *Session) EnsureIndex(db string, collection string, indexKeys [][]string, bBackground bool,sparse bool) error {
-	return s.ensureIndex(db, collection, indexKeys, bBackground, false,sparse)
+// indexKeys[索引][每个索引key字段]
+func (s *Session) EnsureIndex(db string, collection string, indexKeys [][]string, bBackground bool, sparse bool, asc bool) error {
+	return s.ensureIndex(db, collection, indexKeys, bBackground, false, sparse, asc)
 }
 
-//indexKeys[索引][每个索引key字段]
-func (s *Session) EnsureUniqueIndex(db string, collection string, indexKeys [][]string, bBackground bool,sparse bool) error {
-	return s.ensureIndex(db, collection, indexKeys, bBackground, true,sparse)
+// indexKeys[索引][每个索引key字段]
+func (s *Session) EnsureUniqueIndex(db string, collection string, indexKeys [][]string, bBackground bool, sparse bool, asc bool) error {
+	return s.ensureIndex(db, collection, indexKeys, bBackground, true, sparse, asc)
 }
 
-//keys[索引][每个索引key字段]
-func (s *Session) ensureIndex(db string, collection string, indexKeys [][]string, bBackground bool, unique bool,sparse bool) error {
+// keys[索引][每个索引key字段]
+func (s *Session) ensureIndex(db string, collection string, indexKeys [][]string, bBackground bool, unique bool, sparse bool, asc bool) error {
 	var indexes []mongo.IndexModel
 	for _, keys := range indexKeys {
 		keysDoc := bsonx.Doc{}
 		for _, key := range keys {
-			keysDoc = keysDoc.Append(key, bsonx.Int32(1))
+			if asc {
+				keysDoc = keysDoc.Append(key, bsonx.Int32(1))
+			} else {
+				keysDoc = keysDoc.Append(key, bsonx.Int32(-1))
+			}
+
 		}
 
-		options:= options.Index().SetUnique(unique).SetBackground(bBackground)
+		options := options.Index().SetUnique(unique).SetBackground(bBackground)
 		if sparse == true {
 			options.SetSparse(true)
 		}
-		indexes = append(indexes, mongo.IndexModel{Keys:    keysDoc,	Options:options	})
+		indexes = append(indexes, mongo.IndexModel{Keys: keysDoc, Options: options})
 	}
 
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), s.maxOperatorTimeOut)

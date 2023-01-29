@@ -20,8 +20,6 @@ type MongoPersist struct {
 	url        string //连接url
 	dbName     string //数据库名称
 	retryCount int    //落地数据库重试次数
-
-	topic []TopicData //用于临时缓存
 }
 
 const CustomerCollectName = "SysCustomer"
@@ -48,7 +46,7 @@ func (mp *MongoPersist) OnInit() error {
 	keys = append(keys, "Customer", "Topic")
 	IndexKey = append(IndexKey, keys)
 	s := mp.mongo.TakeSession()
-	if err := s.EnsureUniqueIndex(mp.dbName, CustomerCollectName, IndexKey, true, true); err != nil {
+	if err := s.EnsureUniqueIndex(mp.dbName, CustomerCollectName, IndexKey, true, true,true); err != nil {
 		log.SError("EnsureUniqueIndex is fail ", err.Error())
 		return err
 	}
@@ -83,14 +81,6 @@ func (mp *MongoPersist) ReadCfg() error {
 	mp.retryCount = int(goroutineNum.(float64))
 
 	return nil
-}
-
-func (mp *MongoPersist) getTopicBuff(limit int) []TopicData {
-	if cap(mp.topic) < limit {
-		mp.topic = make([]TopicData, limit)
-	}
-
-	return mp.topic[:0]
 }
 
 func (mp *MongoPersist) OnExit() {
@@ -184,7 +174,7 @@ func (mp *MongoPersist) PersistTopicData(topic string, topicData []TopicData, re
 }
 
 // FindTopicData 查找数据
-func (mp *MongoPersist) findTopicData(topic string, startIndex uint64, limit int64) ([]TopicData, bool) {
+func (mp *MongoPersist) findTopicData(topic string, startIndex uint64, limit int64,topicBuff []TopicData) ([]TopicData, bool) {
 	s := mp.mongo.TakeSession()
 
 
@@ -226,7 +216,6 @@ func (mp *MongoPersist) findTopicData(topic string, startIndex uint64, limit int
 	}
 
 	//序列化返回
-	topicBuff := mp.getTopicBuff(int(limit))
 	for i := 0; i < len(res); i++ {
 		rawData, errM := bson.Marshal(res[i])
 		if errM != nil {
@@ -261,7 +250,7 @@ func (mp *MongoPersist) getCollectCount(topic string,today string) (int64 ,error
 }
 
 // FindTopicData 查找数据
-func (mp *MongoPersist) FindTopicData(topic string, startIndex uint64, limit int64) []TopicData {
+func (mp *MongoPersist) FindTopicData(topic string, startIndex uint64, limit int64,topicBuff []TopicData) []TopicData {
 	//某表找不到，一直往前找，找到当前置为止
 	for days := 1; days <= MaxDays; days++ {
 		//是否可以跳天
@@ -285,7 +274,7 @@ func (mp *MongoPersist) FindTopicData(topic string, startIndex uint64, limit int
 		}
 
 		//从startIndex开始一直往后查
-		topicData, isSucc := mp.findTopicData(topic, startIndex, limit)
+		topicData, isSucc := mp.findTopicData(topic, startIndex, limit,topicBuff)
 		//有数据或者数据库出错时返回，返回后，会进行下一轮的查询遍历
 		if len(topicData) > 0 || isSucc == false {
 			return topicData
