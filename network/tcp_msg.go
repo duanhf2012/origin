@@ -40,6 +40,8 @@ func (p *MsgParser) init(){
 	if p.MaxMsgLen > max {
 		p.MaxMsgLen = max
 	}
+
+	p.INetMempool = NewMemAreaPool()
 }
 
 

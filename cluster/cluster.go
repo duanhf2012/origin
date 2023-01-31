@@ -110,15 +110,13 @@ func (cls *Cluster) DelNode(nodeId int, immediately bool) {
 			break
 		}
 
-		rpc.client.Lock()
 		//正在连接中不主动断开，只断开没有连接中的
 		if rpc.client.IsConnected() {
 			nodeInfo.status = Discard
-			rpc.client.Unlock()
 			log.SRelease("Discard node ", nodeInfo.NodeId, " ", nodeInfo.ListenAddr)
 			return
 		}
-		rpc.client.Unlock()
+
 		break
 	}
 
@@ -194,20 +192,17 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo(nodeInfo *NodeInfo) {
 	if _, rpcInfoOK := cls.mapRpc[nodeInfo.NodeId]; rpcInfoOK == true {
 		return
 	}
+
 	rpcInfo := NodeRpcInfo{}
 	rpcInfo.nodeInfo = *nodeInfo
-	rpcInfo.client = &rpc.Client{}
-	rpcInfo.client.TriggerRpcEvent = cls.triggerRpcEvent
-	rpcInfo.client.Connect(nodeInfo.NodeId, nodeInfo.ListenAddr, nodeInfo.MaxRpcParamLen)
+	rpcInfo.client =rpc.NewRClient(nodeInfo.NodeId, nodeInfo.ListenAddr, nodeInfo.MaxRpcParamLen,cls.triggerRpcEvent)
 	cls.mapRpc[nodeInfo.NodeId] = rpcInfo
-
 }
 
 func (cls *Cluster) buildLocalRpc() {
 	rpcInfo := NodeRpcInfo{}
 	rpcInfo.nodeInfo = cls.localNodeInfo
-	rpcInfo.client = &rpc.Client{}
-	rpcInfo.client.Connect(rpcInfo.nodeInfo.NodeId, "", 0)
+	rpcInfo.client = rpc.NewLClient(rpcInfo.nodeInfo.NodeId)
 
 	cls.mapRpc[cls.localNodeInfo.NodeId] = rpcInfo
 }
@@ -358,10 +353,10 @@ func (cls *Cluster) IsNodeConnected(nodeId int) bool {
 	return pClient != nil && pClient.IsConnected()
 }
 
-func (cls *Cluster) triggerRpcEvent(bConnect bool, clientSeq uint32, nodeId int) {
+func (cls *Cluster) triggerRpcEvent(bConnect bool, clientId uint32, nodeId int) {
 	cls.locker.Lock()
 	nodeInfo, ok := cls.mapRpc[nodeId]
-	if ok == false || nodeInfo.client == nil || nodeInfo.client.GetClientSeq() != clientSeq {
+	if ok == false || nodeInfo.client == nil || nodeInfo.client.GetClientId() != clientId {
 		cls.locker.Unlock()
 		return
 	}
@@ -382,7 +377,6 @@ func (cls *Cluster) triggerRpcEvent(bConnect bool, clientSeq uint32, nodeId int)
 		ser.(service.IModule).NotifyEvent(&eventData)
 	}
 }
-
 
 func (cls *Cluster) TriggerDiscoveryEvent(bDiscovery bool, nodeId int, serviceName []string) {
 	cls.rpcEventLocker.Lock()

@@ -273,6 +273,11 @@ func (m *Module) SafeNewTicker(tickerId *uint64, d time.Duration, AdditionData i
 }
 
 func (m *Module) CancelTimerId(timerId *uint64) bool {
+	if timerId==nil || *timerId == 0 {
+		log.SWarning("timerId is invalid")
+		return false
+	}
+
 	if m.mapActiveIdTimer == nil {
 		log.SError("mapActiveIdTimer is nil")
 		return false
@@ -280,7 +285,7 @@ func (m *Module) CancelTimerId(timerId *uint64) bool {
 
 	t, ok := m.mapActiveIdTimer[*timerId]
 	if ok == false {
-		log.SError("cannot find timer id ", timerId)
+		log.SStack("cannot find timer id ", timerId)
 		return false
 	}
 

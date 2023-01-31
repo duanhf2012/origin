@@ -3,6 +3,7 @@ package rpc
 import (
 	"github.com/duanhf2012/origin/util/sync"
 	"github.com/gogo/protobuf/proto"
+	"fmt"
 )
 
 type GoGoPBProcessor struct {
@@ -73,6 +74,15 @@ func (slf *GoGoPBProcessor)	GetProcessorType() RpcProcessorType{
 	return RpcProcessorGoGoPB
 }
 
+func (slf *GoGoPBProcessor) Clone(src interface{}) (interface{},error){
+	srcMsg,ok := src.(proto.Message)
+	if ok == false {
+		return nil,fmt.Errorf("param is not of proto.message type")
+	}
+
+	return proto.Clone(srcMsg),nil
+}
+
 func (slf *GoGoPBRpcRequestData) IsNoReply() bool{
 	return slf.GetNoReply()
 }
@@ -85,8 +95,6 @@ func (slf *GoGoPBRpcResponseData)		GetErr() *RpcError {
 	err := RpcError(slf.GetError())
 	return &err
 }
-
-
 
 
 

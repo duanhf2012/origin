@@ -3,6 +3,7 @@ package rpc
 import (
 	"github.com/duanhf2012/origin/util/sync"
 	jsoniter "github.com/json-iterator/go"
+	"reflect"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -118,6 +119,22 @@ func (jsonRpcResponseData *JsonRpcResponseData)		GetReply() []byte{
 	return jsonRpcResponseData.Reply
 }
 
+
+func (jsonProcessor *JsonProcessor) Clone(src interface{}) (interface{},error){
+	dstValue := reflect.New(reflect.ValueOf(src).Type().Elem())
+	bytes,err := json.Marshal(src)
+	if err != nil {
+		return nil,err
+	}
+	
+	dst := dstValue.Interface()
+	err = json.Unmarshal(bytes,dst)
+	if err != nil {
+		return nil,err
+	}
+
+	return dst,nil
+}
 
 
 

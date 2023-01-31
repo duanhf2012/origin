@@ -19,7 +19,6 @@ const (
 	RpcProcessorGoGoPB RpcProcessorType = 1
 )
 
-//var processor IRpcProcessor = &JsonProcessor{}
 var arrayProcessor = []IRpcProcessor{&JsonProcessor{}, &GoGoPBProcessor{}}
 var arrayProcessorLen uint8 = 2
 var LittleEndian bool
@@ -245,11 +244,11 @@ func (server *Server) myselfRpcHandlerGo(client *Client,handlerName string, serv
 		log.SError(err.Error())
 		return err
 	}
-
-
-
+	
 	return rpcHandler.CallMethod(client,serviceMethod, args,callBack, reply)
 }
+
+
 
 func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Client, noReply bool, handlerName string, rpcMethodId uint32, serviceMethod string, args interface{}, reply interface{}, rawArgs []byte) *Call {
 	pCall := MakeCall()
@@ -266,22 +265,13 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Clie
 	}
 
 	var iParam interface{}
-
-
 	if processor == nil {
 		_, processor = GetProcessorType(args)
 	}
 
 	if args != nil {
-		inParamValue := reflect.New(reflect.ValueOf(args).Type().Elem())
-		//args
-		//复制输入参数
-		iParam = inParamValue.Interface()
-		bytes,err := processor.Marshal(args)
-		if err == nil {
-			err = processor.Unmarshal(bytes,iParam)
-		}
-
+		var err error
+		iParam,err = processor.Clone(args)
 		if err != nil {
 			pCall.Seq = 0
 			pCall.Err = errors.New("RpcHandler " + handlerName + "."+serviceMethod+" deep copy inParam is error:" + err.Error())
@@ -359,15 +349,7 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client, callerRpcHandler
 	}
 
 	_, processor := GetProcessorType(args)
-	inParamValue := reflect.New(reflect.ValueOf(args).Type().Elem())
-	//args
-	//复制输入参数
-	iParam := inParamValue.Interface()
-	bytes,err := processor.Marshal(args)
-	if err == nil {
-		err = processor.Unmarshal(bytes,iParam)
-	}
-
+	iParam,err := processor.Clone(args)
 	if err != nil {
 		errM := errors.New("RpcHandler " + handlerName + "."+serviceMethod+" deep copy inParam is error:" + err.Error())
 		log.SError(errM.Error())
