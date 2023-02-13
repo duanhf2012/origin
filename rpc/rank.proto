@@ -2,19 +2,48 @@ syntax = "proto3";
 package rpc;
 option go_package = ".;rpc";
 
-// RankData 排行数据
-message RankData {
-    uint64 Key                  = 1; //数据主建
-    repeated int64 SortData     = 2; //参与排行的数据
-    bytes Data                  = 3; //不参与排行的数据
+message SetSortAndExtendData{
+    bool IsSortData  = 1; //是否为排序字段,为true时，修改Sort字段，否则修改Extend数据
+    int32 Pos        = 2;   //排序位置
+    int64 Data       = 3;  //排序值
+}
+
+//自增值
+message IncreaseRankData {
+    uint64      RankId                      = 1; //排行榜的ID
+    uint64      Key                         = 2; //数据主建
+    repeated    ExtendIncData Extend        = 3;  //扩展数据
+    repeated    int64   IncreaseSortData    = 4;//自增排行数值
+    repeated    SetSortAndExtendData SetSortAndExtendData     = 5;//设置排序数据值
+    bool        ReturnRankData              = 6; //是否查找最新排名，否则不返回排行Rank字段
+
+    bool        InsertDataOnNonExistent    = 7;   //为true时:存在不进行更新，不存在则插入InitData与InitSortData数据。为false时：忽略不对InitData与InitSortData数据
+    bytes       InitData                   = 8;   //不参与排行的数据
+    repeated int64 InitSortData            = 9;   //参与排行的数据
+}
+
+message IncreaseRankDataRet{
+    RankPosData PosData         = 1;
+}
+
+//用于单独刷新排行榜数据
+message UpdateRankData {
+    uint64      RankId                      = 1; //排行榜的ID
+    uint64      Key                         = 2; //数据主建
+    bytes       Data                        = 3; //数据部分
+}
+
+message UpdateRankDataRet {
+    bool Ret = 1;
 }
 
 // RankPosData 排行数据——查询返回
 message RankPosData {
     uint64 Key                  = 1; //数据主建
-    uint64 Rank              = 2; //名次
+    uint64 Rank                 = 2; //名次
     repeated int64 SortData     = 3; //参与排行的数据
     bytes Data                  = 4; //不参与排行的数据
+    repeated int64 ExtendData   = 5; //扩展数据
 }
 
 // RankList 排行榜数据
@@ -31,6 +60,22 @@ message RankList {
 message UpsetRankData {
     uint64      RankId                 = 1; //排行榜的ID
     repeated    RankData RankDataList  = 2; //排行数据
+    bool        FindNewRank            = 3; //是否查找最新排名
+}
+
+message ExtendIncData {
+    int64 InitValue       = 1;
+    int64 IncreaseValue   = 2;
+}
+
+// RankData 排行数据
+message RankData {
+    uint64 Key                  = 1; //数据主建
+    repeated int64 SortData     = 2; //参与排行的数据
+
+    bytes Data                  = 3; //不参与排行的数据
+
+    repeated    ExtendIncData ExData  = 4;  //扩展增量数据
 }
 
 // DeleteByKey 删除排行榜数据
@@ -71,9 +116,15 @@ message RankDataList {
 	RankPosData KeyRank                   = 3; //附带的Key查询排行结果信息
 }
 
+message RankInfo{
+  uint64 Key = 1;
+  uint64 Rank = 2;
+}
+
 // RankResult
 message RankResult {
     int32 AddCount = 1;//新增数量
     int32 ModifyCount = 2; //修改数量
     int32 RemoveCount = 3;//删除数量
+    repeated RankInfo NewRank    = 4; //新的排名名次，只有UpsetRankData.FindNewRank为true时才生效
 }

@@ -2,13 +2,15 @@ package rankservice
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/service"
-	"time"
 )
 
 const PreMapRankSkipLen = 10
+
 type RankService struct {
 	service.Service
 
@@ -61,11 +63,11 @@ func (rs *RankService) RPC_ManualAddRankSkip(addInfo *rpc.AddRankList, addResult
 			continue
 		}
 
-		newSkip := NewRankSkip(addRankListData.RankId,addRankListData.RankName,addRankListData.IsDec, transformLevel(addRankListData.SkipListLevel), addRankListData.MaxRank,time.Duration(addRankListData.ExpireMs)*time.Millisecond)
+		newSkip := NewRankSkip(addRankListData.RankId, addRankListData.RankName, addRankListData.IsDec, transformLevel(addRankListData.SkipListLevel), addRankListData.MaxRank, time.Duration(addRankListData.ExpireMs)*time.Millisecond)
 		newSkip.SetupRankModule(rs.rankModule)
 
 		rs.mapRankSkip[addRankListData.RankId] = newSkip
-		rs.rankModule.OnSetupRank(true,newSkip)
+		rs.rankModule.OnSetupRank(true, newSkip)
 	}
 
 	addResult.AddCount = 1
@@ -82,6 +84,52 @@ func (rs *RankService) RPC_UpsetRank(upsetInfo *rpc.UpsetRankData, upsetResult *
 	addCount, updateCount := rankSkip.UpsetRankList(upsetInfo.RankDataList)
 	upsetResult.AddCount = addCount
 	upsetResult.ModifyCount = updateCount
+
+	if upsetInfo.FindNewRank == true {
+		for _, rdata := range upsetInfo.RankDataList {
+			_, rank := rankSkip.GetRankNodeData(rdata.Key)
+			upsetResult.NewRank = append(upsetResult.NewRank, &rpc.RankInfo{Key: rdata.Key, Rank: rank})
+		}
+	}
+
+	return nil
+}
+
+// RPC_IncreaseRankData 增量更新排行扩展数据
+func (rs *RankService) RPC_IncreaseRankData(changeRankData *rpc.IncreaseRankData, changeRankDataRet *rpc.IncreaseRankDataRet) error {
+	rankSkip, ok := rs.mapRankSkip[changeRankData.RankId]
+	if ok == false || rankSkip == nil {
+		return fmt.Errorf("RPC_ChangeRankData[", changeRankData.RankId, "] no this rank id")
+	}
+
+	ret := rankSkip.ChangeExtendData(changeRankData)
+	if ret == false {
+		return fmt.Errorf("RPC_ChangeRankData[", changeRankData.RankId, "] no this key ", changeRankData.Key)
+	}
+
+	if changeRankData.ReturnRankData == true {
+		rankData, rank := rankSkip.GetRankNodeData(changeRankData.Key)
+		changeRankDataRet.PosData = &rpc.RankPosData{}
+		changeRankDataRet.PosData.Rank = rank
+
+		changeRankDataRet.PosData.Key = rankData.Key
+		changeRankDataRet.PosData.Data = rankData.Data
+		changeRankDataRet.PosData.SortData = rankData.SortData
+		changeRankDataRet.PosData.ExtendData = rankData.ExData
+	}
+
+	return nil
+}
+
+// RPC_UpsetRank 更新排行榜
+func (rs *RankService) RPC_UpdateRankData(updateRankData *rpc.UpdateRankData, updateRankDataRet *rpc.UpdateRankDataRet) error {
+	rankSkip, ok := rs.mapRankSkip[updateRankData.RankId]
+	if ok == false || rankSkip == nil {
+		updateRankDataRet.Ret = false
+		return nil
+	}
+
+	updateRankDataRet.Ret = rankSkip.UpdateRankData(updateRankData)
 	return nil
 }
 
@@ -114,6 +162,7 @@ func (rs *RankService) RPC_FindRankDataByKey(findInfo *rpc.FindRankDataByKey, fi
 		findResult.Key = findRankData.Key
 		findResult.SortData = findRankData.SortData
 		findResult.Rank = rank
+		findResult.ExtendData = findRankData.ExData
 	}
 	return nil
 }
@@ -131,6 +180,7 @@ func (rs *RankService) RPC_FindRankDataByRank(findInfo *rpc.FindRankDataByRank, 
 		findResult.Key = findRankData.Key
 		findResult.SortData = findRankData.SortData
 		findResult.Rank = rankPos
+		findResult.ExtendData = findRankData.ExData
 	}
 	return nil
 }
@@ -139,7 +189,7 @@ func (rs *RankService) RPC_FindRankDataByRank(findInfo *rpc.FindRankDataByRank, 
 func (rs *RankService) RPC_FindRankDataList(findInfo *rpc.FindRankDataList, findResult *rpc.RankDataList) error {
 	rankObj, ok := rs.mapRankSkip[findInfo.RankId]
 	if ok == false || rankObj == nil {
-		err := fmt.Errorf("not config rank %d",findInfo.RankId)
+		err := fmt.Errorf("not config rank %d", findInfo.RankId)
 		log.SError(err.Error())
 		return err
 	}
@@ -151,7 +201,7 @@ func (rs *RankService) RPC_FindRankDataList(findInfo *rpc.FindRankDataList, find
 	}
 
 	//查询附带的key
-	if findInfo.Key!= 0 {
+	if findInfo.Key != 0 {
 		findRankData, rank := rankObj.GetRankNodeData(findInfo.Key)
 		if findRankData != nil {
 			findResult.KeyRank = &rpc.RankPosData{}
@@ -159,6 +209,7 @@ func (rs *RankService) RPC_FindRankDataList(findInfo *rpc.FindRankDataList, find
 			findResult.KeyRank.Key = findRankData.Key
 			findResult.KeyRank.SortData = findRankData.SortData
 			findResult.KeyRank.Rank = rank
+			findResult.KeyRank.ExtendData = findRankData.ExData
 		}
 	}
 
@@ -193,12 +244,12 @@ func (rs *RankService) dealCfg() error {
 		}
 
 		rankId, okId := mapCfg["RankID"].(float64)
-		if okId == false || uint64(rankId)==0 {
+		if okId == false || uint64(rankId) == 0 {
 			return fmt.Errorf("RankService SortCfg data must has RankID[number]")
 		}
 
 		rankName, okId := mapCfg["RankName"].(string)
-		if okId == false || len(rankName)==0 {
+		if okId == false || len(rankName) == 0 {
 			return fmt.Errorf("RankService SortCfg data must has RankName[string]")
 		}
 
@@ -207,11 +258,10 @@ func (rs *RankService) dealCfg() error {
 		maxRank, _ := mapCfg["MaxRank"].(float64)
 		expireMs, _ := mapCfg["ExpireMs"].(float64)
 
-
-		newSkip := NewRankSkip(uint64(rankId),rankName,isDec, transformLevel(int32(level)), uint64(maxRank),time.Duration(expireMs)*time.Millisecond)
+		newSkip := NewRankSkip(uint64(rankId), rankName, isDec, transformLevel(int32(level)), uint64(maxRank), time.Duration(expireMs)*time.Millisecond)
 		newSkip.SetupRankModule(rs.rankModule)
 		rs.mapRankSkip[uint64(rankId)] = newSkip
-		err := rs.rankModule.OnSetupRank(false,newSkip)
+		err := rs.rankModule.OnSetupRank(false, newSkip)
 		if err != nil {
 			return err
 		}
@@ -219,5 +269,3 @@ func (rs *RankService) dealCfg() error {
 
 	return nil
 }
-
-

@@ -14,7 +14,11 @@ var RankDataPool = sync.NewPoolEx(make(chan sync.IPoolData, 10240), func() sync.
 })
 
 type RankData struct {
-	*rpc.RankData
+	Key                  uint64
+	SortData             []int64
+	Data                 []byte
+	ExData               []int64
+
 	refreshTimestamp int64 //刷新时间
 	//bRelease bool
 	ref         bool
@@ -27,7 +31,14 @@ func NewRankData(isDec bool, data *rpc.RankData,refreshTimestamp int64) *RankDat
 	if isDec {
 		ret.compareFunc = ret.desCompare
 	}
-	ret.RankData = data
+	ret.Key = data.Key
+	ret.SortData = data.SortData
+	ret.Data = data.Data
+
+	for _,d := range data.ExData{
+		ret.ExData = append(ret.ExData,d.InitValue+d.IncreaseValue)
+	}
+
 	ret.refreshTimestamp = refreshTimestamp
 
 	return ret

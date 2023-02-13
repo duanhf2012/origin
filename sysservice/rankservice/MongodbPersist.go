@@ -18,10 +18,11 @@ const batchRemoveNum  = 128  //一切删除的最大数量
 
 // RankDataDB 排行表数据
 type RankDataDB struct {
-	Id                 uint64                      `bson:"_id,omitempty"`
-	RefreshTime        int64                       `bson:"RefreshTime,omitempty"`
-	SortData             []int64  				   `bson:"SortData,omitempty"`
-	Data                 []byte   				   `bson:"Data,omitempty"`
+	Id                 uint64                      `bson:"_id"`
+	RefreshTime        int64                       `bson:"RefreshTime"`
+	SortData             []int64  				   `bson:"SortData"`
+	Data                 []byte   				   `bson:"Data"`
+	ExData               []int64                    `bson:"ExData"`
 }
 
 // MongoPersist持久化Module
@@ -186,6 +187,9 @@ func (mp *MongoPersist) loadFromDB(rankId uint64,rankCollectName string) error{
 		rankData.Data = rankDataDB.Data
 		rankData.Key = rankDataDB.Id
 		rankData.SortData = rankDataDB.SortData
+		for _,eData := range rankDataDB.ExData{
+			rankData.ExData = append(rankData.ExData,&rpc.ExtendIncData{InitValue:eData})
+		}
 
 		//更新到排行榜
 		rankSkip.UpsetRank(&rankData,rankDataDB.RefreshTime,true)
@@ -343,7 +347,7 @@ func (mp *MongoPersist) removeRankData(rankId uint64,keys []uint64) bool {
 
 func (mp *MongoPersist) upsertToDB(collectName string,rankData *RankData) error{
 	condition := bson.D{{"_id", rankData.Key}}
-	upsert := bson.M{"_id":rankData.Key,"RefreshTime": rankData.refreshTimestamp, "SortData": rankData.SortData, "Data": rankData.Data}
+	upsert := bson.M{"_id":rankData.Key,"RefreshTime": rankData.refreshTimestamp, "SortData": rankData.SortData, "Data": rankData.Data,"ExData":rankData.ExData}
 	update := bson.M{"$set": upsert}
 
 	s := mp.mongo.TakeSession()

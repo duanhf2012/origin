@@ -22,28 +22,27 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
-// RankData 排行数据
-type RankData struct {
-	Key                  uint64   `protobuf:"varint,1,opt,name=Key,proto3" json:"Key,omitempty"`
-	SortData             []int64  `protobuf:"varint,2,rep,packed,name=SortData,proto3" json:"SortData,omitempty"`
-	Data                 []byte   `protobuf:"bytes,3,opt,name=Data,proto3" json:"Data,omitempty"`
+type SetSortAndExtendData struct {
+	IsSortData           bool     `protobuf:"varint,1,opt,name=IsSortData,proto3" json:"IsSortData,omitempty"`
+	Pos                  int32    `protobuf:"varint,2,opt,name=Pos,proto3" json:"Pos,omitempty"`
+	Data                 int64    `protobuf:"varint,3,opt,name=Data,proto3" json:"Data,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *RankData) Reset()         { *m = RankData{} }
-func (m *RankData) String() string { return proto.CompactTextString(m) }
-func (*RankData) ProtoMessage()    {}
-func (*RankData) Descriptor() ([]byte, []int) {
+func (m *SetSortAndExtendData) Reset()         { *m = SetSortAndExtendData{} }
+func (m *SetSortAndExtendData) String() string { return proto.CompactTextString(m) }
+func (*SetSortAndExtendData) ProtoMessage()    {}
+func (*SetSortAndExtendData) Descriptor() ([]byte, []int) {
 	return fileDescriptor_d5b64eda47521620, []int{0}
 }
-func (m *RankData) XXX_Unmarshal(b []byte) error {
+func (m *SetSortAndExtendData) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
 }
-func (m *RankData) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+func (m *SetSortAndExtendData) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	if deterministic {
-		return xxx_messageInfo_RankData.Marshal(b, m, deterministic)
+		return xxx_messageInfo_SetSortAndExtendData.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
 		n, err := m.MarshalToSizedBuffer(b)
@@ -53,37 +52,307 @@ func (m *RankData) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 		return b[:n], nil
 	}
 }
-func (m *RankData) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_RankData.Merge(m, src)
+func (m *SetSortAndExtendData) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_SetSortAndExtendData.Merge(m, src)
 }
-func (m *RankData) XXX_Size() int {
+func (m *SetSortAndExtendData) XXX_Size() int {
 	return m.Size()
 }
-func (m *RankData) XXX_DiscardUnknown() {
-	xxx_messageInfo_RankData.DiscardUnknown(m)
+func (m *SetSortAndExtendData) XXX_DiscardUnknown() {
+	xxx_messageInfo_SetSortAndExtendData.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_RankData proto.InternalMessageInfo
+var xxx_messageInfo_SetSortAndExtendData proto.InternalMessageInfo
 
-func (m *RankData) GetKey() uint64 {
+func (m *SetSortAndExtendData) GetIsSortData() bool {
+	if m != nil {
+		return m.IsSortData
+	}
+	return false
+}
+
+func (m *SetSortAndExtendData) GetPos() int32 {
+	if m != nil {
+		return m.Pos
+	}
+	return 0
+}
+
+func (m *SetSortAndExtendData) GetData() int64 {
+	if m != nil {
+		return m.Data
+	}
+	return 0
+}
+
+//自增值
+type IncreaseRankData struct {
+	RankId                  uint64                  `protobuf:"varint,1,opt,name=RankId,proto3" json:"RankId,omitempty"`
+	Key                     uint64                  `protobuf:"varint,2,opt,name=Key,proto3" json:"Key,omitempty"`
+	Extend                  []*ExtendIncData        `protobuf:"bytes,3,rep,name=Extend,proto3" json:"Extend,omitempty"`
+	IncreaseSortData        []int64                 `protobuf:"varint,4,rep,packed,name=IncreaseSortData,proto3" json:"IncreaseSortData,omitempty"`
+	SetSortAndExtendData    []*SetSortAndExtendData `protobuf:"bytes,5,rep,name=SetSortAndExtendData,proto3" json:"SetSortAndExtendData,omitempty"`
+	ReturnRankData          bool                    `protobuf:"varint,6,opt,name=ReturnRankData,proto3" json:"ReturnRankData,omitempty"`
+	InsertDataOnNonExistent bool                    `protobuf:"varint,7,opt,name=InsertDataOnNonExistent,proto3" json:"InsertDataOnNonExistent,omitempty"`
+	InitData                []byte                  `protobuf:"bytes,8,opt,name=InitData,proto3" json:"InitData,omitempty"`
+	InitSortData            []int64                 `protobuf:"varint,9,rep,packed,name=InitSortData,proto3" json:"InitSortData,omitempty"`
+	XXX_NoUnkeyedLiteral    struct{}                `json:"-"`
+	XXX_unrecognized        []byte                  `json:"-"`
+	XXX_sizecache           int32                   `json:"-"`
+}
+
+func (m *IncreaseRankData) Reset()         { *m = IncreaseRankData{} }
+func (m *IncreaseRankData) String() string { return proto.CompactTextString(m) }
+func (*IncreaseRankData) ProtoMessage()    {}
+func (*IncreaseRankData) Descriptor() ([]byte, []int) {
+	return fileDescriptor_d5b64eda47521620, []int{1}
+}
+func (m *IncreaseRankData) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *IncreaseRankData) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_IncreaseRankData.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *IncreaseRankData) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_IncreaseRankData.Merge(m, src)
+}
+func (m *IncreaseRankData) XXX_Size() int {
+	return m.Size()
+}
+func (m *IncreaseRankData) XXX_DiscardUnknown() {
+	xxx_messageInfo_IncreaseRankData.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_IncreaseRankData proto.InternalMessageInfo
+
+func (m *IncreaseRankData) GetRankId() uint64 {
+	if m != nil {
+		return m.RankId
+	}
+	return 0
+}
+
+func (m *IncreaseRankData) GetKey() uint64 {
 	if m != nil {
 		return m.Key
 	}
 	return 0
 }
 
-func (m *RankData) GetSortData() []int64 {
+func (m *IncreaseRankData) GetExtend() []*ExtendIncData {
 	if m != nil {
-		return m.SortData
+		return m.Extend
 	}
 	return nil
 }
 
-func (m *RankData) GetData() []byte {
+func (m *IncreaseRankData) GetIncreaseSortData() []int64 {
+	if m != nil {
+		return m.IncreaseSortData
+	}
+	return nil
+}
+
+func (m *IncreaseRankData) GetSetSortAndExtendData() []*SetSortAndExtendData {
+	if m != nil {
+		return m.SetSortAndExtendData
+	}
+	return nil
+}
+
+func (m *IncreaseRankData) GetReturnRankData() bool {
+	if m != nil {
+		return m.ReturnRankData
+	}
+	return false
+}
+
+func (m *IncreaseRankData) GetInsertDataOnNonExistent() bool {
+	if m != nil {
+		return m.InsertDataOnNonExistent
+	}
+	return false
+}
+
+func (m *IncreaseRankData) GetInitData() []byte {
+	if m != nil {
+		return m.InitData
+	}
+	return nil
+}
+
+func (m *IncreaseRankData) GetInitSortData() []int64 {
+	if m != nil {
+		return m.InitSortData
+	}
+	return nil
+}
+
+type IncreaseRankDataRet struct {
+	PosData              *RankPosData `protobuf:"bytes,1,opt,name=PosData,proto3" json:"PosData,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}     `json:"-"`
+	XXX_unrecognized     []byte       `json:"-"`
+	XXX_sizecache        int32        `json:"-"`
+}
+
+func (m *IncreaseRankDataRet) Reset()         { *m = IncreaseRankDataRet{} }
+func (m *IncreaseRankDataRet) String() string { return proto.CompactTextString(m) }
+func (*IncreaseRankDataRet) ProtoMessage()    {}
+func (*IncreaseRankDataRet) Descriptor() ([]byte, []int) {
+	return fileDescriptor_d5b64eda47521620, []int{2}
+}
+func (m *IncreaseRankDataRet) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *IncreaseRankDataRet) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_IncreaseRankDataRet.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *IncreaseRankDataRet) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_IncreaseRankDataRet.Merge(m, src)
+}
+func (m *IncreaseRankDataRet) XXX_Size() int {
+	return m.Size()
+}
+func (m *IncreaseRankDataRet) XXX_DiscardUnknown() {
+	xxx_messageInfo_IncreaseRankDataRet.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_IncreaseRankDataRet proto.InternalMessageInfo
+
+func (m *IncreaseRankDataRet) GetPosData() *RankPosData {
+	if m != nil {
+		return m.PosData
+	}
+	return nil
+}
+
+//用于单独刷新排行榜数据
+type UpdateRankData struct {
+	RankId               uint64   `protobuf:"varint,1,opt,name=RankId,proto3" json:"RankId,omitempty"`
+	Key                  uint64   `protobuf:"varint,2,opt,name=Key,proto3" json:"Key,omitempty"`
+	Data                 []byte   `protobuf:"bytes,3,opt,name=Data,proto3" json:"Data,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *UpdateRankData) Reset()         { *m = UpdateRankData{} }
+func (m *UpdateRankData) String() string { return proto.CompactTextString(m) }
+func (*UpdateRankData) ProtoMessage()    {}
+func (*UpdateRankData) Descriptor() ([]byte, []int) {
+	return fileDescriptor_d5b64eda47521620, []int{3}
+}
+func (m *UpdateRankData) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *UpdateRankData) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_UpdateRankData.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *UpdateRankData) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UpdateRankData.Merge(m, src)
+}
+func (m *UpdateRankData) XXX_Size() int {
+	return m.Size()
+}
+func (m *UpdateRankData) XXX_DiscardUnknown() {
+	xxx_messageInfo_UpdateRankData.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UpdateRankData proto.InternalMessageInfo
+
+func (m *UpdateRankData) GetRankId() uint64 {
+	if m != nil {
+		return m.RankId
+	}
+	return 0
+}
+
+func (m *UpdateRankData) GetKey() uint64 {
+	if m != nil {
+		return m.Key
+	}
+	return 0
+}
+
+func (m *UpdateRankData) GetData() []byte {
 	if m != nil {
 		return m.Data
 	}
 	return nil
+}
+
+type UpdateRankDataRet struct {
+	Ret                  bool     `protobuf:"varint,1,opt,name=Ret,proto3" json:"Ret,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *UpdateRankDataRet) Reset()         { *m = UpdateRankDataRet{} }
+func (m *UpdateRankDataRet) String() string { return proto.CompactTextString(m) }
+func (*UpdateRankDataRet) ProtoMessage()    {}
+func (*UpdateRankDataRet) Descriptor() ([]byte, []int) {
+	return fileDescriptor_d5b64eda47521620, []int{4}
+}
+func (m *UpdateRankDataRet) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *UpdateRankDataRet) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_UpdateRankDataRet.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *UpdateRankDataRet) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UpdateRankDataRet.Merge(m, src)
+}
+func (m *UpdateRankDataRet) XXX_Size() int {
+	return m.Size()
+}
+func (m *UpdateRankDataRet) XXX_DiscardUnknown() {
+	xxx_messageInfo_UpdateRankDataRet.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UpdateRankDataRet proto.InternalMessageInfo
+
+func (m *UpdateRankDataRet) GetRet() bool {
+	if m != nil {
+		return m.Ret
+	}
+	return false
 }
 
 // RankPosData 排行数据——查询返回
@@ -92,6 +361,7 @@ type RankPosData struct {
 	Rank                 uint64   `protobuf:"varint,2,opt,name=Rank,proto3" json:"Rank,omitempty"`
 	SortData             []int64  `protobuf:"varint,3,rep,packed,name=SortData,proto3" json:"SortData,omitempty"`
 	Data                 []byte   `protobuf:"bytes,4,opt,name=Data,proto3" json:"Data,omitempty"`
+	ExtendData           []int64  `protobuf:"varint,5,rep,packed,name=ExtendData,proto3" json:"ExtendData,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -101,7 +371,7 @@ func (m *RankPosData) Reset()         { *m = RankPosData{} }
 func (m *RankPosData) String() string { return proto.CompactTextString(m) }
 func (*RankPosData) ProtoMessage()    {}
 func (*RankPosData) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{1}
+	return fileDescriptor_d5b64eda47521620, []int{5}
 }
 func (m *RankPosData) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -158,6 +428,13 @@ func (m *RankPosData) GetData() []byte {
 	return nil
 }
 
+func (m *RankPosData) GetExtendData() []int64 {
+	if m != nil {
+		return m.ExtendData
+	}
+	return nil
+}
+
 // RankList 排行榜数据
 type RankList struct {
 	RankId               uint64   `protobuf:"varint,1,opt,name=RankId,proto3" json:"RankId,omitempty"`
@@ -175,7 +452,7 @@ func (m *RankList) Reset()         { *m = RankList{} }
 func (m *RankList) String() string { return proto.CompactTextString(m) }
 func (*RankList) ProtoMessage()    {}
 func (*RankList) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{2}
+	return fileDescriptor_d5b64eda47521620, []int{6}
 }
 func (m *RankList) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -250,6 +527,7 @@ func (m *RankList) GetExpireMs() int64 {
 type UpsetRankData struct {
 	RankId               uint64      `protobuf:"varint,1,opt,name=RankId,proto3" json:"RankId,omitempty"`
 	RankDataList         []*RankData `protobuf:"bytes,2,rep,name=RankDataList,proto3" json:"RankDataList,omitempty"`
+	FindNewRank          bool        `protobuf:"varint,3,opt,name=FindNewRank,proto3" json:"FindNewRank,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}    `json:"-"`
 	XXX_unrecognized     []byte      `json:"-"`
 	XXX_sizecache        int32       `json:"-"`
@@ -259,7 +537,7 @@ func (m *UpsetRankData) Reset()         { *m = UpsetRankData{} }
 func (m *UpsetRankData) String() string { return proto.CompactTextString(m) }
 func (*UpsetRankData) ProtoMessage()    {}
 func (*UpsetRankData) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{3}
+	return fileDescriptor_d5b64eda47521620, []int{7}
 }
 func (m *UpsetRankData) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -302,6 +580,140 @@ func (m *UpsetRankData) GetRankDataList() []*RankData {
 	return nil
 }
 
+func (m *UpsetRankData) GetFindNewRank() bool {
+	if m != nil {
+		return m.FindNewRank
+	}
+	return false
+}
+
+type ExtendIncData struct {
+	InitValue            int64    `protobuf:"varint,1,opt,name=InitValue,proto3" json:"InitValue,omitempty"`
+	IncreaseValue        int64    `protobuf:"varint,2,opt,name=IncreaseValue,proto3" json:"IncreaseValue,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *ExtendIncData) Reset()         { *m = ExtendIncData{} }
+func (m *ExtendIncData) String() string { return proto.CompactTextString(m) }
+func (*ExtendIncData) ProtoMessage()    {}
+func (*ExtendIncData) Descriptor() ([]byte, []int) {
+	return fileDescriptor_d5b64eda47521620, []int{8}
+}
+func (m *ExtendIncData) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *ExtendIncData) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_ExtendIncData.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *ExtendIncData) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ExtendIncData.Merge(m, src)
+}
+func (m *ExtendIncData) XXX_Size() int {
+	return m.Size()
+}
+func (m *ExtendIncData) XXX_DiscardUnknown() {
+	xxx_messageInfo_ExtendIncData.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ExtendIncData proto.InternalMessageInfo
+
+func (m *ExtendIncData) GetInitValue() int64 {
+	if m != nil {
+		return m.InitValue
+	}
+	return 0
+}
+
+func (m *ExtendIncData) GetIncreaseValue() int64 {
+	if m != nil {
+		return m.IncreaseValue
+	}
+	return 0
+}
+
+// RankData 排行数据
+type RankData struct {
+	Key                  uint64           `protobuf:"varint,1,opt,name=Key,proto3" json:"Key,omitempty"`
+	SortData             []int64          `protobuf:"varint,2,rep,packed,name=SortData,proto3" json:"SortData,omitempty"`
+	Data                 []byte           `protobuf:"bytes,3,opt,name=Data,proto3" json:"Data,omitempty"`
+	ExData               []*ExtendIncData `protobuf:"bytes,4,rep,name=ExData,proto3" json:"ExData,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
+	XXX_unrecognized     []byte           `json:"-"`
+	XXX_sizecache        int32            `json:"-"`
+}
+
+func (m *RankData) Reset()         { *m = RankData{} }
+func (m *RankData) String() string { return proto.CompactTextString(m) }
+func (*RankData) ProtoMessage()    {}
+func (*RankData) Descriptor() ([]byte, []int) {
+	return fileDescriptor_d5b64eda47521620, []int{9}
+}
+func (m *RankData) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *RankData) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_RankData.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *RankData) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_RankData.Merge(m, src)
+}
+func (m *RankData) XXX_Size() int {
+	return m.Size()
+}
+func (m *RankData) XXX_DiscardUnknown() {
+	xxx_messageInfo_RankData.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_RankData proto.InternalMessageInfo
+
+func (m *RankData) GetKey() uint64 {
+	if m != nil {
+		return m.Key
+	}
+	return 0
+}
+
+func (m *RankData) GetSortData() []int64 {
+	if m != nil {
+		return m.SortData
+	}
+	return nil
+}
+
+func (m *RankData) GetData() []byte {
+	if m != nil {
+		return m.Data
+	}
+	return nil
+}
+
+func (m *RankData) GetExData() []*ExtendIncData {
+	if m != nil {
+		return m.ExData
+	}
+	return nil
+}
+
 // DeleteByKey 删除排行榜数据
 type DeleteByKey struct {
 	RankId               uint64   `protobuf:"varint,1,opt,name=RankId,proto3" json:"RankId,omitempty"`
@@ -315,7 +727,7 @@ func (m *DeleteByKey) Reset()         { *m = DeleteByKey{} }
 func (m *DeleteByKey) String() string { return proto.CompactTextString(m) }
 func (*DeleteByKey) ProtoMessage()    {}
 func (*DeleteByKey) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{4}
+	return fileDescriptor_d5b64eda47521620, []int{10}
 }
 func (m *DeleteByKey) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -370,7 +782,7 @@ func (m *AddRankList) Reset()         { *m = AddRankList{} }
 func (m *AddRankList) String() string { return proto.CompactTextString(m) }
 func (*AddRankList) ProtoMessage()    {}
 func (*AddRankList) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{5}
+	return fileDescriptor_d5b64eda47521620, []int{11}
 }
 func (m *AddRankList) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -419,7 +831,7 @@ func (m *FindRankDataByKey) Reset()         { *m = FindRankDataByKey{} }
 func (m *FindRankDataByKey) String() string { return proto.CompactTextString(m) }
 func (*FindRankDataByKey) ProtoMessage()    {}
 func (*FindRankDataByKey) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{6}
+	return fileDescriptor_d5b64eda47521620, []int{12}
 }
 func (m *FindRankDataByKey) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -475,7 +887,7 @@ func (m *FindRankDataByRank) Reset()         { *m = FindRankDataByRank{} }
 func (m *FindRankDataByRank) String() string { return proto.CompactTextString(m) }
 func (*FindRankDataByRank) ProtoMessage()    {}
 func (*FindRankDataByRank) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{7}
+	return fileDescriptor_d5b64eda47521620, []int{13}
 }
 func (m *FindRankDataByRank) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -533,7 +945,7 @@ func (m *FindRankDataList) Reset()         { *m = FindRankDataList{} }
 func (m *FindRankDataList) String() string { return proto.CompactTextString(m) }
 func (*FindRankDataList) ProtoMessage()    {}
 func (*FindRankDataList) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{8}
+	return fileDescriptor_d5b64eda47521620, []int{14}
 }
 func (m *FindRankDataList) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -604,7 +1016,7 @@ func (m *RankDataList) Reset()         { *m = RankDataList{} }
 func (m *RankDataList) String() string { return proto.CompactTextString(m) }
 func (*RankDataList) ProtoMessage()    {}
 func (*RankDataList) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{9}
+	return fileDescriptor_d5b64eda47521620, []int{15}
 }
 func (m *RankDataList) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -654,21 +1066,77 @@ func (m *RankDataList) GetKeyRank() *RankPosData {
 	return nil
 }
 
-// RankResult
-type RankResult struct {
-	AddCount             int32    `protobuf:"varint,1,opt,name=AddCount,proto3" json:"AddCount,omitempty"`
-	ModifyCount          int32    `protobuf:"varint,2,opt,name=ModifyCount,proto3" json:"ModifyCount,omitempty"`
-	RemoveCount          int32    `protobuf:"varint,3,opt,name=RemoveCount,proto3" json:"RemoveCount,omitempty"`
+type RankInfo struct {
+	Key                  uint64   `protobuf:"varint,1,opt,name=Key,proto3" json:"Key,omitempty"`
+	Rank                 uint64   `protobuf:"varint,2,opt,name=Rank,proto3" json:"Rank,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *RankInfo) Reset()         { *m = RankInfo{} }
+func (m *RankInfo) String() string { return proto.CompactTextString(m) }
+func (*RankInfo) ProtoMessage()    {}
+func (*RankInfo) Descriptor() ([]byte, []int) {
+	return fileDescriptor_d5b64eda47521620, []int{16}
+}
+func (m *RankInfo) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *RankInfo) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_RankInfo.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *RankInfo) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_RankInfo.Merge(m, src)
+}
+func (m *RankInfo) XXX_Size() int {
+	return m.Size()
+}
+func (m *RankInfo) XXX_DiscardUnknown() {
+	xxx_messageInfo_RankInfo.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_RankInfo proto.InternalMessageInfo
+
+func (m *RankInfo) GetKey() uint64 {
+	if m != nil {
+		return m.Key
+	}
+	return 0
+}
+
+func (m *RankInfo) GetRank() uint64 {
+	if m != nil {
+		return m.Rank
+	}
+	return 0
+}
+
+// RankResult
+type RankResult struct {
+	AddCount             int32       `protobuf:"varint,1,opt,name=AddCount,proto3" json:"AddCount,omitempty"`
+	ModifyCount          int32       `protobuf:"varint,2,opt,name=ModifyCount,proto3" json:"ModifyCount,omitempty"`
+	RemoveCount          int32       `protobuf:"varint,3,opt,name=RemoveCount,proto3" json:"RemoveCount,omitempty"`
+	NewRank              []*RankInfo `protobuf:"bytes,4,rep,name=NewRank,proto3" json:"NewRank,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}    `json:"-"`
+	XXX_unrecognized     []byte      `json:"-"`
+	XXX_sizecache        int32       `json:"-"`
 }
 
 func (m *RankResult) Reset()         { *m = RankResult{} }
 func (m *RankResult) String() string { return proto.CompactTextString(m) }
 func (*RankResult) ProtoMessage()    {}
 func (*RankResult) Descriptor() ([]byte, []int) {
-	return fileDescriptor_d5b64eda47521620, []int{10}
+	return fileDescriptor_d5b64eda47521620, []int{17}
 }
 func (m *RankResult) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -718,59 +1186,92 @@ func (m *RankResult) GetRemoveCount() int32 {
 	return 0
 }
 
+func (m *RankResult) GetNewRank() []*RankInfo {
+	if m != nil {
+		return m.NewRank
+	}
+	return nil
+}
+
 func init() {
-	proto.RegisterType((*RankData)(nil), "rpc.RankData")
+	proto.RegisterType((*SetSortAndExtendData)(nil), "rpc.SetSortAndExtendData")
+	proto.RegisterType((*IncreaseRankData)(nil), "rpc.IncreaseRankData")
+	proto.RegisterType((*IncreaseRankDataRet)(nil), "rpc.IncreaseRankDataRet")
+	proto.RegisterType((*UpdateRankData)(nil), "rpc.UpdateRankData")
+	proto.RegisterType((*UpdateRankDataRet)(nil), "rpc.UpdateRankDataRet")
 	proto.RegisterType((*RankPosData)(nil), "rpc.RankPosData")
 	proto.RegisterType((*RankList)(nil), "rpc.RankList")
 	proto.RegisterType((*UpsetRankData)(nil), "rpc.UpsetRankData")
+	proto.RegisterType((*ExtendIncData)(nil), "rpc.ExtendIncData")
+	proto.RegisterType((*RankData)(nil), "rpc.RankData")
 	proto.RegisterType((*DeleteByKey)(nil), "rpc.DeleteByKey")
 	proto.RegisterType((*AddRankList)(nil), "rpc.AddRankList")
 	proto.RegisterType((*FindRankDataByKey)(nil), "rpc.FindRankDataByKey")
 	proto.RegisterType((*FindRankDataByRank)(nil), "rpc.FindRankDataByRank")
 	proto.RegisterType((*FindRankDataList)(nil), "rpc.FindRankDataList")
 	proto.RegisterType((*RankDataList)(nil), "rpc.RankDataList")
+	proto.RegisterType((*RankInfo)(nil), "rpc.RankInfo")
 	proto.RegisterType((*RankResult)(nil), "rpc.RankResult")
 }
 
 func init() { proto.RegisterFile("proto/rpcproto/rank.proto", fileDescriptor_d5b64eda47521620) }
 
 var fileDescriptor_d5b64eda47521620 = []byte{
-	// 502 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x7c, 0x54, 0x51, 0x8b, 0xd3, 0x40,
-	0x10, 0x66, 0x9b, 0xa4, 0xed, 0x4d, 0xae, 0x58, 0x57, 0x91, 0x28, 0x52, 0x42, 0x10, 0x2c, 0x3e,
-	0x54, 0x54, 0xf0, 0x41, 0x11, 0xed, 0x59, 0x85, 0xe3, 0x5a, 0x91, 0x2d, 0xbe, 0xdc, 0x5b, 0x4c,
-	0x56, 0x08, 0xed, 0x35, 0x4b, 0xb2, 0x77, 0x5c, 0xff, 0x8b, 0x3f, 0xc2, 0x9f, 0xe1, 0xa3, 0x3f,
-	0x41, 0xfa, 0x4b, 0x8e, 0x99, 0x64, 0xd3, 0xe4, 0xb8, 0xf4, 0xa9, 0xf3, 0xcd, 0xcc, 0x7e, 0xdf,
-	0xb7, 0xb3, 0xd3, 0xc0, 0x63, 0x95, 0xa5, 0x3a, 0x7d, 0x99, 0xa9, 0xa8, 0x0c, 0xc2, 0xcd, 0x6a,
-	0x42, 0x21, 0xb7, 0x32, 0x15, 0x05, 0x73, 0xe8, 0x8b, 0x70, 0xb3, 0x9a, 0x85, 0x3a, 0xe4, 0x43,
-	0xb0, 0xce, 0xe4, 0xd6, 0x63, 0x3e, 0x1b, 0xdb, 0x02, 0x43, 0xfe, 0x04, 0xfa, 0xcb, 0x34, 0xd3,
-	0x58, 0xf5, 0x3a, 0xbe, 0x35, 0xb6, 0x44, 0x85, 0x39, 0x07, 0x9b, 0xf2, 0x96, 0xcf, 0xc6, 0xc7,
-	0x82, 0xe2, 0x20, 0x02, 0x17, 0xd9, 0xbe, 0xa7, 0x79, 0x0b, 0x21, 0x07, 0x1b, 0x1b, 0xbc, 0x0e,
-	0xa5, 0x28, 0x6e, 0x88, 0x58, 0x2d, 0x22, 0x76, 0x4d, 0xe4, 0x0f, 0x2b, 0x3c, 0xcf, 0x93, 0x5c,
-	0xf3, 0x47, 0xd0, 0xc5, 0xf8, 0x34, 0x2e, 0x55, 0x4a, 0x84, 0xa4, 0x18, 0x7d, 0x0b, 0x2f, 0x24,
-	0x89, 0x1d, 0x89, 0x0a, 0xf3, 0x67, 0x30, 0x58, 0xae, 0x12, 0x85, 0xe7, 0xe7, 0xf2, 0x4a, 0xae,
-	0xe9, 0x0a, 0x8e, 0x68, 0x26, 0xf9, 0x43, 0x70, 0x4e, 0xf3, 0x99, 0x8c, 0x48, 0xbb, 0x2f, 0x0a,
-	0xc0, 0x3d, 0xe8, 0x2d, 0xc2, 0x6b, 0xba, 0x83, 0x43, 0x82, 0x06, 0xa2, 0xe2, 0x97, 0x6b, 0x95,
-	0x64, 0x72, 0x91, 0x7b, 0x5d, 0x9f, 0xe1, 0x35, 0x0c, 0x0e, 0xce, 0x61, 0xf0, 0x43, 0xe5, 0x52,
-	0x57, 0xa3, 0x6e, 0xb3, 0xfd, 0x0a, 0x8e, 0x4d, 0x0f, 0x3a, 0xa1, 0xa1, 0xbb, 0xaf, 0x07, 0x93,
-	0x4c, 0x45, 0x13, 0x53, 0x10, 0x8d, 0x96, 0xe0, 0x23, 0xb8, 0x33, 0xb9, 0x96, 0x5a, 0x9e, 0x6c,
-	0x71, 0xc2, 0x6d, 0xcc, 0x1e, 0xf4, 0xce, 0xe4, 0xb6, 0x22, 0xb5, 0x85, 0x81, 0xc1, 0x5b, 0x70,
-	0xa7, 0x71, 0x5c, 0x4d, 0xf4, 0x39, 0xf4, 0xa6, 0x71, 0x4c, 0x8d, 0xec, 0x96, 0x3a, 0x26, 0x85,
-	0xa9, 0x06, 0x1f, 0xe0, 0xfe, 0xd7, 0x64, 0x13, 0x1b, 0x33, 0x87, 0xe5, 0xcb, 0x55, 0xe8, 0x54,
-	0xab, 0x10, 0x7c, 0x02, 0xde, 0x3c, 0x4e, 0x53, 0x6c, 0x3b, 0x7f, 0xc7, 0xe2, 0x04, 0x0a, 0x86,
-	0x75, 0x86, 0x83, 0xfb, 0xf0, 0x14, 0x8e, 0x96, 0x3a, 0xcc, 0x74, 0x8d, 0x64, 0x9f, 0xc0, 0xb7,
-	0xfe, 0x9c, 0x5e, 0x6e, 0x34, 0x6d, 0x82, 0x2d, 0x0a, 0x60, 0x3c, 0xdb, 0x7b, 0xcf, 0xbf, 0x59,
-	0xf3, 0x7d, 0x70, 0x95, 0x0c, 0x2e, 0x08, 0x0a, 0xd5, 0x66, 0x92, 0xbf, 0x83, 0x7b, 0xb5, 0xbf,
-	0x45, 0xed, 0x61, 0x87, 0xd5, 0x68, 0xcb, 0x9a, 0xb8, 0xdd, 0xc8, 0x5f, 0xd0, 0xbb, 0x91, 0x6d,
-	0x34, 0x77, 0xd7, 0x19, 0xd3, 0x10, 0xac, 0x01, 0xf0, 0x57, 0xc8, 0xfc, 0x72, 0xad, 0x71, 0x21,
-	0xa7, 0x71, 0xbc, 0xb7, 0xe5, 0x88, 0x0a, 0x73, 0x1f, 0xdc, 0x45, 0x1a, 0x27, 0xbf, 0xb6, 0x45,
-	0xb9, 0x43, 0xe5, 0x7a, 0x0a, 0x3b, 0x84, 0xbc, 0x48, 0xaf, 0xe4, 0x7e, 0x30, 0x8e, 0xa8, 0xa7,
-	0x4e, 0x1e, 0xfc, 0xdd, 0x8d, 0xd8, 0xbf, 0xdd, 0x88, 0xfd, 0xdf, 0x8d, 0xd8, 0xb9, 0x33, 0x79,
-	0x9f, 0xa9, 0xe8, 0x67, 0x97, 0xbe, 0x2d, 0x6f, 0x6e, 0x02, 0x00, 0x00, 0xff, 0xff, 0x95, 0xfb,
-	0xbc, 0xc4, 0x78, 0x04, 0x00, 0x00,
+	// 812 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x9c, 0x56, 0xdd, 0x6a, 0xdb, 0x58,
+	0x10, 0x46, 0x96, 0xe4, 0x9f, 0xb1, 0x9d, 0x75, 0x4e, 0xc2, 0xae, 0x12, 0x82, 0x31, 0x87, 0xfd,
+	0x31, 0xb9, 0xf0, 0xee, 0x66, 0x61, 0x59, 0x76, 0x59, 0x76, 0x9d, 0x26, 0x05, 0x91, 0xd8, 0x0d,
+	0xc7, 0xa4, 0x17, 0xa5, 0x37, 0xaa, 0x75, 0x02, 0x26, 0x8e, 0x24, 0xa4, 0xe3, 0xd4, 0x86, 0xde,
+	0x95, 0x3e, 0x42, 0xef, 0xfa, 0x10, 0x7d, 0x8c, 0x5e, 0xf6, 0x11, 0x4a, 0x9e, 0xa4, 0xcc, 0xe8,
+	0xc7, 0x92, 0x63, 0xa7, 0xa5, 0x77, 0x33, 0x9f, 0xe6, 0xcc, 0xf9, 0x66, 0xe6, 0x3b, 0x63, 0xc3,
+	0x5e, 0x10, 0xfa, 0xca, 0xff, 0x35, 0x0c, 0xc6, 0x89, 0xe1, 0x78, 0xd7, 0x3d, 0x32, 0x99, 0x1e,
+	0x06, 0x63, 0xfe, 0x1c, 0x76, 0x47, 0x52, 0x8d, 0xfc, 0x50, 0xf5, 0x3d, 0xf7, 0x74, 0xae, 0xa4,
+	0xe7, 0x9e, 0x38, 0xca, 0x61, 0x6d, 0x00, 0x3b, 0x42, 0x18, 0x3d, 0x4b, 0xeb, 0x68, 0xdd, 0xaa,
+	0xc8, 0x21, 0xac, 0x05, 0xfa, 0x85, 0x1f, 0x59, 0xa5, 0x8e, 0xd6, 0x35, 0x05, 0x9a, 0x8c, 0x81,
+	0x41, 0xb1, 0x7a, 0x47, 0xeb, 0xea, 0x82, 0x6c, 0xfe, 0x46, 0x87, 0x96, 0xed, 0x8d, 0x43, 0xe9,
+	0x44, 0x52, 0x38, 0xde, 0x35, 0x1d, 0xfd, 0x1e, 0xca, 0x68, 0xdb, 0x2e, 0xa5, 0x35, 0x44, 0xe2,
+	0x61, 0xca, 0x33, 0xb9, 0xa0, 0x94, 0x86, 0x40, 0x93, 0x1d, 0x42, 0x39, 0xa6, 0x64, 0xe9, 0x1d,
+	0xbd, 0x5b, 0x3f, 0x62, 0xbd, 0x30, 0x18, 0xf7, 0x62, 0xc8, 0xf6, 0xc6, 0x98, 0x4d, 0x24, 0x11,
+	0xec, 0x70, 0x79, 0x53, 0x46, 0xdb, 0xe8, 0xe8, 0x5d, 0x5d, 0xdc, 0xc3, 0xd9, 0x60, 0x7d, 0xd1,
+	0x96, 0x49, 0xb7, 0xec, 0xd1, 0x2d, 0xeb, 0x02, 0xc4, 0xfa, 0x5e, 0xfd, 0x0c, 0x5b, 0x42, 0xaa,
+	0x59, 0xe8, 0xa5, 0x25, 0x5a, 0x65, 0xea, 0xd7, 0x0a, 0xca, 0xfe, 0x82, 0x1f, 0x6c, 0x2f, 0x92,
+	0x31, 0x89, 0x27, 0xde, 0xd0, 0xf7, 0x4e, 0xe7, 0x93, 0x48, 0x49, 0x4f, 0x59, 0x15, 0x3a, 0xb0,
+	0xe9, 0x33, 0xdb, 0x87, 0xaa, 0xed, 0x4d, 0xe2, 0xa2, 0xaa, 0x1d, 0xad, 0xdb, 0x10, 0x99, 0xcf,
+	0x38, 0x34, 0xd0, 0xce, 0x8a, 0xae, 0x51, 0xd1, 0x05, 0x8c, 0xf7, 0x61, 0x67, 0x75, 0x0c, 0x42,
+	0x2a, 0x76, 0x08, 0x95, 0x0b, 0x3f, 0xca, 0x26, 0x5c, 0x3f, 0x6a, 0x51, 0xe9, 0x18, 0x92, 0xe0,
+	0x22, 0x0d, 0xe0, 0x43, 0xd8, 0xba, 0x0c, 0x5c, 0x47, 0x7d, 0xcb, 0x1c, 0xf3, 0xd2, 0x68, 0x24,
+	0xd2, 0xf8, 0x09, 0xb6, 0x8b, 0xf9, 0x90, 0x50, 0x0b, 0x74, 0x21, 0x55, 0x22, 0x37, 0x34, 0xf9,
+	0x6b, 0x0d, 0xea, 0x39, 0x3e, 0x69, 0x72, 0xad, 0x90, 0x1c, 0x03, 0x92, 0xfb, 0xc8, 0xc6, 0x7e,
+	0x65, 0xfd, 0xd0, 0xa9, 0x1f, 0x99, 0x9f, 0x91, 0x31, 0x96, 0x64, 0x50, 0xed, 0x2b, 0x32, 0xd0,
+	0x45, 0x0e, 0xe1, 0xef, 0x35, 0xa8, 0x62, 0xe2, 0xf3, 0x49, 0xa4, 0x36, 0xd6, 0xbd, 0x1f, 0xc7,
+	0x0c, 0x9d, 0x1b, 0x49, 0x64, 0x6a, 0x22, 0xf3, 0xd9, 0x8f, 0xd0, 0x1c, 0x5d, 0x4f, 0x02, 0x3c,
+	0x7f, 0x2e, 0x6f, 0xe5, 0x94, 0x5a, 0x61, 0x8a, 0x22, 0xc8, 0x76, 0xc1, 0xb4, 0xa3, 0x13, 0x39,
+	0x26, 0x6e, 0x55, 0x11, 0x3b, 0xcc, 0x82, 0xca, 0xc0, 0x99, 0x53, 0x8d, 0x26, 0x5d, 0x98, 0xba,
+	0x78, 0xe3, 0xe9, 0x3c, 0x98, 0x84, 0x72, 0x10, 0x91, 0xe4, 0x74, 0x91, 0xf9, 0xfc, 0x15, 0x34,
+	0x2f, 0x83, 0x48, 0xaa, 0x2f, 0x8e, 0xeb, 0x77, 0x68, 0xa4, 0x31, 0xc8, 0xc4, 0x2a, 0xd1, 0x23,
+	0x68, 0x66, 0x4a, 0xa0, 0xd9, 0x14, 0x42, 0x58, 0x07, 0xea, 0x8f, 0x27, 0x9e, 0x3b, 0x94, 0x2f,
+	0x89, 0x95, 0x4e, 0x6c, 0xf3, 0x10, 0x1f, 0x41, 0xb3, 0xf0, 0x4c, 0xd9, 0x01, 0xd4, 0x50, 0x91,
+	0x4f, 0x9d, 0xe9, 0x4c, 0x12, 0x01, 0x5d, 0x2c, 0x01, 0x6c, 0x4f, 0xaa, 0xcf, 0x38, 0xa2, 0x44,
+	0x11, 0x45, 0x90, 0xcf, 0xe3, 0x06, 0x6f, 0xd0, 0x41, 0x7e, 0xe6, 0xa5, 0x0d, 0x33, 0xcf, 0x09,
+	0x30, 0x5e, 0x2e, 0xd9, 0x9a, 0xd8, 0xb8, 0x5c, 0x68, 0xfe, 0xff, 0x41, 0xfd, 0x44, 0x4e, 0xa5,
+	0x92, 0xc7, 0x0b, 0xbc, 0x6a, 0x53, 0x2b, 0x2d, 0xa8, 0x9c, 0xc9, 0x45, 0xd6, 0x45, 0x43, 0xa4,
+	0x2e, 0xff, 0x13, 0xea, 0x7d, 0xd7, 0xcd, 0x24, 0xf4, 0x0b, 0x54, 0xfa, 0xae, 0x4b, 0x81, 0xda,
+	0x4a, 0xbb, 0x11, 0x14, 0xe9, 0x57, 0xfe, 0x2f, 0x6c, 0x63, 0x5b, 0xd3, 0xb2, 0x1f, 0xbe, 0xfe,
+	0xde, 0xc3, 0xe3, 0xff, 0x03, 0x2b, 0x1e, 0x27, 0xd9, 0x6c, 0x3a, 0xbf, 0xe6, 0x25, 0xf1, 0x00,
+	0x5a, 0xf9, 0x0c, 0x0f, 0x3e, 0x80, 0x03, 0xa8, 0x8d, 0x94, 0x13, 0xaa, 0x5c, 0x92, 0x25, 0x80,
+	0xe2, 0x7e, 0xe4, 0xcf, 0x3c, 0x45, 0x43, 0x30, 0x44, 0xec, 0xa4, 0x9c, 0x8d, 0x25, 0xe7, 0x77,
+	0x5a, 0x51, 0x90, 0x28, 0x8e, 0xd4, 0x8f, 0x13, 0xc4, 0xb7, 0x16, 0x41, 0xf6, 0x37, 0x7c, 0x97,
+	0xdb, 0x13, 0x39, 0x25, 0xdf, 0xdf, 0x69, 0xab, 0x81, 0xb8, 0x07, 0xcf, 0xe4, 0x22, 0xd3, 0xf2,
+	0xda, 0x3d, 0x98, 0x04, 0xf0, 0xdf, 0x62, 0x11, 0xda, 0xde, 0x95, 0xff, 0x75, 0xcb, 0x88, 0xbf,
+	0xd5, 0x00, 0xd0, 0x10, 0x32, 0x9a, 0x4d, 0x69, 0x97, 0xf7, 0x5d, 0x77, 0x59, 0x89, 0x29, 0x32,
+	0x1f, 0x1f, 0xd6, 0xc0, 0x77, 0x27, 0x57, 0x8b, 0xf8, 0x73, 0xfc, 0xeb, 0x9a, 0x87, 0x30, 0x42,
+	0xc8, 0x1b, 0xff, 0x56, 0x2e, 0x7b, 0x69, 0x8a, 0x3c, 0x84, 0xda, 0x4a, 0x1f, 0xa6, 0xb1, 0xa2,
+	0x2d, 0x24, 0x2d, 0xd2, 0xaf, 0xc7, 0x3b, 0x1f, 0xee, 0xda, 0xda, 0xc7, 0xbb, 0xb6, 0xf6, 0xe9,
+	0xae, 0xad, 0x3d, 0x33, 0x7b, 0xff, 0x84, 0xc1, 0xf8, 0x45, 0x99, 0xfe, 0x1b, 0xfc, 0xf1, 0x39,
+	0x00, 0x00, 0xff, 0xff, 0xae, 0x8b, 0x04, 0x8f, 0x38, 0x08, 0x00, 0x00,
 }
 
-func (m *RankData) Marshal() (dAtA []byte, err error) {
+func (m *SetSortAndExtendData) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -780,12 +1281,228 @@ func (m *RankData) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *RankData) MarshalTo(dAtA []byte) (int, error) {
+func (m *SetSortAndExtendData) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *RankData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *SetSortAndExtendData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.XXX_unrecognized != nil {
+		i -= len(m.XXX_unrecognized)
+		copy(dAtA[i:], m.XXX_unrecognized)
+	}
+	if m.Data != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.Data))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.Pos != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.Pos))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.IsSortData {
+		i--
+		if m.IsSortData {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *IncreaseRankData) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *IncreaseRankData) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *IncreaseRankData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.XXX_unrecognized != nil {
+		i -= len(m.XXX_unrecognized)
+		copy(dAtA[i:], m.XXX_unrecognized)
+	}
+	if len(m.InitSortData) > 0 {
+		dAtA2 := make([]byte, len(m.InitSortData)*10)
+		var j1 int
+		for _, num1 := range m.InitSortData {
+			num := uint64(num1)
+			for num >= 1<<7 {
+				dAtA2[j1] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j1++
+			}
+			dAtA2[j1] = uint8(num)
+			j1++
+		}
+		i -= j1
+		copy(dAtA[i:], dAtA2[:j1])
+		i = encodeVarintRank(dAtA, i, uint64(j1))
+		i--
+		dAtA[i] = 0x4a
+	}
+	if len(m.InitData) > 0 {
+		i -= len(m.InitData)
+		copy(dAtA[i:], m.InitData)
+		i = encodeVarintRank(dAtA, i, uint64(len(m.InitData)))
+		i--
+		dAtA[i] = 0x42
+	}
+	if m.InsertDataOnNonExistent {
+		i--
+		if m.InsertDataOnNonExistent {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.ReturnRankData {
+		i--
+		if m.ReturnRankData {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x30
+	}
+	if len(m.SetSortAndExtendData) > 0 {
+		for iNdEx := len(m.SetSortAndExtendData) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.SetSortAndExtendData[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintRank(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x2a
+		}
+	}
+	if len(m.IncreaseSortData) > 0 {
+		dAtA4 := make([]byte, len(m.IncreaseSortData)*10)
+		var j3 int
+		for _, num1 := range m.IncreaseSortData {
+			num := uint64(num1)
+			for num >= 1<<7 {
+				dAtA4[j3] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j3++
+			}
+			dAtA4[j3] = uint8(num)
+			j3++
+		}
+		i -= j3
+		copy(dAtA[i:], dAtA4[:j3])
+		i = encodeVarintRank(dAtA, i, uint64(j3))
+		i--
+		dAtA[i] = 0x22
+	}
+	if len(m.Extend) > 0 {
+		for iNdEx := len(m.Extend) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Extend[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintRank(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x1a
+		}
+	}
+	if m.Key != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.Key))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.RankId != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.RankId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *IncreaseRankDataRet) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *IncreaseRankDataRet) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *IncreaseRankDataRet) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.XXX_unrecognized != nil {
+		i -= len(m.XXX_unrecognized)
+		copy(dAtA[i:], m.XXX_unrecognized)
+	}
+	if m.PosData != nil {
+		{
+			size, err := m.PosData.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRank(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *UpdateRankData) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *UpdateRankData) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateRankData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
@@ -801,27 +1518,50 @@ func (m *RankData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x1a
 	}
-	if len(m.SortData) > 0 {
-		dAtA2 := make([]byte, len(m.SortData)*10)
-		var j1 int
-		for _, num1 := range m.SortData {
-			num := uint64(num1)
-			for num >= 1<<7 {
-				dAtA2[j1] = uint8(uint64(num)&0x7f | 0x80)
-				num >>= 7
-				j1++
-			}
-			dAtA2[j1] = uint8(num)
-			j1++
-		}
-		i -= j1
-		copy(dAtA[i:], dAtA2[:j1])
-		i = encodeVarintRank(dAtA, i, uint64(j1))
-		i--
-		dAtA[i] = 0x12
-	}
 	if m.Key != 0 {
 		i = encodeVarintRank(dAtA, i, uint64(m.Key))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.RankId != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.RankId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *UpdateRankDataRet) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *UpdateRankDataRet) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateRankDataRet) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.XXX_unrecognized != nil {
+		i -= len(m.XXX_unrecognized)
+		copy(dAtA[i:], m.XXX_unrecognized)
+	}
+	if m.Ret {
+		i--
+		if m.Ret {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
 		i--
 		dAtA[i] = 0x8
 	}
@@ -852,6 +1592,25 @@ func (m *RankPosData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i -= len(m.XXX_unrecognized)
 		copy(dAtA[i:], m.XXX_unrecognized)
 	}
+	if len(m.ExtendData) > 0 {
+		dAtA7 := make([]byte, len(m.ExtendData)*10)
+		var j6 int
+		for _, num1 := range m.ExtendData {
+			num := uint64(num1)
+			for num >= 1<<7 {
+				dAtA7[j6] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j6++
+			}
+			dAtA7[j6] = uint8(num)
+			j6++
+		}
+		i -= j6
+		copy(dAtA[i:], dAtA7[:j6])
+		i = encodeVarintRank(dAtA, i, uint64(j6))
+		i--
+		dAtA[i] = 0x2a
+	}
 	if len(m.Data) > 0 {
 		i -= len(m.Data)
 		copy(dAtA[i:], m.Data)
@@ -860,21 +1619,21 @@ func (m *RankPosData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		dAtA[i] = 0x22
 	}
 	if len(m.SortData) > 0 {
-		dAtA4 := make([]byte, len(m.SortData)*10)
-		var j3 int
+		dAtA9 := make([]byte, len(m.SortData)*10)
+		var j8 int
 		for _, num1 := range m.SortData {
 			num := uint64(num1)
 			for num >= 1<<7 {
-				dAtA4[j3] = uint8(uint64(num)&0x7f | 0x80)
+				dAtA9[j8] = uint8(uint64(num)&0x7f | 0x80)
 				num >>= 7
-				j3++
+				j8++
 			}
-			dAtA4[j3] = uint8(num)
-			j3++
+			dAtA9[j8] = uint8(num)
+			j8++
 		}
-		i -= j3
-		copy(dAtA[i:], dAtA4[:j3])
-		i = encodeVarintRank(dAtA, i, uint64(j3))
+		i -= j8
+		copy(dAtA[i:], dAtA9[:j8])
+		i = encodeVarintRank(dAtA, i, uint64(j8))
 		i--
 		dAtA[i] = 0x1a
 	}
@@ -979,6 +1738,16 @@ func (m *UpsetRankData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i -= len(m.XXX_unrecognized)
 		copy(dAtA[i:], m.XXX_unrecognized)
 	}
+	if m.FindNewRank {
+		i--
+		if m.FindNewRank {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x18
+	}
 	if len(m.RankDataList) > 0 {
 		for iNdEx := len(m.RankDataList) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -995,6 +1764,115 @@ func (m *UpsetRankData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	}
 	if m.RankId != 0 {
 		i = encodeVarintRank(dAtA, i, uint64(m.RankId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ExtendIncData) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ExtendIncData) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ExtendIncData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.XXX_unrecognized != nil {
+		i -= len(m.XXX_unrecognized)
+		copy(dAtA[i:], m.XXX_unrecognized)
+	}
+	if m.IncreaseValue != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.IncreaseValue))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.InitValue != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.InitValue))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *RankData) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RankData) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *RankData) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.XXX_unrecognized != nil {
+		i -= len(m.XXX_unrecognized)
+		copy(dAtA[i:], m.XXX_unrecognized)
+	}
+	if len(m.ExData) > 0 {
+		for iNdEx := len(m.ExData) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.ExData[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintRank(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x22
+		}
+	}
+	if len(m.Data) > 0 {
+		i -= len(m.Data)
+		copy(dAtA[i:], m.Data)
+		i = encodeVarintRank(dAtA, i, uint64(len(m.Data)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.SortData) > 0 {
+		dAtA11 := make([]byte, len(m.SortData)*10)
+		var j10 int
+		for _, num1 := range m.SortData {
+			num := uint64(num1)
+			for num >= 1<<7 {
+				dAtA11[j10] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j10++
+			}
+			dAtA11[j10] = uint8(num)
+			j10++
+		}
+		i -= j10
+		copy(dAtA[i:], dAtA11[:j10])
+		i = encodeVarintRank(dAtA, i, uint64(j10))
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.Key != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.Key))
 		i--
 		dAtA[i] = 0x8
 	}
@@ -1026,20 +1904,20 @@ func (m *DeleteByKey) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		copy(dAtA[i:], m.XXX_unrecognized)
 	}
 	if len(m.KeyList) > 0 {
-		dAtA6 := make([]byte, len(m.KeyList)*10)
-		var j5 int
+		dAtA13 := make([]byte, len(m.KeyList)*10)
+		var j12 int
 		for _, num := range m.KeyList {
 			for num >= 1<<7 {
-				dAtA6[j5] = uint8(uint64(num)&0x7f | 0x80)
+				dAtA13[j12] = uint8(uint64(num)&0x7f | 0x80)
 				num >>= 7
-				j5++
+				j12++
 			}
-			dAtA6[j5] = uint8(num)
-			j5++
+			dAtA13[j12] = uint8(num)
+			j12++
 		}
-		i -= j5
-		copy(dAtA[i:], dAtA6[:j5])
-		i = encodeVarintRank(dAtA, i, uint64(j5))
+		i -= j12
+		copy(dAtA[i:], dAtA13[:j12])
+		i = encodeVarintRank(dAtA, i, uint64(j12))
 		i--
 		dAtA[i] = 0x12
 	}
@@ -1271,6 +2149,43 @@ func (m *RankDataList) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *RankInfo) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RankInfo) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *RankInfo) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.XXX_unrecognized != nil {
+		i -= len(m.XXX_unrecognized)
+		copy(dAtA[i:], m.XXX_unrecognized)
+	}
+	if m.Rank != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.Rank))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.Key != 0 {
+		i = encodeVarintRank(dAtA, i, uint64(m.Key))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
 func (m *RankResult) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -1294,6 +2209,20 @@ func (m *RankResult) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	if m.XXX_unrecognized != nil {
 		i -= len(m.XXX_unrecognized)
 		copy(dAtA[i:], m.XXX_unrecognized)
+	}
+	if len(m.NewRank) > 0 {
+		for iNdEx := len(m.NewRank) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.NewRank[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintRank(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x22
+		}
 	}
 	if m.RemoveCount != 0 {
 		i = encodeVarintRank(dAtA, i, uint64(m.RemoveCount))
@@ -1324,25 +2253,127 @@ func encodeVarintRank(dAtA []byte, offset int, v uint64) int {
 	dAtA[offset] = uint8(v)
 	return base
 }
-func (m *RankData) Size() (n int) {
+func (m *SetSortAndExtendData) Size() (n int) {
 	if m == nil {
 		return 0
 	}
 	var l int
 	_ = l
+	if m.IsSortData {
+		n += 2
+	}
+	if m.Pos != 0 {
+		n += 1 + sovRank(uint64(m.Pos))
+	}
+	if m.Data != 0 {
+		n += 1 + sovRank(uint64(m.Data))
+	}
+	if m.XXX_unrecognized != nil {
+		n += len(m.XXX_unrecognized)
+	}
+	return n
+}
+
+func (m *IncreaseRankData) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.RankId != 0 {
+		n += 1 + sovRank(uint64(m.RankId))
+	}
 	if m.Key != 0 {
 		n += 1 + sovRank(uint64(m.Key))
 	}
-	if len(m.SortData) > 0 {
+	if len(m.Extend) > 0 {
+		for _, e := range m.Extend {
+			l = e.Size()
+			n += 1 + l + sovRank(uint64(l))
+		}
+	}
+	if len(m.IncreaseSortData) > 0 {
 		l = 0
-		for _, e := range m.SortData {
+		for _, e := range m.IncreaseSortData {
 			l += sovRank(uint64(e))
 		}
 		n += 1 + sovRank(uint64(l)) + l
 	}
+	if len(m.SetSortAndExtendData) > 0 {
+		for _, e := range m.SetSortAndExtendData {
+			l = e.Size()
+			n += 1 + l + sovRank(uint64(l))
+		}
+	}
+	if m.ReturnRankData {
+		n += 2
+	}
+	if m.InsertDataOnNonExistent {
+		n += 2
+	}
+	l = len(m.InitData)
+	if l > 0 {
+		n += 1 + l + sovRank(uint64(l))
+	}
+	if len(m.InitSortData) > 0 {
+		l = 0
+		for _, e := range m.InitSortData {
+			l += sovRank(uint64(e))
+		}
+		n += 1 + sovRank(uint64(l)) + l
+	}
+	if m.XXX_unrecognized != nil {
+		n += len(m.XXX_unrecognized)
+	}
+	return n
+}
+
+func (m *IncreaseRankDataRet) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.PosData != nil {
+		l = m.PosData.Size()
+		n += 1 + l + sovRank(uint64(l))
+	}
+	if m.XXX_unrecognized != nil {
+		n += len(m.XXX_unrecognized)
+	}
+	return n
+}
+
+func (m *UpdateRankData) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.RankId != 0 {
+		n += 1 + sovRank(uint64(m.RankId))
+	}
+	if m.Key != 0 {
+		n += 1 + sovRank(uint64(m.Key))
+	}
 	l = len(m.Data)
 	if l > 0 {
 		n += 1 + l + sovRank(uint64(l))
+	}
+	if m.XXX_unrecognized != nil {
+		n += len(m.XXX_unrecognized)
+	}
+	return n
+}
+
+func (m *UpdateRankDataRet) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Ret {
+		n += 2
 	}
 	if m.XXX_unrecognized != nil {
 		n += len(m.XXX_unrecognized)
@@ -1372,6 +2403,13 @@ func (m *RankPosData) Size() (n int) {
 	l = len(m.Data)
 	if l > 0 {
 		n += 1 + l + sovRank(uint64(l))
+	}
+	if len(m.ExtendData) > 0 {
+		l = 0
+		for _, e := range m.ExtendData {
+			l += sovRank(uint64(e))
+		}
+		n += 1 + sovRank(uint64(l)) + l
 	}
 	if m.XXX_unrecognized != nil {
 		n += len(m.XXX_unrecognized)
@@ -1421,6 +2459,59 @@ func (m *UpsetRankData) Size() (n int) {
 	}
 	if len(m.RankDataList) > 0 {
 		for _, e := range m.RankDataList {
+			l = e.Size()
+			n += 1 + l + sovRank(uint64(l))
+		}
+	}
+	if m.FindNewRank {
+		n += 2
+	}
+	if m.XXX_unrecognized != nil {
+		n += len(m.XXX_unrecognized)
+	}
+	return n
+}
+
+func (m *ExtendIncData) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.InitValue != 0 {
+		n += 1 + sovRank(uint64(m.InitValue))
+	}
+	if m.IncreaseValue != 0 {
+		n += 1 + sovRank(uint64(m.IncreaseValue))
+	}
+	if m.XXX_unrecognized != nil {
+		n += len(m.XXX_unrecognized)
+	}
+	return n
+}
+
+func (m *RankData) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Key != 0 {
+		n += 1 + sovRank(uint64(m.Key))
+	}
+	if len(m.SortData) > 0 {
+		l = 0
+		for _, e := range m.SortData {
+			l += sovRank(uint64(e))
+		}
+		n += 1 + sovRank(uint64(l)) + l
+	}
+	l = len(m.Data)
+	if l > 0 {
+		n += 1 + l + sovRank(uint64(l))
+	}
+	if len(m.ExData) > 0 {
+		for _, e := range m.ExData {
 			l = e.Size()
 			n += 1 + l + sovRank(uint64(l))
 		}
@@ -1556,6 +2647,24 @@ func (m *RankDataList) Size() (n int) {
 	return n
 }
 
+func (m *RankInfo) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Key != 0 {
+		n += 1 + sovRank(uint64(m.Key))
+	}
+	if m.Rank != 0 {
+		n += 1 + sovRank(uint64(m.Rank))
+	}
+	if m.XXX_unrecognized != nil {
+		n += len(m.XXX_unrecognized)
+	}
+	return n
+}
+
 func (m *RankResult) Size() (n int) {
 	if m == nil {
 		return 0
@@ -1571,6 +2680,12 @@ func (m *RankResult) Size() (n int) {
 	if m.RemoveCount != 0 {
 		n += 1 + sovRank(uint64(m.RemoveCount))
 	}
+	if len(m.NewRank) > 0 {
+		for _, e := range m.NewRank {
+			l = e.Size()
+			n += 1 + l + sovRank(uint64(l))
+		}
+	}
 	if m.XXX_unrecognized != nil {
 		n += len(m.XXX_unrecognized)
 	}
@@ -1583,7 +2698,7 @@ func sovRank(x uint64) (n int) {
 func sozRank(x uint64) (n int) {
 	return sovRank(uint64((x << 1) ^ uint64((int64(x) >> 63))))
 }
-func (m *RankData) Unmarshal(dAtA []byte) error {
+func (m *SetSortAndExtendData) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -1606,13 +2721,144 @@ func (m *RankData) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: RankData: wiretype end group for non-group")
+			return fmt.Errorf("proto: SetSortAndExtendData: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: RankData: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: SetSortAndExtendData: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field IsSortData", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.IsSortData = bool(v != 0)
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Pos", wireType)
+			}
+			m.Pos = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Pos |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Data", wireType)
+			}
+			m.Data = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Data |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRank(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *IncreaseRankData) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRank
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: IncreaseRankData: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: IncreaseRankData: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RankId", wireType)
+			}
+			m.RankId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.RankId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Key", wireType)
 			}
@@ -1631,7 +2877,41 @@ func (m *RankData) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-		case 2:
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Extend", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRank
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRank
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Extend = append(m.Extend, &ExtendIncData{})
+			if err := m.Extend[len(m.Extend)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
 			if wireType == 0 {
 				var v int64
 				for shift := uint(0); ; shift += 7 {
@@ -1648,7 +2928,7 @@ func (m *RankData) Unmarshal(dAtA []byte) error {
 						break
 					}
 				}
-				m.SortData = append(m.SortData, v)
+				m.IncreaseSortData = append(m.IncreaseSortData, v)
 			} else if wireType == 2 {
 				var packedLen int
 				for shift := uint(0); ; shift += 7 {
@@ -1683,8 +2963,8 @@ func (m *RankData) Unmarshal(dAtA []byte) error {
 					}
 				}
 				elementCount = count
-				if elementCount != 0 && len(m.SortData) == 0 {
-					m.SortData = make([]int64, 0, elementCount)
+				if elementCount != 0 && len(m.IncreaseSortData) == 0 {
+					m.IncreaseSortData = make([]int64, 0, elementCount)
 				}
 				for iNdEx < postIndex {
 					var v int64
@@ -1702,10 +2982,376 @@ func (m *RankData) Unmarshal(dAtA []byte) error {
 							break
 						}
 					}
-					m.SortData = append(m.SortData, v)
+					m.IncreaseSortData = append(m.IncreaseSortData, v)
 				}
 			} else {
-				return fmt.Errorf("proto: wrong wireType = %d for field SortData", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field IncreaseSortData", wireType)
+			}
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SetSortAndExtendData", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRank
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRank
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SetSortAndExtendData = append(m.SetSortAndExtendData, &SetSortAndExtendData{})
+			if err := m.SetSortAndExtendData[len(m.SetSortAndExtendData)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ReturnRankData", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.ReturnRankData = bool(v != 0)
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field InsertDataOnNonExistent", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.InsertDataOnNonExistent = bool(v != 0)
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field InitData", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthRank
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRank
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.InitData = append(m.InitData[:0], dAtA[iNdEx:postIndex]...)
+			if m.InitData == nil {
+				m.InitData = []byte{}
+			}
+			iNdEx = postIndex
+		case 9:
+			if wireType == 0 {
+				var v int64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowRank
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					v |= int64(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				m.InitSortData = append(m.InitSortData, v)
+			} else if wireType == 2 {
+				var packedLen int
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowRank
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					packedLen |= int(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				if packedLen < 0 {
+					return ErrInvalidLengthRank
+				}
+				postIndex := iNdEx + packedLen
+				if postIndex < 0 {
+					return ErrInvalidLengthRank
+				}
+				if postIndex > l {
+					return io.ErrUnexpectedEOF
+				}
+				var elementCount int
+				var count int
+				for _, integer := range dAtA[iNdEx:postIndex] {
+					if integer < 128 {
+						count++
+					}
+				}
+				elementCount = count
+				if elementCount != 0 && len(m.InitSortData) == 0 {
+					m.InitSortData = make([]int64, 0, elementCount)
+				}
+				for iNdEx < postIndex {
+					var v int64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowRank
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						v |= int64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					m.InitSortData = append(m.InitSortData, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field InitSortData", wireType)
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRank(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *IncreaseRankDataRet) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRank
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: IncreaseRankDataRet: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: IncreaseRankDataRet: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PosData", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRank
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRank
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.PosData == nil {
+				m.PosData = &RankPosData{}
+			}
+			if err := m.PosData.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRank(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *UpdateRankData) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRank
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: UpdateRankData: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: UpdateRankData: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RankId", wireType)
+			}
+			m.RankId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.RankId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Key", wireType)
+			}
+			m.Key = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Key |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
 			}
 		case 3:
 			if wireType != 2 {
@@ -1741,6 +3387,80 @@ func (m *RankData) Unmarshal(dAtA []byte) error {
 				m.Data = []byte{}
 			}
 			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRank(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *UpdateRankDataRet) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRank
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: UpdateRankDataRet: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: UpdateRankDataRet: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Ret", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Ret = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRank(dAtA[iNdEx:])
@@ -1943,6 +3663,82 @@ func (m *RankPosData) Unmarshal(dAtA []byte) error {
 				m.Data = []byte{}
 			}
 			iNdEx = postIndex
+		case 5:
+			if wireType == 0 {
+				var v int64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowRank
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					v |= int64(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				m.ExtendData = append(m.ExtendData, v)
+			} else if wireType == 2 {
+				var packedLen int
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowRank
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					packedLen |= int(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				if packedLen < 0 {
+					return ErrInvalidLengthRank
+				}
+				postIndex := iNdEx + packedLen
+				if postIndex < 0 {
+					return ErrInvalidLengthRank
+				}
+				if postIndex > l {
+					return io.ErrUnexpectedEOF
+				}
+				var elementCount int
+				var count int
+				for _, integer := range dAtA[iNdEx:postIndex] {
+					if integer < 128 {
+						count++
+					}
+				}
+				elementCount = count
+				if elementCount != 0 && len(m.ExtendData) == 0 {
+					m.ExtendData = make([]int64, 0, elementCount)
+				}
+				for iNdEx < postIndex {
+					var v int64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowRank
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						v |= int64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					m.ExtendData = append(m.ExtendData, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtendData", wireType)
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRank(dAtA[iNdEx:])
@@ -2229,6 +4025,335 @@ func (m *UpsetRankData) Unmarshal(dAtA []byte) error {
 			}
 			m.RankDataList = append(m.RankDataList, &RankData{})
 			if err := m.RankDataList[len(m.RankDataList)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field FindNewRank", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.FindNewRank = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRank(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ExtendIncData) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRank
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ExtendIncData: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ExtendIncData: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field InitValue", wireType)
+			}
+			m.InitValue = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.InitValue |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field IncreaseValue", wireType)
+			}
+			m.IncreaseValue = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.IncreaseValue |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRank(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *RankData) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRank
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RankData: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RankData: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Key", wireType)
+			}
+			m.Key = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Key |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType == 0 {
+				var v int64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowRank
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					v |= int64(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				m.SortData = append(m.SortData, v)
+			} else if wireType == 2 {
+				var packedLen int
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowRank
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					packedLen |= int(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				if packedLen < 0 {
+					return ErrInvalidLengthRank
+				}
+				postIndex := iNdEx + packedLen
+				if postIndex < 0 {
+					return ErrInvalidLengthRank
+				}
+				if postIndex > l {
+					return io.ErrUnexpectedEOF
+				}
+				var elementCount int
+				var count int
+				for _, integer := range dAtA[iNdEx:postIndex] {
+					if integer < 128 {
+						count++
+					}
+				}
+				elementCount = count
+				if elementCount != 0 && len(m.SortData) == 0 {
+					m.SortData = make([]int64, 0, elementCount)
+				}
+				for iNdEx < postIndex {
+					var v int64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowRank
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						v |= int64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					m.SortData = append(m.SortData, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field SortData", wireType)
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Data", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthRank
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRank
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Data = append(m.Data[:0], dAtA[iNdEx:postIndex]...)
+			if m.Data == nil {
+				m.Data = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ExData", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRank
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRank
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ExData = append(m.ExData, &ExtendIncData{})
+			if err := m.ExData[len(m.ExData)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -2951,6 +5076,98 @@ func (m *RankDataList) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *RankInfo) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRank
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RankInfo: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RankInfo: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Key", wireType)
+			}
+			m.Key = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Key |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Rank", wireType)
+			}
+			m.Rank = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Rank |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRank(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRank
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *RankResult) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -3037,6 +5254,40 @@ func (m *RankResult) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NewRank", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRank
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRank
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRank
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NewRank = append(m.NewRank, &RankInfo{})
+			if err := m.NewRank[len(m.NewRank)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRank(dAtA[iNdEx:])

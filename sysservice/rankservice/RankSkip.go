@@ -2,20 +2,21 @@ package rankservice
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/algorithms/skip"
-	"time"
 )
 
 type RankSkip struct {
-	rankId      uint64               //排行榜ID
-	rankName    string               //排行榜名称
-	isDes       bool                 //是否为降序 true：降序 false：升序
-	skipList    *skip.SkipList       //跳表
-	mapRankData map[uint64]*RankData //排行数据map
-	maxLen      uint64               //排行数据长度
-	expireMs    time.Duration        //有效时间
-	rankModule  IRankModule
+	rankId         uint64               //排行榜ID
+	rankName       string               //排行榜名称
+	isDes          bool                 //是否为降序 true：降序 false：升序
+	skipList       *skip.SkipList       //跳表
+	mapRankData    map[uint64]*RankData //排行数据map
+	maxLen         uint64               //排行数据长度
+	expireMs       time.Duration        //有效时间
+	rankModule     IRankModule
 	rankDataExpire rankDataHeap
 }
 
@@ -28,7 +29,7 @@ const (
 )
 
 // NewRankSkip 创建排行榜
-func NewRankSkip(rankId uint64,rankName string,isDes bool, level interface{}, maxLen uint64,expireMs time.Duration) *RankSkip {
+func NewRankSkip(rankId uint64, rankName string, isDes bool, level interface{}, maxLen uint64, expireMs time.Duration) *RankSkip {
 	rs := &RankSkip{}
 
 	rs.rankId = rankId
@@ -38,17 +39,17 @@ func NewRankSkip(rankId uint64,rankName string,isDes bool, level interface{}, ma
 	rs.mapRankData = make(map[uint64]*RankData, 10240)
 	rs.maxLen = maxLen
 	rs.expireMs = expireMs
-	rs.rankDataExpire.Init(int32(maxLen),expireMs)
+	rs.rankDataExpire.Init(int32(maxLen), expireMs)
 
 	return rs
 }
 
-func (rs *RankSkip) pickExpireKey(){
+func (rs *RankSkip) pickExpireKey() {
 	if rs.expireMs == 0 {
 		return
 	}
 
-	for i:=1;i<=MaxPickExpireNum;i++{
+	for i := 1; i <= MaxPickExpireNum; i++ {
 		key := rs.rankDataExpire.PopExpireKey()
 		if key == 0 {
 			return
@@ -79,46 +80,211 @@ func (rs *RankSkip) GetRankLen() uint64 {
 
 func (rs *RankSkip) UpsetRankList(upsetRankData []*rpc.RankData) (addCount int32, modifyCount int32) {
 	for _, upsetData := range upsetRankData {
-		 changeType := rs.UpsetRank(upsetData,time.Now().UnixNano(),false)
-		 if changeType == RankDataAdd{
-			 addCount+=1
-		 } else if changeType == RankDataUpdate{
-			 modifyCount+=1
-		 }
+		changeType := rs.UpsetRank(upsetData, time.Now().UnixNano(), false)
+		if changeType == RankDataAdd {
+			addCount += 1
+		} else if changeType == RankDataUpdate {
+			modifyCount += 1
+		}
 	}
 
 	rs.pickExpireKey()
 	return
 }
 
+func (rs *RankSkip) InsertDataOnNonExistent(changeRankData *rpc.IncreaseRankData) bool {
+	if changeRankData.InsertDataOnNonExistent == false {
+		return false
+	}
+
+	var upsetData rpc.RankData
+	upsetData.Key = changeRankData.Key
+	upsetData.Data = changeRankData.InitData
+	upsetData.SortData = changeRankData.InitSortData
+
+	for i := 0; i < len(changeRankData.IncreaseSortData) && i < len(upsetData.SortData); i++ {
+		upsetData.SortData[i] += changeRankData.IncreaseSortData[i]
+	}
+
+	for _, val := range changeRankData.Extend {
+		upsetData.ExData = append(upsetData.ExData, &rpc.ExtendIncData{InitValue: val.InitValue, IncreaseValue: val.IncreaseValue})
+	}
+
+	//强制设计指定值
+	for _, setData := range changeRankData.SetSortAndExtendData {
+		if setData.IsSortData == true {
+			if int(setData.Pos) >= len(upsetData.SortData) {
+				return false
+			}
+			upsetData.SortData[setData.Pos] = setData.Data
+		} else {
+			if int(setData.Pos) < len(upsetData.ExData) {
+				upsetData.ExData[setData.Pos].IncreaseValue = 0
+				upsetData.ExData[setData.Pos].InitValue = setData.Data
+			}
+		}
+	}
+
+	refreshTimestamp := time.Now().UnixNano()
+	newRankData := NewRankData(rs.isDes, &upsetData, refreshTimestamp)
+	rs.skipList.Insert(newRankData)
+	rs.mapRankData[upsetData.Key] = newRankData
+
+	//刷新有效期和存档数据
+	rs.rankDataExpire.PushOrRefreshExpireKey(upsetData.Key, refreshTimestamp)
+	rs.rankModule.OnChangeRankData(rs, newRankData)
+
+	return true
+}
+
+func (rs *RankSkip) UpdateRankData(updateRankData *rpc.UpdateRankData) bool {
+	rankNode, ok := rs.mapRankData[updateRankData.Key]
+	if ok == false {
+		return false
+	}
+
+	rankNode.Data = updateRankData.Data
+	rs.rankDataExpire.PushOrRefreshExpireKey(updateRankData.Key, time.Now().UnixNano())
+	rs.rankModule.OnChangeRankData(rs, rankNode)
+	return true
+}
+
+func (rs *RankSkip) ChangeExtendData(changeRankData *rpc.IncreaseRankData) bool {
+	rankNode, ok := rs.mapRankData[changeRankData.Key]
+	if ok == false {
+		return rs.InsertDataOnNonExistent(changeRankData)
+	}
+
+	//先判断是不是有修改
+	bChange := false
+	for i := 0; i < len(changeRankData.IncreaseSortData) && i < len(rankNode.SortData); i++ {
+		if changeRankData.IncreaseSortData[i] != 0 {
+			bChange = true
+		}
+	}
+
+	if bChange == false {
+		for _, setSortAndExtendData := range changeRankData.SetSortAndExtendData {
+			if setSortAndExtendData.IsSortData == true {
+				bChange = true
+			}
+		}
+	}
+
+	//如果有改变，删除原有的数据,重新刷新到跳表
+	rankData := rankNode
+	refreshTimestamp := time.Now().UnixNano()
+	if bChange == true {
+		//copy数据
+		var upsetData rpc.RankData
+		upsetData.Key = rankNode.Key
+		upsetData.Data = rankNode.Data
+		upsetData.SortData = append(upsetData.SortData, rankNode.SortData...)
+
+		for i := 0; i < len(changeRankData.IncreaseSortData) && i < len(upsetData.SortData); i++ {
+			if changeRankData.IncreaseSortData[i] != 0 {
+				upsetData.SortData[i] += changeRankData.IncreaseSortData[i]
+			}
+		}
+
+		for _, setData := range changeRankData.SetSortAndExtendData {
+			if setData.IsSortData == true {
+				if int(setData.Pos) < len(upsetData.SortData) {
+					upsetData.SortData[setData.Pos] = setData.Data
+				}
+			}
+		}
+
+		rankData = NewRankData(rs.isDes, &upsetData, refreshTimestamp)
+		rankData.ExData = append(rankData.ExData, rankNode.ExData...)
+
+		//从排行榜中删除
+		rs.skipList.Delete(rankNode)
+		ReleaseRankData(rankNode)
+
+		rs.skipList.Insert(rankData)
+		rs.mapRankData[upsetData.Key] = rankData
+	}
+
+	//增长扩展参数
+	for i := 0; i < len(changeRankData.Extend); i++ {
+		if i < len(rankData.ExData) {
+			//直接增长
+			rankData.ExData[i] += changeRankData.Extend[i].IncreaseValue
+		} else {
+			//如果不存在的扩展位置,append补充，并按IncreaseValue增长
+			rankData.ExData = append(rankData.ExData, changeRankData.Extend[i].InitValue+changeRankData.Extend[i].IncreaseValue)
+		}
+	}
+
+	//设置固定值
+	for _, setData := range changeRankData.SetSortAndExtendData {
+		if setData.IsSortData == false {
+			if int(setData.Pos) < len(rankData.ExData) {
+				rankData.ExData[setData.Pos] = setData.Data
+			}
+		}
+	}
+
+	rs.rankDataExpire.PushOrRefreshExpireKey(rankData.Key, refreshTimestamp)
+	rs.rankModule.OnChangeRankData(rs, rankData)
+
+	return true
+}
+
 // UpsetRank 更新玩家排行数据,返回变化后的数据及变化类型
-func (rs *RankSkip) UpsetRank(upsetData *rpc.RankData,refreshTimestamp int64,fromLoad bool)  RankDataChangeType {
+func (rs *RankSkip) UpsetRank(upsetData *rpc.RankData, refreshTimestamp int64, fromLoad bool) RankDataChangeType {
 	rankNode, ok := rs.mapRankData[upsetData.Key]
 	if ok == true {
+		//增长扩展数据
+		for i := 0; i < len(upsetData.ExData); i++ {
+			if i < len(rankNode.ExData) {
+				//直接增长
+				rankNode.ExData[i] += upsetData.ExData[i].IncreaseValue
+			} else {
+				//如果不存在的扩展位置,append补充，并按IncreaseValue增长
+				rankNode.ExData = append(rankNode.ExData, upsetData.ExData[i].InitValue+upsetData.ExData[i].IncreaseValue)
+			}
+		}
+
 		//找到的情况对比排名数据是否有变化,无变化进行data更新,有变化则进行删除更新
 		if compareIsEqual(rankNode.SortData, upsetData.SortData) {
 			rankNode.Data = upsetData.GetData()
 			rankNode.refreshTimestamp = refreshTimestamp
 
 			if fromLoad == false {
-				rs.rankModule.OnChangeRankData(rs,rankNode)
+				rs.rankModule.OnChangeRankData(rs, rankNode)
 			}
-			rs.rankDataExpire.PushOrRefreshExpireKey(upsetData.Key,refreshTimestamp)
+			rs.rankDataExpire.PushOrRefreshExpireKey(upsetData.Key, refreshTimestamp)
 			return RankDataUpdate
 		}
 
 		if upsetData.Data == nil {
 			upsetData.Data = rankNode.Data
 		}
+
+		//设置额外数据
+		for idx, exValue := range rankNode.ExData {
+			currentIncreaseValue := int64(0)
+			if idx < len(upsetData.ExData) {
+				currentIncreaseValue = upsetData.ExData[idx].IncreaseValue
+			}
+
+			upsetData.ExData = append(upsetData.ExData, &rpc.ExtendIncData{
+				InitValue:     exValue,
+				IncreaseValue: currentIncreaseValue,
+			})
+		}
+
 		rs.skipList.Delete(rankNode)
 		ReleaseRankData(rankNode)
 
-		newRankData := NewRankData(rs.isDes, upsetData,refreshTimestamp)
+		newRankData := NewRankData(rs.isDes, upsetData, refreshTimestamp)
 		rs.skipList.Insert(newRankData)
 		rs.mapRankData[upsetData.Key] = newRankData
 
 		//刷新有效期
-		rs.rankDataExpire.PushOrRefreshExpireKey(upsetData.Key,refreshTimestamp)
+		rs.rankDataExpire.PushOrRefreshExpireKey(upsetData.Key, refreshTimestamp)
 
 		if fromLoad == false {
 			rs.rankModule.OnChangeRankData(rs, newRankData)
@@ -127,10 +293,11 @@ func (rs *RankSkip) UpsetRank(upsetData *rpc.RankData,refreshTimestamp int64,fro
 	}
 
 	if rs.checkInsertAndReplace(upsetData) {
-		newRankData := NewRankData(rs.isDes, upsetData,refreshTimestamp)
+		newRankData := NewRankData(rs.isDes, upsetData, refreshTimestamp)
+
 		rs.skipList.Insert(newRankData)
 		rs.mapRankData[upsetData.Key] = newRankData
-		rs.rankDataExpire.PushOrRefreshExpireKey(upsetData.Key,refreshTimestamp)
+		rs.rankDataExpire.PushOrRefreshExpireKey(upsetData.Key, refreshTimestamp)
 
 		if fromLoad == false {
 			rs.rankModule.OnEnterRank(rs, newRankData)
@@ -152,7 +319,7 @@ func (rs *RankSkip) DeleteRankData(delKeys []uint64) int32 {
 			continue
 		}
 
-		removeRankData+=1
+		removeRankData += 1
 		rs.skipList.Delete(rankData)
 		delete(rs.mapRankData, rankData.Key)
 		rs.rankDataExpire.RemoveExpireKey(rankData.Key)
@@ -172,13 +339,13 @@ func (rs *RankSkip) GetRankNodeData(findKey uint64) (*RankData, uint64) {
 
 	rs.pickExpireKey()
 	_, index := rs.skipList.GetWithPosition(rankNode)
-	return rankNode, index+1
+	return rankNode, index + 1
 }
 
 // GetRankNodeDataByPos 获取,返回排名节点与名次
 func (rs *RankSkip) GetRankNodeDataByRank(rank uint64) (*RankData, uint64) {
 	rs.pickExpireKey()
-	rankNode := rs.skipList.ByPosition(rank-1)
+	rankNode := rs.skipList.ByPosition(rank - 1)
 	if rankNode == nil {
 		return nil, 0
 	}
@@ -203,10 +370,11 @@ func (rs *RankSkip) GetRankKeyPrevToLimit(findKey, count uint64, result *rpc.Ran
 	for iter.Prev() && iterCount < count {
 		rankData := iter.Value().(*RankData)
 		result.RankPosDataList = append(result.RankPosDataList, &rpc.RankPosData{
-			Key:      rankData.Key,
-			Rank:  rankPos - iterCount+1,
-			SortData: rankData.SortData,
-			Data:     rankData.Data,
+			Key:        rankData.Key,
+			Rank:       rankPos - iterCount + 1,
+			SortData:   rankData.SortData,
+			Data:       rankData.Data,
+			ExtendData: rankData.ExData,
 		})
 		iterCount++
 	}
@@ -231,10 +399,11 @@ func (rs *RankSkip) GetRankKeyNextToLimit(findKey, count uint64, result *rpc.Ran
 	for iter.Next() && iterCount < count {
 		rankData := iter.Value().(*RankData)
 		result.RankPosDataList = append(result.RankPosDataList, &rpc.RankPosData{
-			Key:      rankData.Key,
-			Rank:  rankPos + iterCount+1,
-			SortData: rankData.SortData,
-			Data:     rankData.Data,
+			Key:        rankData.Key,
+			Rank:       rankPos + iterCount + 1,
+			SortData:   rankData.SortData,
+			Data:       rankData.Data,
+			ExtendData: rankData.ExData,
 		})
 		iterCount++
 	}
@@ -259,10 +428,11 @@ func (rs *RankSkip) GetRankDataFromToLimit(startPos, count uint64, result *rpc.R
 	for iter.Next() && iterCount < count {
 		rankData := iter.Value().(*RankData)
 		result.RankPosDataList = append(result.RankPosDataList, &rpc.RankPosData{
-			Key:      rankData.Key,
-			Rank:  iterCount + startPos+1,
-			SortData: rankData.SortData,
-			Data:     rankData.Data,
+			Key:        rankData.Key,
+			Rank:       iterCount + startPos + 1,
+			SortData:   rankData.SortData,
+			Data:       rankData.Data,
+			ExtendData: rankData.ExData,
 		})
 		iterCount++
 	}
@@ -301,4 +471,3 @@ func (rs *RankSkip) checkInsertAndReplace(upsetData *rpc.RankData) bool {
 	ReleaseRankData(lastRankData)
 	return true
 }
-
