@@ -16,13 +16,11 @@ import (
 	"sync/atomic"
 )
 
-
-var closeSig chan bool
 var timerDispatcherLen = 100000
 
 type IService interface {
 	Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})
-	Wait()
+	Stop()
 	Start()
 
 	OnSetup(iService IService)
@@ -61,6 +59,8 @@ type Service struct {
 	nodeEventLister rpc.INodeListener
 	discoveryServiceLister rpc.IDiscoveryServiceListener
 	chanEvent chan event.IEvent
+
+	closeSig chan bool
 }
 
 // RpcConnEvent Node结点连接事件
@@ -105,6 +105,7 @@ func (s *Service) OpenProfiler()  {
 }
 
 func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
+	s.closeSig = make(chan bool, 1)
 	s.dispatcher =timer.NewDispatcher(timerDispatcherLen)
 	if s.chanEvent == nil {
 		s.chanEvent = make(chan event.IEvent,maxServiceEventChannel)
@@ -125,26 +126,31 @@ func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServe
 	s.eventHandler.Init(s.eventProcessor)
 }
 
-
 func (s *Service) Start() {
 	s.startStatus = true
+	var waitRun sync.WaitGroup
+
 	for i:=int32(0);i< s.goroutineNum;i++{
 		s.wg.Add(1)
+		waitRun.Add(1)
 		go func(){
+			log.SRelease(s.GetName()," service is running",)
+			waitRun.Done()
 			s.Run()
 		}()
 	}
+
+	waitRun.Wait()
 }
 
 func (s *Service) Run() {
-	log.SDebug("Start running Service ", s.GetName())
 	defer s.wg.Done()
 	var bStop = false
 	s.self.(IService).OnStart()
 	for{
 		var analyzer *profiler.Analyzer
 		select {
-		case <- closeSig:
+		case <- s.closeSig:
 			bStop = true
 		case ev := <- s.chanEvent:
 			switch ev.GetEventType() {
@@ -238,8 +244,8 @@ func (s *Service) Release(){
 			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
 		}
 	}()
+	
 	s.self.OnRelease()
-	log.SDebug("Release Service ", s.GetName())
 }
 
 func (s *Service) OnRelease(){
@@ -249,8 +255,11 @@ func (s *Service) OnInit() error {
 	return nil
 }
 
-func (s *Service) Wait(){
+func (s *Service) Stop(){
+	log.SRelease("stop ",s.GetName()," service ")
+	close(s.closeSig)
 	s.wg.Wait()
+	log.SRelease(s.GetName()," service has been stopped")
 }
 
 func (s *Service) GetServiceCfg()interface{}{

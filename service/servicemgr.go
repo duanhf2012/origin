@@ -19,9 +19,7 @@ func init(){
 	setupServiceList = []IService{}
 }
 
-func Init(chanCloseSig chan bool) {
-	closeSig=chanCloseSig
-
+func Init() {
 	for _,s := range setupServiceList {
 		err := s.OnInit()
 		if err != nil {
@@ -57,8 +55,8 @@ func Start(){
 	}
 }
 
-func WaitStop(){
+func StopAllService(){
 	for i := len(setupServiceList) - 1; i >= 0; i-- {
-		setupServiceList[i].Wait()
+		setupServiceList[i].Stop()
 	}
 }

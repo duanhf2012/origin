@@ -22,7 +22,6 @@ import (
 	"time"
 )
 
-var closeSig chan bool
 var sig chan os.Signal
 var nodeId int
 var preSetupService []service.IService //预安装
@@ -40,8 +39,6 @@ const(
 )
 
 func init() {
-
-	closeSig = make(chan bool, 1)
 	sig = make(chan os.Signal, 3)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.Signal(10))
 
@@ -155,21 +152,23 @@ func initNode(id int) {
 		return
 	}
 
-	//2.setup service
-	for _, s := range preSetupService {
-		//是否配置的service
-		if cluster.GetCluster().IsConfigService(s.GetName()) == false {
-			continue
+	//2.顺序安装服务
+	serviceOrder := cluster.GetCluster().GetLocalNodeInfo().ServiceList
+	for _,serviceName:= range serviceOrder{
+		for _, s := range preSetupService {
+			if s.GetName() != serviceName {
+				continue
+			}
+
+			pServiceCfg := cluster.GetCluster().GetServiceCfg(s.GetName())
+			s.Init(s, cluster.GetRpcClient, cluster.GetRpcServer, pServiceCfg)
+
+			service.Setup(s)
 		}
-
-		pServiceCfg := cluster.GetCluster().GetServiceCfg(s.GetName())
-		s.Init(s, cluster.GetRpcClient, cluster.GetRpcServer, pServiceCfg)
-
-		service.Setup(s)
 	}
 
 	//3.service初始化
-	service.Init(closeSig)
+	service.Init()
 }
 
 func initLog() error {
@@ -274,8 +273,7 @@ func startNode(args interface{}) error {
 	}
 	cluster.GetCluster().Stop()
 	//7.退出
-	close(closeSig)
-	service.WaitStop()
+	service.StopAllService()
 
 	log.SRelease("Server is stop.")
 	return nil

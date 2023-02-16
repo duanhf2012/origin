@@ -26,7 +26,7 @@ type NodeInfo struct {
 	Private           bool
 	ListenAddr        string
 	MaxRpcParamLen    uint32   //最大Rpc参数长度
-	ServiceList       []string //所有的服务列表
+	ServiceList  	  []string //所有的有序服务列表
 	PublicServiceList []string //对外公开的服务列表
 	DiscoveryService  []string //筛选发现的服务，如果不配置，不进行筛选
 	NeighborService   []string
@@ -248,8 +248,9 @@ func (cls *Cluster) checkDynamicDiscovery(localNodeId int) (bool, bool) {
 	return localMaster, hasMaster
 }
 
-func (cls *Cluster) appendService(serviceName string, bPublicService bool) {
-	cls.localNodeInfo.ServiceList = append(cls.localNodeInfo.ServiceList, serviceName)
+func (cls *Cluster) AddDynamicDiscoveryService(serviceName string, bPublicService bool) {
+	addServiceList := append([]string{},serviceName)
+	cls.localNodeInfo.ServiceList = append(addServiceList,cls.localNodeInfo.ServiceList...)
 	if bPublicService {
 		cls.localNodeInfo.PublicServiceList = append(cls.localNodeInfo.PublicServiceList, serviceName)
 	}
@@ -293,11 +294,10 @@ func (cls *Cluster) SetupServiceDiscovery(localNodeId int, setupServiceFun Setup
 
 	//2.如果为动态服务发现安装本地发现服务
 	cls.serviceDiscovery = getDynamicDiscovery()
+	cls.AddDynamicDiscoveryService(DynamicDiscoveryClientName, true)
 	if localMaster == true {
-		cls.appendService(DynamicDiscoveryMasterName, false)
+		cls.AddDynamicDiscoveryService(DynamicDiscoveryMasterName, false)
 	}
-	cls.appendService(DynamicDiscoveryClientName, true)
-
 }
 
 func (cls *Cluster) FindRpcHandler(serviceName string) rpc.IRpcHandler {
