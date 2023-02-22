@@ -7,7 +7,6 @@ import (
 	"sync"
 )
 
-
 //事件接受器
 type EventCallBack func(event IEvent)
 
@@ -229,7 +228,6 @@ func (processor *EventProcessor) EventHandler(ev IEvent) {
 	}
 }
 
-
 func (processor *EventProcessor) castEvent(event IEvent){
 	if processor.mapListenerEvent == nil {
 		log.SError("mapListenerEvent not init!")
@@ -246,3 +244,4 @@ func (processor *EventProcessor) castEvent(event IEvent){
 		proc.PushEvent(event)
 	}
 }
+

@@ -69,6 +69,13 @@ func (pq *PriorityQueue) Pop() *Item {
 	return heap.Pop(&pq.priorityQueueSlice).(*Item)
 }
 
+func (pq *PriorityQueue) GetHighest() *Item{
+	if len(pq.priorityQueueSlice)>0 {
+		return pq.priorityQueueSlice[0]
+	}
+	
+	return nil
+}
 func (pq *PriorityQueue) Len() int {
 	return len(pq.priorityQueueSlice)
 }

@@ -10,11 +10,13 @@ import (
 	"github.com/duanhf2012/origin/log"
 	rpcHandle "github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/util/timer"
+	"github.com/duanhf2012/origin/concurrent"
 )
 
 const InitModuleId = 1e9
 
 type IModule interface {
+	concurrent.IConcurrent
 	SetModuleId(moduleId uint32) bool
 	GetModuleId() uint32
 	AddModule(module IModule) (uint32, error)
@@ -56,6 +58,7 @@ type Module struct {
 
 	//事件管道
 	eventHandler event.IEventHandler
+	concurrent.IConcurrent
 }
 
 func (m *Module) SetModuleId(moduleId uint32) bool {
@@ -105,6 +108,7 @@ func (m *Module) AddModule(module IModule) (uint32, error) {
 	pAddModule.moduleName = reflect.Indirect(reflect.ValueOf(module)).Type().Name()
 	pAddModule.eventHandler = event.NewEventHandler()
 	pAddModule.eventHandler.Init(m.eventHandler.GetEventProcessor())
+	pAddModule.IConcurrent = m.IConcurrent
 	err := module.OnInit()
 	if err != nil {
 		return 0, err

@@ -7,16 +7,17 @@ import (
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/profiler"
 	"github.com/duanhf2012/origin/rpc"
-	originSync "github.com/duanhf2012/origin/util/sync"
 	"github.com/duanhf2012/origin/util/timer"
 	"reflect"
 	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"github.com/duanhf2012/origin/concurrent"
 )
 
 var timerDispatcherLen = 100000
+var maxServiceEventChannelNum = 2000000
 
 type IService interface {
 	Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})
@@ -40,14 +41,9 @@ type IService interface {
 	OpenProfiler()
 }
 
-// eventPool的内存池,缓存Event
-var maxServiceEventChannel = 2000000
-var eventPool = originSync.NewPoolEx(make(chan originSync.IPoolData, maxServiceEventChannel), func() originSync.IPoolData {
-	return &event.Event{}
-})
-
 type Service struct {
 	Module
+
 	rpcHandler rpc.RpcHandler           //rpc
 	name           string    //service name
 	wg             sync.WaitGroup
@@ -59,8 +55,7 @@ type Service struct {
 	nodeEventLister rpc.INodeListener
 	discoveryServiceLister rpc.IDiscoveryServiceListener
 	chanEvent chan event.IEvent
-
-	closeSig chan bool
+	closeSig chan struct{}
 }
 
 // RpcConnEvent Node结点连接事件
@@ -77,10 +72,7 @@ type DiscoveryServiceEvent struct{
 }
 
 func SetMaxServiceChannel(maxEventChannel int){
-	maxServiceEventChannel = maxEventChannel
-	eventPool = originSync.NewPoolEx(make(chan originSync.IPoolData, maxServiceEventChannel), func() originSync.IPoolData {
-		return &event.Event{}
-	})
+	maxServiceEventChannelNum = maxEventChannel
 }
 
 func (rpcEventData *DiscoveryServiceEvent)  GetEventType() event.EventType{
@@ -105,10 +97,10 @@ func (s *Service) OpenProfiler()  {
 }
 
 func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
-	s.closeSig = make(chan bool, 1)
+	s.closeSig = make(chan struct{})
 	s.dispatcher =timer.NewDispatcher(timerDispatcherLen)
 	if s.chanEvent == nil {
-		s.chanEvent = make(chan event.IEvent,maxServiceEventChannel)
+		s.chanEvent = make(chan event.IEvent,maxServiceEventChannelNum)
 	}
 
 	s.rpcHandler.InitRpcHandler(iService.(rpc.IRpcHandler),getClientFun,getServerFun,iService.(rpc.IRpcHandlerChannel))
@@ -124,6 +116,7 @@ func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServe
 	s.eventProcessor.Init(s)
 	s.eventHandler =  event.NewEventHandler()
 	s.eventHandler.Init(s.eventProcessor)
+	s.Module.IConcurrent = &concurrent.Concurrent{}
 }
 
 func (s *Service) Start() {
@@ -146,12 +139,19 @@ func (s *Service) Start() {
 func (s *Service) Run() {
 	defer s.wg.Done()
 	var bStop = false
+	
+	concurrent := s.IConcurrent.(*concurrent.Concurrent)
+	concurrentCBChannel := concurrent.GetCallBackChannel()
+
 	s.self.(IService).OnStart()
 	for{
 		var analyzer *profiler.Analyzer
 		select {
 		case <- s.closeSig:
 			bStop = true
+			concurrent.Close()
+		case cb:=<-concurrentCBChannel:
+			concurrent.DoCallback(cb)
 		case ev := <- s.chanEvent:
 			switch ev.GetEventType() {
 			case event.ServiceRpcRequestEvent:
@@ -174,7 +174,7 @@ func (s *Service) Run() {
 					analyzer.Pop()
 					analyzer = nil
 				}
-				eventPool.Put(cEvent)
+				event.DeleteEvent(cEvent)
 			case event.ServiceRpcResponseEvent:
 				cEvent,ok := ev.(*event.Event)
 				if ok == false {
@@ -194,7 +194,7 @@ func (s *Service) Run() {
 					analyzer.Pop()
 					analyzer = nil
 				}
-				eventPool.Put(cEvent)
+				event.DeleteEvent(cEvent)
 			default:
 				if s.profiler!=nil {
 					analyzer = s.profiler.Push("[SEvent]"+strconv.Itoa(int(ev.GetEventType())))
@@ -329,9 +329,8 @@ func (s *Service) UnRegDiscoverListener(rpcLister rpc.INodeListener) {
 	UnRegDiscoveryServiceEventFun(s.GetName())
 }
 
-
 func (s *Service) PushRpcRequest(rpcRequest *rpc.RpcRequest) error{
-	ev := eventPool.Get().(*event.Event)
+	ev := event.NewEvent()
 	ev.Type = event.ServiceRpcRequestEvent
 	ev.Data = rpcRequest
 
@@ -339,7 +338,7 @@ func (s *Service) PushRpcRequest(rpcRequest *rpc.RpcRequest) error{
 }
 
 func (s *Service) PushRpcResponse(call *rpc.Call) error{
-	ev := eventPool.Get().(*event.Event)
+	ev := event.NewEvent()
 	ev.Type = event.ServiceRpcResponseEvent
 	ev.Data = call
 
@@ -351,7 +350,7 @@ func (s *Service) PushEvent(ev event.IEvent) error{
 }
 
 func (s *Service) pushEvent(ev event.IEvent) error{
-	if len(s.chanEvent) >= maxServiceEventChannel {
+	if len(s.chanEvent) >= maxServiceEventChannelNum {
 		err := errors.New("The event channel in the service is full")
 		log.SError(err.Error())
 		return err
