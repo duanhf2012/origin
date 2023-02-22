@@ -13,6 +13,7 @@ import (
 )
 
 var idleTimeout = 2 * time.Second
+const maxTaskQueueSessionId = 10000
 
 type dispatch struct {
 	minConcurrentNum int32
@@ -35,7 +36,7 @@ func (d *dispatch) open(minGoroutineNum int32, maxGoroutineNum int32, tasks chan
 	d.minConcurrentNum = minGoroutineNum
 	d.maxConcurrentNum = maxGoroutineNum
 	d.tasks = tasks
-	d.mapTaskQueueSession = make(map[int64]*queue.Deque[task], 1024)
+	d.mapTaskQueueSession = make(map[int64]*queue.Deque[task], maxTaskQueueSessionId)
 	d.workerQueue = make(chan task)
 	d.cbChannel = cbChannel
 	d.queueIdChannel = make(chan int64, cap(tasks))

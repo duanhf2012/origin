@@ -69,6 +69,10 @@ func (c *Concurrent) AsyncDoByQueue(queueId int64, fn func(), cb func(err error)
 		return
 	}
 
+	if queueId != 0 {
+		queueId = queueId % maxTaskQueueSessionId+1
+	}
+
 	select {
 	case c.tasks <- task{queueId, fn, cb}:
 	}
