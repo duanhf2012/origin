@@ -90,7 +90,7 @@ cluster.json如下：
 * MaxRpcParamLen:Rpc参数数据包最大长度，该参数可以缺省，默认一次Rpc调用支持最大4294967295byte长度数据。
 * NodeName:结点名称
 * remark:备注，可选项
-* ServiceList:该Node将安装的服务列表
+* ServiceList:该Node拥有的服务列表，注意：origin按配置的顺序进行安装初始化。但停止服务的顺序是相反。
 
 ---
 
