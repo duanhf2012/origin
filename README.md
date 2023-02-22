@@ -1,10 +1,10 @@
 origin 游戏服务器引擎简介
-==================
-
+=========================
 
 origin 是一个由 Go 语言（golang）编写的分布式开源游戏服务器引擎。origin适用于各类游戏服务器的开发，包括 H5（HTML5）游戏服务器。
 
 origin 解决的问题：
+
 * origin总体设计如go语言设计一样，总是尽可能的提供简洁和易用的模式，快速开发。
 * 能够根据业务需求快速并灵活的制定服务器架构。
 * 利用多核优势，将不同的service配置到不同的node，并能高效的协同工作。
@@ -12,12 +12,16 @@ origin 解决的问题：
 * 有丰富并健壮的工具库。
 
 Hello world!
----------------
+------------
+
 下面我们来一步步的建立origin服务器,先下载[origin引擎](https://github.com/duanhf2012/origin "origin引擎"),或者使用如下命令：
+
 ```go
 go get -v -u  github.com/duanhf2012/origin
 ```
+
 于是下载到GOPATH环境目录中,在src中加入main.go,内容如下：
+
 ```go
 package main
 
@@ -29,16 +33,20 @@ func main() {
 	node.Start()
 }
 ```
+
 以上只是基础代码，具体运行参数和配置请参照第一章节。
 
 一个origin进程需要创建一个node对象,Start开始运行。您也可以直接下载origin引擎示例:
+
 ```
 go get -v -u github.com/duanhf2012/originserver
 ```
+
 本文所有的说明都是基于该示例为主。
 
 origin引擎三大对象关系
----------------
+----------------------
+
 * Node:   可以认为每一个Node代表着一个origin进程
 * Service:一个独立的服务可以认为是一个大的功能模块，他是Node的子集，创建完成并安装Node对象中。服务可以支持对外部RPC等功能。
 * Module: 这是origin最小对象单元，强烈建议所有的业务模块都划分成各个小的Module组合，origin引擎将监控所有服务与Module运行状态，例如可以监控它们的慢处理和死循环函数。Module可以建立树状关系。Service本身也是Module的类型。
@@ -46,7 +54,8 @@ origin引擎三大对象关系
 origin集群核心配置文件在config的cluster目录下，如github.com/duanhf2012/originserver的config/cluster目录下有cluster.json与service.json配置：
 
 cluster.json如下：
----------------
+------------------
+
 ```
 {
     "NodeList":[
@@ -70,8 +79,11 @@ cluster.json如下：
         }
     ]
 ```
----------------
+
+---
+
 以上配置了两个结点服务器程序:
+
 * NodeId: 表示origin程序的结点Id标识，不允许重复。
 * Private: 是否私有结点，如果为true，表示其他结点不会发现它，但可以自我运行。
 * ListenAddr:Rpc通信服务的监听地址
@@ -79,12 +91,14 @@ cluster.json如下：
 * NodeName:结点名称
 * remark:备注，可选项
 * ServiceList:该Node将安装的服务列表
----------------
+
+---
 
 在启动程序命令originserver -start nodeid=1中nodeid就是根据该配置装载服务。
 更多参数使用，请使用originserver -help查看。
 service.json如下：
----------------
+------------------
+
 ```
 {
 "Global": {
@@ -103,7 +117,7 @@ service.json如下：
 			"Keyfile":""
 		}
 		]
-		
+	
 	  },
 	  "TcpService":{
 		"ListenAddr":"0.0.0.0:9030",
@@ -160,10 +174,12 @@ service.json如下：
 }
 ```
 
----------------
+---
+
 以上配置分为两个部分：Global,Service与NodeService。Global是全局配置，在任何服务中都可以通过cluster.GetCluster().GetGlobalCfg()获取，NodeService中配置的对应结点中服务的配置，如果启动程序中根据nodeid查找该域的对应的服务，如果找不到时，从Service公共部分查找。
 
 **HttpService配置**
+
 * ListenAddr:Http监听地址
 * ReadTimeout:读网络超时毫秒
 * WriteTimeout:写网络超时毫秒
@@ -172,6 +188,7 @@ service.json如下：
 * CAFile: 证书文件，如果您的服务器通过web服务器代理配置https可以忽略该配置
 
 **TcpService配置**
+
 * ListenAddr: 监听地址
 * MaxConnNum: 允许最大连接数
 * PendingWriteNum：发送网络队列最大数量
@@ -180,20 +197,21 @@ service.json如下：
 * MaxMsgLen:包最大长度
 
 **WSService配置**
+
 * ListenAddr: 监听地址
 * MaxConnNum: 允许最大连接数
 * PendingWriteNum：发送网络队列最大数量
 * MaxMsgLen:包最大长度
----------------
 
-
-
+---
 
 第一章：origin基础:
----------------
+-------------------
+
 查看github.com/duanhf2012/originserver中的simple_service中新建两个服务，分别是TestService1.go与CTestService2.go。
 
 simple_service/TestService1.go如下：
+
 ```
 package simple_service
 
@@ -223,7 +241,9 @@ func (slf *TestService1) OnInit() error {
 
 
 ```
+
 simple_service/TestService2.go如下：
+
 ```
 import (
 	"github.com/duanhf2012/origin/node"
@@ -263,6 +283,7 @@ func main(){
 ```
 
 * config/cluster/cluster.json如下：
+
 ```
 {
     "NodeList":[
@@ -279,6 +300,7 @@ func main(){
 ```
 
 编译后运行结果如下：
+
 ```
 #originserver -start nodeid=1
 TestService1 OnInit.
@@ -286,13 +308,15 @@ TestService2 OnInit.
 ```
 
 第二章：Service中常用功能:
----------------
+--------------------------
 
 定时器:
----------------
+-------
+
 在开发中最常用的功能有定时任务，origin提供两种定时方式：
 
 一种AfterFunc函数，可以间隔一定时间触发回调，参照simple_service/TestService2.go,实现如下：
+
 ```
 func (slf *TestService2) OnInit() error {
 	fmt.Printf("TestService2 OnInit.\n")
@@ -305,10 +329,11 @@ func (slf *TestService2) OnSecondTick(){
 	slf.AfterFunc(time.Second*1,slf.OnSecondTick)
 }
 ```
+
 此时日志可以看到每隔1秒钟会print一次"tick."，如果下次还需要触发，需要重新设置定时器
 
-
 另一种方式是类似Linux系统的crontab命令，使用如下：
+
 ```
 
 func (slf *TestService2) OnInit() error {
@@ -327,27 +352,29 @@ func (slf *TestService2) OnCron(cron *timer.Cron){
 	fmt.Printf(":A minute passed!\n")
 }
 ```
-以上运行结果每换分钟时打印:A minute passed!
 
+以上运行结果每换分钟时打印:A minute passed!
 
 打开多协程模式:
 ---------------
+
 在origin引擎设计中，所有的服务是单协程模式，这样在编写逻辑代码时，不用考虑线程安全问题。极大的减少开发难度，但某些开发场景下不用考虑这个问题，而且需要并发执行的情况，比如，某服务只处理数据库操作控制，而数据库处理中发生阻塞等待的问题，因为一个协程，该服务接受的数据库操作只能是一个
 一个的排队处理，效率过低。于是可以打开此模式指定处理协程数，代码如下：
+
 ```
 func (slf *TestService1) OnInit() error {
 	fmt.Printf("TestService1 OnInit.\n")
-	
+
 	//打开多线程处理模式，10个协程并发处理
 	slf.SetGoRoutineNum(10)
 	return nil
 }
 ```
-为了
 
 
 性能监控功能:
----------------
+-------------
+
 我们在开发一个大型的系统时，经常由于一些代码质量的原因，产生处理过慢或者死循环的产生，该功能可以被监测到。使用方法如下：
 
 ```
@@ -382,6 +409,7 @@ func main(){
 }
 
 ```
+
 上面通过GetProfiler().SetOverTime与slf.GetProfiler().SetMaxOverTimer设置监控时间
 并在main.go中，打开了性能报告器，以每10秒汇报一次，因为上面的例子中，定时器是有死循环，所以可以得到以下报告：
 
@@ -390,10 +418,11 @@ process count 0,take time 0 Milliseconds,average 0 Milliseconds/per.
 too slow process:Timer_orginserver/simple_service.(*TestService1).Loop-fm is take 38003 Milliseconds
 直接帮助找到TestService1服务中的Loop函数
 
-
 结点连接和断开事件监听:
----------------
+-----------------------
+
 在有些业务中需要关注某结点是否断开连接，可以注册回调如下：
+
 ```
 func (ts *TestService) OnInit() error{
 	ts.RegRpcListener(ts)
@@ -408,13 +437,14 @@ func (ts *TestService) OnNodeDisconnect(nodeId int){
 }
 ```
 
-
 第三章：Module使用:
----------------
+-------------------
 
 Module创建与销毁:
----------------
+-----------------
+
 可以认为Service就是一种Module，它有Module所有的功能。在示例代码中可以参考originserver/simple_module/TestService3.go。
+
 ```
 package simple_module
 
@@ -476,7 +506,9 @@ func (slf *TestService3) OnInit() error {
 }
 
 ```
+
 在OnInit中创建了一条线型的模块关系TestService3->module1->module2，调用AddModule后会返回Module的Id，自动生成的Id从10e17开始,内部的id，您可以自己设置Id。当调用ReleaseModule释放时module1时，同样会将module2释放。会自动调用OnRelease函数，日志顺序如下：
+
 ```
 Module1 OnInit.
 Module2 OnInit.
@@ -484,14 +516,16 @@ module1 id is 100000000000000001, module2 id is 100000000000000002
 Module2 Release.
 Module1 Release.
 ```
+
 在Module中同样可以使用定时器功能，请参照第二章节的定时器部分。
 
-
 第四章：事件使用
----------------
+----------------
+
 事件是origin中一个重要的组成部分，可以在同一个node中的service与service或者与module之间进行事件通知。系统内置的几个服务，如：TcpService/HttpService等都是通过事件功能实现。他也是一个典型的观察者设计模型。在event中有两个类型的interface，一个是event.IEventProcessor它提供注册与卸载功能，另一个是event.IEventHandler提供消息广播等功能。
 
 在目录simple_event/TestService4.go中
+
 ```
 package simple_event
 
@@ -535,6 +569,7 @@ func (slf *TestService4) TriggerEvent(){
 ```
 
 在目录simple_event/TestService5.go中
+
 ```
 package simple_event
 
@@ -590,19 +625,24 @@ func (slf *TestService5) OnServiceEvent(ev event.IEvent){
 
 
 ```
+
 程序运行10秒后，调用slf.TriggerEvent函数广播事件，于是在TestService5中会收到
+
 ```
 OnServiceEvent type :1001 data:event data.
 OnModuleEvent type :1001 data:event data.
 ```
+
 在上面的TestModule中监听的事情，当这个Module被Release时监听会自动卸载。
 
 第五章：RPC使用
 ---------------
+
 RPC是service与service间通信的重要方式，它允许跨进程node互相访问，当然也可以指定nodeid进行调用。如下示例：
 
 simple_rpc/TestService6.go文件如下：
-```
+
+```go
 package simple_rpc
 
 import (
@@ -635,6 +675,7 @@ func (slf *TestService6) RPC_Sum(input *InputData,output *int) error{
 ```
 
 simple_rpc/TestService7.go文件如下：
+
 ```
 package simple_rpc
 
@@ -709,11 +750,58 @@ func (slf *TestService7) GoTest(){
 }
 
 ```
+
 您可以把TestService6配置到其他的Node中，比如NodeId为2中。只要在一个子网，origin引擎可以无差别调用。开发者只需要关注Service关系。同样它也是您服务器架构设计的核心需要思考的部分。
 
-第六章：配置服务发现
+
+第六章：并发函数调用
 ---------------
+在开发中经常会有将某些任务放到其他协程中并发执行，执行完成后，将服务的工作线程去回调。使用方式很简单，先打开该功能如下代码：
+```
+	//以下通过cpu数量来定开启协程并发数量，建议:(1)cpu密集型计算使用1.0  (2)i/o密集型使用2.0或者更高
+	slf.OpenConcurrentByNumCPU(1.0)
+	
+	//以下通过函数打开并发协程数，以下协程最小1个，最大10个，任务管道的cap数量
+	//slf.OpenConcurrent(5, 10, 1000000)
+```
+
+普通调用可以使用以下方法:
+```
+func (slf *TestService1) testAsyncDo() {
+	var context struct {
+		data int64
+	}
+	slf.AsyncDo(func() {
+		//该函数回调在协程池中执行
+		context.data = 100
+	}, func(err error) {
+		//函数将在服务协程中执行
+		fmt.Print(context.data) //显示100
+	})
+}
+```
+以下方法将函数扔到任务管道中，由协程池去抢执行。但某些任务是由先后顺序的，可以使用以下方法：
+```
+func (slf *TestService1) testAsyncDoByQueue() {
+	queueId := int64(1)
+
+	//以下进行两次调用，因为两次都传入参数queueId都为1，所以它们会都进入queueId为1的排队执行
+	for i := 0; i < 2; i++ {
+		slf.AsyncDoByQueue(queueId, func() {
+			//该函数会被2次调用，但是会排队执行
+		}, func(err error) {
+			//函数将在服务协程中执行
+		})
+	}
+}
+```
+
+
+第七章：配置服务发现
+--------------------
+
 origin引擎默认使用读取所有结点配置的进行确认结点有哪些Service。引擎也支持动态服务发现的方式，使用了内置的DiscoveryMaster服务用于中心Service，DiscoveryClient用于向DiscoveryMaster获取整个origin网络中所有的结点以及服务信息。具体实现细节请查看这两部分的服务实现。具体使用方式，在以下cluster配置中加入以下内容：
+
 ```
 {
 	"MasterDiscoveryNode": [{
@@ -727,8 +815,8 @@ origin引擎默认使用读取所有结点配置的进行确认结点有哪些Se
 		"ListenAddr": "127.0.0.1:8801",
 		"MaxRpcParamLen": 409600
 	}],
-	
-	
+
+
 	"NodeList": [{
 		"NodeId": 1,
 		"ListenAddr": "127.0.0.1:8801",
@@ -741,6 +829,7 @@ origin引擎默认使用读取所有结点配置的进行确认结点有哪些Se
 	}]
 }
 ```
+
 新上有两新不同的字段分别为MasterDiscoveryNode与DiscoveryService。其中:
 
 MasterDiscoveryNode中配置了结点Id为1的服务发现Master，他的监听地址ListenAddr为127.0.0.1:8801，结点为2的也是一个服务发现Master，不同在于多了"NeighborService":["HttpGateService"]配置。如果"NeighborService"有配置具体的服务时，则表示该结点是一个邻居Master结点。当前运行的Node结点会从该Master结点上筛选HttpGateService的服务，并且当前运行的Node结点不会向上同步本地所有公开的服务，和邻居结点关系是单向的。
@@ -748,14 +837,13 @@ MasterDiscoveryNode中配置了结点Id为1的服务发现Master，他的监听�
 NeighborService可以用在当有多个以Master中心结点的网络，发现跨网络的服务场景。
 DiscoveryService表示将筛选origin网络中的TestService8服务，注意如果DiscoveryService不配置，则筛选功能不生效。
 
+第八章：HttpService使用
+-----------------------
 
-
-
-第七章：HttpService使用
----------------
 HttpService是origin引擎中系统实现的http服务，http接口中常用的GET,POST以及url路由处理。
 
 simple_http/TestHttpService.go文件如下：
+
 ```
 package simple_http
 
@@ -825,15 +913,16 @@ func (slf *TestHttpService) HttpPost(session *sysservice.HttpSession){
 }
 
 ```
+
 注意，要在main.go中加入import _ "orginserver/simple_service"，并且在config/cluster/cluster.json中的ServiceList加入服务。
 
+第九章：TcpService服务使用
+--------------------------
 
-
-第七章：TcpService服务使用
----------------
 TcpService是origin引擎中系统实现的Tcp服务，可以支持自定义消息格式处理器。只要重新实现network.Processor接口。目前内置已经实现最常用的protobuf处理器。
 
 simple_tcp/TestTcpService.go文件如下：
+
 ```
 package simple_tcp
 
@@ -901,9 +990,9 @@ func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
 }
 ```
 
+第十章：其他系统模块介绍
+------------------------
 
-第八章：其他系统模块介绍
----------------
 * sysservice/wsservice.go:支持了WebSocket协议，使用方法与TcpService类似
 * sysmodule/DBModule.go:对mysql数据库操作
 * sysmodule/RedisModule.go:对Redis数据进行操作
@@ -912,9 +1001,9 @@ func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
 * util:在该目录下，有常用的uuid,hash,md5,协程封装等工具库
 * https://github.com/duanhf2012/originservice: 其他扩展支持的服务可以在该工程上看到，目前支持firebase推送的封装。
 
-
 备注:
----------------
+-----
+
 **感觉不错请star, 谢谢!**
 
 **欢迎加入origin服务器开发QQ交流群:168306674，有任何疑问我都会及时解答**
@@ -924,6 +1013,7 @@ func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
 [因服务器是由个人维护，如果这个项目对您有帮助，您可以点我进行捐赠，感谢！](http://www.cppblog.com/images/cppblog_com/API/21416/r_pay.jpg "Thanks!")
 
 特别感谢以下赞助网友：
+
 ```
 咕咕兽
 _
