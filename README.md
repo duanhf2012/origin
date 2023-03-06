@@ -667,6 +667,7 @@ type InputData struct {
 	B int
 }
 
+// 注意RPC函数名的格式必需为RPC_FunctionName或者是RPCFunctionName，如下的RPC_Sum也可以写成RPCSum
 func (slf *TestService6) RPC_Sum(input *InputData,output *int) error{
 	*output = input.A+input.B
 	return nil
