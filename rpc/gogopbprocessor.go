@@ -41,7 +41,10 @@ func (slf *GoGoPBProcessor) Marshal(v interface{}) ([]byte, error){
 }
 
 func (slf *GoGoPBProcessor) Unmarshal(data []byte, msg interface{}) error{
-	protoMsg := msg.(proto.Message)
+	protoMsg,ok := msg.(proto.Message)
+	if ok == false {
+		return fmt.Errorf("%+v is not of proto.Message type",msg)
+	}
 	return proto.Unmarshal(data, protoMsg)
 }
 
