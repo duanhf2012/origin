@@ -138,7 +138,7 @@ func (handler *RpcHandler) isExportedOrBuiltinType(t reflect.Type) bool {
 
 func (handler *RpcHandler) suitableMethods(method reflect.Method) error {
 	//只有RPC_开头的才能被调用
-	if strings.Index(method.Name, "RPC_") != 0 {
+	if strings.Index(method.Name, "RPC_") != 0 && strings.Index(method.Name, "RPC") != 0 {
 		return nil
 	}
 
