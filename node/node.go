@@ -155,15 +155,20 @@ func initNode(id int) {
 	//2.顺序安装服务
 	serviceOrder := cluster.GetCluster().GetLocalNodeInfo().ServiceList
 	for _,serviceName:= range serviceOrder{
+		bSetup := false
 		for _, s := range preSetupService {
 			if s.GetName() != serviceName {
 				continue
 			}
-
+			bSetup = true
 			pServiceCfg := cluster.GetCluster().GetServiceCfg(s.GetName())
 			s.Init(s, cluster.GetRpcClient, cluster.GetRpcServer, pServiceCfg)
 
 			service.Setup(s)
+		}
+
+		if bSetup == false {
+			log.SFatal("Service name "+serviceName+" configuration error")
 		}
 	}
 

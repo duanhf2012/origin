@@ -60,6 +60,21 @@ func (ds *DynamicDiscoveryMaster) addNodeInfo(nodeInfo *rpc.NodeInfo) {
 	ds.nodeInfo = append(ds.nodeInfo, nodeInfo)
 }
 
+func (ds *DynamicDiscoveryMaster) removeNodeInfo(nodeId int32) {
+	if _,ok:= ds.mapNodeInfo[nodeId];ok == false {
+		return
+	}
+
+	for i:=0;i<len(ds.nodeInfo);i++ {
+		if ds.nodeInfo[i].NodeId == nodeId {
+			ds.nodeInfo = append(ds.nodeInfo[:i],ds.nodeInfo[i+1:]...)
+			break
+		}
+	}
+
+	delete(ds.mapNodeInfo,nodeId)
+}
+
 func (ds *DynamicDiscoveryMaster) OnInit() error {
 	ds.mapNodeInfo = make(map[int32]struct{}, 20)
 	ds.RegRpcListener(ds)
@@ -102,6 +117,8 @@ func (ds *DynamicDiscoveryMaster) OnNodeDisconnect(nodeId int) {
 	if ds.isRegNode(int32(nodeId)) == false {
 		return
 	}
+
+	ds.removeNodeInfo(int32(nodeId))
 
 	var notifyDiscover rpc.SubscribeDiscoverNotify
 	notifyDiscover.MasterNodeId = int32(cluster.GetLocalNodeInfo().NodeId)

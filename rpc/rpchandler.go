@@ -496,7 +496,11 @@ func (handler *RpcHandler) asyncCallRpc(nodeId int, serviceMethod string, args i
 	err, count := handler.funcRpcClient(nodeId, serviceMethod, pClientList[:])
 	if count == 0 || err != nil {
 		if err == nil {
-			err = fmt.Errorf("cannot find %s from nodeId %d",serviceMethod,nodeId)
+			if nodeId  > 0 {
+				err = fmt.Errorf("cannot find %s from nodeId %d",serviceMethod,nodeId)
+			}else {
+				err = fmt.Errorf("No %s service found in the origin network",serviceMethod)
+			}
 		}
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply), reflect.ValueOf(err)})
 		log.SError("Call serviceMethod is error:", err.Error())
