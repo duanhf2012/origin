@@ -71,7 +71,6 @@ func (server *Server) Start(listenAddr string, maxRpcParamLen uint32) {
 	}
 
 	server.rpcServer.Addr = ":" + splitAddr[1]
-	server.rpcServer.LenMsgLen = 4 //uint16
 	server.rpcServer.MinMsgLen = 2
 	if maxRpcParamLen > 0 {
 		server.rpcServer.MaxMsgLen = maxRpcParamLen

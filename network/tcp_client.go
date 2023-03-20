@@ -64,9 +64,7 @@ func (client *TCPClient) init() {
 	if client.cons != nil {
 		log.SFatal("client is running")
 	}
-	if client.LenMsgLen == 0 {
-		client.LenMsgLen = Default_LenMsgLen
-	}
+
 	if client.MinMsgLen == 0 {
 		client.MinMsgLen = Default_MinMsgLen
 	}

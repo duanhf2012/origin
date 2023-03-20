@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"math"
 )
 
 // --------------
@@ -21,29 +20,18 @@ type MsgParser struct {
 
 
 func (p *MsgParser) init(){
-	var max uint32
-	switch p.LenMsgLen {
-	case 1:
-		max = math.MaxUint8
-	case 2:
-		max = math.MaxUint16
-	case 4:
-		max = math.MaxUint32
-	default:
-		panic("LenMsgLen value must be 1 or 2 or 4")
-	}
-
-	if p.MinMsgLen > max {
-		p.MinMsgLen = max
-	}
-
-	if p.MaxMsgLen > max {
-		p.MaxMsgLen = max
-	}
-
 	p.INetMempool = NewMemAreaPool()
-}
 
+	for i:=1;i<=4;i*=2 {
+		max := uint32(1<<(i*8)-1)
+		if p.MaxMsgLen <= max  {
+			p.LenMsgLen = i
+			return
+		}
+	}
+
+	panic("MaxMsgLen value must be less than 4294967295")
+}
 
 // goroutine safe
 func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {

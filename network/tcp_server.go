@@ -9,12 +9,11 @@ import (
 
 const Default_ReadDeadline  = time.Second*30  //30s
 const Default_WriteDeadline = time.Second*30 //30s
-const Default_MaxConnNum = 9000
+const Default_MaxConnNum = 1000000
 const Default_PendingWriteNum = 10000
 const Default_LittleEndian = false
 const Default_MinMsgLen = 2
 const Default_MaxMsgLen = 65535
-const Default_LenMsgLen = 2
 
 type TCPServer struct {
 	Addr            string
@@ -49,6 +48,7 @@ func (server *TCPServer) init() {
 		server.MaxConnNum = Default_MaxConnNum
 		log.SRelease("invalid MaxConnNum, reset to ", server.MaxConnNum)
 	}
+
 	if server.PendingWriteNum <= 0 {
 		server.PendingWriteNum = Default_PendingWriteNum
 		log.SRelease("invalid PendingWriteNum, reset to ", server.PendingWriteNum)
@@ -72,10 +72,6 @@ func (server *TCPServer) init() {
 	if server.ReadDeadline == 0 {
 		server.ReadDeadline = Default_ReadDeadline
 		log.SRelease("invalid ReadDeadline, reset to ", server.ReadDeadline.Seconds(),"s")
-	}
-
-	if server.LenMsgLen == 0 {
-		server.LenMsgLen = Default_LenMsgLen
 	}
 
 	if server.NewAgent == nil {
