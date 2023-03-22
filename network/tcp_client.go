@@ -71,11 +71,17 @@ func (client *TCPClient) init() {
 	if client.MaxMsgLen == 0 {
 		client.MaxMsgLen = Default_MaxMsgLen
 	}
+	if client.LenMsgLen ==0 {
+		client.LenMsgLen = Default_LenMsgLen
+	}
+	maxMsgLen := client.MsgParser.getMaxMsgLen(client.LenMsgLen)
+	if client.MaxMsgLen > maxMsgLen {
+		client.MaxMsgLen = maxMsgLen
+		log.SRelease("invalid MaxMsgLen, reset to ", maxMsgLen)
+	}
 
 	client.cons = make(ConnSet)
 	client.closeFlag = false
-
-	// msg parser
 	client.MsgParser.init()
 }
 

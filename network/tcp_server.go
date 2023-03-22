@@ -7,13 +7,16 @@ import (
 	"time"
 )
 
-const Default_ReadDeadline  = time.Second*30  //30s
-const Default_WriteDeadline = time.Second*30 //30s
-const Default_MaxConnNum = 1000000
-const Default_PendingWriteNum = 10000
-const Default_LittleEndian = false
-const Default_MinMsgLen = 2
-const Default_MaxMsgLen = 65535
+const(
+	Default_ReadDeadline  = time.Second*30 //默认读超时30s
+	Default_WriteDeadline = time.Second*30 //默认写超时30s
+	Default_MaxConnNum = 1000000						 //默认最大连接数
+	Default_PendingWriteNum = 100000				     //单连接写消息Channel容量
+	Default_LittleEndian = false						 //默认大小端
+	Default_MinMsgLen = 2								 //最小消息长度2byte
+	Default_LenMsgLen = 2								 //包头字段长度占用2byte
+	Default_MaxMsgLen = 65535                            //最大消息长度
+)
 
 type TCPServer struct {
 	Addr            string
@@ -28,8 +31,7 @@ type TCPServer struct {
 	mutexConns      sync.Mutex
 	wgLn            sync.WaitGroup
 	wgConns         sync.WaitGroup
-	
-	// msg parser
+
 	MsgParser
 }
 
@@ -54,14 +56,25 @@ func (server *TCPServer) init() {
 		log.SRelease("invalid PendingWriteNum, reset to ", server.PendingWriteNum)
 	}
 
-	if server.MinMsgLen <= 0 {
-		server.MinMsgLen = Default_MinMsgLen
-		log.SRelease("invalid MinMsgLen, reset to ", server.MinMsgLen)
+	if server.LenMsgLen <= 0 {
+		server.LenMsgLen = Default_LenMsgLen
+		log.SRelease("invalid LenMsgLen, reset to ", server.LenMsgLen)
 	}
 
 	if server.MaxMsgLen <= 0 {
 		server.MaxMsgLen = Default_MaxMsgLen
 		log.SRelease("invalid MaxMsgLen, reset to ", server.MaxMsgLen)
+	}
+
+	maxMsgLen := server.MsgParser.getMaxMsgLen(server.LenMsgLen)
+	if server.MaxMsgLen > maxMsgLen {
+		server.MaxMsgLen = maxMsgLen
+		log.SRelease("invalid MaxMsgLen, reset to ", maxMsgLen)
+	}
+	
+	if server.MinMsgLen <= 0 {
+		server.MinMsgLen = Default_MinMsgLen
+		log.SRelease("invalid MinMsgLen, reset to ", server.MinMsgLen)
 	}
 
 	if server.WriteDeadline == 0 {
@@ -80,8 +93,6 @@ func (server *TCPServer) init() {
 
 	server.ln = ln
 	server.conns = make(ConnSet)
-	server.INetMempool = NewMemAreaPool()
-
 	server.MsgParser.init()
 }
 

@@ -90,6 +90,10 @@ func (tcpService *TcpService) OnInit() error{
 	if ok == true {
 		tcpService.tcpServer.LittleEndian = LittleEndian.(bool)
 	}
+	LenMsgLen,ok := tcpCfg["LenMsgLen"]
+	if ok == true {
+		tcpService.tcpServer.LenMsgLen = int(LenMsgLen.(float64))
+	}
 	MinMsgLen,ok := tcpCfg["MinMsgLen"]
 	if ok == true {
 		tcpService.tcpServer.MinMsgLen = uint32(MinMsgLen.(float64))
