@@ -11,14 +11,19 @@ import (
 	"time"
 )
 
-const MaxCheckCallRpcCount = 1000
-const MaxPendingWriteNum = 200000
-const ConnectInterval = 2*time.Second
-const RpcConnNum = 1
-const RpcLenMsgLen = 4
-const RpcMinMsgLen = 2
-const CheckRpcCallTimeoutInterval = 5*time.Second
-const DefaultRpcTimeout = 15*time.Second
+const(
+	DefaultRpcConnNum           = 1
+	DefaultRpcLenMsgLen         = 4
+	DefaultRpcMinMsgLen         = 2
+	DefaultMaxCheckCallRpcCount = 1000
+	DefaultMaxPendingWriteNum 	 = 200000
+
+
+	DefaultConnectInterval = 2*time.Second
+	DefaultCheckRpcCallTimeoutInterval = 5*time.Second
+	DefaultRpcTimeout = 15*time.Second
+)
+
 var clientSeq uint32
 
 type IRealClient interface {
@@ -64,7 +69,7 @@ func (bc *Client) makeCallFail(call *Call) {
 
 func (bc *Client) checkRpcCallTimeout() {
 	for{
-		time.Sleep(CheckRpcCallTimeoutInterval)
+		time.Sleep(DefaultCheckRpcCallTimeoutInterval)
 		now := time.Now()
 
 		for i := 0; i < bc.maxCheckCallRpcCount; i++ {

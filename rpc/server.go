@@ -84,6 +84,8 @@ func (server *Server) Start(listenAddr string, maxRpcParamLen uint32) {
 	server.rpcServer.LittleEndian = LittleEndian
 	server.rpcServer.WriteDeadline = Default_ReadWriteDeadline
 	server.rpcServer.ReadDeadline = Default_ReadWriteDeadline
+	server.rpcServer.LenMsgLen = DefaultRpcLenMsgLen
+
 	server.rpcServer.Start()
 }
 

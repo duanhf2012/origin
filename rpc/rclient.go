@@ -211,19 +211,19 @@ func NewRClient(nodeId int, addr string, maxRpcParamLen uint32,triggerRpcConnEve
 	client := &Client{}
 	client.clientId = atomic.AddUint32(&clientSeq, 1)
 	client.nodeId = nodeId
-	client.maxCheckCallRpcCount = MaxCheckCallRpcCount
+	client.maxCheckCallRpcCount = DefaultMaxCheckCallRpcCount
 	client.callRpcTimeout = DefaultRpcTimeout
 
 	c:= &RClient{}
 	c.selfClient = client
 	c.Addr = addr
-	c.ConnectInterval = ConnectInterval
-	c.PendingWriteNum = MaxPendingWriteNum
+	c.ConnectInterval = DefaultConnectInterval
+	c.PendingWriteNum = DefaultMaxPendingWriteNum
 	c.AutoReconnect = true
 	c.TriggerRpcConnEvent = triggerRpcConnEvent
-	c.ConnNum = RpcConnNum
-	c.LenMsgLen = RpcLenMsgLen
-	c.MinMsgLen = RpcMinMsgLen
+	c.ConnNum = DefaultRpcConnNum
+	c.LenMsgLen = DefaultRpcLenMsgLen
+	c.MinMsgLen = DefaultRpcMinMsgLen
 	c.ReadDeadline = Default_ReadWriteDeadline
 	c.WriteDeadline = Default_ReadWriteDeadline
 	c.LittleEndian = LittleEndian

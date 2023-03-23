@@ -119,7 +119,7 @@ func NewLClient(nodeId int) *Client{
 	client := &Client{}
 	client.clientId = atomic.AddUint32(&clientSeq, 1)
 	client.nodeId = nodeId
-	client.maxCheckCallRpcCount = MaxCheckCallRpcCount
+	client.maxCheckCallRpcCount = DefaultMaxCheckCallRpcCount
 	client.callRpcTimeout = DefaultRpcTimeout
 
 	lClient := &LClient{}
