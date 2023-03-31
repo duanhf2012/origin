@@ -12,7 +12,7 @@ import (
 
 type task struct {
 	queueId int64
-	fn      func()
+	fn      func() bool
 	cb      func(err error)
 }
 
@@ -60,17 +60,18 @@ func (w *worker) exec(t *task) {
 				cb(errors.New(errString))
 			}
 
-			w.endCallFun(t)
+			w.endCallFun(true,t)
 			log.SError("core dump info[", errString, "]\n", string(buf[:l]))
 		}
 	}()
 
-	t.fn()
-	w.endCallFun(t)
+	w.endCallFun(t.fn(),t)
 }
 
-func (w *worker) endCallFun(t *task) {
-	w.pushAsyncDoCallbackEvent(t.cb)
+func (w *worker) endCallFun(isDocallBack bool,t *task) {
+	if isDocallBack {
+		w.pushAsyncDoCallbackEvent(t.cb)
+	}
 
 	if t.queueId != 0 {
 		w.pushQueueTaskFinishEvent(t.queueId)

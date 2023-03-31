@@ -12,8 +12,8 @@ const defaultMaxTaskChannelNum = 1000000
 type IConcurrent interface {
 	OpenConcurrentByNumCPU(cpuMul float32)
 	OpenConcurrent(minGoroutineNum int32, maxGoroutineNum int32, maxTaskChannelNum int)
-	AsyncDoByQueue(queueId int64, fn func(), cb func(err error))
-	AsyncDo(f func(), cb func(err error))
+	AsyncDoByQueue(queueId int64, fn func() bool, cb func(err error))
+	AsyncDo(f func() bool, cb func(err error))
 }
 
 type Concurrent struct {
@@ -40,11 +40,11 @@ func (c *Concurrent) OpenConcurrent(minGoroutineNum int32, maxGoroutineNum int32
 	c.dispatch.open(minGoroutineNum, maxGoroutineNum, c.tasks, c.cbChannel)
 }
 
-func (c *Concurrent) AsyncDo(f func(), cb func(err error)) {
+func (c *Concurrent) AsyncDo(f func() bool, cb func(err error)) {
 	c.AsyncDoByQueue(0, f, cb)
 }
 
-func (c *Concurrent) AsyncDoByQueue(queueId int64, fn func(), cb func(err error)) {
+func (c *Concurrent) AsyncDoByQueue(queueId int64, fn func() bool, cb func(err error)) {
 	if cap(c.tasks) == 0 {
 		panic("not open concurrent")
 	}
