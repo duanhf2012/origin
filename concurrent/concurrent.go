@@ -54,16 +54,6 @@ func (c *Concurrent) AsyncDoByQueue(queueId int64, fn func() bool, cb func(err e
 		return
 	}
 
-	if len(c.tasks) > cap(c.tasks) {
-		log.SError("tasks channel is full")
-		if cb != nil {
-			c.pushAsyncDoCallbackEvent(func(err error) {
-				cb(errors.New("tasks channel is full"))
-			})
-		}
-		return
-	}
-
 	if fn == nil {
 		c.pushAsyncDoCallbackEvent(cb)
 		return
@@ -75,6 +65,14 @@ func (c *Concurrent) AsyncDoByQueue(queueId int64, fn func() bool, cb func(err e
 
 	select {
 	case c.tasks <- task{queueId, fn, cb}:
+	default:
+		log.SError("tasks channel is full")
+		if cb != nil {
+			c.pushAsyncDoCallbackEvent(func(err error) {
+				cb(errors.New("tasks channel is full"))
+			})
+		}
+		return
 	}
 }
 
