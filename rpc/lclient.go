@@ -44,7 +44,8 @@ func (lc *LClient) Go(rpcHandler IRpcHandler,noReply bool, serviceMethod string,
 		sErr := errors.New("Call serviceMethod " + serviceMethod + " is error!")
 		log.SError(sErr.Error())
 		call := MakeCall()
-		call.Err = sErr
+		call.DoError(sErr)
+
 		return call
 	}
 
@@ -53,12 +54,13 @@ func (lc *LClient) Go(rpcHandler IRpcHandler,noReply bool, serviceMethod string,
 		//调用自己rpcHandler处理器
 		err := pLocalRpcServer.myselfRpcHandlerGo(lc.selfClient,serviceName, serviceMethod, args, requestHandlerNull,reply)
 		call := MakeCall()
+
 		if err != nil {
-			call.Err = err
+			call.DoError(err)
 			return call
 		}
 
-		call.done<-call
+		call.DoOK()
 		return call
 	}
 

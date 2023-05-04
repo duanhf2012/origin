@@ -44,8 +44,9 @@ func (rc *RClient) Go(rpcHandler IRpcHandler,noReply bool, serviceMethod string,
 	_, processor := GetProcessorType(args)
 	InParam, err := processor.Marshal(args)
 	if err != nil {
+		log.SError(err.Error())
 		call := MakeCall()
-		call.Err = err
+		call.DoError(err)
 		return call
 	}
 
@@ -65,14 +66,17 @@ func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 
 	if err != nil {
 		call.Seq = 0
-		call.Err = err
+		log.SError(err.Error())
+		call.DoError(err)
 		return call
 	}
 
 	conn := rc.GetConn()
 	if conn == nil || conn.IsConnected()==false {
 		call.Seq = 0
-		call.Err = errors.New(serviceMethod + "  was called failed,rpc client is disconnect")
+		sErr := errors.New(serviceMethod + "  was called failed,rpc client is disconnect")
+		log.SError(sErr.Error())
+		call.DoError(sErr)
 		return call
 	}
 
@@ -83,8 +87,11 @@ func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 	err = conn.WriteMsg([]byte{uint8(processor.GetProcessorType())}, bytes)
 	if err != nil {
 		rc.selfClient.RemovePending(call.Seq)
+
+		log.SError(err.Error())
+
 		call.Seq = 0
-		call.Err = err
+		call.DoError(err)
 	}
 
 	return call

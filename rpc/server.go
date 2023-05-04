@@ -256,10 +256,10 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Clie
 
 	rpcHandler := server.rpcHandleFinder.FindRpcHandler(handlerName)
 	if rpcHandler == nil {
+		err := errors.New("service method " + serviceMethod + " not config!")
+		log.SError(err.Error())
 		pCall.Seq = 0
-		pCall.Err = errors.New("service method " + serviceMethod + " not config!")
-		pCall.done <- pCall
-		log.SError(pCall.Err.Error())
+		pCall.DoError(err)
 
 		return pCall
 	}
@@ -273,10 +273,10 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Clie
 		var err error
 		iParam,err = processor.Clone(args)
 		if err != nil {
+			sErr := errors.New("RpcHandler " + handlerName + "."+serviceMethod+" deep copy inParam is error:" + err.Error())
+			log.SError(sErr.Error())
 			pCall.Seq = 0
-			pCall.Err = errors.New("RpcHandler " + handlerName + "."+serviceMethod+" deep copy inParam is error:" + err.Error())
-			pCall.done <- pCall
-			log.SError(pCall.Err.Error())
+			pCall.DoError(sErr)
 
 			return pCall
 		}
@@ -289,9 +289,10 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Clie
 		var err error
 		req.inParam, err = rpcHandler.UnmarshalInParam(processor, serviceMethod, rpcMethodId, rawArgs)
 		if err != nil {
+			log.SError(err.Error())
+			pCall.Seq = 0
+			pCall.DoError(err)
 			ReleaseRpcRequest(req)
-			pCall.Err = err
-			pCall.done <- pCall
 			return pCall
 		}
 	}
@@ -321,20 +322,22 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Clie
 
 				return
 			}
+
 			if len(Err) == 0 {
 				v.Err = nil
+				v.DoOK()
 			} else {
-				v.Err = Err
+				log.SError(Err.Error())
+				v.DoError(Err)
 			}
-			v.done <- v
 		}
 	}
 
 	err := rpcHandler.PushRpcRequest(req)
 	if err != nil {
+		log.SError(err.Error())
+		pCall.DoError(err)
 		ReleaseRpcRequest(req)
-		pCall.Err = err
-		pCall.done <- pCall
 	}
 
 	return pCall

@@ -102,6 +102,15 @@ func (rpcResponse *RpcResponse) Clear() *RpcResponse{
 	return rpcResponse
 }
 
+func (call *Call) DoError(err error){
+	call.Err = err
+	call.done <- call
+}
+
+func (call *Call) DoOK(){
+	call.done <- call
+}
+
 func (call *Call) Clear() *Call{
 	call.Seq = 0
 	call.ServiceMethod = ""
