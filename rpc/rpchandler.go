@@ -291,14 +291,16 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		request.requestHandle(nil, RpcError(rErr))
 		return
 	}
+
+	requestHanle := request.requestHandle
 	returnValues := v.method.Func.Call(paramList)
 	errInter := returnValues[0].Interface()
 	if errInter != nil {
 		err = errInter.(error)
 	}
 
-	if request.requestHandle != nil && v.hasResponder == false {
-		request.requestHandle(oParam.Interface(), ConvertError(err))
+	if v.hasResponder == false && requestHanle != nil  {
+		requestHanle(oParam.Interface(), ConvertError(err))
 	}
 }
 

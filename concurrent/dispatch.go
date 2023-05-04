@@ -80,7 +80,7 @@ func (d *dispatch) run() {
 }
 
 func (d *dispatch) processTimer() {
-	if d.idle == true && d.workerNum > d.minConcurrentNum {
+	if d.idle == true && d.workerNum > atomic.LoadInt32(&d.minConcurrentNum) {
 		d.processIdle()
 	}
 
