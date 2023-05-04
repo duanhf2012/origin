@@ -461,11 +461,6 @@ func (handler *RpcHandler) callRpc(nodeId int, serviceMethod string, args interf
 
 	pClient := pClientList[0]
 	pCall := pClient.Go(handler.rpcHandler,false, serviceMethod, args, reply)
-	if pCall.Err != nil {
-		err = pCall.Err
-		ReleaseCall(pCall)
-		return err
-	}
 
 	err = pCall.Done().Err
 	pClient.RemovePending(pCall.Seq)
