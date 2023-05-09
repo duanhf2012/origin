@@ -71,6 +71,7 @@ func (mp *MongoPersist) OnInit() error {
 	}
 
 	//开启协程
+	mp.waitGroup.Add(1)
 	go mp.persistCoroutine()
 
 	return nil
@@ -261,7 +262,6 @@ func (mp *MongoPersist) JugeTimeoutSave() bool{
 }
 
 func (mp *MongoPersist)  persistCoroutine(){
-	mp.waitGroup.Add(1)
 	defer mp.waitGroup.Done()
 	for atomic.LoadInt32(&mp.stop)==0 || mp.hasPersistData(){
 		//间隔时间sleep

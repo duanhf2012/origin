@@ -193,9 +193,11 @@ func Report() {
 
 		record = prof.record
 		prof.record = list.New()
+		callNum := prof.callNum
+		totalCostTime := prof.totalCostTime
 		prof.stackLocker.RUnlock()
 
-		DefaultReportFunction(name,prof.callNum,prof.totalCostTime,record)
+		DefaultReportFunction(name,callNum,totalCostTime,record)
 	}
 }
 

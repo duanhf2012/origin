@@ -1,11 +1,12 @@
 package network
 
 import (
+	"errors"
 	"github.com/duanhf2012/origin/log"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
-	"errors"
 )
 
 type ConnSet map[net.Conn]struct{}
@@ -14,7 +15,7 @@ type TCPConn struct {
 	sync.Mutex
 	conn      net.Conn
 	writeChan chan []byte
-	closeFlag bool
+	closeFlag int32
 	msgParser *MsgParser
 }
 
@@ -49,7 +50,7 @@ func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser,writeDe
 		conn.Close()
 		tcpConn.Lock()
 		freeChannel(tcpConn)
-		tcpConn.closeFlag = true
+		atomic.StoreInt32(&tcpConn.closeFlag,1)
 		tcpConn.Unlock()
 	}()
 
@@ -60,9 +61,9 @@ func (tcpConn *TCPConn) doDestroy() {
 	tcpConn.conn.(*net.TCPConn).SetLinger(0)
 	tcpConn.conn.Close()
 
-	if !tcpConn.closeFlag {
+	if atomic.LoadInt32(&tcpConn.closeFlag)==0 {
 		close(tcpConn.writeChan)
-		tcpConn.closeFlag = true
+		atomic.StoreInt32(&tcpConn.closeFlag,1)
 	}
 }
 
@@ -76,12 +77,12 @@ func (tcpConn *TCPConn) Destroy() {
 func (tcpConn *TCPConn) Close() {
 	tcpConn.Lock()
 	defer tcpConn.Unlock()
-	if tcpConn.closeFlag {
+	if atomic.LoadInt32(&tcpConn.closeFlag)==1 {
 		return
 	}
 
 	tcpConn.doWrite(nil)
-	tcpConn.closeFlag = true
+	atomic.StoreInt32(&tcpConn.closeFlag,1)
 }
 
 func (tcpConn *TCPConn) GetRemoteIp() string {
@@ -104,7 +105,7 @@ func (tcpConn *TCPConn) doWrite(b []byte) error{
 func (tcpConn *TCPConn) Write(b []byte) error{
 	tcpConn.Lock()
 	defer tcpConn.Unlock()
-	if tcpConn.closeFlag || b == nil {
+	if atomic.LoadInt32(&tcpConn.closeFlag)==1 || b == nil {
 		tcpConn.ReleaseReadMsg(b)
 		return errors.New("conn is close")
 	}
@@ -133,14 +134,14 @@ func (tcpConn *TCPConn) ReleaseReadMsg(byteBuff []byte){
 }
 
 func (tcpConn *TCPConn) WriteMsg(args ...[]byte) error {
-	if tcpConn.closeFlag == true {
+	if atomic.LoadInt32(&tcpConn.closeFlag) == 1 {
 		return errors.New("conn is close")
 	}
 	return tcpConn.msgParser.Write(tcpConn, args...)
 }
 
 func (tcpConn *TCPConn) WriteRawMsg(args []byte) error {
-	if tcpConn.closeFlag == true {
+	if atomic.LoadInt32(&tcpConn.closeFlag) == 1 {
 		return errors.New("conn is close")
 	}
 
@@ -149,7 +150,7 @@ func (tcpConn *TCPConn) WriteRawMsg(args []byte) error {
 
 
 func (tcpConn *TCPConn) IsConnected() bool {
-	return tcpConn.closeFlag == false
+	return atomic.LoadInt32(&tcpConn.closeFlag) == 0
 }
 
 func (tcpConn *TCPConn) SetReadDeadline(d time.Duration)  {

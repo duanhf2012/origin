@@ -12,7 +12,7 @@ import (
 	"github.com/duanhf2012/origin/util/queue"
 )
 
-var idleTimeout = 2 * time.Second
+var idleTimeout = int64(2 * time.Second)
 const maxTaskQueueSessionId = 10000
 
 type dispatch struct {
@@ -47,7 +47,7 @@ func (d *dispatch) open(minGoroutineNum int32, maxGoroutineNum int32, tasks chan
 
 func (d *dispatch) run() {
 	defer d.waitDispatch.Done()
-	timeout := time.NewTimer(idleTimeout)
+	timeout := time.NewTimer(time.Duration(atomic.LoadInt64(&idleTimeout)))
 
 	for {
 		select {
@@ -65,9 +65,9 @@ func (d *dispatch) run() {
 			case <-timeout.C:
 				d.processTimer()
 				if atomic.LoadInt32(&d.minConcurrentNum) == -1 && len(d.tasks) == 0 {
-					idleTimeout = time.Millisecond * 10
+					atomic.StoreInt64(&idleTimeout,int64(time.Millisecond * 10))
 				}
-				timeout.Reset(idleTimeout)
+				timeout.Reset(time.Duration(atomic.LoadInt64(&idleTimeout)))
 			}
 		}
 
