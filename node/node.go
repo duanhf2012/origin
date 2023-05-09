@@ -295,9 +295,9 @@ func GetService(serviceName string) service.IService {
 	return service.GetService(serviceName)
 }
 
-func SetConfigDir(configDir string) {
-	configDir = configDir
-	cluster.SetConfigDir(configDir)
+func SetConfigDir(cfgDir string) {
+	configDir = cfgDir
+	cluster.SetConfigDir(cfgDir)
 }
 
 func GetConfigDir() string {

@@ -356,12 +356,12 @@ func (rs *RankSkip) GetRankNodeDataByRank(rank uint64) (*RankData, uint64) {
 // GetRankKeyPrevToLimit 获取key前count名的数据
 func (rs *RankSkip) GetRankKeyPrevToLimit(findKey, count uint64, result *rpc.RankDataList) error {
 	if rs.GetRankLen() <= 0 {
-		return fmt.Errorf("rank[", rs.rankId, "] no data")
+		return fmt.Errorf("rank[%d] no data", rs.rankId)
 	}
 
 	findData, ok := rs.mapRankData[findKey]
 	if ok == false {
-		return fmt.Errorf("rank[", rs.rankId, "] no data")
+		return fmt.Errorf("rank[%d] no data", rs.rankId)
 	}
 
 	_, rankPos := rs.skipList.GetWithPosition(findData)
@@ -385,12 +385,12 @@ func (rs *RankSkip) GetRankKeyPrevToLimit(findKey, count uint64, result *rpc.Ran
 // GetRankKeyPrevToLimit 获取key前count名的数据
 func (rs *RankSkip) GetRankKeyNextToLimit(findKey, count uint64, result *rpc.RankDataList) error {
 	if rs.GetRankLen() <= 0 {
-		return fmt.Errorf("rank[", rs.rankId, "] no data")
+		return fmt.Errorf("rank[%d] no data", rs.rankId)
 	}
 
 	findData, ok := rs.mapRankData[findKey]
 	if ok == false {
-		return fmt.Errorf("rank[", rs.rankId, "] no data")
+		return fmt.Errorf("rank[%d] no data", rs.rankId)
 	}
 
 	_, rankPos := rs.skipList.GetWithPosition(findData)
