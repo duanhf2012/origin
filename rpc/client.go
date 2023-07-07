@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"github.com/duanhf2012/origin/log"
 )
 
 const(
@@ -87,7 +88,8 @@ func (bc *Client) checkRpcCallTimeout() {
 			pCall := pElem.Value.(*Call)
 			if now.Sub(pCall.callTime) > bc.callRpcTimeout {
 				strTimeout := strconv.FormatInt(int64(bc.callRpcTimeout/time.Second), 10)
-				pCall.Err = errors.New("RPC call takes more than " + strTimeout + " seconds")
+				pCall.Err = errors.New("RPC call takes more than " + strTimeout + " seconds,method is "+pCall.ServiceMethod)
+				log.SError(pCall.Err.Error())
 				bc.makeCallFail(pCall)
 				bc.pendingLock.Unlock()
 				continue

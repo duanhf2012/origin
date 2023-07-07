@@ -375,21 +375,21 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client, callerRpcHandler
 		req.requestHandle = func(Returns interface{}, Err RpcError) {
 			v := client.RemovePending(callSeq)
 			if v == nil {
-				log.SError("rpcClient cannot find seq ", pCall.Seq, " in pending")
+				log.SError("rpcClient cannot find seq ", callSeq, " in pending, service method is ",serviceMethod)
 				//ReleaseCall(pCall)
 				ReleaseRpcRequest(req)
 				return
 			}
 			if len(Err) == 0 {
-				pCall.Err = nil
+				v.Err = nil
 			} else {
-				pCall.Err = Err
+				v.Err = Err
 			}
 
 			if Returns != nil {
-				pCall.Reply = Returns
+				v.Reply = Returns
 			}
-			pCall.rpcHandler.PushRpcResponse(pCall)
+			v.rpcHandler.PushRpcResponse(v)
 			ReleaseRpcRequest(req)
 		}
 	}
