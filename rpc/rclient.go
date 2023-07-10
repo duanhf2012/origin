@@ -13,6 +13,9 @@ import (
 
 //跨结点连接的Client
 type RClient struct {
+	compressBuff []byte
+
+	compressBytesLen int
 	selfClient *Client
 	network.TCPClient
 	conn *network.TCPConn
@@ -80,11 +83,24 @@ func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 		return call
 	}
 
+	bCompress := uint8(0x7f)
+	if rc.compressBytesLen > 0 && len(bytes) >= rc.compressBytesLen {
+		cnt,cErr := compressor.CompressBlock(bytes,rc.compressBuff[:])
+		if cErr != nil {
+			call.Seq = 0
+			log.SError(err.Error())
+			call.DoError(err)
+			return call
+		}
+		bytes = rc.compressBuff[:cnt]
+		bCompress = 0xff
+	}
+
 	if noReply == false {
 		rc.selfClient.AddPending(call)
 	}
 
-	err = conn.WriteMsg([]byte{uint8(processor.GetProcessorType())}, bytes)
+	err = conn.WriteMsg([]byte{uint8(processor.GetProcessorType())&bCompress}, bytes)
 	if err != nil {
 		rc.selfClient.RemovePending(call.Seq)
 
@@ -127,6 +143,16 @@ func (rc *RClient) asyncCall(rpcHandler IRpcHandler, serviceMethod string, callb
 		return errors.New("Rpc server is disconnect,call " + serviceMethod)
 	}
 
+	bCompress := uint8(0x7f)
+	if rc.compressBytesLen>0 &&len(bytes) >= rc.compressBytesLen {
+		cnt,cErr := compressor.CompressBlock(bytes,rc.compressBuff[:])
+		if cErr != nil {
+			return cErr
+		}
+		bytes = rc.compressBuff[:cnt]
+		bCompress = 0xff
+	}
+
 	call := MakeCall()
 	call.Reply = replyParam
 	call.callback = &callback
@@ -135,7 +161,7 @@ func (rc *RClient) asyncCall(rpcHandler IRpcHandler, serviceMethod string, callb
 	call.Seq = seq
 	rc.selfClient.AddPending(call)
 
-	err = conn.WriteMsg([]byte{uint8(processorType)}, bytes)
+	err = conn.WriteMsg([]byte{uint8(processorType)&bCompress}, bytes)
 	if err != nil {
 		rc.selfClient.RemovePending(call.Seq)
 		ReleaseCall(call)
@@ -144,6 +170,8 @@ func (rc *RClient) asyncCall(rpcHandler IRpcHandler, serviceMethod string, callb
 
 	return nil
 }
+
+
 
 func (rc *RClient) Run() {
 	defer func() {
@@ -163,7 +191,8 @@ func (rc *RClient) Run() {
 			return
 		}
 
-		processor := GetProcessor(bytes[0])
+		bCompress := (bytes[0]>>7) > 0
+		processor := GetProcessor(bytes[0]&0x7f)
 		if processor == nil {
 			rc.conn.ReleaseReadMsg(bytes)
 			log.SError("rpcClient ", rc.Addr, " ReadMsg head error:", err.Error())
@@ -174,7 +203,19 @@ func (rc *RClient) Run() {
 		response := RpcResponse{}
 		response.RpcResponseData = processor.MakeRpcResponse(0, "", nil)
 
-		err = processor.Unmarshal(bytes[1:], response.RpcResponseData)
+		//解压缩
+		byteData := bytes[1:]
+		if bCompress == true {
+			cnt,unCompressErr := compressor.UncompressBlock(byteData,rc.compressBuff)
+			if unCompressErr!= nil {
+				rc.conn.ReleaseReadMsg(bytes)
+				log.SError("rpcClient ", rc.Addr, " ReadMsg head error:", err.Error())
+				return
+			}
+			byteData = rc.compressBuff[:cnt]
+		}
+
+		err = processor.Unmarshal(byteData, response.RpcResponseData)
 		rc.conn.ReleaseReadMsg(bytes)
 		if err != nil {
 			processor.ReleaseRpcResponse(response.RpcResponseData)
@@ -214,14 +255,14 @@ func (rc *RClient) OnClose() {
 	rc.TriggerRpcConnEvent(false, rc.selfClient.GetClientId(), rc.selfClient.GetNodeId())
 }
 
-func NewRClient(nodeId int, addr string, maxRpcParamLen uint32,triggerRpcConnEvent TriggerRpcConnEvent) *Client{
+func NewRClient(nodeId int, addr string, maxRpcParamLen uint32,compressBytesLen int,triggerRpcConnEvent TriggerRpcConnEvent) *Client{
 	client := &Client{}
 	client.clientId = atomic.AddUint32(&clientSeq, 1)
 	client.nodeId = nodeId
 	client.maxCheckCallRpcCount = DefaultMaxCheckCallRpcCount
 	client.callRpcTimeout = DefaultRpcTimeout
-
 	c:= &RClient{}
+	c.compressBytesLen = compressBytesLen
 	c.selfClient = client
 	c.Addr = addr
 	c.ConnectInterval = DefaultConnectInterval
@@ -235,6 +276,8 @@ func NewRClient(nodeId int, addr string, maxRpcParamLen uint32,triggerRpcConnEve
 	c.WriteDeadline = Default_ReadWriteDeadline
 	c.LittleEndian = LittleEndian
 	c.NewAgent = client.NewClientAgent
+
+	c.compressBuff = make([]byte, compressor.UnCompressBlockBound(int(maxRpcParamLen)))
 
 	if maxRpcParamLen > 0 {
 		c.MaxMsgLen = maxRpcParamLen

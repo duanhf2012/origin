@@ -27,12 +27,16 @@ type Server struct {
 	functions       map[interface{}]interface{}
 	rpcHandleFinder RpcHandleFinder
 	rpcServer       *network.TCPServer
+
+	compressBytesLen int
 }
 
 type RpcAgent struct {
 	conn      network.Conn
 	rpcServer *Server
 	userData  interface{}
+
+	compressBuff []byte
 }
 
 func AppendProcessor(rpcProcessor IRpcProcessor) {
@@ -64,7 +68,7 @@ func (server *Server) Init(rpcHandleFinder RpcHandleFinder) {
 
 const Default_ReadWriteDeadline = 15*time.Second
 
-func (server *Server) Start(listenAddr string, maxRpcParamLen uint32) {
+func (server *Server) Start(listenAddr string, maxRpcParamLen uint32,compressBytesLen int) {
 	splitAddr := strings.Split(listenAddr, ":")
 	if len(splitAddr) != 2 {
 		log.SFatal("listen addr is error :", listenAddr)
@@ -72,6 +76,7 @@ func (server *Server) Start(listenAddr string, maxRpcParamLen uint32) {
 
 	server.rpcServer.Addr = ":" + splitAddr[1]
 	server.rpcServer.MinMsgLen = 2
+	server.compressBytesLen = compressBytesLen
 	if maxRpcParamLen > 0 {
 		server.rpcServer.MaxMsgLen = maxRpcParamLen
 	} else {
@@ -112,7 +117,18 @@ func (agent *RpcAgent) WriteResponse(processor IRpcProcessor, serviceMethod stri
 		return
 	}
 
-	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())}, bytes)
+	bCompress := uint8(0x7f)
+	if agent.rpcServer.compressBytesLen >0 && len(bytes) >= agent.rpcServer.compressBytesLen {
+		cnt,cErr := compressor.CompressBlock(bytes,agent.compressBuff[:])
+		if cErr != nil {
+			log.SError("service method ", serviceMethod, " CompressBlock error:", errM.Error())
+			return
+		}
+		bytes = agent.compressBuff[:cnt]
+		bCompress = 0xff
+	}
+
+	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())&bCompress}, bytes)
 	if errM != nil {
 		log.SError("Rpc ", serviceMethod, " return is error:", errM.Error())
 	}
@@ -127,7 +143,8 @@ func (agent *RpcAgent) Run() {
 			break
 		}
 
-		processor := GetProcessor(data[0])
+		bCompress := (data[0]>>7) > 0
+		processor := GetProcessor(data[0]&0x7f)
 		if processor == nil {
 			agent.conn.ReleaseReadMsg(data)
 			log.SError("remote rpc  ", agent.conn.RemoteAddr(), " cannot find processor:", data[0])
@@ -135,8 +152,19 @@ func (agent *RpcAgent) Run() {
 		}
 
 		//解析head
+		byteData := data[1:]
+		if bCompress == true {
+			cnt,unCompressErr := compressor.UncompressBlock(byteData,agent.compressBuff)
+			if unCompressErr!= nil {
+				agent.conn.ReleaseReadMsg(data)
+				log.SError("rpcClient ", agent.conn.RemoteAddr(), " ReadMsg head error:", err.Error())
+				return
+			}
+			byteData = agent.compressBuff[:cnt]
+		}
+
 		req := MakeRpcRequest(processor, 0, 0, "", false, nil)
-		err = processor.Unmarshal(data[1:], req.RpcRequestData)
+		err = processor.Unmarshal(byteData, req.RpcRequestData)
 		agent.conn.ReleaseReadMsg(data)
 		if err != nil {
 			log.SError("rpc Unmarshal request is error:", err.Error())
@@ -233,6 +261,7 @@ func (agent *RpcAgent) Destroy() {
 
 func (server *Server) NewAgent(c *network.TCPConn) network.Agent {
 	agent := &RpcAgent{conn: c, rpcServer: server}
+	agent.compressBuff = make([]byte, compressor.UnCompressBlockBound(int(server.rpcServer.MaxMsgLen)))
 
 	return agent
 }

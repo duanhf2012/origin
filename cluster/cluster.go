@@ -26,6 +26,7 @@ type NodeInfo struct {
 	Private           bool
 	ListenAddr        string
 	MaxRpcParamLen    uint32   //最大Rpc参数长度
+	CompressBytesLen  int   //超过字节进行压缩的长度
 	ServiceList  	  []string //所有的有序服务列表
 	PublicServiceList []string //对外公开的服务列表
 	DiscoveryService  []string //筛选发现的服务，如果不配置，不进行筛选
@@ -73,7 +74,7 @@ func SetServiceDiscovery(serviceDiscovery IServiceDiscovery) {
 }
 
 func (cls *Cluster) Start() {
-	cls.rpcServer.Start(cls.localNodeInfo.ListenAddr, cls.localNodeInfo.MaxRpcParamLen)
+	cls.rpcServer.Start(cls.localNodeInfo.ListenAddr, cls.localNodeInfo.MaxRpcParamLen,cls.localNodeInfo.CompressBytesLen)
 }
 
 func (cls *Cluster) Stop() {
@@ -195,7 +196,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo(nodeInfo *NodeInfo) {
 
 	rpcInfo := NodeRpcInfo{}
 	rpcInfo.nodeInfo = *nodeInfo
-	rpcInfo.client =rpc.NewRClient(nodeInfo.NodeId, nodeInfo.ListenAddr, nodeInfo.MaxRpcParamLen,cls.triggerRpcEvent)
+	rpcInfo.client =rpc.NewRClient(nodeInfo.NodeId, nodeInfo.ListenAddr, nodeInfo.MaxRpcParamLen,nodeInfo.CompressBytesLen,cls.triggerRpcEvent)
 	cls.mapRpc[nodeInfo.NodeId] = rpcInfo
 }
 
