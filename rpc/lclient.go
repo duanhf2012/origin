@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 //本结点的Client
@@ -36,7 +37,7 @@ func (lc *LClient) SetConn(conn *network.TCPConn){
 func (lc *LClient) Close(waitDone bool){
 }
 
-func (lc *LClient) Go(rpcHandler IRpcHandler,noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
+func (lc *LClient) Go(timeout time.Duration,rpcHandler IRpcHandler,noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
 	pLocalRpcServer := rpcHandler.GetRpcServer()()
 	//判断是否是同一服务
 	findIndex := strings.Index(serviceMethod, ".")
@@ -65,7 +66,7 @@ func (lc *LClient) Go(rpcHandler IRpcHandler,noReply bool, serviceMethod string,
 	}
 
 	//其他的rpcHandler的处理器
-	return pLocalRpcServer.selfNodeRpcHandlerGo(nil, lc.selfClient, noReply, serviceName, 0, serviceMethod, args, reply, nil)
+	return pLocalRpcServer.selfNodeRpcHandlerGo(timeout,nil, lc.selfClient, noReply, serviceName, 0, serviceMethod, args, reply, nil)
 }
 
 
@@ -86,11 +87,11 @@ func (rc *LClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 	}
 
 	//其他的rpcHandler的处理器
-	return pLocalRpcServer.selfNodeRpcHandlerGo(processor,rc.selfClient, true, serviceName, rpcMethodId, serviceName, nil, nil, rawArgs)
+	return pLocalRpcServer.selfNodeRpcHandlerGo(DefaultRpcTimeout,processor,rc.selfClient, true, serviceName, rpcMethodId, serviceName, nil, nil, rawArgs)
 }
 
 
-func (lc *LClient) AsyncCall(rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, reply interface{}) error {
+func (lc *LClient) AsyncCall(timeout time.Duration,rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, reply interface{},cancelable bool)  (CancelRpc,error) {
 	pLocalRpcServer := rpcHandler.GetRpcServer()()
 
 	//判断是否是同一服务
@@ -99,22 +100,22 @@ func (lc *LClient) AsyncCall(rpcHandler IRpcHandler, serviceMethod string, callb
 		err := errors.New("Call serviceMethod " + serviceMethod + " is error!")
 		callback.Call([]reflect.Value{reflect.ValueOf(reply), reflect.ValueOf(err)})
 		log.SError(err.Error())
-		return nil
+		return emptyCancelRpc,nil
 	}
 
 	serviceName := serviceMethod[:findIndex]
 	//调用自己rpcHandler处理器
 	if serviceName == rpcHandler.GetName() { //自己服务调用
-		return pLocalRpcServer.myselfRpcHandlerGo(lc.selfClient,serviceName, serviceMethod, args,callback ,reply)
+		return emptyCancelRpc,pLocalRpcServer.myselfRpcHandlerGo(lc.selfClient,serviceName, serviceMethod, args,callback ,reply)
 	}
 
 	//其他的rpcHandler的处理器
-	err := pLocalRpcServer.selfNodeRpcHandlerAsyncGo(lc.selfClient, rpcHandler, false, serviceName, serviceMethod, args, reply, callback)
+	calcelRpc,err := pLocalRpcServer.selfNodeRpcHandlerAsyncGo(timeout,lc.selfClient, rpcHandler, false, serviceName, serviceMethod, args, reply, callback,cancelable)
 	if err != nil {
 		callback.Call([]reflect.Value{reflect.ValueOf(reply), reflect.ValueOf(err)})
 	}
 
-	return nil
+	return calcelRpc,nil
 }
 
 func NewLClient(nodeId int) *Client{

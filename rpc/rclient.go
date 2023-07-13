@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync/atomic"
+	"time"
 )
 
 //跨结点连接的Client
@@ -43,7 +44,7 @@ func (rc *RClient) SetConn(conn *network.TCPConn){
 	rc.Unlock()
 }
 
-func (rc *RClient) Go(rpcHandler IRpcHandler,noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
+func (rc *RClient) Go(timeout time.Duration,rpcHandler IRpcHandler,noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
 	_, processor := GetProcessorType(args)
 	InParam, err := processor.Marshal(args)
 	if err != nil {
@@ -114,20 +115,20 @@ func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 }
 
 
-func (rc *RClient) AsyncCall(rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{}) error {
-	err := rc.asyncCall(rpcHandler, serviceMethod, callback, args, replyParam)
+func (rc *RClient) AsyncCall(timeout time.Duration,rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{},cancelable bool)  (CancelRpc,error) {
+	cancelRpc,err := rc.asyncCall(timeout,rpcHandler, serviceMethod, callback, args, replyParam,cancelable)
 	if err != nil {
 		callback.Call([]reflect.Value{reflect.ValueOf(replyParam), reflect.ValueOf(err)})
 	}
 
-	return nil
+	return cancelRpc,nil
 }
 
-func (rc *RClient) asyncCall(rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{}) error {
+func (rc *RClient) asyncCall(timeout time.Duration,rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{},cancelable bool) (CancelRpc,error) {
 	processorType, processor := GetProcessorType(args)
 	InParam, herr := processor.Marshal(args)
 	if herr != nil {
-		return herr
+		return emptyCancelRpc,herr
 	}
 
 	seq := rc.selfClient.generateSeq()
@@ -135,19 +136,19 @@ func (rc *RClient) asyncCall(rpcHandler IRpcHandler, serviceMethod string, callb
 	bytes, err := processor.Marshal(request.RpcRequestData)
 	ReleaseRpcRequest(request)
 	if err != nil {
-		return err
+		return emptyCancelRpc,err
 	}
 
 	conn := rc.GetConn()
 	if conn == nil || conn.IsConnected()==false {
-		return errors.New("Rpc server is disconnect,call " + serviceMethod)
+		return emptyCancelRpc,errors.New("Rpc server is disconnect,call " + serviceMethod)
 	}
 
 	bCompress := uint8(0x7f)
 	if rc.compressBytesLen>0 &&len(bytes) >= rc.compressBytesLen {
 		cnt,cErr := compressor.CompressBlock(bytes,rc.compressBuff[:])
 		if cErr != nil {
-			return cErr
+			return emptyCancelRpc,cErr
 		}
 		bytes = rc.compressBuff[:cnt]
 		bCompress = 0xff
@@ -159,18 +160,23 @@ func (rc *RClient) asyncCall(rpcHandler IRpcHandler, serviceMethod string, callb
 	call.rpcHandler = rpcHandler
 	call.ServiceMethod = serviceMethod
 	call.Seq = seq
+	call.TimeOut = timeout
 	rc.selfClient.AddPending(call)
 
 	err = conn.WriteMsg([]byte{uint8(processorType)&bCompress}, bytes)
 	if err != nil {
 		rc.selfClient.RemovePending(call.Seq)
 		ReleaseCall(call)
-		return err
+		return emptyCancelRpc,err
 	}
 
-	return nil
-}
+	if cancelable {
+		rpcCancel := RpcCancel{CallSeq:seq,Cli: rc.selfClient}
+		return rpcCancel.CancelRpc,nil
+	}
 
+	return emptyCancelRpc,nil
+}
 
 
 func (rc *RClient) Run() {
@@ -294,18 +300,6 @@ func NewRClient(nodeId int, addr string, maxRpcParamLen uint32,compressBytesLen 
 
 func (rc *RClient) Close(waitDone bool) {
 	rc.TCPClient.Close(waitDone)
-
-	rc.selfClient.pendingLock.Lock()
-	for  {
-		pElem := rc.selfClient.pendingTimer.Front()
-		if pElem == nil {
-			break
-		}
-
-		pCall := pElem.Value.(*Call)
-		pCall.Err = errors.New("nodeid is disconnect ")
-		rc.selfClient.makeCallFail(pCall)
-	}
-	rc.selfClient.pendingLock.Unlock()
+	rc.selfClient.cleanPending()
 }
 

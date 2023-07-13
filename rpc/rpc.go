@@ -68,7 +68,16 @@ type Call struct {
 	connId        int
 	callback      *reflect.Value
 	rpcHandler    IRpcHandler
-	callTime      time.Time
+	TimeOut       time.Duration
+}
+
+type RpcCancel struct {
+	Cli *Client
+	CallSeq uint64
+}
+
+func (rc *RpcCancel) CancelRpc(){
+	rc.Cli.RemovePending(rc.CallSeq)
 }
 
 func (slf *RpcRequest) Clear() *RpcRequest{

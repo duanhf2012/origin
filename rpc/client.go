@@ -1,7 +1,6 @@
 package rpc
 
 import (
-	"container/list"
 	"errors"
 	"github.com/duanhf2012/origin/network"
 	"reflect"
@@ -21,7 +20,7 @@ const(
 
 
 	DefaultConnectInterval = 2*time.Second
-	DefaultCheckRpcCallTimeoutInterval = 5*time.Second
+	DefaultCheckRpcCallTimeoutInterval = 1*time.Second
 	DefaultRpcTimeout = 15*time.Second
 )
 
@@ -31,8 +30,8 @@ type IRealClient interface {
 	SetConn(conn *network.TCPConn)
 	Close(waitDone bool)
 
-	AsyncCall(rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{}) error
-	Go(rpcHandler IRpcHandler, noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call
+	AsyncCall(timeout time.Duration,rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{},cancelable bool)  (CancelRpc,error)
+	Go(timeout time.Duration,rpcHandler IRpcHandler, noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call
 	RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call
 	IsConnected() bool
 
@@ -45,11 +44,11 @@ type Client struct {
 	nodeId        int
 	pendingLock          sync.RWMutex
 	startSeq             uint64
-	pending              map[uint64]*list.Element
-	pendingTimer         *list.List
+	pending              map[uint64]*Call
 	callRpcTimeout       time.Duration
 	maxCheckCallRpcCount int
 
+	callTimerHeap CallTimerHeap
 	IRealClient
 }
 
@@ -60,7 +59,6 @@ func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
 }
 
 func (bc *Client) makeCallFail(call *Call) {
-	bc.removePending(call.Seq)
 	if call.callback != nil && call.callback.IsValid() {
 		call.rpcHandler.PushRpcResponse(call)
 	} else {
@@ -71,55 +69,52 @@ func (bc *Client) makeCallFail(call *Call) {
 func (bc *Client) checkRpcCallTimeout() {
 	for{
 		time.Sleep(DefaultCheckRpcCallTimeoutInterval)
-		now := time.Now()
-
 		for i := 0; i < bc.maxCheckCallRpcCount; i++ {
 			bc.pendingLock.Lock()
-			if bc.pendingTimer == nil {
+			
+			callSeq := bc.callTimerHeap.PopTimeout()
+			if callSeq == 0 {
 				bc.pendingLock.Unlock()
 				break
 			}
 
-			pElem := bc.pendingTimer.Front()
-			if pElem == nil {
+			pCall := bc.pending[callSeq]
+			if pCall == nil {
 				bc.pendingLock.Unlock()
-				break
-			}
-			pCall := pElem.Value.(*Call)
-			if now.Sub(pCall.callTime) > bc.callRpcTimeout {
-				strTimeout := strconv.FormatInt(int64(bc.callRpcTimeout/time.Second), 10)
-				pCall.Err = errors.New("RPC call takes more than " + strTimeout + " seconds,method is "+pCall.ServiceMethod)
-				log.SError(pCall.Err.Error())
-				bc.makeCallFail(pCall)
-				bc.pendingLock.Unlock()
+				log.SError("callSeq ",callSeq," is not find")
 				continue
 			}
+
+			delete(bc.pending,callSeq)
+			strTimeout := strconv.FormatInt(int64(pCall.TimeOut.Seconds()), 10)
+			pCall.Err = errors.New("RPC call takes more than " + strTimeout + " seconds,method is "+pCall.ServiceMethod)
+			log.SError(pCall.Err.Error())
+			bc.makeCallFail(pCall)
 			bc.pendingLock.Unlock()
-			break
+			continue
 		}
 	}
 }
 
 func (client *Client) InitPending() {
 	client.pendingLock.Lock()
-	if client.pending != nil {
-		for _, v := range client.pending {
-			v.Value.(*Call).Err = errors.New("node is disconnect")
-			v.Value.(*Call).done <- v.Value.(*Call)
-		}
-	}
-
-	client.pending = make(map[uint64]*list.Element, 4096)
-	client.pendingTimer = list.New()
+	client.callTimerHeap.Init()
+	client.pending = make(map[uint64]*Call,4096)
 	client.pendingLock.Unlock()
 }
 
-
 func (bc *Client) AddPending(call *Call) {
 	bc.pendingLock.Lock()
-	call.callTime = time.Now()
-	elemTimer := bc.pendingTimer.PushBack(call)
-	bc.pending[call.Seq] = elemTimer //如果下面发送失败，将会一一直存在这里
+
+	if call.Seq == 0 {
+		bc.pendingLock.Unlock()
+		log.SStack("call is error.")
+		return
+	}
+
+	bc.pending[call.Seq] = call
+	bc.callTimerHeap.AddTimer(call.Seq,call.TimeOut)
+
 	bc.pendingLock.Unlock()
 }
 
@@ -138,28 +133,43 @@ func (bc *Client) removePending(seq uint64) *Call {
 	if ok == false {
 		return nil
 	}
-	call := v.Value.(*Call)
-	bc.pendingTimer.Remove(v)
+
+	bc.callTimerHeap.Cancel(seq)
 	delete(bc.pending, seq)
-	return call
+	return v
 }
 
-func (bc *Client) FindPending(seq uint64) *Call {
+func (bc *Client) FindPending(seq uint64) (pCall *Call) {
 	if seq == 0 {
 		return nil
 	}
 	
 	bc.pendingLock.Lock()
-	v, ok := bc.pending[seq]
-	if ok == false {
-		bc.pendingLock.Unlock()
-		return nil
-	}
-
-	pCall := v.Value.(*Call)
+	pCall = bc.pending[seq]
 	bc.pendingLock.Unlock()
 
 	return pCall
+}
+
+func (bc *Client) cleanPending(){
+	bc.pendingLock.Lock()
+	for  {
+		callSeq := bc.callTimerHeap.PopFirst()
+		if callSeq == 0 {
+			break
+		}
+		pCall := bc.pending[callSeq]
+		if pCall == nil {
+			log.SError("callSeq ",callSeq," is not find")
+			continue
+		}
+
+		delete(bc.pending,callSeq)
+		pCall.Err = errors.New("nodeid is disconnect ")
+		bc.makeCallFail(pCall)
+	}
+
+	bc.pendingLock.Unlock()
 }
 
 func (bc *Client) generateSeq() uint64 {

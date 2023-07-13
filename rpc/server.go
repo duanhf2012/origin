@@ -277,11 +277,10 @@ func (server *Server) myselfRpcHandlerGo(client *Client,handlerName string, serv
 	return rpcHandler.CallMethod(client,serviceMethod, args,callBack, reply)
 }
 
-
-
-func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Client, noReply bool, handlerName string, rpcMethodId uint32, serviceMethod string, args interface{}, reply interface{}, rawArgs []byte) *Call {
+func (server *Server) selfNodeRpcHandlerGo(timeout time.Duration,processor IRpcProcessor, client *Client, noReply bool, handlerName string, rpcMethodId uint32, serviceMethod string, args interface{}, reply interface{}, rawArgs []byte) *Call {
 	pCall := MakeCall()
 	pCall.Seq = client.generateSeq()
+	pCall.TimeOut = timeout
 
 	rpcHandler := server.rpcHandleFinder.FindRpcHandler(handlerName)
 	if rpcHandler == nil {
@@ -372,12 +371,12 @@ func (server *Server) selfNodeRpcHandlerGo(processor IRpcProcessor, client *Clie
 	return pCall
 }
 
-func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client, callerRpcHandler IRpcHandler, noReply bool, handlerName string, serviceMethod string, args interface{}, reply interface{}, callback reflect.Value) error {
+func (server *Server) selfNodeRpcHandlerAsyncGo(timeout time.Duration,client *Client, callerRpcHandler IRpcHandler, noReply bool, handlerName string, serviceMethod string, args interface{}, reply interface{}, callback reflect.Value,cancelable bool) (CancelRpc,error)  {
 	rpcHandler := server.rpcHandleFinder.FindRpcHandler(handlerName)
 	if rpcHandler == nil {
 		err := errors.New("service method " + serviceMethod + " not config!")
 		log.SError(err.Error())
-		return err
+		return emptyCancelRpc,err
 	}
 
 	_, processor := GetProcessorType(args)
@@ -385,22 +384,28 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client, callerRpcHandler
 	if err != nil {
 		errM := errors.New("RpcHandler " + handlerName + "."+serviceMethod+" deep copy inParam is error:" + err.Error())
 		log.SError(errM.Error())
-		return errM
+		return emptyCancelRpc,errM
 	}
 
 	req := MakeRpcRequest(processor, 0, 0, serviceMethod, noReply, nil)
 	req.inParam = iParam
 	req.localReply = reply
 
+	cancelRpc := emptyCancelRpc
+	var callSeq uint64
 	if noReply == false {
-		callSeq := client.generateSeq()
+		callSeq = client.generateSeq()
 		pCall := MakeCall()
 		pCall.Seq = callSeq
 		pCall.rpcHandler = callerRpcHandler
 		pCall.callback = &callback
 		pCall.Reply = reply
 		pCall.ServiceMethod = serviceMethod
+		pCall.TimeOut = timeout
 		client.AddPending(pCall)
+		rpcCancel :=  RpcCancel{CallSeq: callSeq,Cli: client}
+		cancelRpc = rpcCancel.CancelRpc
+
 		req.requestHandle = func(Returns interface{}, Err RpcError) {
 			v := client.RemovePending(callSeq)
 			if v == nil {
@@ -426,8 +431,11 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(client *Client, callerRpcHandler
 	err = rpcHandler.PushRpcRequest(req)
 	if err != nil {
 		ReleaseRpcRequest(req)
-		return err
+		if callSeq > 0 {
+			client.RemovePending(callSeq)
+		}
+		return emptyCancelRpc,err
 	}
 
-	return nil
+	return cancelRpc,nil
 }
