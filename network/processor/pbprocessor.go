@@ -68,6 +68,11 @@ func (pbProcessor *PBProcessor) MsgRoute(clientId uint64, msg interface{}) error
 // must goroutine safe
 func (pbProcessor *PBProcessor) Unmarshal(clientId uint64, data []byte) (interface{}, error) {
 	defer pbProcessor.ReleaseByteSlice(data)
+	return pbProcessor.UnmarshalWithOutRelease(clientId, data)
+}
+
+// unmarshal but not release data
+func (pbProcessor *PBProcessor) UnmarshalWithOutRelease(clientId uint64, data []byte) (interface{}, error) {
 	var msgType uint16
 	if pbProcessor.LittleEndian == true {
 		msgType = binary.LittleEndian.Uint16(data[:2])
