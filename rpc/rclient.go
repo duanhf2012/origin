@@ -84,24 +84,28 @@ func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 		return call
 	}
 
-	bCompress := uint8(0x7f)
+	bCompress := uint8(0)
 	if rc.compressBytesLen > 0 && len(bytes) >= rc.compressBytesLen {
-		cnt,cErr := compressor.CompressBlock(bytes,rc.compressBuff[:])
+		var cnt int
+		var cErr error
+		rc.compressBuff,cnt,cErr = compressor.CompressBlock(bytes,rc.compressBuff[:])
 		if cErr != nil {
 			call.Seq = 0
 			log.SError(err.Error())
 			call.DoError(err)
 			return call
 		}
-		bytes = rc.compressBuff[:cnt]
-		bCompress = 0xff
+		if cnt < len(bytes) {
+			bytes = rc.compressBuff[:cnt]
+			bCompress = 1<<7
+		}
 	}
 
 	if noReply == false {
 		rc.selfClient.AddPending(call)
 	}
 
-	err = conn.WriteMsg([]byte{uint8(processor.GetProcessorType())&bCompress}, bytes)
+	err = conn.WriteMsg([]byte{uint8(processor.GetProcessorType())|bCompress}, bytes)
 	if err != nil {
 		rc.selfClient.RemovePending(call.Seq)
 
@@ -144,14 +148,20 @@ func (rc *RClient) asyncCall(timeout time.Duration,rpcHandler IRpcHandler, servi
 		return emptyCancelRpc,errors.New("Rpc server is disconnect,call " + serviceMethod)
 	}
 
-	bCompress := uint8(0x7f)
+	bCompress := uint8(0)
 	if rc.compressBytesLen>0 &&len(bytes) >= rc.compressBytesLen {
-		cnt,cErr := compressor.CompressBlock(bytes,rc.compressBuff[:])
+		var cnt int
+		var cErr error
+
+		rc.compressBuff,cnt,cErr = compressor.CompressBlock(bytes,rc.compressBuff[:])
 		if cErr != nil {
 			return emptyCancelRpc,cErr
 		}
-		bytes = rc.compressBuff[:cnt]
-		bCompress = 0xff
+
+		if cnt < len(bytes) {
+			bytes = rc.compressBuff[:cnt]
+			bCompress = 1<<7
+		}
 	}
 
 	call := MakeCall()
@@ -163,7 +173,7 @@ func (rc *RClient) asyncCall(timeout time.Duration,rpcHandler IRpcHandler, servi
 	call.TimeOut = timeout
 	rc.selfClient.AddPending(call)
 
-	err = conn.WriteMsg([]byte{uint8(processorType)&bCompress}, bytes)
+	err = conn.WriteMsg([]byte{uint8(processorType)|bCompress}, bytes)
 	if err != nil {
 		rc.selfClient.RemovePending(call.Seq)
 		ReleaseCall(call)
@@ -212,7 +222,10 @@ func (rc *RClient) Run() {
 		//解压缩
 		byteData := bytes[1:]
 		if bCompress == true {
-			cnt,unCompressErr := compressor.UncompressBlock(byteData,rc.compressBuff)
+			var cnt int
+			var unCompressErr error
+
+			rc.compressBuff,cnt,unCompressErr = compressor.UncompressBlock(byteData,rc.compressBuff[:])
 			if unCompressErr!= nil {
 				rc.conn.ReleaseReadMsg(bytes)
 				log.SError("rpcClient ", rc.Addr, " ReadMsg head error:", err.Error())
@@ -282,8 +295,6 @@ func NewRClient(nodeId int, addr string, maxRpcParamLen uint32,compressBytesLen 
 	c.WriteDeadline = Default_ReadWriteDeadline
 	c.LittleEndian = LittleEndian
 	c.NewAgent = client.NewClientAgent
-
-	c.compressBuff = make([]byte, compressor.UnCompressBlockBound(int(maxRpcParamLen)))
 
 	if maxRpcParamLen > 0 {
 		c.MaxMsgLen = maxRpcParamLen

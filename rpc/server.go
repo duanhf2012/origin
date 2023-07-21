@@ -117,18 +117,23 @@ func (agent *RpcAgent) WriteResponse(processor IRpcProcessor, serviceMethod stri
 		return
 	}
 
-	bCompress := uint8(0x7f)
+	bCompress := uint8(0)
 	if agent.rpcServer.compressBytesLen >0 && len(bytes) >= agent.rpcServer.compressBytesLen {
-		cnt,cErr := compressor.CompressBlock(bytes,agent.compressBuff[:])
+		var cnt int
+		var cErr error
+
+		agent.compressBuff,cnt,cErr = compressor.CompressBlock(bytes,agent.compressBuff[:])
 		if cErr != nil {
 			log.SError("service method ", serviceMethod, " CompressBlock error:", errM.Error())
 			return
 		}
-		bytes = agent.compressBuff[:cnt]
-		bCompress = 0xff
+		if cnt < len(bytes) {
+			bytes = agent.compressBuff[:cnt]
+			bCompress = 1<<7
+		}
 	}
 
-	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())&bCompress}, bytes)
+	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())|bCompress}, bytes)
 	if errM != nil {
 		log.SError("Rpc ", serviceMethod, " return is error:", errM.Error())
 	}
@@ -154,7 +159,10 @@ func (agent *RpcAgent) Run() {
 		//解析head
 		byteData := data[1:]
 		if bCompress == true {
-			cnt,unCompressErr := compressor.UncompressBlock(byteData,agent.compressBuff)
+			var cnt int
+			var unCompressErr error
+
+			agent.compressBuff,cnt,unCompressErr = compressor.UncompressBlock(byteData,agent.compressBuff[:])
 			if unCompressErr!= nil {
 				agent.conn.ReleaseReadMsg(data)
 				log.SError("rpcClient ", agent.conn.RemoteAddr(), " ReadMsg head error:", err.Error())
@@ -261,7 +269,6 @@ func (agent *RpcAgent) Destroy() {
 
 func (server *Server) NewAgent(c *network.TCPConn) network.Agent {
 	agent := &RpcAgent{conn: c, rpcServer: server}
-	agent.compressBuff = make([]byte, compressor.UnCompressBlockBound(int(server.rpcServer.MaxMsgLen)))
 
 	return agent
 }

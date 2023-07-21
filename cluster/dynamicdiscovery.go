@@ -5,6 +5,8 @@ import (
 	"github.com/duanhf2012/origin/log"
 	"github.com/duanhf2012/origin/rpc"
 	"github.com/duanhf2012/origin/service"
+	"time"
+	"github.com/duanhf2012/origin/util/timer"
 )
 
 const DynamicDiscoveryMasterName = "DiscoveryMaster"
@@ -341,6 +343,10 @@ func (dc *DynamicDiscoveryClient) isDiscoverNode(nodeId int) bool {
 }
 
 func (dc *DynamicDiscoveryClient) OnNodeConnected(nodeId int) {
+	dc.regServiceDiscover(nodeId)
+}
+
+func (dc *DynamicDiscoveryClient) regServiceDiscover(nodeId int){
 	nodeInfo := cluster.GetMasterDiscoveryNodeInfo(nodeId)
 	if nodeInfo == nil {
 		return
@@ -364,6 +370,10 @@ func (dc *DynamicDiscoveryClient) OnNodeConnected(nodeId int) {
 	err := dc.AsyncCallNode(nodeId, RegServiceDiscover, &req, func(res *rpc.Empty, err error) {
 		if err != nil {
 			log.SError("call ", RegServiceDiscover, " is fail :", err.Error())
+			dc.AfterFunc(time.Second*3, func(timer *timer.Timer) {
+				dc.regServiceDiscover(nodeId)
+			})
+
 			return
 		}
 	})

@@ -8,8 +8,8 @@ import (
 )
 
 type ICompressor interface {
-	CompressBlock(src, dst []byte) (int, error)     //dst如果有预申请使用dst内存，传入nil时内部申请
-	UncompressBlock(src []byte, dst []byte) (int, error)//dst如果有预申请使用dst内存，传入nil时内部申请
+	CompressBlock(src, dst []byte) ([]byte,int, error)     //dst如果有预申请使用dst内存，传入nil时内部申请
+	UncompressBlock(src []byte, dst []byte) ([]byte,int, error)//dst如果有预申请使用dst内存，传入nil时内部申请
 
 	CompressBlockBound(n int) int
 	UnCompressBlockBound(n int) int
@@ -28,7 +28,7 @@ func SetCompressor(cp ICompressor){
 type Lz4Compressor struct {
 }
 
-func (lc *Lz4Compressor) CompressBlock(src, dst []byte) (cnt int, err error) {
+func (lc *Lz4Compressor) CompressBlock(src, dst []byte) (dest []byte,cnt int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -38,13 +38,19 @@ func (lc *Lz4Compressor) CompressBlock(src, dst []byte) (cnt int, err error) {
 		}
 	}()
 
+	dest = dst
 	var c lz4.Compressor
-	cnt, err = c.CompressBlock(src, dst)
+	maxCompressSize := lc.CompressBlockBound(len(src))
+	if len(dest) < maxCompressSize {
+		dest = make([]byte,maxCompressSize)
+	}
+
+	cnt, err = c.CompressBlock(src, dest)
 
 	return
 }
 
-func (lc *Lz4Compressor) UncompressBlock(src, dst []byte) (cnt int, err error) {
+func (lc *Lz4Compressor) UncompressBlock(src, dst []byte) (dest []byte,cnt int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -54,7 +60,13 @@ func (lc *Lz4Compressor) UncompressBlock(src, dst []byte) (cnt int, err error) {
 		}
 	}()
 
-	cnt, err = lz4.UncompressBlock(src, dst)
+	dest = dst
+	maxUncompressSize := lc.UnCompressBlockBound(len(src))
+	if len(dest) < maxUncompressSize {
+		dest = make([]byte,maxUncompressSize)
+	}
+
+	cnt, err = lz4.UncompressBlock(src, dest)
 	return
 }
 
