@@ -55,7 +55,6 @@ func (rc *RClient) Go(timeout time.Duration,rpcHandler IRpcHandler,noReply bool,
 	return rc.RawGo(rpcHandler,processor, noReply, 0, serviceMethod, InParam, reply)
 }
 
-
 func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call {
 	call := MakeCall()
 	call.ServiceMethod = serviceMethod
@@ -104,9 +103,6 @@ func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 	}
 
 	err = conn.WriteMsg([]byte{uint8(processor.GetProcessorType())|bCompress}, bytes)
-	if cap(compressBuff) >0 {
-		compressor.CompressBufferCollection(compressBuff)
-	}
 	if cap(compressBuff) >0 {
 		compressor.CompressBufferCollection(compressBuff)
 	}
@@ -228,9 +224,9 @@ func (rc *RClient) Run() {
 		//解压缩
 		byteData := bytes[1:]
 		var compressBuff []byte
+
 		if bCompress == true {
 			var unCompressErr error
-
 			compressBuff,unCompressErr = compressor.UncompressBlock(byteData)
 			if unCompressErr!= nil {
 				rc.conn.ReleaseReadMsg(bytes)
@@ -244,13 +240,14 @@ func (rc *RClient) Run() {
 		if cap(compressBuff) > 0 {
 			compressor.UnCompressBufferCollection(compressBuff)
 		}
+
 		rc.conn.ReleaseReadMsg(bytes)
 		if err != nil {
 			processor.ReleaseRpcResponse(response.RpcResponseData)
 			log.SError("rpcClient Unmarshal head error:", err.Error())
 			continue
 		}
-
+		
 		v := rc.selfClient.RemovePending(response.RpcResponseData.GetSeq())
 		if v == nil {
 			log.SError("rpcClient cannot find seq ", response.RpcResponseData.GetSeq(), " in pending")

@@ -11,11 +11,11 @@ import (
 var memPool network.INetMempool = network.NewMemAreaPool()
 
 type ICompressor interface {
-	CompressBlock(src []byte) ([]byte, error)     //dst如果有预申请使用dst内存，传入nil时内部申请
-	UncompressBlock(src []byte) ([]byte, error)//dst如果有预申请使用dst内存，传入nil时内部申请
+	CompressBlock(src []byte) ([]byte, error)   //dst如果有预申请使用dst内存，传入nil时内部申请
+	UncompressBlock(src []byte) ([]byte, error) //dst如果有预申请使用dst内存，传入nil时内部申请
 
-	CompressBufferCollection(buffer []byte)   //压缩的Buffer内存回收
-	UnCompressBufferCollection(buffer []byte) //解压缩的Buffer内存回收
+	CompressBufferCollection(buffer []byte)   	//压缩的Buffer内存回收
+	UnCompressBufferCollection(buffer []byte) 	//解压缩的Buffer内存回收
 }
 
 var compressor ICompressor

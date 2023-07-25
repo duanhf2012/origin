@@ -153,7 +153,7 @@ func (agent *RpcAgent) Run() {
 		processor := GetProcessor(data[0]&0x7f)
 		if processor == nil {
 			agent.conn.ReleaseReadMsg(data)
-			log.SError("remote rpc  ", agent.conn.RemoteAddr(), " cannot find processor:", data[0])
+			log.SError("remote rpc  ", agent.conn.RemoteAddr().String(), " cannot find processor:", data[0])
 			return
 		}
 
@@ -166,7 +166,7 @@ func (agent *RpcAgent) Run() {
 			compressBuff,unCompressErr = compressor.UncompressBlock(byteData)
 			if unCompressErr!= nil {
 				agent.conn.ReleaseReadMsg(data)
-				log.SError("rpcClient ", agent.conn.RemoteAddr(), " ReadMsg head error:", unCompressErr.Error())
+				log.SError("rpcClient ", agent.conn.RemoteAddr().String(), " ReadMsg head error:", unCompressErr.Error())
 				return
 			}
 			byteData = compressBuff
