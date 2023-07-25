@@ -5,18 +5,20 @@ import (
 	"errors"
 	"github.com/pierrec/lz4/v4"
 	"fmt"
+	"github.com/duanhf2012/origin/network"
 )
 
-type ICompressor interface {
-	CompressBlock(src, dst []byte) ([]byte,int, error)     //dst如果有预申请使用dst内存，传入nil时内部申请
-	UncompressBlock(src []byte, dst []byte) ([]byte,int, error)//dst如果有预申请使用dst内存，传入nil时内部申请
+var memPool network.INetMempool = network.NewMemAreaPool()
 
-	CompressBlockBound(n int) int
-	UnCompressBlockBound(n int) int
+type ICompressor interface {
+	CompressBlock(src []byte) ([]byte, error)     //dst如果有预申请使用dst内存，传入nil时内部申请
+	UncompressBlock(src []byte) ([]byte, error)//dst如果有预申请使用dst内存，传入nil时内部申请
+
+	CompressBufferCollection(buffer []byte)   //压缩的Buffer内存回收
+	UnCompressBufferCollection(buffer []byte) //解压缩的Buffer内存回收
 }
 
 var compressor ICompressor
-
 func init(){
 	SetCompressor(&Lz4Compressor{})
 }
@@ -28,7 +30,7 @@ func SetCompressor(cp ICompressor){
 type Lz4Compressor struct {
 }
 
-func (lc *Lz4Compressor) CompressBlock(src, dst []byte) (dest []byte,cnt int, err error) {
+func (lc *Lz4Compressor) CompressBlock(src []byte) (dest []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -38,19 +40,31 @@ func (lc *Lz4Compressor) CompressBlock(src, dst []byte) (dest []byte,cnt int, er
 		}
 	}()
 
-	dest = dst
 	var c lz4.Compressor
-	maxCompressSize := lc.CompressBlockBound(len(src))
-	if len(dest) < maxCompressSize {
-		dest = make([]byte,maxCompressSize)
+	var cnt int
+	dest = memPool.MakeByteSlice(lz4.CompressBlockBound(len(src))+1)
+	cnt, err = c.CompressBlock(src, dest[1:])
+	if err != nil {
+		memPool.ReleaseByteSlice(dest)
+		return nil,err
 	}
 
-	cnt, err = c.CompressBlock(src, dest)
+	ratio := len(src) / cnt
+	if len(src) % cnt > 0 {
+		ratio += 1
+	}
 
+	if ratio > 255 {
+		memPool.ReleaseByteSlice(dest)
+		return nil,fmt.Errorf("Impermissible errors")
+	}
+
+	dest[0] = uint8(ratio)
+	dest = dest[:cnt+1]
 	return
 }
 
-func (lc *Lz4Compressor) UncompressBlock(src, dst []byte) (dest []byte,cnt int, err error) {
+func (lc *Lz4Compressor) UncompressBlock(src []byte) (dest []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
@@ -60,22 +74,29 @@ func (lc *Lz4Compressor) UncompressBlock(src, dst []byte) (dest []byte,cnt int, 
 		}
 	}()
 
-	dest = dst
-	maxUncompressSize := lc.UnCompressBlockBound(len(src))
-	if len(dest) < maxUncompressSize {
-		dest = make([]byte,maxUncompressSize)
+	radio := uint8(src[0])
+	if radio == 0 {
+		return nil,fmt.Errorf("Impermissible errors")
 	}
 
-	cnt, err = lz4.UncompressBlock(src, dest)
-	return
+	dest = memPool.MakeByteSlice(len(src)*int(radio))
+	cnt, err := lz4.UncompressBlock(src[1:], dest)
+	if err != nil {
+		memPool.ReleaseByteSlice(dest)
+		return nil,err
+	}
+
+	return dest[:cnt],nil
 }
 
-func (lc *Lz4Compressor) CompressBlockBound(n int) int{
+func (lc *Lz4Compressor) compressBlockBound(n int) int{
 	return lz4.CompressBlockBound(n)
 }
 
-func (lc *Lz4Compressor) UnCompressBlockBound(n int) int{
-	return n*10
+func (lc *Lz4Compressor) CompressBufferCollection(buffer []byte){
+	memPool.ReleaseByteSlice(buffer)
 }
 
-
+func (lc *Lz4Compressor) UnCompressBufferCollection(buffer []byte) {
+	memPool.ReleaseByteSlice(buffer)
+}

@@ -14,8 +14,6 @@ import (
 
 //跨结点连接的Client
 type RClient struct {
-	compressBuff []byte
-
 	compressBytesLen int
 	selfClient *Client
 	network.TCPClient
@@ -84,19 +82,19 @@ func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 		return call
 	}
 
+	var compressBuff[]byte
 	bCompress := uint8(0)
 	if rc.compressBytesLen > 0 && len(bytes) >= rc.compressBytesLen {
-		var cnt int
 		var cErr error
-		rc.compressBuff,cnt,cErr = compressor.CompressBlock(bytes,rc.compressBuff[:])
+		compressBuff,cErr = compressor.CompressBlock(bytes)
 		if cErr != nil {
 			call.Seq = 0
-			log.SError(err.Error())
-			call.DoError(err)
+			log.SError(cErr.Error())
+			call.DoError(cErr)
 			return call
 		}
-		if cnt < len(bytes) {
-			bytes = rc.compressBuff[:cnt]
+		if len(compressBuff) < len(bytes) {
+			bytes = compressBuff
 			bCompress = 1<<7
 		}
 	}
@@ -106,6 +104,12 @@ func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 	}
 
 	err = conn.WriteMsg([]byte{uint8(processor.GetProcessorType())|bCompress}, bytes)
+	if cap(compressBuff) >0 {
+		compressor.CompressBufferCollection(compressBuff)
+	}
+	if cap(compressBuff) >0 {
+		compressor.CompressBufferCollection(compressBuff)
+	}
 	if err != nil {
 		rc.selfClient.RemovePending(call.Seq)
 
@@ -148,18 +152,17 @@ func (rc *RClient) asyncCall(timeout time.Duration,rpcHandler IRpcHandler, servi
 		return emptyCancelRpc,errors.New("Rpc server is disconnect,call " + serviceMethod)
 	}
 
+	var compressBuff[]byte
 	bCompress := uint8(0)
 	if rc.compressBytesLen>0 &&len(bytes) >= rc.compressBytesLen {
-		var cnt int
 		var cErr error
-
-		rc.compressBuff,cnt,cErr = compressor.CompressBlock(bytes,rc.compressBuff[:])
+		compressBuff,cErr = compressor.CompressBlock(bytes)
 		if cErr != nil {
 			return emptyCancelRpc,cErr
 		}
 
-		if cnt < len(bytes) {
-			bytes = rc.compressBuff[:cnt]
+		if len(compressBuff) < len(bytes) {
+			bytes = compressBuff
 			bCompress = 1<<7
 		}
 	}
@@ -174,6 +177,9 @@ func (rc *RClient) asyncCall(timeout time.Duration,rpcHandler IRpcHandler, servi
 	rc.selfClient.AddPending(call)
 
 	err = conn.WriteMsg([]byte{uint8(processorType)|bCompress}, bytes)
+	if cap(compressBuff) >0 {
+		compressor.CompressBufferCollection(compressBuff)
+	}
 	if err != nil {
 		rc.selfClient.RemovePending(call.Seq)
 		ReleaseCall(call)
@@ -221,20 +227,23 @@ func (rc *RClient) Run() {
 
 		//解压缩
 		byteData := bytes[1:]
+		var compressBuff []byte
 		if bCompress == true {
-			var cnt int
 			var unCompressErr error
 
-			rc.compressBuff,cnt,unCompressErr = compressor.UncompressBlock(byteData,rc.compressBuff[:])
+			compressBuff,unCompressErr = compressor.UncompressBlock(byteData)
 			if unCompressErr!= nil {
 				rc.conn.ReleaseReadMsg(bytes)
-				log.SError("rpcClient ", rc.Addr, " ReadMsg head error:", err.Error())
+				log.SError("rpcClient ", rc.Addr, " ReadMsg head error:", unCompressErr.Error())
 				return
 			}
-			byteData = rc.compressBuff[:cnt]
+			byteData = compressBuff
 		}
 
 		err = processor.Unmarshal(byteData, response.RpcResponseData)
+		if cap(compressBuff) > 0 {
+			compressor.UnCompressBufferCollection(compressBuff)
+		}
 		rc.conn.ReleaseReadMsg(bytes)
 		if err != nil {
 			processor.ReleaseRpcResponse(response.RpcResponseData)

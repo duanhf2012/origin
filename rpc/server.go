@@ -35,8 +35,6 @@ type RpcAgent struct {
 	conn      network.Conn
 	rpcServer *Server
 	userData  interface{}
-
-	compressBuff []byte
 }
 
 func AppendProcessor(rpcProcessor IRpcProcessor) {
@@ -117,23 +115,26 @@ func (agent *RpcAgent) WriteResponse(processor IRpcProcessor, serviceMethod stri
 		return
 	}
 
+	var compressBuff[]byte
 	bCompress := uint8(0)
 	if agent.rpcServer.compressBytesLen >0 && len(bytes) >= agent.rpcServer.compressBytesLen {
-		var cnt int
 		var cErr error
 
-		agent.compressBuff,cnt,cErr = compressor.CompressBlock(bytes,agent.compressBuff[:])
+		compressBuff,cErr = compressor.CompressBlock(bytes)
 		if cErr != nil {
-			log.SError("service method ", serviceMethod, " CompressBlock error:", errM.Error())
+			log.SError("service method ", serviceMethod, " CompressBlock error:", cErr.Error())
 			return
 		}
-		if cnt < len(bytes) {
-			bytes = agent.compressBuff[:cnt]
+		if len(compressBuff) < len(bytes) {
+			bytes = compressBuff
 			bCompress = 1<<7
 		}
 	}
 
 	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())|bCompress}, bytes)
+	if cap(compressBuff) >0 {
+		compressor.CompressBufferCollection(compressBuff)
+	}
 	if errM != nil {
 		log.SError("Rpc ", serviceMethod, " return is error:", errM.Error())
 	}
@@ -157,22 +158,25 @@ func (agent *RpcAgent) Run() {
 		}
 
 		//解析head
+		var compressBuff []byte
 		byteData := data[1:]
 		if bCompress == true {
-			var cnt int
 			var unCompressErr error
 
-			agent.compressBuff,cnt,unCompressErr = compressor.UncompressBlock(byteData,agent.compressBuff[:])
+			compressBuff,unCompressErr = compressor.UncompressBlock(byteData)
 			if unCompressErr!= nil {
 				agent.conn.ReleaseReadMsg(data)
-				log.SError("rpcClient ", agent.conn.RemoteAddr(), " ReadMsg head error:", err.Error())
+				log.SError("rpcClient ", agent.conn.RemoteAddr(), " ReadMsg head error:", unCompressErr.Error())
 				return
 			}
-			byteData = agent.compressBuff[:cnt]
+			byteData = compressBuff
 		}
 
 		req := MakeRpcRequest(processor, 0, 0, "", false, nil)
 		err = processor.Unmarshal(byteData, req.RpcRequestData)
+		if cap(compressBuff) > 0 {
+			compressor.UnCompressBufferCollection(compressBuff)
+		}
 		agent.conn.ReleaseReadMsg(data)
 		if err != nil {
 			log.SError("rpc Unmarshal request is error:", err.Error())
