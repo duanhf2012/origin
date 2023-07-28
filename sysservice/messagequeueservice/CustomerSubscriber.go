@@ -213,7 +213,7 @@ func (cs *CustomerSubscriber) publishToCustomer(topicData []TopicData) bool {
 		}
 
 		//推送数据
-		err := cs.CallNode(cs.fromNodeId, cs.callBackRpcMethod, &dbQueuePublishReq, &dbQueuePushRes)
+		err := cs.CallNodeWithTimeout(4*time.Minute,cs.fromNodeId, cs.callBackRpcMethod, &dbQueuePublishReq, &dbQueuePushRes)
 		if err != nil {
 			time.Sleep(time.Second * 1)
 			continue
