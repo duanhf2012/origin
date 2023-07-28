@@ -133,6 +133,8 @@ func (call *Call) Clear() *Call{
 	call.connId = 0
 	call.callback = nil
 	call.rpcHandler = nil
+	call.TimeOut = 0
+
 	return call
 }
 

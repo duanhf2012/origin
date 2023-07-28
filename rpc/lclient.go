@@ -70,15 +70,16 @@ func (lc *LClient) Go(timeout time.Duration,rpcHandler IRpcHandler,noReply bool,
 }
 
 
-func (rc *LClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceName string, rawArgs []byte, reply interface{}) *Call {
+func (rc *LClient) RawGo(timeout time.Duration,rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceName string, rawArgs []byte, reply interface{}) *Call {
 	pLocalRpcServer := rpcHandler.GetRpcServer()()
-
-	call := MakeCall()
-	call.ServiceMethod = serviceName
-	call.Reply = reply
-
+	
 	//服务自我调用
 	if serviceName == rpcHandler.GetName() {
+		call := MakeCall()
+		call.ServiceMethod = serviceName
+		call.Reply = reply
+		call.TimeOut = timeout
+
 		err := pLocalRpcServer.myselfRpcHandlerGo(rc.selfClient,serviceName, serviceName, rawArgs, requestHandlerNull,nil)
 		call.Err = err
 		call.done <- call
@@ -87,7 +88,7 @@ func (rc *LClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply
 	}
 
 	//其他的rpcHandler的处理器
-	return pLocalRpcServer.selfNodeRpcHandlerGo(DefaultRpcTimeout,processor,rc.selfClient, true, serviceName, rpcMethodId, serviceName, nil, nil, rawArgs)
+	return pLocalRpcServer.selfNodeRpcHandlerGo(timeout,processor,rc.selfClient, true, serviceName, rpcMethodId, serviceName, nil, nil, rawArgs)
 }
 
 

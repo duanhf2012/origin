@@ -52,14 +52,15 @@ func (rc *RClient) Go(timeout time.Duration,rpcHandler IRpcHandler,noReply bool,
 		return call
 	}
 
-	return rc.RawGo(rpcHandler,processor, noReply, 0, serviceMethod, InParam, reply)
+	return rc.RawGo(timeout,rpcHandler,processor, noReply, 0, serviceMethod, InParam, reply)
 }
 
-func (rc *RClient) RawGo(rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call {
+func (rc *RClient) RawGo(timeout time.Duration,rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call {
 	call := MakeCall()
 	call.ServiceMethod = serviceMethod
 	call.Reply = reply
 	call.Seq = rc.selfClient.generateSeq()
+	call.TimeOut = timeout
 
 	request := MakeRpcRequest(processor, call.Seq, rpcMethodId, serviceMethod, noReply, rawArgs)
 	bytes, err := processor.Marshal(request.RpcRequestData)

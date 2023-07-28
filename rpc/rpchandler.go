@@ -599,7 +599,7 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType, nodeId i
 	//如果调用本结点服务
 	for i := 0; i < count; i++ {
 		//跨node调用
-		pCall := handler.pClientList[i].RawGo(handler.rpcHandler,processor, true, rpcMethodId, serviceName, rawArgs, nil)
+		pCall := handler.pClientList[i].RawGo(DefaultRpcTimeout,handler.rpcHandler,processor, true, rpcMethodId, serviceName, rawArgs, nil)
 		if pCall.Err != nil {
 			err = pCall.Err
 		}
