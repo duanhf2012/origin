@@ -334,7 +334,8 @@ func (handler *RpcHandler) CallMethod(client *Client,ServiceMethod string, param
 		pCall.callback = &callBack
 		pCall.Seq = client.generateSeq()
 		callSeq = pCall.Seq
-
+		pCall.TimeOut = DefaultRpcTimeout
+		pCall.ServiceMethod = ServiceMethod
 		client.AddPending(pCall)
 
 		//有返回值时

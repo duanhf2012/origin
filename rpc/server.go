@@ -292,6 +292,7 @@ func (server *Server) selfNodeRpcHandlerGo(timeout time.Duration,processor IRpcP
 	pCall := MakeCall()
 	pCall.Seq = client.generateSeq()
 	pCall.TimeOut = timeout
+	pCall.ServiceMethod = serviceMethod
 
 	rpcHandler := server.rpcHandleFinder.FindRpcHandler(handlerName)
 	if rpcHandler == nil {
@@ -420,8 +421,6 @@ func (server *Server) selfNodeRpcHandlerAsyncGo(timeout time.Duration,client *Cl
 		req.requestHandle = func(Returns interface{}, Err RpcError) {
 			v := client.RemovePending(callSeq)
 			if v == nil {
-				log.SError("rpcClient cannot find seq ", callSeq, " in pending, service method is ",serviceMethod)
-				//ReleaseCall(pCall)
 				ReleaseRpcRequest(req)
 				return
 			}
