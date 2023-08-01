@@ -64,19 +64,19 @@ cluster.json如下：
           "Private": false,
           "ListenAddr":"127.0.0.1:8001",
           "MaxRpcParamLen": 409600,
-		  "CompressBytesLen": 20480,
+          "CompressBytesLen": 20480,
           "NodeName": "Node_Test1",
-		  "remark":"//以_打头的，表示只在本机进程，不对整个子网公开",
+          "remark":"//以_打头的，表示只在本机进程，不对整个子网公开",
           "ServiceList": ["TestService1","TestService2","TestServiceCall","GateService","_TcpService","HttpService","WSService"]
         },
-		 {
+        {
           "NodeId": 2,
           "Private": false,
           "ListenAddr":"127.0.0.1:8002",
-		  "MaxRpcParamLen": 409600,
-		  "CompressBytesLen": 20480,
+          "MaxRpcParamLen": 409600,
+          "CompressBytesLen": 20480,
           "NodeName": "Node_Test1",
-		  "remark":"//以_打头的，表示只在本机进程，不对整个子网公开",
+          "remark":"//以_打头的，表示只在本机进程，不对整个子网公开",
           "ServiceList": ["TestService1","TestService2","TestServiceCall","GateService","TcpService","HttpService","WSService"]
         }
     ]
