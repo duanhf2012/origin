@@ -142,7 +142,7 @@ func (ds *DynamicDiscoveryMaster) RpcCastGo(serviceMethod string, args interface
 func (ds *DynamicDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscoverReq, res *rpc.Empty) error {
 	if req.NodeInfo == nil {
 		err := errors.New("RPC_RegServiceDiscover req is error.")
-		log.SError(err.Error())
+		log.Error(err.Error())
 
 		return err
 	}
@@ -369,7 +369,7 @@ func (dc *DynamicDiscoveryClient) regServiceDiscover(nodeId int){
 	//向Master服务同步本Node服务信息
 	err := dc.AsyncCallNode(nodeId, RegServiceDiscover, &req, func(res *rpc.Empty, err error) {
 		if err != nil {
-			log.SError("call ", RegServiceDiscover, " is fail :", err.Error())
+			log.Error("call "+RegServiceDiscover+" is fail :"+ err.Error())
 			dc.AfterFunc(time.Second*3, func(timer *timer.Timer) {
 				dc.regServiceDiscover(nodeId)
 			})
@@ -378,7 +378,7 @@ func (dc *DynamicDiscoveryClient) regServiceDiscover(nodeId int){
 		}
 	})
 	if err != nil {
-		log.SError("call ", RegServiceDiscover, " is fail :", err.Error())
+		log.Error("call "+ RegServiceDiscover+" is fail :"+ err.Error())
 	}
 }
 

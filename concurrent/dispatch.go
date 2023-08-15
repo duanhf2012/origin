@@ -187,8 +187,7 @@ func (d *dispatch) DoCallback(cb func(err error)) {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-
-			log.SError("core dump info[", errString, "]\n", string(buf[:l]))
+			log.Dump(string(buf[:l]),log.String("error",errString))
 		}
 	}()
 

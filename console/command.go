@@ -11,8 +11,9 @@ type CommandFunctionCB func(args interface{}) error
 var commandList []*command
 var programName string
 const(
-	boolType valueType = iota
-	stringType valueType = iota
+	boolType valueType = 0
+	stringType valueType = 1
+	intType valueType = 2
 )
 
 type command struct{
@@ -20,6 +21,7 @@ type command struct{
 	name string
 	bValue bool
 	strValue string
+	intValue int
 	usage string
 	fn CommandFunctionCB
 }
@@ -29,6 +31,8 @@ func (cmd *command) execute() error{
 		return cmd.fn(cmd.bValue)
 	}else if cmd.valType == stringType {
 		return cmd.fn(cmd.strValue)
+	}else if cmd.valType == intType {
+		return cmd.fn(cmd.intValue)
 	}else{
 		return fmt.Errorf("Unknow command type.")
 	}
@@ -69,6 +73,16 @@ func RegisterCommandBool(cmdName string, defaultValue bool, usage string,fn Comm
 	cmd.fn = fn
 	cmd.usage = usage
 	flag.BoolVar(&cmd.bValue, cmdName, defaultValue, usage)
+	commandList = append(commandList,&cmd)
+}
+
+func RegisterCommandInt(cmdName string, defaultValue int, usage string,fn CommandFunctionCB){
+	var cmd command
+	cmd.valType = intType
+	cmd.name = cmdName
+	cmd.fn = fn
+	cmd.usage = usage
+	flag.IntVar(&cmd.intValue, cmdName, defaultValue, usage)
 	commandList = append(commandList,&cmd)
 }
 

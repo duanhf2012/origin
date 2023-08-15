@@ -92,7 +92,7 @@ func (tcpConn *TCPConn) GetRemoteIp() string {
 func (tcpConn *TCPConn) doWrite(b []byte) error{
 	if len(tcpConn.writeChan) == cap(tcpConn.writeChan) {
 		tcpConn.ReleaseReadMsg(b)
-		log.SError("close conn: channel full")
+		log.Error("close conn: channel full")
 		tcpConn.doDestroy()
 		return errors.New("close conn: channel full")
 	}

@@ -170,7 +170,7 @@ func (slf *Client) Run() {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
+			log.Dump(string(buf[:l]),log.String("error",errString))
 		}
 	}()
 
@@ -183,7 +183,7 @@ func (slf *Client) Run() {
 		slf.tcpConn.SetReadDeadline(slf.tcpService.tcpServer.ReadDeadline)
 		bytes,err := slf.tcpConn.ReadMsg()
 		if err != nil {
-			log.SDebug("read client id ",slf.id," is error:",err.Error())
+			log.Debug("read client failed",log.ErrorAttr("error",err),log.Uint64("clientId",slf.id))
 			break
 		}
 		data,err:=slf.tcpService.process.Unmarshal(slf.id,bytes)

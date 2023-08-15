@@ -40,29 +40,29 @@ func (client *WSClient) init() {
 
 	if client.ConnNum <= 0 {
 		client.ConnNum = 1
-		log.SRelease("invalid ConnNum, reset to ", client.ConnNum)
+		log.Info("invalid ConnNum",log.Int("reset", client.ConnNum))
 	}
 	if client.ConnectInterval <= 0 {
 		client.ConnectInterval = 3 * time.Second
-		log.SRelease("invalid ConnectInterval, reset to ", client.ConnectInterval)
+		log.Info("invalid ConnectInterval",log.Duration("reset", client.ConnectInterval))
 	}
 	if client.PendingWriteNum <= 0 {
 		client.PendingWriteNum = 100
-		log.SRelease("invalid PendingWriteNum, reset to ", client.PendingWriteNum)
+		log.Info("invalid PendingWriteNum",log.Int("reset", client.PendingWriteNum))
 	}
 	if client.MaxMsgLen <= 0 {
 		client.MaxMsgLen = 4096
-		log.SRelease("invalid MaxMsgLen, reset to ", client.MaxMsgLen)
+		log.Info("invalid MaxMsgLen",log.Uint32("reset", client.MaxMsgLen))
 	}
 	if client.HandshakeTimeout <= 0 {
 		client.HandshakeTimeout = 10 * time.Second
-		log.SRelease("invalid HandshakeTimeout, reset to ", client.HandshakeTimeout)
+		log.Info("invalid HandshakeTimeout",log.Duration("reset", client.HandshakeTimeout))
 	}
 	if client.NewAgent == nil {
-		log.SFatal("NewAgent must not be nil")
+		log.Fatal("NewAgent must not be nil")
 	}
 	if client.cons != nil {
-		log.SFatal("client is running")
+		log.Fatal("client is running")
 	}
 
 	if client.MessageType == 0 {
@@ -83,7 +83,7 @@ func (client *WSClient) dial() *websocket.Conn {
 			return conn
 		}
 
-		log.SRelease("connect to ", client.Addr," error: ", err.Error())
+		log.Info("connect fail", log.String("error",err.Error()),log.String("addr",client.Addr))
 		time.Sleep(client.ConnectInterval)
 		continue
 	}

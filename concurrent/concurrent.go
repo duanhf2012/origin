@@ -50,7 +50,7 @@ func (c *Concurrent) AsyncDoByQueue(queueId int64, fn func() bool, cb func(err e
 	}
 
 	if fn == nil && cb == nil {
-		log.SStack("fn and cb is nil")
+		log.Stack("fn and cb is nil")
 		return
 	}
 
@@ -66,7 +66,7 @@ func (c *Concurrent) AsyncDoByQueue(queueId int64, fn func() bool, cb func(err e
 	select {
 	case c.tasks <- task{queueId, fn, cb}:
 	default:
-		log.SError("tasks channel is full")
+		log.Error("tasks channel is full")
 		if cb != nil {
 			c.pushAsyncDoCallbackEvent(func(err error) {
 				cb(errors.New("tasks channel is full"))
@@ -81,11 +81,11 @@ func (c *Concurrent) Close() {
 		return
 	}
 
-	log.SRelease("wait close concurrent")
+	log.Info("wait close concurrent")
 
 	c.dispatch.close()
 
-	log.SRelease("concurrent has successfully exited")
+	log.Info("concurrent has successfully exited")
 }
 
 func (c *Concurrent) GetCallBackChannel() chan func(error) {

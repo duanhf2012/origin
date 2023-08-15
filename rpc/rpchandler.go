@@ -215,7 +215,7 @@ func (handler *RpcHandler) HandlerRpcResponseCB(call *Call) {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.SError("core dump info[", errString, "]\n", string(buf[:l]))
+			log.Dump(string(buf[:l]),log.String("error",errString))
 		}
 	}()
 
@@ -237,7 +237,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.SError("Handler Rpc ", request.RpcRequestData.GetServiceMethod(), " Core dump info[", errString, "]\n", string(buf[:l]))
+			log.Dump(string(buf[:l]),log.String("error",errString))
 			rpcErr := RpcError("call error : core dumps")
 			if request.requestHandle != nil {
 				request.requestHandle(nil, rpcErr)
@@ -250,12 +250,12 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	if rawRpcId > 0 {
 		v, ok := handler.mapRawFunctions[rawRpcId]
 		if ok == false {
-			log.SError("RpcHandler cannot find request rpc id", rawRpcId)
+			log.Error("RpcHandler cannot find request rpc id",log.Uint32("rawRpcId",rawRpcId))
 			return
 		}
 		rawData,ok := request.inParam.([]byte)
 		if ok == false {
-			log.SError("RpcHandler " + handler.rpcHandler.GetName()," cannot convert in param to []byte", rawRpcId)
+			log.Error("RpcHandler cannot  convert",log.String("RpcHandlerName",handler.rpcHandler.GetName()),log.Uint32("rawRpcId",rawRpcId))
 			return
 		}
 
@@ -267,7 +267,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 	v, ok := handler.mapFunctions[request.RpcRequestData.GetServiceMethod()]
 	if ok == false {
 		err := "RpcHandler " + handler.rpcHandler.GetName() + "cannot find " + request.RpcRequestData.GetServiceMethod()
-		log.SError(err)
+		log.Error("HandlerRpcRequest cannot find serviceMethod",log.String("RpcHandlerName",handler.rpcHandler.GetName()),log.String("serviceMethod",request.RpcRequestData.GetServiceMethod()))
 		if request.requestHandle != nil {
 			request.requestHandle(nil, RpcError(err))
 		}
@@ -298,7 +298,7 @@ func (handler *RpcHandler) HandlerRpcRequest(request *RpcRequest) {
 		paramList = append(paramList, oParam) //输出参数
 	} else if request.requestHandle != nil && v.hasResponder == false { //调用方有返回值，但被调用函数没有返回参数
 		rErr := "Call Rpc " + request.RpcRequestData.GetServiceMethod() + " without return parameter!"
-		log.SError(rErr)
+		log.Error("call serviceMethod without return parameter",log.String("serviceMethod",request.RpcRequestData.GetServiceMethod()))
 		request.requestHandle(nil, RpcError(rErr))
 		return
 	}
@@ -320,7 +320,7 @@ func (handler *RpcHandler) CallMethod(client *Client,ServiceMethod string, param
 	v, ok := handler.mapFunctions[ServiceMethod]
 	if ok == false {
 		err = errors.New("RpcHandler " + handler.rpcHandler.GetName() + " cannot find" + ServiceMethod)
-		log.SError(err.Error())
+		log.Error("CallMethod cannot find serviceMethod",log.String("rpcHandlerName",handler.rpcHandler.GetName()),log.String("serviceMethod",ServiceMethod))
 		return err
 	}
 
@@ -344,7 +344,7 @@ func (handler *RpcHandler) CallMethod(client *Client,ServiceMethod string, param
 			hander :=func(Returns interface{}, Err RpcError) {
 				rpcCall := client.RemovePending(callSeq)
 				if rpcCall == nil {
-					log.SError("cannot find call seq ",callSeq)
+					log.Error("cannot find call seq",log.Uint64("seq",callSeq))
 					return
 				}
 
@@ -431,15 +431,15 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor, bCast bool, nodeId int
 	err, count := handler.funcRpcClient(nodeId, serviceMethod, pClientList[:])
 	if count == 0 {
 		if err != nil {
-			log.SError("Call ", serviceMethod, " is error:", err.Error())
+			log.Error("call serviceMethod is failed",log.String("serviceMethod",serviceMethod),log.ErrorAttr("error",err))
 		} else {
-			log.SError("Can not find ", serviceMethod)
+			log.Error("cannot find serviceMethod",log.String("serviceMethod",serviceMethod))
 		}
 		return err
 	}
 
 	if count > 1 && bCast == false {
-		log.SError("Cannot call %s more then 1 node!", serviceMethod)
+		log.Error("cannot call serviceMethod more then 1 node",log.String("serviceMethod",serviceMethod))
 		return errors.New("cannot call more then 1 node")
 	}
 
@@ -460,14 +460,14 @@ func (handler *RpcHandler) callRpc(timeout time.Duration,nodeId int, serviceMeth
 	var pClientList [maxClusterNode]*Client
 	err, count := handler.funcRpcClient(nodeId, serviceMethod, pClientList[:])
 	if err != nil {
-		log.SError("Call serviceMethod is error:", err.Error())
+		log.Error("Call serviceMethod is failed",log.ErrorAttr("error",err))
 		return err
 	} else if count <= 0 {
 		err = errors.New("Call serviceMethod is error:cannot find " + serviceMethod)
-		log.SError(err.Error())
+		log.Error("cannot find serviceMethod",log.String("serviceMethod",serviceMethod))
 		return err
 	} else if count > 1 {
-		log.SError("Cannot call more then 1 node!")
+		log.Error("Cannot call more then 1 node!",log.String("serviceMethod",serviceMethod))
 		return errors.New("cannot call more then 1 node")
 	}
 
@@ -484,19 +484,19 @@ func (handler *RpcHandler) asyncCallRpc(timeout time.Duration,nodeId int, servic
 	fVal := reflect.ValueOf(callback)
 	if fVal.Kind() != reflect.Func {
 		err := errors.New("call " + serviceMethod + " input callback param is error!")
-		log.SError(err.Error())
+		log.Error("input callback param is error",log.String("serviceMethod",serviceMethod))
 		return emptyCancelRpc,err
 	}
 
 	if fVal.Type().NumIn() != 2 {
 		err := errors.New("call " + serviceMethod + " callback param function is error!")
-		log.SError(err.Error())
+		log.Error("callback param function is error",log.String("serviceMethod",serviceMethod))
 		return emptyCancelRpc,err
 	}
 
 	if fVal.Type().In(0).Kind() != reflect.Ptr || fVal.Type().In(1).String() != "error" {
 		err := errors.New("call " + serviceMethod + " callback param function is error!")
-		log.SError(err.Error())
+		log.Error("callback param function is error",log.String("serviceMethod",serviceMethod))
 		return emptyCancelRpc,err
 	}
 
@@ -512,14 +512,14 @@ func (handler *RpcHandler) asyncCallRpc(timeout time.Duration,nodeId int, servic
 			}
 		}
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply), reflect.ValueOf(err)})
-		log.SError("Call serviceMethod is error:", err.Error())
+		log.Error("cannot find serviceMethod from node",log.String("serviceMethod",serviceMethod),log.Int("nodeId",nodeId))
 		return emptyCancelRpc,nil
 	}
 
 	if count > 1 {
 		err := errors.New("cannot call more then 1 node")
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply), reflect.ValueOf(err)})
-		log.SError(err.Error())
+		log.Error("cannot call more then 1 node",log.String("serviceMethod",serviceMethod))
 		return emptyCancelRpc,nil
 	}
 
@@ -587,12 +587,12 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType, nodeId i
 	processor := GetProcessor(uint8(rpcProcessorType))
 	err, count := handler.funcRpcClient(nodeId, serviceName, handler.pClientList)
 	if count == 0 || err != nil {
-		log.SError("Call serviceMethod is error:", err.Error())
+		log.Error("call serviceMethod is failed",log.ErrorAttr("error",err))
 		return err
 	}
 	if count > 1 {
 		err := errors.New("cannot call more then 1 node")
-		log.SError(err.Error())
+		log.Error("cannot call more then 1 node",log.String("serviceName",serviceName))
 		return err
 	}
 

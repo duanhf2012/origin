@@ -40,29 +40,29 @@ func (client *TCPClient) init() {
 
 	if client.ConnNum <= 0 {
 		client.ConnNum = 1
-		log.SRelease("invalid ConnNum, reset to ", client.ConnNum)
+		log.Info("invalid ConnNum",log.Int("reset", client.ConnNum))
 	}
 	if client.ConnectInterval <= 0 {
 		client.ConnectInterval = 3 * time.Second
-		log.SRelease("invalid ConnectInterval, reset to ", client.ConnectInterval)
+		log.Info("invalid ConnectInterval",log.Duration("reset", client.ConnectInterval))
 	}
 	if client.PendingWriteNum <= 0 {
 		client.PendingWriteNum = 1000
-		log.SRelease("invalid PendingWriteNum, reset to ", client.PendingWriteNum)
+		log.Info("invalid PendingWriteNum",log.Int("reset",client.PendingWriteNum))
 	}
 	if client.ReadDeadline == 0 {
 		client.ReadDeadline = 15*time.Second
-		log.SRelease("invalid ReadDeadline, reset to ", int64(client.ReadDeadline.Seconds()),"s")
+		log.Info("invalid ReadDeadline",log.Int64("reset", int64(client.ReadDeadline.Seconds())))
 	}
 	if client.WriteDeadline == 0 {
 		client.WriteDeadline = 15*time.Second
-		log.SRelease("invalid WriteDeadline, reset to ", int64(client.WriteDeadline.Seconds()),"s")
+		log.Info("invalid WriteDeadline",log.Int64("reset", int64(client.WriteDeadline.Seconds())))
 	}
 	if client.NewAgent == nil {
-		log.SFatal("NewAgent must not be nil")
+		log.Fatal("NewAgent must not be nil")
 	}
 	if client.cons != nil {
-		log.SFatal("client is running")
+		log.Fatal("client is running")
 	}
 
 	if client.MinMsgLen == 0 {
@@ -77,7 +77,7 @@ func (client *TCPClient) init() {
 	maxMsgLen := client.MsgParser.getMaxMsgLen(client.LenMsgLen)
 	if client.MaxMsgLen > maxMsgLen {
 		client.MaxMsgLen = maxMsgLen
-		log.SRelease("invalid MaxMsgLen, reset to ", maxMsgLen)
+		log.Info("invalid MaxMsgLen",log.Uint32("reset", maxMsgLen))
 	}
 
 	client.cons = make(ConnSet)
@@ -102,7 +102,7 @@ func (client *TCPClient) dial() net.Conn {
 			return conn
 		}
 
-		log.SWarning("connect to ",client.Addr," error:", err.Error())
+		log.Warning("connect error ",log.String("error",err.Error()), log.String("Addr",client.Addr))
 		time.Sleep(client.ConnectInterval)
 		continue
 	}

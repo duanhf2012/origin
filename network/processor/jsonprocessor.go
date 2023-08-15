@@ -106,7 +106,7 @@ func (jsonProcessor *JsonProcessor) MakeRawMsg(msgType uint16,msg []byte) *JsonP
 
 func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId uint64,msg interface{}){
 	if jsonProcessor.unknownMessageHandler==nil {
-		log.SDebug("Unknown message received from ",clientId)
+		log.Debug("Unknown message",log.Uint64("clientId",clientId))
 		return
 	}
 

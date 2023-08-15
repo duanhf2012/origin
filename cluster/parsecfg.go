@@ -58,7 +58,7 @@ func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]
 			serviceCfg := v.(map[string]interface{})
 			nodeId, ok := serviceCfg["NodeId"]
 			if ok == false {
-				log.SFatal("NodeService list not find nodeId field")
+				log.Fatal("NodeService list not find nodeId field")
 			}
 			mapNodeService[int(nodeId.(float64))] = serviceCfg
 		}

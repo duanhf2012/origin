@@ -117,7 +117,7 @@ func (m *Module) AddModule(module IModule) (uint32, error) {
 	m.child[module.GetModuleId()] = module
 	m.ancestor.getBaseModule().(*Module).descendants[module.GetModuleId()] = module
 
-	log.SDebug("Add module ", module.GetModuleName(), " completed")
+	log.Debug("Add module "+module.GetModuleName()+ " completed")
 	return module.GetModuleId(), nil
 }
 
@@ -131,7 +131,7 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 
 	pModule.self.OnRelease()
 	pModule.GetEventHandler().Destroy()
-	log.SDebug("Release module ", pModule.GetModuleName())
+	log.Debug("Release module "+ pModule.GetModuleName())
 	for pTimer := range pModule.mapActiveTimer {
 		pTimer.Cancel()
 	}
@@ -278,18 +278,18 @@ func (m *Module) SafeNewTicker(tickerId *uint64, d time.Duration, AdditionData i
 
 func (m *Module) CancelTimerId(timerId *uint64) bool {
 	if timerId==nil || *timerId == 0 {
-		log.SWarning("timerId is invalid")
+		log.Warning("timerId is invalid")
 		return false
 	}
 
 	if m.mapActiveIdTimer == nil {
-		log.SError("mapActiveIdTimer is nil")
+		log.Error("mapActiveIdTimer is nil")
 		return false
 	}
 
 	t, ok := m.mapActiveIdTimer[*timerId]
 	if ok == false {
-		log.SStack("cannot find timer id ", timerId)
+		log.Stack("cannot find timer id ", log.Uint64("timerId",*timerId))
 		return false
 	}
 

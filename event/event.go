@@ -215,7 +215,7 @@ func (processor *EventProcessor) EventHandler(ev IEvent) {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
+			log.Dump(string(buf[:l]),log.String("error",errString))
 		}
 	}()
 
@@ -230,13 +230,13 @@ func (processor *EventProcessor) EventHandler(ev IEvent) {
 
 func (processor *EventProcessor) castEvent(event IEvent){
 	if processor.mapListenerEvent == nil {
-		log.SError("mapListenerEvent not init!")
+		log.Error("mapListenerEvent not init!")
 		return
 	}
 
 	eventProcessor,ok := processor.mapListenerEvent[event.GetEventType()]
 	if ok == false || processor == nil{
-		log.SDebug("event type ",event.GetEventType()," not listen.")
+		log.Debug("event is not listen",log.Int("event type",int(event.GetEventType())))
 		return
 	}
 

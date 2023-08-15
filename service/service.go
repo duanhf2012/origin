@@ -93,7 +93,7 @@ func (s *Service) OnSetup(iService IService){
 func (s *Service) OpenProfiler()  {
 	s.profiler = profiler.RegProfiler(s.GetName())
 	if s.profiler==nil {
-		log.SFatal("rofiler.RegProfiler ",s.GetName()," fail.")
+		log.Fatal("rofiler.RegProfiler "+s.GetName()+" fail.")
 	}
 }
 
@@ -128,7 +128,7 @@ func (s *Service) Start() {
 		s.wg.Add(1)
 		waitRun.Add(1)
 		go func(){
-			log.SRelease(s.GetName()," service is running",)
+			log.Info(s.GetName()+" service is running",)
 			waitRun.Done()
 			s.Run()
 		}()
@@ -158,12 +158,12 @@ func (s *Service) Run() {
 			case event.ServiceRpcRequestEvent:
 				cEvent,ok := ev.(*event.Event)
 				if ok == false {
-					log.SError("Type event conversion error")
+					log.Error("Type event conversion error")
 					break
 				}
 				rpcRequest,ok := cEvent.Data.(*rpc.RpcRequest)
 				if ok == false {
-					log.SError("Type *rpc.RpcRequest conversion error")
+					log.Error("Type *rpc.RpcRequest conversion error")
 					break
 				}
 				if s.profiler!=nil {
@@ -179,12 +179,12 @@ func (s *Service) Run() {
 			case event.ServiceRpcResponseEvent:
 				cEvent,ok := ev.(*event.Event)
 				if ok == false {
-					log.SError("Type event conversion error")
+					log.Error("Type event conversion error")
 					break
 				}
 				rpcResponseCB,ok := cEvent.Data.(*rpc.Call)
 				if ok == false {
-					log.SError("Type *rpc.Call conversion error")
+					log.Error("Type *rpc.Call conversion error")
 					break
 				}
 				if s.profiler!=nil {
@@ -242,7 +242,7 @@ func (s *Service) Release(){
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.SError("core dump info[",errString,"]\n",string(buf[:l]))
+			log.Dump(string(buf[:l]),log.String("error",errString))
 		}
 	}()
 	
@@ -257,10 +257,10 @@ func (s *Service) OnInit() error {
 }
 
 func (s *Service) Stop(){
-	log.SRelease("stop ",s.GetName()," service ")
+	log.Info("stop "+s.GetName()+" service ")
 	close(s.closeSig)
 	s.wg.Wait()
-	log.SRelease(s.GetName()," service has been stopped")
+	log.Info(s.GetName()+" service has been stopped")
 }
 
 func (s *Service) GetServiceCfg()interface{}{
@@ -353,7 +353,7 @@ func (s *Service) PushEvent(ev event.IEvent) error{
 func (s *Service) pushEvent(ev event.IEvent) error{
 	if len(s.chanEvent) >= maxServiceEventChannelNum {
 		err := errors.New("The event channel in the service is full")
-		log.SError(err.Error())
+		log.Error(err.Error())
 		return err
 	}
 
@@ -380,7 +380,7 @@ func (s *Service) SetEventChannelNum(num int){
 func (s *Service) SetGoRoutineNum(goroutineNum int32) bool {
 	//已经开始状态不允许修改协程数量,打开性能分析器不允许开多线程
 	if s.startStatus == true || s.profiler!=nil {
-		log.SError("open profiler mode is not allowed to set Multi-coroutine.")
+		log.Error("open profiler mode is not allowed to set Multi-coroutine.")
 		return false
 	}
 

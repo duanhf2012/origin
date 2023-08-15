@@ -46,7 +46,7 @@ func (rc *RClient) Go(timeout time.Duration,rpcHandler IRpcHandler,noReply bool,
 	_, processor := GetProcessorType(args)
 	InParam, err := processor.Marshal(args)
 	if err != nil {
-		log.SError(err.Error())
+		log.Error("Marshal is fail",log.ErrorAttr("error",err))
 		call := MakeCall()
 		call.DoError(err)
 		return call
@@ -68,7 +68,7 @@ func (rc *RClient) RawGo(timeout time.Duration,rpcHandler IRpcHandler,processor 
 
 	if err != nil {
 		call.Seq = 0
-		log.SError(err.Error())
+		log.Error("marshal is fail",log.String("error",err.Error()))
 		call.DoError(err)
 		return call
 	}
@@ -77,7 +77,7 @@ func (rc *RClient) RawGo(timeout time.Duration,rpcHandler IRpcHandler,processor 
 	if conn == nil || conn.IsConnected()==false {
 		call.Seq = 0
 		sErr := errors.New(serviceMethod + "  was called failed,rpc client is disconnect")
-		log.SError(sErr.Error())
+		log.Error("conn is disconnect",log.String("error",sErr.Error()))
 		call.DoError(sErr)
 		return call
 	}
@@ -89,7 +89,7 @@ func (rc *RClient) RawGo(timeout time.Duration,rpcHandler IRpcHandler,processor 
 		compressBuff,cErr = compressor.CompressBlock(bytes)
 		if cErr != nil {
 			call.Seq = 0
-			log.SError(cErr.Error())
+			log.Error("compress fail",log.String("error",cErr.Error()))
 			call.DoError(cErr)
 			return call
 		}
@@ -109,9 +109,7 @@ func (rc *RClient) RawGo(timeout time.Duration,rpcHandler IRpcHandler,processor 
 	}
 	if err != nil {
 		rc.selfClient.RemovePending(call.Seq)
-
-		log.SError(err.Error())
-
+		log.Error("WiteMsg is fail",log.ErrorAttr("error",err))
 		call.Seq = 0
 		call.DoError(err)
 	}
@@ -191,14 +189,13 @@ func (rc *RClient) asyncCall(timeout time.Duration,rpcHandler IRpcHandler, servi
 	return emptyCancelRpc,nil
 }
 
-
 func (rc *RClient) Run() {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.SError("core dump info[", errString, "]\n", string(buf[:l]))
+			log.Dump(string(buf[:l]),log.String("error",errString))
 		}
 	}()
 
@@ -206,7 +203,7 @@ func (rc *RClient) Run() {
 	for {
 		bytes, err := rc.conn.ReadMsg()
 		if err != nil {
-			log.SError("rpcClient ", rc.Addr, " ReadMsg error:", err.Error())
+			log.Error("rclient read msg is failed",log.ErrorAttr("error",err))
 			return
 		}
 
@@ -214,7 +211,7 @@ func (rc *RClient) Run() {
 		processor := GetProcessor(bytes[0]&0x7f)
 		if processor == nil {
 			rc.conn.ReleaseReadMsg(bytes)
-			log.SError("rpcClient ", rc.Addr, " ReadMsg head error:", err.Error())
+			log.Error("cannot find process",log.Uint8("process type",bytes[0]&0x7f))
 			return
 		}
 
@@ -231,7 +228,7 @@ func (rc *RClient) Run() {
 			compressBuff,unCompressErr = compressor.UncompressBlock(byteData)
 			if unCompressErr!= nil {
 				rc.conn.ReleaseReadMsg(bytes)
-				log.SError("rpcClient ", rc.Addr, " ReadMsg head error:", unCompressErr.Error())
+				log.Error("uncompressBlock failed",log.ErrorAttr("error",unCompressErr))
 				return
 			}
 			byteData = compressBuff
@@ -245,19 +242,19 @@ func (rc *RClient) Run() {
 		rc.conn.ReleaseReadMsg(bytes)
 		if err != nil {
 			processor.ReleaseRpcResponse(response.RpcResponseData)
-			log.SError("rpcClient Unmarshal head error:", err.Error())
+			log.Error("rpcClient Unmarshal head error",log.ErrorAttr("error",err))
 			continue
 		}
 		
 		v := rc.selfClient.RemovePending(response.RpcResponseData.GetSeq())
 		if v == nil {
-			log.SError("rpcClient cannot find seq ", response.RpcResponseData.GetSeq(), " in pending")
+			log.Error("rpcClient cannot find seq",log.Uint64("seq",response.RpcResponseData.GetSeq()))
 		} else {
 			v.Err = nil
 			if len(response.RpcResponseData.GetReply()) > 0 {
 				err = processor.Unmarshal(response.RpcResponseData.GetReply(), v.Reply)
 				if err != nil {
-					log.SError("rpcClient Unmarshal body error:", err.Error())
+					log.Error("rpcClient Unmarshal body failed",log.ErrorAttr("error",err))
 					v.Err = err
 				}
 			}

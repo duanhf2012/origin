@@ -43,52 +43,52 @@ func (server *TCPServer) Start() {
 func (server *TCPServer) init() {
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		log.SFatal("Listen tcp error:", err.Error())
+		log.Fatal("Listen tcp fail",log.String("error", err.Error()))
 	}
 
 	if server.MaxConnNum <= 0 {
 		server.MaxConnNum = Default_MaxConnNum
-		log.SRelease("invalid MaxConnNum, reset to ", server.MaxConnNum)
+		log.Info("invalid MaxConnNum",log.Int("reset", server.MaxConnNum))
 	}
 
 	if server.PendingWriteNum <= 0 {
 		server.PendingWriteNum = Default_PendingWriteNum
-		log.SRelease("invalid PendingWriteNum, reset to ", server.PendingWriteNum)
+		log.Info("invalid PendingWriteNum",log.Int("reset", server.PendingWriteNum))
 	}
 
 	if server.LenMsgLen <= 0 {
 		server.LenMsgLen = Default_LenMsgLen
-		log.SRelease("invalid LenMsgLen, reset to ", server.LenMsgLen)
+		log.Info("invalid LenMsgLen", log.Int("reset", server.LenMsgLen))
 	}
 
 	if server.MaxMsgLen <= 0 {
 		server.MaxMsgLen = Default_MaxMsgLen
-		log.SRelease("invalid MaxMsgLen, reset to ", server.MaxMsgLen)
+		log.Info("invalid MaxMsgLen", log.Uint32("reset to", server.MaxMsgLen))
 	}
 
 	maxMsgLen := server.MsgParser.getMaxMsgLen(server.LenMsgLen)
 	if server.MaxMsgLen > maxMsgLen {
 		server.MaxMsgLen = maxMsgLen
-		log.SRelease("invalid MaxMsgLen, reset to ", maxMsgLen)
+		log.Info("invalid MaxMsgLen",log.Uint32("reset", maxMsgLen))
 	}
 	
 	if server.MinMsgLen <= 0 {
 		server.MinMsgLen = Default_MinMsgLen
-		log.SRelease("invalid MinMsgLen, reset to ", server.MinMsgLen)
+		log.Info("invalid MinMsgLen",log.Uint32("reset", server.MinMsgLen))
 	}
 
 	if server.WriteDeadline == 0 {
 		server.WriteDeadline = Default_WriteDeadline
-		log.SRelease("invalid WriteDeadline, reset to ", server.WriteDeadline.Seconds(),"s")
+		log.Info("invalid WriteDeadline",log.Int64("reset",int64(server.WriteDeadline.Seconds())))
 	}
 
 	if server.ReadDeadline == 0 {
 		server.ReadDeadline = Default_ReadDeadline
-		log.SRelease("invalid ReadDeadline, reset to ", server.ReadDeadline.Seconds(),"s")
+		log.Info("invalid ReadDeadline",log.Int64("reset", int64(server.ReadDeadline.Seconds())))
 	}
 
 	if server.NewAgent == nil {
-		log.SFatal("NewAgent must not be nil")
+		log.Fatal("NewAgent must not be nil")
 	}
 
 	server.ln = ln
@@ -121,7 +121,7 @@ func (server *TCPServer) run() {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				log.SRelease("accept error:",err.Error(),"; retrying in ", tempDelay)
+				log.Info("accept fail",log.String("error",err.Error()),log.Duration("sleep time", tempDelay))
 				time.Sleep(tempDelay)
 				continue
 			}
@@ -135,7 +135,7 @@ func (server *TCPServer) run() {
 		if len(server.conns) >= server.MaxConnNum {
 			server.mutexConns.Unlock()
 			conn.Close()
-			log.SWarning("too many connections")
+			log.Warning("too many connections")
 			continue
 		}
 

@@ -40,7 +40,7 @@ func (w *worker) run(waitGroup *sync.WaitGroup, t task) {
 		case tw := <-w.workerQueue:
 			if tw.isExistTask() {
 				//exit goroutine
-				log.SRelease("worker goroutine exit")
+				log.Info("worker goroutine exit")
 				return
 			}
 			w.exec(&tw)
@@ -59,9 +59,8 @@ func (w *worker) exec(t *task) {
 			t.cb = func(err error) {
 				cb(errors.New(errString))
 			}
-
+			log.Dump(string(buf[:l]),log.String("error",errString))
 			w.endCallFun(true,t)
-			log.SError("core dump info[", errString, "]\n", string(buf[:l]))
 		}
 	}()
 
