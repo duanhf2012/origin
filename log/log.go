@@ -416,8 +416,8 @@ func (logger *Logger) doSPrintf(level slog.Level,a []interface{}) {
 		return
 	}
 
-	gLogger.Slogger.Handler().(IOriginHandler).Lock()
-	defer gLogger.Slogger.Handler().(IOriginHandler).UnLock()
+	logger.Slogger.Handler().(IOriginHandler).Lock()
+	defer logger.Slogger.Handler().(IOriginHandler).UnLock()
 
 	logger.sBuff.Reset()
 
@@ -427,7 +427,7 @@ func (logger *Logger) doSPrintf(level slog.Level,a []interface{}) {
 		logger.sBuff.AppendString(slog.AnyValue(s).String())
 	}
 	logger.sBuff.AppendString("\"\n")
-	gLogger.ioWriter.Write([]byte(logger.sBuff.Bytes()))
+	logger.ioWriter.Write([]byte(logger.sBuff.Bytes()))
 }
 
  func (logger *Logger) STrace(a ...interface{}) {
