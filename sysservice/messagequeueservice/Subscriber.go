@@ -56,9 +56,9 @@ func (ss *Subscriber) TopicSubscribe(rpcHandler rpc.IRpcHandler, subScribeType r
 		}
 
 		if ok == true {
-			log.SRelease("repeat subscription for customer ", customerId)
+			log.Info("repeat subscription for customer ", customerId)
 		} else {
-			log.SRelease("subscription for customer ", customerId)
+			log.Info("subscription for customer ", customerId)
 		}
 
 	}

@@ -93,7 +93,7 @@ func (tr *TopicRoom) Stop() {
 func (tr *TopicRoom) topicRoomRun() {
 	defer tr.queueWait.Done()
 
-	log.SRelease("topic room ", tr.topic, " is running..")
+	log.Info("topic room ", tr.topic, " is running..")
 	for {
 		if atomic.LoadInt32(&tr.isStop) != 0 {
 			break
@@ -145,5 +145,5 @@ func (tr *TopicRoom) topicRoomRun() {
 	}
 	tr.customerLocker.Unlock()
 
-	log.SRelease("topic room ", tr.topic, " is stop")
+	log.Info("topic room ", tr.topic, " is stop")
 }

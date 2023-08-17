@@ -3,7 +3,7 @@ package processor
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/duanhf2012/origin/network"
+	"github.com/duanhf2012/origin/util/bytespool"
 	"github.com/gogo/protobuf/proto"
 	"reflect"
 )
@@ -26,7 +26,7 @@ type PBProcessor struct {
 	unknownMessageHandler UnknownMessageHandler
 	connectHandler        ConnectHandler
 	disconnectHandler     ConnectHandler
-	network.INetMempool
+	bytespool.IBytesMempool
 }
 
 type PBPackInfo struct {
@@ -37,7 +37,7 @@ type PBPackInfo struct {
 
 func NewPBProcessor() *PBProcessor {
 	processor := &PBProcessor{mapMsg: map[uint16]MessageInfo{}}
-	processor.INetMempool = network.NewMemAreaPool()
+	processor.IBytesMempool = bytespool.NewMemAreaPool()
 	return processor
 }
 
@@ -67,7 +67,7 @@ func (pbProcessor *PBProcessor) MsgRoute(clientId uint64, msg interface{}) error
 
 // must goroutine safe
 func (pbProcessor *PBProcessor) Unmarshal(clientId uint64, data []byte) (interface{}, error) {
-	defer pbProcessor.ReleaseByteSlice(data)
+	defer pbProcessor.ReleaseBytes(data)
 	return pbProcessor.UnmarshalWithOutRelease(clientId, data)
 }
 

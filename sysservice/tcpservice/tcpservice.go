@@ -8,10 +8,11 @@ import (
 	"github.com/duanhf2012/origin/network/processor"
 	"github.com/duanhf2012/origin/node"
 	"github.com/duanhf2012/origin/service"
-	"sync/atomic"
-	"sync"
-	"time"
+	"github.com/duanhf2012/origin/util/bytespool"
 	"runtime"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 type TcpService struct {
@@ -277,14 +278,14 @@ func (tcpService *TcpService) GetConnNum() int {
 	return connNum
 }
 
-func (server *TcpService) SetNetMempool(mempool network.INetMempool){
+func (server *TcpService) SetNetMempool(mempool bytespool.IBytesMempool){
 	server.tcpServer.SetNetMempool(mempool)
 }
 
-func (server *TcpService) GetNetMempool() network.INetMempool{
+func (server *TcpService) GetNetMempool() bytespool.IBytesMempool {
 	return server.tcpServer.GetNetMempool()
 }
 
 func (server *TcpService) ReleaseNetMem(byteBuff []byte) {
-	server.tcpServer.GetNetMempool().ReleaseByteSlice(byteBuff)
+	server.tcpServer.GetNetMempool().ReleaseBytes(byteBuff)
 }

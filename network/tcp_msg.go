@@ -3,6 +3,7 @@ package network
 import (
 	"encoding/binary"
 	"errors"
+	"github.com/duanhf2012/origin/util/bytespool"
 	"io"
 	"math"
 )
@@ -16,7 +17,7 @@ type MsgParser struct {
 	MaxMsgLen    uint32
 	LittleEndian bool
 
-	INetMempool
+	bytespool.IBytesMempool
 }
 
 
@@ -34,7 +35,7 @@ func (p *MsgParser) getMaxMsgLen(lenMsgLen int) uint32 {
 }
 
 func (p *MsgParser) init(){
-	p.INetMempool = NewMemAreaPool()
+	p.IBytesMempool = bytespool.NewMemAreaPool()
 }
 
 // goroutine safe
@@ -74,9 +75,9 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 	}
 	
 	// data
-	msgData := p.MakeByteSlice(int(msgLen))
+	msgData := p.MakeBytes(int(msgLen))
 	if _, err := io.ReadFull(conn, msgData[:msgLen]); err != nil {
-		p.ReleaseByteSlice(msgData)
+		p.ReleaseBytes(msgData)
 		return nil, err
 	}
 
@@ -99,7 +100,7 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 	}
 
 	//msg := make([]byte, uint32(p.lenMsgLen)+msgLen)
-	msg := p.MakeByteSlice(p.LenMsgLen+int(msgLen))
+	msg := p.MakeBytes(p.LenMsgLen+int(msgLen))
 	// write len
 	switch p.LenMsgLen {
 	case 1:

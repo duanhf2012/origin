@@ -1,21 +1,29 @@
 package log
 
 import (
+	"context"
 	"fmt"
+	"github.com/duanhf2012/origin/util/bytespool"
 	jsoniter "github.com/json-iterator/go"
 	"io"
+	"log/slog"
 	"os"
 	"path"
-	"time"
-	"log/slog"
-	"context"
+	"path/filepath"
+	"runtime"
+	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 var OpenConsole bool
 var LogSize int64
-var gLogger, _ = NewTextLogger(LevelDebug, "", "",true)
+var LogChannelCap int
+var LogPath string
+var LogLevel slog.Level = LevelTrace
+var gLogger, _ = NewTextLogger(LevelDebug, "", "",true,LogChannelCap)
+var memPool = bytespool.NewMemAreaPool()
 
 // levels
 const (
@@ -44,9 +52,28 @@ type IoWriter struct {
 	outFile    io.Writer  // destination for output
 	outConsole io.Writer  //os.Stdout
 	writeBytes  int64
+	logChannel chan []byte
+	wg             sync.WaitGroup
+	closeSig chan struct{}
+
+	lockWrite sync.Mutex
 }
 
 func (iw *IoWriter) Close() error {
+	iw.lockWrite.Lock()
+	defer iw.lockWrite.Unlock()
+
+	iw.close()
+
+	return nil
+}
+
+func (iw *IoWriter) close() error {
+	if iw.closeSig != nil {
+		close(iw.closeSig)
+	}
+	iw.wg.Wait()
+
 	if iw.outFile!= nil {
 		return iw.outFile.(io.Closer).Close()
 	}
@@ -66,13 +93,79 @@ func (iw *IoWriter) writeFile(p []byte) (n int, err error){
 }
 
 func (iw *IoWriter) Write(p []byte) (n int, err error){
+	iw.lockWrite.Lock()
+	defer iw.lockWrite.Unlock()
+
+	if iw.logChannel == nil {
+		return iw.writeIo(p)
+	}
+
+	copyBuff := memPool.MakeBytes(len(p))
+	if copyBuff == nil {
+		return 0,fmt.Errorf("MakeByteSlice failed")
+	}
+	copy(copyBuff,p)
+
+	iw.logChannel <- copyBuff
+
+	return
+}
+
+func (iw *IoWriter) writeIo(p []byte)  (n int, err error){
 	n,err = iw.writeFile(p)
 
 	if iw.outConsole != nil {
-		return iw.outConsole.Write(p)
+		n,err = iw.outConsole.Write(p)
 	}
 
+	memPool.ReleaseBytes(p)
 	return
+}
+
+func (iw *IoWriter) setLogChannel(logChannelNum int) (err error){
+	iw.lockWrite.Lock()
+	defer iw.lockWrite.Unlock()
+	iw.close()
+
+	if logChannelNum == 0 {
+		iw.logChannel = nil
+		iw.closeSig = nil
+		return nil
+	}
+
+	//copy iw.logChannel
+	var logInfo []byte
+	logChannel := make(chan []byte,logChannelNum)
+	for i := 0; i < logChannelNum&&i<len(iw.logChannel); i++{
+		logInfo = <- iw.logChannel
+		logChannel <- logInfo
+	}
+	iw.logChannel = logChannel
+
+	iw.closeSig = make(chan struct{})
+	iw.wg.Add(1)
+	go iw.run()
+
+	return nil
+}
+
+func (iw *IoWriter) run(){
+	defer iw.wg.Done()
+
+Loop:
+	for{
+		select {
+		case <- iw.closeSig:
+			break Loop
+		case logs := <-iw.logChannel:
+			iw.writeIo(logs)
+		}
+	}
+
+	for len(iw.logChannel) > 0 {
+			logs := <-iw.logChannel
+			iw.writeIo(logs)
+	}
 }
 
 func (logger *Logger) isFull() bool {
@@ -83,6 +176,9 @@ func (logger *Logger) isFull() bool {
 	return atomic.LoadInt64(&logger.ioWriter.writeBytes) >= LogSize
 }
 
+func (logger *Logger) setLogChannel(logChannel int) (err error){
+	return logger.ioWriter.setLogChannel(logChannel)
+}
 
 func (logger *Logger) setIo() error{
 	now := time.Now()
@@ -130,7 +226,7 @@ func (logger *Logger) setIo() error{
 	return nil
 }
 
-func NewTextLogger(level slog.Level,pathName string,filePrefix string,addSource bool) (*Logger,error){
+func NewTextLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (*Logger,error){
 	var logger Logger
 	logger.filePath = pathName
 	logger.fileprefix = filePrefix
@@ -140,11 +236,11 @@ func NewTextLogger(level slog.Level,pathName string,filePrefix string,addSource 
 		return nil,err
 	}
 	logger.Slogger = slog.New(NewOriginTextHandler(level,&logger.ioWriter,addSource,defaultReplaceAttr))
-
+	logger.setLogChannel(logChannelCap)
 	return &logger,nil
 }
 
-func NewJsonLogger(level slog.Level,pathName string,filePrefix string,addSource bool) (*Logger,error){
+func NewJsonLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (*Logger,error){
 	var logger Logger
 	logger.filePath = pathName
 	logger.fileprefix = filePrefix
@@ -154,7 +250,8 @@ func NewJsonLogger(level slog.Level,pathName string,filePrefix string,addSource 
 		return nil,err
 	}
 	logger.Slogger = slog.New(NewOriginJsonHandler(level,&logger.ioWriter,true,defaultReplaceAttr))
-
+	logger.setLogChannel(logChannelCap)
+	
 	return &logger,nil
 }
 
@@ -169,7 +266,7 @@ func (logger *Logger) Trace(msg string, args ...any) {
 }
 
 func (logger *Logger) Debug(msg string, args ...any) {
-	logger.setIo()
+
 	logger.Slogger.Log(context.Background(),LevelDebug,msg,args...)
 }
 
@@ -319,386 +416,113 @@ func Group(key string, args ...any) slog.Attr {
 	return slog.Group(key, args...)
 }
 
-func (logger *Logger) doSPrintf(a []interface{}) string{
-	logger.sBuff.Reset()
-
-	for _,s := range a {
-		switch s.(type) {
-		case []string:
-			strSlice := s.([]string)
-			logger.sBuff.AppendByte('[')
-			for _,str := range strSlice {
-				logger.sBuff.AppendString(str)
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-
-		case int:
-			logger.sBuff.AppendInt(int64(s.(int)))
-		case []int:
-			intSlice := s.([]int)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendInt(int64(v))
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case int8:
-			logger.sBuff.AppendInt(int64(s.(int8)))
-		case []int8:
-			intSlice := s.([]int8)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendInt(int64(v))
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case int16:
-			logger.sBuff.AppendInt(int64(s.(int16)))
-		case []int16:
-			intSlice := s.([]int16)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendInt(int64(v))
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case int32:
-			logger.sBuff.AppendInt(int64(s.(int32)))
-		case []int32:
-			intSlice := s.([]int32)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendInt(int64(v))
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case int64:
-			logger.sBuff.AppendInt(s.(int64))
-		case []int64:
-			intSlice := s.([]int64)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendInt(v)
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case uint:
-			logger.sBuff.AppendUint(uint64(s.(uint)))
-
-		case []uint:
-			intSlice := s.([]uint)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendUint(uint64(v))
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-
-		case uint8:
-			logger.sBuff.AppendUint(uint64(s.(uint8)))
-		case []uint8:
-			intSlice := s.([]uint8)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendUint(uint64(v))
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-
-		case uint16:
-			logger.sBuff.AppendUint(uint64(s.(uint16)))
-		case []uint16:
-			intSlice := s.([]uint16)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendUint(uint64(v))
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case uint32:
-			logger.sBuff.AppendUint(uint64(s.(uint32)))
-		case []uint32:
-			intSlice := s.([]uint32)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendUint(uint64(v))
-				logger.sBuff.AppendByte(',')
-			}
-
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case uint64:
-			logger.sBuff.AppendUint(s.(uint64))
-		case []uint64:
-			intSlice := s.([]uint64)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendUint(v)
-				logger.sBuff.AppendByte(',')
-			}
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case float32:
-			logger.sBuff.AppendFloat(float64(s.(float32)),32)
-		case []float32:
-			intSlice := s.([]float32)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendFloat(float64(v),32)
-				logger.sBuff.AppendByte(',')
-			}
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case float64:
-			logger.sBuff.AppendFloat(s.(float64),64)
-		case []float64:
-			intSlice := s.([]float64)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendFloat(v,64)
-				logger.sBuff.AppendByte(',')
-			}
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case bool:
-			logger.sBuff.AppendBool(s.(bool))
-		case []bool:
-			intSlice := s.([]bool)
-			logger.sBuff.AppendByte('[')
-			for _,v := range intSlice {
-				logger.sBuff.AppendBool(v)
-				logger.sBuff.AppendByte(',')
-			}
-			lastIdx := logger.sBuff.Len()-1
-			if logger.sBuff.Bytes()[lastIdx] == ',' {
-				logger.sBuff.Bytes()[lastIdx] = ']'
-			}else{
-				logger.sBuff.AppendByte(']')
-			}
-		case string:
-			logger.sBuff.AppendString(s.(string))
-		case *int:
-			val := s.(*int)
-			if val != nil {
-				logger.sBuff.AppendInt(int64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*int>")
-			}
-		case *int8:
-			val := s.(*int8)
-			if val != nil {
-				logger.sBuff.AppendInt(int64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*int8>")
-			}
-		case *int16:
-			val := s.(*int16)
-			if val != nil {
-				logger.sBuff.AppendInt(int64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*int16>")
-			}
-		case *int32:
-			val := s.(*int32)
-			if val != nil {
-				logger.sBuff.AppendInt(int64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*int32>")
-			}
-		case *int64:
-			val := s.(*int64)
-			if val != nil {
-				logger.sBuff.AppendInt(int64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*int64>")
-			}
-		case *uint:
-			val := s.(*uint)
-			if val != nil {
-				logger.sBuff.AppendUint(uint64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*uint>")
-			}
-		case *uint8:
-			val := s.(*uint8)
-			if val != nil {
-				logger.sBuff.AppendUint(uint64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*uint8>")
-			}
-		case *uint16:
-			val := s.(*uint16)
-			if val != nil {
-				logger.sBuff.AppendUint(uint64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*uint16>")
-			}
-		case *uint32:
-			val := s.(*uint32)
-			if val != nil {
-				logger.sBuff.AppendUint(uint64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*uint32>")
-			}
-		case *uint64:
-			val := s.(*uint64)
-			if val != nil {
-				logger.sBuff.AppendUint(uint64(*val))
-			}else{
-				logger.sBuff.AppendString("nil<*uint64>")
-			}
-		case *float32:
-			val := s.(*float32)
-			if val != nil {
-				logger.sBuff.AppendFloat(float64(*val),32)
-			}else{
-				logger.sBuff.AppendString("nil<*float32>")
-			}
-		case *float64:
-			val := s.(*float32)
-			if val != nil {
-				logger.sBuff.AppendFloat(float64(*val),64)
-			}else{
-				logger.sBuff.AppendString("nil<*float64>")
-			}
-		case *bool:
-			val := s.(*bool)
-			if val != nil {
-				logger.sBuff.AppendBool(*val)
-			}else{
-				logger.sBuff.AppendString("nil<*bool>")
-			}
-		case *string:
-			val := s.(*string)
-			if val != nil {
-				logger.sBuff.AppendString(*val)
-			}else{
-				logger.sBuff.AppendString("nil<*string>")
-			}
-		//case []byte:
-		//	logger.buf.AppendBytes(s.([]byte))
-		default:
-			//b,err := json.MarshalToString(s)
-			//if err != nil {
-			logger.sBuff.AppendString("<unknown type>")
-			//}else{
-			//logger.buf.AppendBytes(b)
-			//}
-		}
+func (logger *Logger) doSPrintf(level slog.Level,a []interface{}) {
+	if logger.Slogger.Enabled(context.Background(),level) == false{
+		return
 	}
 
-	return logger.sBuff.String()
+	gLogger.Slogger.Handler().(IOriginHandler).Lock()
+	defer gLogger.Slogger.Handler().(IOriginHandler).UnLock()
+
+	logger.sBuff.Reset()
+
+	logger.formatHeader(&logger.sBuff,level,3)
+
+	for _,s := range a {
+		logger.sBuff.AppendString(slog.AnyValue(s).String())
+	}
+	logger.sBuff.AppendString("\"\n")
+	gLogger.ioWriter.Write([]byte(logger.sBuff.Bytes()))
+}
+
+ func (logger *Logger) STrace(a ...interface{}) {
+	 logger.setIo()
+	 logger.doSPrintf(LevelTrace,a)
+}
+
+func (logger *Logger)  SDebug(a ...interface{}) {
+	logger.setIo()
+	logger.doSPrintf(LevelDebug,a)
+}
+
+func (logger *Logger)  SInfo(a ...interface{}) {
+	logger.setIo()
+	logger.doSPrintf(LevelInfo,a)
+}
+
+func (logger *Logger)  SWarning(a ...interface{}) {
+	logger.setIo()
+	logger.doSPrintf(LevelWarning,a)
+}
+
+func (logger *Logger)  SError(a ...interface{}) {
+	logger.setIo()
+	logger.doSPrintf(LevelError,a)
+}
+
+func STrace(a ...interface{}) {
+	gLogger.setIo()
+	gLogger.doSPrintf(LevelTrace,a)
 }
 
 func SDebug(a ...interface{}) {
-	gLogger.sBuff.Locker()
-	defer gLogger.sBuff.UnLocker()
-
-	gLogger.Debug(gLogger.doSPrintf(a))
+	gLogger.setIo()
+	gLogger.doSPrintf(LevelDebug,a)
 }
 
 func SInfo(a ...interface{}) {
-	gLogger.sBuff.Locker()
-	defer gLogger.sBuff.UnLocker()
-
-	gLogger.Info(gLogger.doSPrintf(a))
+	gLogger.setIo()
+	gLogger.doSPrintf(LevelInfo,a)
 }
 
 func SWarning(a ...interface{}) {
-	gLogger.sBuff.Locker()
-	defer gLogger.sBuff.UnLocker()
-
-	gLogger.Warning(gLogger.doSPrintf(a))
+	gLogger.setIo()
+	gLogger.doSPrintf(LevelWarning,a)
 }
 
 func SError(a ...interface{}) {
-	gLogger.sBuff.Locker()
-	defer gLogger.sBuff.UnLocker()
-
-	gLogger.Error(gLogger.doSPrintf(a))
+	gLogger.setIo()
+	gLogger.doSPrintf(LevelError,a)
 }
 
-func SStack(a ...interface{}) {
-	gLogger.sBuff.Locker()
-	defer gLogger.sBuff.UnLocker()
+func (logger *Logger) formatHeader(buf *Buffer,level slog.Level,calldepth int) {
+	t := time.Now()
+	var file string
+	var line int
 
-	gLogger.Stack(gLogger.doSPrintf(a))
-}
+	// Release lock while getting caller info - it's expensive.
+	var ok bool
+	_, file, line, ok = runtime.Caller(calldepth)
+	if !ok {
+		file = "???"
+		line = 0
+	}
+	file = filepath.Base(file)
 
-func SFatal(a ...interface{}) {
-	gLogger.sBuff.Locker()
-	defer gLogger.sBuff.UnLocker()
+	buf.AppendString("time=\"")
+	year, month, day := t.Date()
+	buf.AppendInt(int64(year))
+	buf.AppendByte('/')
+	buf.AppendInt(int64(month))
+	buf.AppendByte('/')
+	buf.AppendInt(int64(day))
+	buf.AppendByte(' ')
 
-	gLogger.Fatal(gLogger.doSPrintf(a))
+	hour, min, sec := t.Clock()
+	buf.AppendInt(int64(hour))
+	buf.AppendByte(':')
+	buf.AppendInt(int64(min))
+	buf.AppendByte(':')
+	
+	buf.AppendInt(int64(sec))
+	buf.AppendString("\"")
+
+	logger.sBuff.AppendString(" level=")
+	logger.sBuff.AppendString(getStrLevel(level))
+	logger.sBuff.AppendString(" source=")
+
+	buf.AppendString(file)
+	buf.AppendByte(':')
+	buf.AppendInt(int64(line))
+	buf.AppendString(" msg=\"")
 }

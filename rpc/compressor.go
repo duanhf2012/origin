@@ -1,14 +1,14 @@
 package rpc
 
 import (
-	"runtime"
 	"errors"
-	"github.com/pierrec/lz4/v4"
 	"fmt"
-	"github.com/duanhf2012/origin/network"
+	"github.com/duanhf2012/origin/util/bytespool"
+	"github.com/pierrec/lz4/v4"
+	"runtime"
 )
 
-var memPool network.INetMempool = network.NewMemAreaPool()
+var memPool bytespool.IBytesMempool = bytespool.NewMemAreaPool()
 
 type ICompressor interface {
 	CompressBlock(src []byte) ([]byte, error)   //dst如果有预申请使用dst内存，传入nil时内部申请
@@ -42,10 +42,10 @@ func (lc *Lz4Compressor) CompressBlock(src []byte) (dest []byte, err error) {
 
 	var c lz4.Compressor
 	var cnt int
-	dest = memPool.MakeByteSlice(lz4.CompressBlockBound(len(src))+1)
+	dest = memPool.MakeBytes(lz4.CompressBlockBound(len(src))+1)
 	cnt, err = c.CompressBlock(src, dest[1:])
 	if err != nil {
-		memPool.ReleaseByteSlice(dest)
+		memPool.ReleaseBytes(dest)
 		return nil,err
 	}
 
@@ -55,7 +55,7 @@ func (lc *Lz4Compressor) CompressBlock(src []byte) (dest []byte, err error) {
 	}
 
 	if ratio > 255 {
-		memPool.ReleaseByteSlice(dest)
+		memPool.ReleaseBytes(dest)
 		return nil,fmt.Errorf("Impermissible errors")
 	}
 
@@ -79,10 +79,10 @@ func (lc *Lz4Compressor) UncompressBlock(src []byte) (dest []byte, err error) {
 		return nil,fmt.Errorf("Impermissible errors")
 	}
 
-	dest = memPool.MakeByteSlice(len(src)*int(radio))
+	dest = memPool.MakeBytes(len(src)*int(radio))
 	cnt, err := lz4.UncompressBlock(src[1:], dest)
 	if err != nil {
-		memPool.ReleaseByteSlice(dest)
+		memPool.ReleaseBytes(dest)
 		return nil,err
 	}
 
@@ -94,9 +94,9 @@ func (lc *Lz4Compressor) compressBlockBound(n int) int{
 }
 
 func (lc *Lz4Compressor) CompressBufferCollection(buffer []byte){
-	memPool.ReleaseByteSlice(buffer)
+	memPool.ReleaseBytes(buffer)
 }
 
 func (lc *Lz4Compressor) UnCompressBufferCollection(buffer []byte) {
-	memPool.ReleaseByteSlice(buffer)
+	memPool.ReleaseBytes(buffer)
 }

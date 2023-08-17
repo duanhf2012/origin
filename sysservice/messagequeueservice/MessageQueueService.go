@@ -63,7 +63,7 @@ func (ms *MessageQueueService) ReadCfg() error {
 	maxProcessTopicBacklogNum, ok := mapDBServiceCfg["MaxProcessTopicBacklogNum"]
 	if ok == false {
 		ms.maxProcessTopicBacklogNum = DefaultMaxTopicBacklogNum
-		log.SRelease("MaxProcessTopicBacklogNum config is set to the default value of ", maxProcessTopicBacklogNum)
+		log.Info("MaxProcessTopicBacklogNum config is set to the default value of ", maxProcessTopicBacklogNum)
 	} else {
 		ms.maxProcessTopicBacklogNum = int32(maxProcessTopicBacklogNum.(float64))
 	}
@@ -71,7 +71,7 @@ func (ms *MessageQueueService) ReadCfg() error {
 	memoryQueueLen, ok := mapDBServiceCfg["MemoryQueueLen"]
 	if ok == false {
 		ms.memoryQueueLen = DefaultMemoryQueueLen
-		log.SRelease("MemoryQueueLen config is set to the default value of ", DefaultMemoryQueueLen)
+		log.Info("MemoryQueueLen config is set to the default value of ", DefaultMemoryQueueLen)
 	} else {
 		ms.memoryQueueLen = int32(memoryQueueLen.(float64))
 	}

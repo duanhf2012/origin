@@ -41,7 +41,7 @@ func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser,writeDe
 
 			conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 			_, err := conn.Write(b)
-			tcpConn.msgParser.ReleaseByteSlice(b)
+			tcpConn.msgParser.ReleaseBytes(b)
 
 			if err != nil {
 				break
@@ -130,7 +130,7 @@ func (tcpConn *TCPConn) ReadMsg() ([]byte, error) {
 }
 
 func (tcpConn *TCPConn) ReleaseReadMsg(byteBuff []byte){
-	tcpConn.msgParser.ReleaseByteSlice(byteBuff)
+	tcpConn.msgParser.ReleaseBytes(byteBuff)
 }
 
 func (tcpConn *TCPConn) WriteMsg(args ...[]byte) error {

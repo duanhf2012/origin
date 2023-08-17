@@ -42,9 +42,9 @@ func Abs[NumType SignedNumberType](Num NumType) NumType {
 func Add[NumType NumberType](number1 NumType, number2 NumType) NumType {
 	ret := number1 + number2
 	if number2> 0 && ret < number1 {
-		log.SStack("Calculation overflow , number1 is ",number1," number2 is ",number2)
+		log.Stack("Calculation overflow" ,log.Any("number1",number1),log.Any("number2",number2))
 	}else if (number2<0 && ret > number1){
-		log.SStack("Calculation overflow , number1 is ",number1," number2 is ",number2)
+		log.Stack("Calculation overflow" ,log.Any("number1",number1),log.Any("number2",number2))
 	}
 
 	return ret
@@ -53,9 +53,9 @@ func Add[NumType NumberType](number1 NumType, number2 NumType) NumType {
 func Sub[NumType NumberType](number1 NumType, number2 NumType) NumType {
 	ret := number1 - number2
 	if number2> 0 && ret > number1 {
-		log.SStack("Calculation overflow , number1 is ",number1," number2 is ",number2)
+		log.Stack("Calculation overflow" ,log.Any("number1",number1),log.Any("number2",number2))
 	}else if (number2<0 && ret < number1){
-		log.SStack("Calculation overflow , number1 is ",number1," number2 is ",number2)
+		log.Stack("Calculation overflow" ,log.Any("number1",number1),log.Any("number2",number2))
 	}
 
 	return ret
@@ -71,8 +71,8 @@ func Mul[NumType NumberType](number1 NumType, number2 NumType) NumType {
 	if ret / number2 == number1 {
 		return ret
 	}
-	
-	log.SStack("Calculation overflow , number1 is ",number1," number2 is ",number2)
+
+	log.Stack("Calculation overflow" ,log.Any("number1",number1),log.Any("number2",number2))
 	return ret
 }
 

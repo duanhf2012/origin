@@ -167,7 +167,7 @@ func DefaultReportFunction(name string,callNum int,costTime time.Duration,record
 		elem = elem.Next()
 	}
 
-	log.Info("report",strReport)
+	log.SInfo("report",strReport)
 }
 
 func Report() {

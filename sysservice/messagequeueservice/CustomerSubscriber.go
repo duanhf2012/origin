@@ -104,11 +104,11 @@ func (cs *CustomerSubscriber) UnSubscribe() {
 func (cs *CustomerSubscriber) LoadLastIndex() {
 	for {
 		if atomic.LoadInt32(&cs.isStop) != 0 {
-			log.SRelease("topic ", cs.topic, "  out of subscription")
+			log.Info("topic ", cs.topic, "  out of subscription")
 			break
 		}
 
-		log.SRelease("customer ", cs.customerId, " start load last index ")
+		log.Info("customer ", cs.customerId, " start load last index ")
 		lastIndex, ret := cs.subscriber.dataPersist.LoadCustomerIndex(cs.topic, cs.customerId)
 		if ret == true {
 			if lastIndex > 0 {
@@ -116,18 +116,18 @@ func (cs *CustomerSubscriber) LoadLastIndex() {
 			} else {
 				//否则直接使用客户端发回来的
 			}
-			log.SRelease("customer ", cs.customerId, " load finish,start index is ", cs.StartIndex)
+			log.Info("customer ", cs.customerId, " load finish,start index is ", cs.StartIndex)
 			break
 		}
 
-		log.SRelease("customer ", cs.customerId, " load last index is fail...")
+		log.Info("customer ", cs.customerId, " load last index is fail...")
 		time.Sleep(5 * time.Second)
 	}
 }
 
 func (cs *CustomerSubscriber) SubscribeRun() {
 	defer cs.subscriber.queueWait.Done()
-	log.SRelease("topic ", cs.topic, "  start subscription")
+	log.Info("topic ", cs.topic, "  start subscription")
 
 	//加载之前的位置
 	if cs.subscribeMethod == MethodLast {
@@ -136,7 +136,7 @@ func (cs *CustomerSubscriber) SubscribeRun() {
 
 	for {
 		if atomic.LoadInt32(&cs.isStop) != 0 {
-			log.SRelease("topic ", cs.topic, "  out of subscription")
+			log.Info("topic ", cs.topic, "  out of subscription")
 			break
 		}
 
@@ -146,14 +146,14 @@ func (cs *CustomerSubscriber) SubscribeRun() {
 
 		//todo 检测退出
 		if cs.subscribe() == false {
-			log.SRelease("topic ", cs.topic, "  out of subscription")
+			log.Info("topic ", cs.topic, "  out of subscription")
 			break
 		}
 	}
 
 	//删除订阅关系
 	cs.subscriber.removeCustomer(cs.customerId, cs)
-	log.SRelease("topic ", cs.topic, "  unsubscription")
+	log.Info("topic ", cs.topic, "  unsubscription")
 }
 
 func (cs *CustomerSubscriber) subscribe() bool {

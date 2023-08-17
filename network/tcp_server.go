@@ -2,6 +2,7 @@ package network
 
 import (
 	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/util/bytespool"
 	"net"
 	"sync"
 	"time"
@@ -96,12 +97,12 @@ func (server *TCPServer) init() {
 	server.MsgParser.init()
 }
 
-func (server *TCPServer) SetNetMempool(mempool INetMempool){
-	server.INetMempool = mempool
+func (server *TCPServer) SetNetMempool(mempool bytespool.IBytesMempool){
+	server.IBytesMempool = mempool
 }
 
-func (server *TCPServer) GetNetMempool() INetMempool{
-	return server.INetMempool
+func (server *TCPServer) GetNetMempool() bytespool.IBytesMempool {
+	return server.IBytesMempool
 }
 
 func (server *TCPServer) run() {

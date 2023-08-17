@@ -1,12 +1,12 @@
-package network
+package bytespool
 
 import (
 	"sync"
 )
 
-type INetMempool interface {
-	MakeByteSlice(size int) []byte
-	ReleaseByteSlice(byteBuff []byte) bool
+type IBytesMempool interface {
+	MakeBytes(size int) []byte
+	ReleaseBytes(byteBuff []byte) bool
 }
 
 type memAreaPool struct {
@@ -68,7 +68,7 @@ func (areaPool *memAreaPool) releaseByteSlice(byteBuff []byte) bool {
 	return true
 }
 
-func (areaPool *memAreaPool) MakeByteSlice(size int) []byte {
+func (areaPool *memAreaPool) MakeBytes(size int) []byte {
 	for i := 0; i < len(memAreaPoolList); i++ {
 		if size <= memAreaPoolList[i].maxAreaValue {
 			return memAreaPoolList[i].makeByteSlice(size)
@@ -78,7 +78,7 @@ func (areaPool *memAreaPool) MakeByteSlice(size int) []byte {
 	return make([]byte, size)
 }
 
-func (areaPool *memAreaPool) ReleaseByteSlice(byteBuff []byte) bool {
+func (areaPool *memAreaPool) ReleaseBytes(byteBuff []byte) bool {
 	for i := 0; i < len(memAreaPoolList); i++ {
 		if cap(byteBuff) <= memAreaPoolList[i].maxAreaValue {
 			return memAreaPoolList[i].releaseByteSlice(byteBuff)

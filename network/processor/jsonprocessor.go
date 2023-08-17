@@ -3,9 +3,9 @@ package processor
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/duanhf2012/origin/network"
-	"reflect"
 	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/util/bytespool"
+	"reflect"
 )
 
 type MessageJsonInfo struct {
@@ -24,7 +24,7 @@ type JsonProcessor struct {
 	unknownMessageHandler UnknownMessageJsonHandler
 	connectHandler ConnectJsonHandler
 	disconnectHandler ConnectJsonHandler
-	network.INetMempool
+	bytespool.IBytesMempool
 }
 
 type JsonPackInfo struct {
@@ -35,7 +35,7 @@ type JsonPackInfo struct {
 
 func NewJsonProcessor() *JsonProcessor {
 	processor := &JsonProcessor{mapMsg:map[uint16]MessageJsonInfo{}}
-	processor.INetMempool = network.NewMemAreaPool()
+	processor.IBytesMempool = bytespool.NewMemAreaPool()
 
 	return processor
 }
@@ -58,7 +58,7 @@ func (jsonProcessor *JsonProcessor ) MsgRoute(clientId uint64,msg interface{}) e
 
 func (jsonProcessor *JsonProcessor) Unmarshal(clientId uint64,data []byte) (interface{}, error) {
 	typeStruct := struct {Type int `json:"typ"`}{}
-	defer jsonProcessor.ReleaseByteSlice(data)
+	defer jsonProcessor.ReleaseBytes(data)
 	err := json.Unmarshal(data, &typeStruct)
 	if err != nil {
 		return nil, err
