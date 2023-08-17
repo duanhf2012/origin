@@ -39,10 +39,7 @@ const (
 
 type Logger struct {
 	Slogger *slog.Logger
-	filePath    string
-	fileprefix 	string
-	fileDay     int
-	fileCreateTime int64 //second
+
 	ioWriter IoWriter
 
 	sBuff Buffer
@@ -57,6 +54,11 @@ type IoWriter struct {
 	closeSig chan struct{}
 
 	lockWrite sync.Mutex
+
+	filePath    string
+	fileprefix 	string
+	fileDay     int
+	fileCreateTime int64 //second
 }
 
 func (iw *IoWriter) Close() error {
@@ -71,17 +73,23 @@ func (iw *IoWriter) Close() error {
 func (iw *IoWriter) close() error {
 	if iw.closeSig != nil {
 		close(iw.closeSig)
+		iw.closeSig = nil
 	}
 	iw.wg.Wait()
 
 	if iw.outFile!= nil {
-		return iw.outFile.(io.Closer).Close()
+		err := iw.outFile.(io.Closer).Close()
+		iw.outFile = nil
+		return err
 	}
 
 	return nil
 }
 
 func (iw *IoWriter) writeFile(p []byte) (n int, err error){
+	//swich log file
+	iw.swichFile()
+
 	if iw.outFile != nil {
 		n,err = iw.outFile.Write(p)
 		if n > 0 {
@@ -118,7 +126,6 @@ func (iw *IoWriter) writeIo(p []byte)  (n int, err error){
 		n,err = iw.outConsole.Write(p)
 	}
 
-	memPool.ReleaseBytes(p)
 	return
 }
 
@@ -128,8 +135,6 @@ func (iw *IoWriter) setLogChannel(logChannelNum int) (err error){
 	iw.close()
 
 	if logChannelNum == 0 {
-		iw.logChannel = nil
-		iw.closeSig = nil
 		return nil
 	}
 
@@ -159,47 +164,43 @@ Loop:
 			break Loop
 		case logs := <-iw.logChannel:
 			iw.writeIo(logs)
+			memPool.ReleaseBytes(logs)
 		}
 	}
 
 	for len(iw.logChannel) > 0 {
 			logs := <-iw.logChannel
 			iw.writeIo(logs)
+			memPool.ReleaseBytes(logs)
 	}
 }
 
-func (logger *Logger) isFull() bool {
+func (iw *IoWriter) isFull() bool {
 	if LogSize == 0 {
 		return false
 	}
 
-	return atomic.LoadInt64(&logger.ioWriter.writeBytes) >= LogSize
+	return atomic.LoadInt64(&iw.writeBytes) >= LogSize
 }
 
 func (logger *Logger) setLogChannel(logChannel int) (err error){
 	return logger.ioWriter.setLogChannel(logChannel)
 }
 
-func (logger *Logger) setIo() error{
+func (iw *IoWriter) swichFile() error{
 	now := time.Now()
-
-	if logger.fileCreateTime == now.Unix() {
+	if iw.fileCreateTime == now.Unix() {
 		return nil
 	}
 
-	if logger.fileDay == now.Day() && logger.isFull() == false {
+	if iw.fileDay == now.Day() && iw.isFull() == false {
 		return nil
 	}
 
-	if logger.Slogger != nil {
-		logger.Slogger.Handler().(IOriginHandler).Lock()
-		defer logger.Slogger.Handler().(IOriginHandler).UnLock()
-	}
-
-	if logger.filePath != "" {
+	if iw.filePath != "" {
 		var err error
 		fileName := fmt.Sprintf("%s%d%02d%02d_%02d_%02d_%02d.log",
-			logger.fileprefix,
+			iw.fileprefix,
 			now.Year(),
 			now.Month(),
 			now.Day(),
@@ -207,20 +208,20 @@ func (logger *Logger) setIo() error{
 			now.Minute(),
 			now.Second())
 
-		filePath := path.Join(logger.filePath, fileName)
+		filePath := path.Join(iw.filePath, fileName)
 
-		logger.ioWriter.outFile,err = os.Create(filePath)
+		iw.outFile,err = os.Create(filePath)
 		if err != nil {
 			return err
 		}
-		logger.fileDay = now.Day()
-		logger.fileCreateTime = now.Unix()
-		atomic.StoreInt64(&logger.ioWriter.writeBytes,0)
+		iw.fileDay = now.Day()
+		iw.fileCreateTime = now.Unix()
+		atomic.StoreInt64(&iw.writeBytes,0)
 		if OpenConsole == true {
-			logger.ioWriter.outConsole = os.Stdout
+			iw.outConsole = os.Stdout
 		}
 	}else{
-		logger.ioWriter.outConsole = os.Stdout
+		iw.outConsole = os.Stdout
 	}
 
 	return nil
@@ -228,30 +229,31 @@ func (logger *Logger) setIo() error{
 
 func NewTextLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (*Logger,error){
 	var logger Logger
-	logger.filePath = pathName
-	logger.fileprefix = filePrefix
+	logger.ioWriter.filePath = pathName
+	logger.ioWriter.fileprefix = filePrefix
 
-	err := logger.setIo()
+	logger.Slogger = slog.New(NewOriginTextHandler(level,&logger.ioWriter,addSource,defaultReplaceAttr))
+	logger.setLogChannel(logChannelCap)
+	err := logger.ioWriter.swichFile()
 	if err != nil {
 		return nil,err
 	}
-	logger.Slogger = slog.New(NewOriginTextHandler(level,&logger.ioWriter,addSource,defaultReplaceAttr))
-	logger.setLogChannel(logChannelCap)
+
 	return &logger,nil
 }
 
 func NewJsonLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (*Logger,error){
 	var logger Logger
-	logger.filePath = pathName
-	logger.fileprefix = filePrefix
+	logger.ioWriter.filePath = pathName
+	logger.ioWriter.fileprefix = filePrefix
 
-	err := logger.setIo()
+	logger.Slogger = slog.New(NewOriginJsonHandler(level,&logger.ioWriter,true,defaultReplaceAttr))
+	logger.setLogChannel(logChannelCap)
+	err := logger.ioWriter.swichFile()
 	if err != nil {
 		return nil,err
 	}
-	logger.Slogger = slog.New(NewOriginJsonHandler(level,&logger.ioWriter,true,defaultReplaceAttr))
-	logger.setLogChannel(logChannelCap)
-	
+
 	return &logger,nil
 }
 
@@ -261,7 +263,6 @@ func (logger *Logger) Close() {
 }
 
 func (logger *Logger) Trace(msg string, args ...any) {
-	logger.setIo()
 	logger.Slogger.Log(context.Background(),LevelTrace,msg,args...)
 }
 
@@ -271,32 +272,26 @@ func (logger *Logger) Debug(msg string, args ...any) {
 }
 
 func (logger *Logger) Info(msg string, args ...any) {
-	logger.setIo()
 	logger.Slogger.Log(context.Background(),LevelInfo,msg,args...)
 }
 
 func (logger *Logger) Warning(msg string, args ...any) {
-	logger.setIo()
 	logger.Slogger.Log(context.Background(),LevelWarning,msg,args...)
 }
 
 func (logger *Logger) Error(msg string, args ...any) {
-	logger.setIo()
 	logger.Slogger.Log(context.Background(),LevelError,msg,args...)
 }
 
 func (logger *Logger) Stack(msg string, args ...any) {
-	logger.setIo()
 	logger.Slogger.Log(context.Background(),LevelStack,msg,args...)
 }
 
 func (logger *Logger) Dump(msg string, args ...any) {
-	logger.setIo()
 	logger.Slogger.Log(context.Background(),LevelDump,msg,args...)
 }
 
 func (logger *Logger) Fatal(msg string, args ...any) {
-	logger.setIo()
 	logger.Slogger.Log(context.Background(),LevelFatal,msg,args...)
 	os.Exit(1)
 }
@@ -436,52 +431,42 @@ func (logger *Logger) doSPrintf(level slog.Level,a []interface{}) {
 }
 
  func (logger *Logger) STrace(a ...interface{}) {
-	 logger.setIo()
 	 logger.doSPrintf(LevelTrace,a)
 }
 
 func (logger *Logger)  SDebug(a ...interface{}) {
-	logger.setIo()
 	logger.doSPrintf(LevelDebug,a)
 }
 
 func (logger *Logger)  SInfo(a ...interface{}) {
-	logger.setIo()
 	logger.doSPrintf(LevelInfo,a)
 }
 
 func (logger *Logger)  SWarning(a ...interface{}) {
-	logger.setIo()
 	logger.doSPrintf(LevelWarning,a)
 }
 
 func (logger *Logger)  SError(a ...interface{}) {
-	logger.setIo()
 	logger.doSPrintf(LevelError,a)
 }
 
 func STrace(a ...interface{}) {
-	gLogger.setIo()
 	gLogger.doSPrintf(LevelTrace,a)
 }
 
 func SDebug(a ...interface{}) {
-	gLogger.setIo()
 	gLogger.doSPrintf(LevelDebug,a)
 }
 
 func SInfo(a ...interface{}) {
-	gLogger.setIo()
 	gLogger.doSPrintf(LevelInfo,a)
 }
 
 func SWarning(a ...interface{}) {
-	gLogger.setIo()
 	gLogger.doSPrintf(LevelWarning,a)
 }
 
 func SError(a ...interface{}) {
-	gLogger.setIo()
 	gLogger.doSPrintf(LevelError,a)
 }
 
