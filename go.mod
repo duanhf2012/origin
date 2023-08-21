@@ -4,11 +4,12 @@ go 1.21
 
 require (
 	github.com/go-sql-driver/mysql v1.6.0
-	github.com/gogo/protobuf v1.3.2
 	github.com/gomodule/redigo v1.8.8
 	github.com/gorilla/websocket v1.5.0
 	github.com/json-iterator/go v1.1.12
+	github.com/pierrec/lz4/v4 v4.1.18
 	go.mongodb.org/mongo-driver v1.9.1
+	google.golang.org/protobuf v1.31.0
 	gopkg.in/mgo.v2 v2.0.0-20190816093944-a6b53ec6cb22
 )
 

@@ -1,8 +1,8 @@
 syntax = "proto3";
 package rpc;
-option go_package = "./rpc";
+option go_package = ".;rpc";
 
-message GoGoPBRpcRequestData{
+message PBRpcRequestData{
   uint64 Seq            = 1;
   uint32 RpcMethodId    = 2;
   string ServiceMethod  = 3;
@@ -10,7 +10,7 @@ message GoGoPBRpcRequestData{
   bytes  InParam        = 5;
 }
 
-message GoGoPBRpcResponseData{
+message PBRpcResponseData{
   uint64 Seq = 1;
   string Error = 2;
   bytes Reply = 3;

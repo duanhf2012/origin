@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/duanhf2012/origin/util/bytespool"
-	"github.com/gogo/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 	"reflect"
 )
 

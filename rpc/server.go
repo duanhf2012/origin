@@ -19,7 +19,7 @@ const (
 	RpcProcessorGoGoPB RpcProcessorType = 1
 )
 
-var arrayProcessor = []IRpcProcessor{&JsonProcessor{}, &GoGoPBProcessor{}}
+var arrayProcessor = []IRpcProcessor{&JsonProcessor{}, &PBProcessor{}}
 var arrayProcessorLen uint8 = 2
 var LittleEndian bool
 
