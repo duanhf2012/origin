@@ -340,6 +340,10 @@ func Close() {
 }
 
 func ErrorAttr(key string,value error) slog.Attr{
+	if value== nil {
+		return slog.Attr{key, slog.StringValue("nil")}
+	}
+
 	return slog.Attr{key, slog.StringValue(value.Error())}
 }
 
