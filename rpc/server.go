@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"runtime"
 )
 
 type RpcProcessorType uint8
@@ -141,6 +142,15 @@ func (agent *RpcAgent) WriteResponse(processor IRpcProcessor, serviceMethod stri
 }
 
 func (agent *RpcAgent) Run() {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 4096)
+			l := runtime.Stack(buf, false) 
+			errString := fmt.Sprint(r)
+			log.Dump(string(buf[:l]),log.String("error",errString))
+		}
+	}()
+
 	for {
 		data, err := agent.conn.ReadMsg()
 		if err != nil {
@@ -226,12 +236,13 @@ func (agent *RpcAgent) Run() {
 		req.inParam, err = rpcHandler.UnmarshalInParam(req.rpcProcessor, req.RpcRequestData.GetServiceMethod(), req.RpcRequestData.GetRpcMethodId(), req.RpcRequestData.GetInParam())
 		if err != nil {
 			rErr := "Call Rpc " + req.RpcRequestData.GetServiceMethod() + " Param error " + err.Error()
+			log.Error("call rpc param error",log.String("serviceMethod",req.RpcRequestData.GetServiceMethod()),log.ErrorAttr("error",err))
 			if req.requestHandle != nil {
 				req.requestHandle(nil, RpcError(rErr))
 			} else {
 				ReleaseRpcRequest(req)
 			}
-			log.Error("call rpc param error",log.String("serviceMethod",req.RpcRequestData.GetServiceMethod()),log.ErrorAttr("error",err))
+
 			continue
 		}
 
