@@ -1,10 +1,10 @@
 package log
 
 import (
-	"log/slog"
-	"io"
-	"path/filepath"
 	"context"
+	"io"
+	"log/slog"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sync"
@@ -35,21 +35,21 @@ type OriginJsonHandler struct {
 func getStrLevel(level slog.Level) string{
 	switch level {
 	case LevelTrace:
-		return "TRACE"
+		return "Trace"
 	case LevelDebug:
-		return "DEBUG"
+		return "Debug"
 	case LevelInfo:
-		return "INFO"
+		return "Info"
 	case LevelWarning:
-		return "WARNING"
+		return "Warning"
 	case LevelError:
-		return "ERROR"
+		return "Error"
 	case LevelStack:
-		return "STACK"
+		return "Stack"
 	case LevelDump:
-		return "DUMP"
+		return "Dump"
 	case LevelFatal:
-		return "FATAL"
+		return "Fatal"
 	}
 
 	return ""
@@ -97,7 +97,8 @@ func (oh *OriginTextHandler) Handle(context context.Context, record slog.Record)
 		oh.w.Write([]byte(strDump))
 		return err
 	}
-	
+
+
 	return oh.TextHandler.Handle(context, record)
 }
 

@@ -489,23 +489,8 @@ func (logger *Logger) formatHeader(buf *Buffer,level slog.Level,calldepth int) {
 	file = filepath.Base(file)
 
 	buf.AppendString("time=\"")
-	year, month, day := t.Date()
-	buf.AppendInt(int64(year))
-	buf.AppendByte('/')
-	buf.AppendInt(int64(month))
-	buf.AppendByte('/')
-	buf.AppendInt(int64(day))
-	buf.AppendByte(' ')
-
-	hour, min, sec := t.Clock()
-	buf.AppendInt(int64(hour))
-	buf.AppendByte(':')
-	buf.AppendInt(int64(min))
-	buf.AppendByte(':')
-	
-	buf.AppendInt(int64(sec))
+	buf.AppendString(t.Format("2006/01/02 15:04:05"))
 	buf.AppendString("\"")
-
 	logger.sBuff.AppendString(" level=")
 	logger.sBuff.AppendString(getStrLevel(level))
 	logger.sBuff.AppendString(" source=")
