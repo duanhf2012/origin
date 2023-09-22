@@ -53,18 +53,9 @@ type Client struct {
 }
 
 func (tcpService *TcpService) genId() uint64 {
-	if node.GetNodeId()>MaxNodeId{
-		panic("nodeId exceeds the maximum!")
-	}
-
 	newSeed := atomic.AddUint32(&seed,1) % MaxSeed
 	nowTime := uint64(time.Now().Unix())%MaxTime
-	return (uint64(node.GetNodeId())<<50)|(nowTime<<19)|uint64(newSeed)
-}
-
-
-func GetNodeId(agentId uint64) int {
-	return int(agentId>>50)
+	return (uint64(node.GetNodeId()%MaxNodeId)<<50)|(nowTime<<19)|uint64(newSeed)
 }
 
 func (tcpService *TcpService) OnInit() error{
