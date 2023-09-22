@@ -20,6 +20,11 @@ const (
 	Discard NodeStatus = 1 //丢弃
 )
 
+type MasterDiscoveryService struct {
+	MasterNodeId int32 //要筛选的主结点Id，如果不配置或者配置成0，表示针对所有的主结点
+	DiscoveryService  []string  //只发现的服务列表
+}
+
 type NodeInfo struct {
 	NodeId            int
 	NodeName          string
@@ -29,8 +34,7 @@ type NodeInfo struct {
 	CompressBytesLen  int   //超过字节进行压缩的长度
 	ServiceList  	  []string //所有的有序服务列表
 	PublicServiceList []string //对外公开的服务列表
-	DiscoveryService  []string //筛选发现的服务，如果不配置，不进行筛选
-	NeighborService   []string
+	MasterDiscoveryService  []MasterDiscoveryService //筛选发现的服务，如果不配置，不进行筛选
 	status            NodeStatus
 }
 
