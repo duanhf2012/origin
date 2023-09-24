@@ -19,7 +19,7 @@ Hello world!
 ```go
 go get -v -u  github.com/duanhf2012/origin
 ```
-
+[README.md](README.md)
 于是下载到GOPATH环境目录中,在src中加入main.go,内容如下：
 
 ```go
@@ -858,8 +858,7 @@ origin引擎默认使用读取所有结点配置的进行确认结点有哪些Se
 	"MasterDiscoveryNode": [{
 		"NodeId": 2,
 		"ListenAddr": "127.0.0.1:10001",
-		"MaxRpcParamLen": 409600,
-		"NeighborService":["HttpGateService"]
+		"MaxRpcParamLen": 409600
 	},
 	{
 		"NodeId": 1,
@@ -876,17 +875,18 @@ origin引擎默认使用读取所有结点配置的进行确认结点有哪些Se
 		"Private": false,
 		"remark": "//以_打头的，表示只在本机进程，不对整个子网开发",
 		"ServiceList": ["_TestService1", "TestService9", "TestService10"],
-		"DiscoveryService": ["TestService8"]
+	    "MasterDiscoveryService": [
+		    {
+                "MasterNodeId": 2,
+                "DiscoveryService": ["TestService8"]
+            }
+	    ]
 	}]
 }
 ```
+MasterDiscoveryNode: 配置了结点Id为1的服务发现Master，他的监听地址ListenAddr为127.0.0.1:8801，结点为2的也是一个服务发现Master。NodeId为1的结点会从结点为1和2的网络中发现服务。
 
-新上有两新不同的字段分别为MasterDiscoveryNode与DiscoveryService。其中:
-
-MasterDiscoveryNode中配置了结点Id为1的服务发现Master，他的监听地址ListenAddr为127.0.0.1:8801，结点为2的也是一个服务发现Master，不同在于多了"NeighborService":["HttpGateService"]配置。如果"NeighborService"有配置具体的服务时，则表示该结点是一个邻居Master结点。当前运行的Node结点会从该Master结点上筛选HttpGateService的服务，并且当前运行的Node结点不会向上同步本地所有公开的服务，和邻居结点关系是单向的。
-
-NeighborService可以用在当有多个以Master中心结点的网络，发现跨网络的服务场景。
-DiscoveryService表示将筛选origin网络中的TestService8服务，注意如果DiscoveryService不配置，则筛选功能不生效。
+MasterDiscoveryService: 表示将筛选origin网络中MasterNodeId为2中的TestService8服务，注意如果MasterDiscoveryService不配置，则筛选功能不生效。MasterNodeId也可以填为0，表示NodeId为1的结点，在所有网络中只发现TestService8的服务。
 
 第八章：HttpService使用
 -----------------------
