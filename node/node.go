@@ -314,7 +314,7 @@ func startNode(args interface{}) error {
 		case s := <-sig:
 			signal := s.(syscall.Signal)
 			if signal == SignalRetire {
-				log.Info("receipt downline signal.")
+				log.Info("receipt retire signal.")
 				notifyAllServiceRetire()
 			}else {
 				bRun = false
