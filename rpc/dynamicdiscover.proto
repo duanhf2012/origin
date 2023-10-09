@@ -8,7 +8,8 @@ message NodeInfo{
     string ListenAddr  = 3;
     uint32 MaxRpcParamLen = 4;
     bool Private = 5;
-    repeated string PublicServiceList = 6;
+	bool Retire = 6;
+    repeated string PublicServiceList = 7;
 }
 
 //Client->Master
@@ -22,6 +23,12 @@ message SubscribeDiscoverNotify{
     bool IsFull = 2;
     int32 DelNodeId    = 3;
     repeated NodeInfo nodeInfo = 4;
+}
+
+
+//Client->Master
+message NodeRetireReq{
+    NodeInfo nodeInfo = 1;
 }
 
 //Master->Client

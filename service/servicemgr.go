@@ -60,3 +60,9 @@ func StopAllService(){
 		setupServiceList[i].Stop()
 	}
 }
+
+func NotifyAllServiceRetire(){
+	for i := len(setupServiceList) - 1; i >= 0; i-- {
+		setupServiceList[i].SetRetire()
+	}
+}

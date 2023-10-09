@@ -8,7 +8,7 @@ import (
 )
 
 func KillProcess(processId int){
-	err := syscall.Kill(processId,syscall.Signal(10))
+	err := syscall.Kill(processId,SingleStop)
 	if err != nil {
 		fmt.Printf("kill processid %d is fail:%+v.\n",processId,err)
 	}else{
@@ -18,4 +18,13 @@ func KillProcess(processId int){
 
 func GetBuildOSType() BuildOSType{
 	return Mac
+}
+
+func RetireProcess(processId int){
+	err := syscall.Kill(processId,SignalRetire)
+	if err != nil {
+		fmt.Printf("offline processid %d is fail:%+v.\n",processId,err)
+	}else{
+		fmt.Printf("offline processid %d is successful.\n",processId)
+	}
 }

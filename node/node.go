@@ -28,6 +28,10 @@ var profilerInterval time.Duration
 var bValid bool
 var configDir = "./config/"
 
+const(
+	SingleStop   syscall.Signal = 10
+	SignalRetire syscall.Signal = 12
+)
 
 type BuildOSType = int8
 
@@ -38,13 +42,14 @@ const(
 )
 
 func init() {
-	sig = make(chan os.Signal, 3)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.Signal(10))
+	sig = make(chan os.Signal, 4)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, SingleStop,SignalRetire)
 
 	console.RegisterCommandBool("help", false, "<-help> This help.", usage)
 	console.RegisterCommandString("name", "", "<-name nodeName> Node's name.", setName)
 	console.RegisterCommandString("start", "", "<-start nodeid=nodeid> Run originserver.", startNode)
 	console.RegisterCommandString("stop", "", "<-stop nodeid=nodeid> Stop originserver process.", stopNode)
+	console.RegisterCommandString("retire", "", "<-retire nodeid=nodeid> retire originserver process.", retireNode)
 	console.RegisterCommandString("config", "", "<-config path> Configuration file path.", setConfigPath)
 	console.RegisterCommandString("console", "", "<-console true|false> Turn on or off screen log output.", openConsole)
 	console.RegisterCommandString("loglevel", "debug", "<-loglevel debug|release|warning|error|fatal> Set loglevel.", setLevel)
@@ -52,6 +57,11 @@ func init() {
 	console.RegisterCommandInt("logsize", 0, "<-logsize size> Set log size(MB).", setLogSize)
 	console.RegisterCommandInt("logchannelcap", 0, "<-logchannelcap num> Set log channel cap.", setLogChannelCapNum)
 	console.RegisterCommandString("pprof", "", "<-pprof ip:port> Open performance analysis.", setPprof)
+}
+
+
+func notifyAllServiceRetire(){
+	service.NotifyAllServiceRetire()
 }
 
 func usage(val interface{}) error {
@@ -201,6 +211,36 @@ func Start() {
 	}
 }
 
+
+func retireNode(args interface{}) error {
+	//1.解析参数
+	param := args.(string)
+	if param == "" {
+		return nil
+	}
+
+	sParam := strings.Split(param, "=")
+	if len(sParam) != 2 {
+		return fmt.Errorf("invalid option %s", param)
+	}
+	if sParam[0] != "nodeid" {
+		return fmt.Errorf("invalid option %s", param)
+	}
+	nId, err := strconv.Atoi(sParam[1])
+	if err != nil {
+		return fmt.Errorf("invalid option %s", param)
+	}
+
+	processId, err := getRunProcessPid(nId)
+	if err != nil {
+		return err
+	}
+
+	RetireProcess(processId)
+	return nil
+}
+
+
 func stopNode(args interface{}) error {
 	//1.解析参数
 	param := args.(string)
@@ -215,12 +255,12 @@ func stopNode(args interface{}) error {
 	if sParam[0] != "nodeid" {
 		return fmt.Errorf("invalid option %s", param)
 	}
-	nodeId, err := strconv.Atoi(sParam[1])
+	nId, err := strconv.Atoi(sParam[1])
 	if err != nil {
 		return fmt.Errorf("invalid option %s", param)
 	}
 
-	processId, err := getRunProcessPid(nodeId)
+	processId, err := getRunProcessPid(nId)
 	if err != nil {
 		return err
 	}
@@ -268,15 +308,23 @@ func startNode(args interface{}) error {
 	if profilerInterval > 0 {
 		pProfilerTicker = time.NewTicker(profilerInterval)
 	}
+
 	for bRun {
 		select {
-		case <-sig:
-			log.Info("receipt stop signal.")
-			bRun = false
+		case s := <-sig:
+			signal := s.(syscall.Signal)
+			if signal == SignalRetire {
+				log.Info("receipt downline signal.")
+				notifyAllServiceRetire()
+			}else {
+				bRun = false
+				log.Info("receipt stop signal.")
+			}
 		case <-pProfilerTicker.C:
 			profiler.Report()
 		}
 	}
+
 	cluster.GetCluster().Stop()
 	//7.退出
 	service.StopAllService()

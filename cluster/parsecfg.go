@@ -199,7 +199,11 @@ func (cls *Cluster) readLocalService(localNodeId int) error {
 }
 
 func (cls *Cluster) parseLocalCfg() {
-	cls.mapIdNode[cls.localNodeInfo.NodeId] = cls.localNodeInfo
+	rpcInfo := NodeRpcInfo{}
+	rpcInfo.nodeInfo = cls.localNodeInfo
+	rpcInfo.client = rpc.NewLClient(rpcInfo.nodeInfo.NodeId)
+
+	cls.mapRpc[cls.localNodeInfo.NodeId] = &rpcInfo
 
 	for _, sName := range cls.localNodeInfo.ServiceList {
 		if _, ok := cls.mapServiceNode[sName]; ok == false {
@@ -225,8 +229,7 @@ func (cls *Cluster) checkDiscoveryNodeList(discoverMasterNode []NodeInfo) bool {
 
 func (cls *Cluster) InitCfg(localNodeId int) error {
 	cls.localServiceCfg = map[string]interface{}{}
-	cls.mapRpc = map[int]NodeRpcInfo{}
-	cls.mapIdNode = map[int]NodeInfo{}
+	cls.mapRpc = map[int]*NodeRpcInfo{}
 	cls.mapServiceNode = map[string]map[int]struct{}{}
 
 	//加载本地结点的NodeList配置
@@ -263,17 +266,24 @@ func (cls *Cluster) IsConfigService(serviceName string) bool {
 	return ok
 }
 
-func (cls *Cluster) GetNodeIdByService(serviceName string, rpcClientList []*rpc.Client, bAll bool) (error, int) {
+
+func (cls *Cluster) GetNodeIdByService(serviceName string, rpcClientList []*rpc.Client, filterRetire bool) (error, int) {
 	cls.locker.RLock()
 	defer cls.locker.RUnlock()
 	mapNodeId, ok := cls.mapServiceNode[serviceName]
 	count := 0
 	if ok == true {
 		for nodeId, _ := range mapNodeId {
-			pClient := GetCluster().getRpcClient(nodeId)
-			if pClient == nil || (bAll == false && pClient.IsConnected() == false) {
+			pClient,retire := GetCluster().getRpcClient(nodeId)
+			if pClient == nil || pClient.IsConnected() == false {
 				continue
 			}
+
+			//如果需要筛选掉退休的，对retire状态的结点略过
+			if filterRetire == true && retire == true {
+				continue
+			}
+
 			rpcClientList[count] = pClient
 			count++
 			if count >= cap(rpcClientList) {

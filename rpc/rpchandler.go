@@ -14,7 +14,7 @@ import (
 
 const maxClusterNode int = 128
 
-type FuncRpcClient func(nodeId int, serviceMethod string, client []*Client) (error, int)
+type FuncRpcClient func(nodeId int, serviceMethod string,filterRetire bool, client []*Client) (error, int)
 type FuncRpcServer func() *Server
 
 
@@ -73,7 +73,7 @@ type INodeListener interface {
 
 type IDiscoveryServiceListener interface {
 	OnDiscoveryService(nodeId int, serviceName []string)
-	OnUnDiscoveryService(nodeId int, serviceName []string)
+	OnUnDiscoveryService(nodeId int)
 }
 
 type CancelRpc func()
@@ -428,7 +428,7 @@ func (handler *RpcHandler) CallMethod(client *Client,ServiceMethod string, param
 
 func (handler *RpcHandler) goRpc(processor IRpcProcessor, bCast bool, nodeId int, serviceMethod string, args interface{}) error {
 	var pClientList [maxClusterNode]*Client
-	err, count := handler.funcRpcClient(nodeId, serviceMethod, pClientList[:])
+	err, count := handler.funcRpcClient(nodeId, serviceMethod,false, pClientList[:])
 	if count == 0 {
 		if err != nil {
 			log.Error("call serviceMethod is failed",log.String("serviceMethod",serviceMethod),log.ErrorAttr("error",err))
@@ -458,7 +458,7 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor, bCast bool, nodeId int
 
 func (handler *RpcHandler) callRpc(timeout time.Duration,nodeId int, serviceMethod string, args interface{}, reply interface{}) error {
 	var pClientList [maxClusterNode]*Client
-	err, count := handler.funcRpcClient(nodeId, serviceMethod, pClientList[:])
+	err, count := handler.funcRpcClient(nodeId, serviceMethod,false, pClientList[:])
 	if err != nil {
 		log.Error("Call serviceMethod is failed",log.ErrorAttr("error",err))
 		return err
@@ -502,7 +502,7 @@ func (handler *RpcHandler) asyncCallRpc(timeout time.Duration,nodeId int, servic
 
 	reply := reflect.New(fVal.Type().In(0).Elem()).Interface()
 	var pClientList [2]*Client
-	err, count := handler.funcRpcClient(nodeId, serviceMethod, pClientList[:])
+	err, count := handler.funcRpcClient(nodeId, serviceMethod,false, pClientList[:])
 	if count == 0 || err != nil {
 		if err == nil {
 			if nodeId  > 0 {
@@ -585,7 +585,7 @@ func (handler *RpcHandler) CastGo(serviceMethod string, args interface{}) error 
 
 func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType, nodeId int, rpcMethodId uint32, serviceName string, rawArgs []byte) error {
 	processor := GetProcessor(uint8(rpcProcessorType))
-	err, count := handler.funcRpcClient(nodeId, serviceName, handler.pClientList)
+	err, count := handler.funcRpcClient(nodeId, serviceName,false, handler.pClientList)
 	if count == 0 || err != nil {
 		log.Error("call serviceMethod is failed",log.ErrorAttr("error",err))
 		return err

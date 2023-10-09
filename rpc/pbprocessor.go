@@ -74,7 +74,7 @@ func (slf *PBProcessor) IsParse(param interface{}) bool {
 }
 
 func (slf *PBProcessor)	GetProcessorType() RpcProcessorType{
-	return RpcProcessorGoGoPB
+	return RpcProcessorPB
 }
 
 func (slf *PBProcessor) Clone(src interface{}) (interface{},error){

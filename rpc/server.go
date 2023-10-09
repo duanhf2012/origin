@@ -17,7 +17,7 @@ type RpcProcessorType uint8
 
 const (
 	RpcProcessorJson   RpcProcessorType = 0
-	RpcProcessorGoGoPB RpcProcessorType = 1
+	RpcProcessorPB RpcProcessorType = 1
 )
 
 var arrayProcessor = []IRpcProcessor{&JsonProcessor{}, &PBProcessor{}}

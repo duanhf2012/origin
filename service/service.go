@@ -28,6 +28,7 @@ type IService interface {
 	OnSetup(iService IService)
 	OnInit() error
 	OnStart()
+	OnRetire()
 	OnRelease()
 
 	SetName(serviceName string)
@@ -40,6 +41,9 @@ type IService interface {
 
 	SetEventChannelNum(num int)
 	OpenProfiler()
+
+	SetRetire()     //设置服务退休状态
+	IsRetire() bool //服务是否退休
 }
 
 type Service struct {
@@ -51,6 +55,7 @@ type Service struct {
 	serviceCfg     interface{}
 	goroutineNum   int32
 	startStatus    bool
+	retire int32
 	eventProcessor event.IEventProcessor
 	profiler *profiler.Profiler //性能分析器
 	nodeEventLister rpc.INodeListener
@@ -95,6 +100,19 @@ func (s *Service) OpenProfiler()  {
 	if s.profiler==nil {
 		log.Fatal("rofiler.RegProfiler "+s.GetName()+" fail.")
 	}
+}
+
+func (s *Service) IsRetire() bool{
+	return atomic.LoadInt32(&s.retire) != 0
+}
+
+func (s *Service) SetRetire(){
+	atomic.StoreInt32(&s.retire,1)
+
+	ev := event.NewEvent()
+	ev.Type = event.Sys_Event_Retire
+
+	s.pushEvent(ev)
 }
 
 func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{}) {
@@ -155,6 +173,9 @@ func (s *Service) Run() {
 			concurrent.DoCallback(cb)
 		case ev := <- s.chanEvent:
 			switch ev.GetEventType() {
+			case event.Sys_Event_Retire:
+				log.Info("service OnRetire",log.String("servceName",s.GetName()))
+				s.self.(IService).OnRetire()
 			case event.ServiceRpcRequestEvent:
 				cEvent,ok := ev.(*event.Event)
 				if ok == false {
@@ -304,7 +325,7 @@ func (s *Service) OnDiscoverServiceEvent(ev event.IEvent){
 	if event.IsDiscovery {
 		s.discoveryServiceLister.OnDiscoveryService(event.NodeId,event.ServiceName)
 	}else{
-		s.discoveryServiceLister.OnUnDiscoveryService(event.NodeId,event.ServiceName)
+		s.discoveryServiceLister.OnUnDiscoveryService(event.NodeId)
 	}
 }
 
@@ -386,4 +407,7 @@ func (s *Service) SetGoRoutineNum(goroutineNum int32) bool {
 
 	s.goroutineNum = goroutineNum
 	return true
+}
+
+func (s *Service) OnRetire(){
 }
