@@ -350,6 +350,15 @@ func (cls *Cluster) IsNodeConnected(nodeId int) bool {
 	return pClient != nil && pClient.IsConnected()
 }
 
+func (cls *Cluster) IsNodeRetire(nodeId int) bool {
+	cls.locker.RLock()
+	defer cls.locker.RUnlock()
+
+	_,retire :=cls.getRpcClient(nodeId)
+	return retire
+}
+
+
 func (cls *Cluster) triggerRpcEvent(bConnect bool, clientId uint32, nodeId int) {
 	cls.locker.Lock()
 	nodeInfo, ok := cls.mapRpc[nodeId]
