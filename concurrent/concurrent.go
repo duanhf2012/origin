@@ -5,6 +5,7 @@ import (
 	"runtime"
 
 	"github.com/duanhf2012/origin/log"
+	"sync/atomic"
 )
 
 const defaultMaxTaskChannelNum = 1000000
@@ -21,6 +22,7 @@ type Concurrent struct {
 
 	tasks     chan task
 	cbChannel chan func(error)
+	open int32
 }
 
 /*
@@ -33,6 +35,10 @@ func (c *Concurrent) OpenConcurrentByNumCPU(cpuNumMul float32) {
 }
 
 func (c *Concurrent) OpenConcurrent(minGoroutineNum int32, maxGoroutineNum int32, maxTaskChannelNum int) {
+	if atomic.AddInt32(&c.open,1) > 1 {
+		panic("repeated calls to OpenConcurrent are not allowed!")
+	}
+	
 	c.tasks = make(chan task, maxTaskChannelNum)
 	c.cbChannel = make(chan func(error), maxTaskChannelNum)
 
