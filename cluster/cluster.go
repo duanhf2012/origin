@@ -477,3 +477,14 @@ func (cls *Cluster) GetGlobalCfg() interface{} {
 	return cls.globalCfg
 }
 
+func (cls *Cluster) GetNodeInfo(nodeId int) (NodeInfo,bool) {
+	cls.locker.RLock()
+	defer cls.locker.RUnlock()
+
+	nodeInfo,ok:= cls.mapRpc[nodeId]
+	if ok == false || nodeInfo == nil {
+		return NodeInfo{},false
+	}
+
+	return nodeInfo.nodeInfo,true
+}
