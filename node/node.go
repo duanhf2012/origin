@@ -19,6 +19,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"github.com/shirou/gopsutil/process"
 )
 
 var sig chan os.Signal
@@ -236,6 +237,7 @@ func retireNode(args interface{}) error {
 		return err
 	}
 
+
 	RetireProcess(processId)
 	return nil
 }
@@ -286,6 +288,14 @@ func startNode(args interface{}) error {
 	nodeId, err := strconv.Atoi(sParam[1])
 	if err != nil {
 		return fmt.Errorf("invalid option %s", param)
+	}
+	processId, err := getRunProcessPid(nodeId)
+	if err != nil {
+		return err
+	}
+	ok,_ := process.PidExists(int32(processId))
+	if ok == true {
+		return fmt.Errorf("repeat runs are not allowed,node is %d,processid is %d",nodeId,processId)
 	}
 
 	timer.StartTimer(10*time.Millisecond, 1000000)
