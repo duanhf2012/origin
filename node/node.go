@@ -19,7 +19,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"github.com/shirou/gopsutil/process"
+	"github.com/duanhf2012/origin/util/sysprocess"
 )
 
 var sig chan os.Signal
@@ -293,9 +293,19 @@ func startNode(args interface{}) error {
 	if err != nil {
 		return err
 	}
-	ok,_ := process.PidExists(int32(processId))
-	if ok == true {
-		return fmt.Errorf("repeat runs are not allowed,node is %d,processid is %d",nodeId,processId)
+
+	name, cErr := sysprocess.GetProcessNameByPID(int32(processId))
+	myName, mErr := sysprocess.GetMyProcessName()
+	//当前进程名获取失败，不应该发生
+	if mErr != nil {
+		log.SInfo("get my process's name is error,", err.Error())
+		os.Exit(-1)
+	}
+
+	//进程id存在，而且进程名也相同，被认为是当前进程重复运行
+	if cErr == nil && name == myName {
+		log.SInfo(fmt.Sprintf("repeat runs are not allowed,node is %d,processid is %d",nodeId,processId))
+		os.Exit(-1)
 	}
 
 	timer.StartTimer(10*time.Millisecond, 1000000)
