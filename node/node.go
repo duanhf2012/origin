@@ -289,38 +289,43 @@ func startNode(args interface{}) error {
 	if err != nil {
 		return fmt.Errorf("invalid option %s", param)
 	}
-	processId, err := getRunProcessPid(nodeId)
-	if err != nil {
-		return err
+	for{
+		processId, pErr := getRunProcessPid(nodeId)
+		if pErr != nil {
+			break
+		}
+
+		name, cErr := sysprocess.GetProcessNameByPID(int32(processId))
+		myName, mErr := sysprocess.GetMyProcessName()
+		//当前进程名获取失败，不应该发生
+		if mErr != nil {
+			log.SInfo("get my process's name is error,", err.Error())
+			os.Exit(-1)
+		}
+
+		//进程id存在，而且进程名也相同，被认为是当前进程重复运行
+		if cErr == nil && name == myName {
+			log.SInfo(fmt.Sprintf("repeat runs are not allowed,node is %d,processid is %d",nodeId,processId))
+			os.Exit(-1)
+		}
+		break
 	}
 
-	name, cErr := sysprocess.GetProcessNameByPID(int32(processId))
-	myName, mErr := sysprocess.GetMyProcessName()
-	//当前进程名获取失败，不应该发生
-	if mErr != nil {
-		log.SInfo("get my process's name is error,", err.Error())
-		os.Exit(-1)
-	}
-
-	//进程id存在，而且进程名也相同，被认为是当前进程重复运行
-	if cErr == nil && name == myName {
-		log.SInfo(fmt.Sprintf("repeat runs are not allowed,node is %d,processid is %d",nodeId,processId))
-		os.Exit(-1)
-	}
-
-	timer.StartTimer(10*time.Millisecond, 1000000)
+	//2.记录进程id号
 	log.Info("Start running server.")
-	//2.初始化node
+	writeProcessPid(nodeId)
+	timer.StartTimer(10*time.Millisecond, 1000000)
+
+	//3.初始化node
 	initNode(nodeId)
 
-	//3.运行service
+	//4.运行service
 	service.Start()
 
-	//4.运行集群
+	//5.运行集群
 	cluster.GetCluster().Start()
 
-	//5.记录进程id号
-	writeProcessPid(nodeId)
+
 
 	//6.监听程序退出信号&性能报告
 	bRun := true
