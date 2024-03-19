@@ -43,7 +43,15 @@ func (slf *SyncHttpResponse) Get(timeoutMs int) HttpResponse {
 	}
 }
 
-func (m *HttpClientModule) Init(maxpool int, proxyUrl string) {
+func (m *HttpClientModule) InitHttpClient(transport http.RoundTripper,timeout time.Duration,checkRedirect func(req *http.Request, via []*http.Request) error){
+	m.client = &http.Client{
+		Transport: transport,
+		Timeout: timeout,
+		CheckRedirect: checkRedirect,
+	}
+}
+
+func (m *HttpClientModule) Init(proxyUrl string, maxpool int, dialTimeout time.Duration,dialKeepAlive time.Duration,idleConnTimeout time.Duration,timeout time.Duration) {
 	type ProxyFun func(_ *http.Request) (*url.URL, error)
 	var proxyFun ProxyFun
 	if proxyUrl != "" {
@@ -55,16 +63,16 @@ func (m *HttpClientModule) Init(maxpool int, proxyUrl string) {
 	m.client = &http.Client{
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
-				Timeout:   5 * time.Second,
-				KeepAlive: 30 * time.Second,
+				Timeout:   dialTimeout,
+				KeepAlive: dialKeepAlive,
 			}).DialContext,
 			MaxIdleConns:        maxpool,
 			MaxIdleConnsPerHost: maxpool,
-			IdleConnTimeout:     60 * time.Second,
+			IdleConnTimeout:     idleConnTimeout,
 			Proxy:               proxyFun,
 			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		},
-		Timeout: 5 * time.Second,
+		Timeout: timeout,
 	}
 }
 
