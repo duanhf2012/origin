@@ -3,13 +3,13 @@ package node
 import (
 	"errors"
 	"fmt"
-	"github.com/duanhf2012/origin/cluster"
-	"github.com/duanhf2012/origin/console"
-	"github.com/duanhf2012/origin/log"
-	"github.com/duanhf2012/origin/profiler"
-	"github.com/duanhf2012/origin/service"
-	"github.com/duanhf2012/origin/util/buildtime"
-	"github.com/duanhf2012/origin/util/timer"
+	"github.com/duanhf2012/origin/v2/cluster"
+	"github.com/duanhf2012/origin/v2/console"
+	"github.com/duanhf2012/origin/v2/log"
+	"github.com/duanhf2012/origin/v2/profiler"
+	"github.com/duanhf2012/origin/v2/service"
+	"github.com/duanhf2012/origin/v2/util/buildtime"
+	"github.com/duanhf2012/origin/v2/util/timer"
 	"io"
 	"net/http"
 	_ "net/http/pprof"
@@ -19,7 +19,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"github.com/duanhf2012/origin/util/sysprocess"
+	"github.com/duanhf2012/origin/v2/util/sysprocess"
 )
 
 var sig chan os.Signal

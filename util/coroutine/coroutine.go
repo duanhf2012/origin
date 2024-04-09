@@ -2,7 +2,7 @@ package coroutine
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 	"reflect"
 	"runtime/debug"
 )

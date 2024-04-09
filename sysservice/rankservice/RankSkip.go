@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/duanhf2012/origin/rpc"
-	"github.com/duanhf2012/origin/util/algorithms/skip"
+	"github.com/duanhf2012/origin/v2/rpc"
+	"github.com/duanhf2012/origin/v2/util/algorithms/skip"
 )
 
 type RankSkip struct {

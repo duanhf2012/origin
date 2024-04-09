@@ -3,17 +3,17 @@ package service
 import (
 	"errors"
 	"fmt"
-	"github.com/duanhf2012/origin/event"
-	"github.com/duanhf2012/origin/log"
-	"github.com/duanhf2012/origin/profiler"
-	"github.com/duanhf2012/origin/rpc"
-	"github.com/duanhf2012/origin/util/timer"
+	"github.com/duanhf2012/origin/v2/event"
+	"github.com/duanhf2012/origin/v2/log"
+	"github.com/duanhf2012/origin/v2/profiler"
+	"github.com/duanhf2012/origin/v2/rpc"
+	"github.com/duanhf2012/origin/v2/util/timer"
 	"reflect"
 	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"github.com/duanhf2012/origin/concurrent"
+	"github.com/duanhf2012/origin/v2/concurrent"
 )
 
 var timerDispatcherLen = 100000

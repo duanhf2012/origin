@@ -3,7 +3,7 @@ package rpc
 import (
 	"errors"
 	"fmt"
-	"github.com/duanhf2012/origin/util/bytespool"
+	"github.com/duanhf2012/origin/v2/util/bytespool"
 	"github.com/pierrec/lz4/v4"
 	"runtime"
 )

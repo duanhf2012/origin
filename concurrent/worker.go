@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 )
 
 type task struct {

@@ -1,6 +1,6 @@
 package event
 
-import "github.com/duanhf2012/origin/util/sync"
+import "github.com/duanhf2012/origin/v2/util/sync"
 
 // eventPool的内存池,缓存Event
 const defaultMaxEventChannelNum = 2000000

@@ -3,7 +3,7 @@ package profiler
 import (
 	"container/list"
 	"fmt"
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 	"sync"
 	"time"
 )

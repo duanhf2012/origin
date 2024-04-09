@@ -2,7 +2,7 @@ package rankservice
 
 import (
 	"container/heap"
-	"github.com/duanhf2012/origin/util/sync"
+	"github.com/duanhf2012/origin/v2/util/sync"
 	"time"
 )
 

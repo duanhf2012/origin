@@ -1,7 +1,7 @@
 package messagequeueservice
 
 import (
-	"github.com/duanhf2012/origin/util/algorithms"
+	"github.com/duanhf2012/origin/v2/util/algorithms"
 	"sync"
 )
 

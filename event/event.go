@@ -2,7 +2,7 @@ package event
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 	"runtime"
 	"sync"
 )

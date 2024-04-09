@@ -3,7 +3,7 @@ package rpc
 import (
 	"errors"
 	"fmt"
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 	"reflect"
 	"runtime"
 	"strings"

@@ -3,7 +3,7 @@ package log
 import (
 	"context"
 	"fmt"
-	"github.com/duanhf2012/origin/util/bytespool"
+	"github.com/duanhf2012/origin/v2/util/bytespool"
 	jsoniter "github.com/json-iterator/go"
 	"io"
 	"log/slog"

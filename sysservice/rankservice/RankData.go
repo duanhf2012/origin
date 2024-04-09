@@ -1,9 +1,9 @@
 package rankservice
 
 import (
-	"github.com/duanhf2012/origin/rpc"
-	"github.com/duanhf2012/origin/util/algorithms/skip"
-	"github.com/duanhf2012/origin/util/sync"
+	"github.com/duanhf2012/origin/v2/rpc"
+	"github.com/duanhf2012/origin/v2/util/algorithms/skip"
+	"github.com/duanhf2012/origin/v2/util/sync"
 )
 
 var emptyRankData RankData

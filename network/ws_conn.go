@@ -2,7 +2,7 @@ package network
 
 import (
 	"errors"
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 	"github.com/gorilla/websocket"
 	"net"
 	"sync"

@@ -2,11 +2,11 @@ package cluster
 
 import (
 	"errors"
-	"github.com/duanhf2012/origin/log"
-	"github.com/duanhf2012/origin/rpc"
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/log"
+	"github.com/duanhf2012/origin/v2/rpc"
+	"github.com/duanhf2012/origin/v2/service"
 	"time"
-	"github.com/duanhf2012/origin/util/timer"
+	"github.com/duanhf2012/origin/v2/util/timer"
 	"google.golang.org/protobuf/proto"
 )
 

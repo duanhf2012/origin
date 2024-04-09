@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/service"
 )
 
 type HttpClientModule struct {

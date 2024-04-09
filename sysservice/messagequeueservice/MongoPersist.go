@@ -3,9 +3,9 @@ package messagequeueservice
 import (
 	"errors"
 	"fmt"
-	"github.com/duanhf2012/origin/log"
-	"github.com/duanhf2012/origin/service"
-	"github.com/duanhf2012/origin/sysmodule/mongodbmodule"
+	"github.com/duanhf2012/origin/v2/log"
+	"github.com/duanhf2012/origin/v2/service"
+	"github.com/duanhf2012/origin/v2/sysmodule/mongodbmodule"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"time"

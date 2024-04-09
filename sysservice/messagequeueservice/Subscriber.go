@@ -1,8 +1,8 @@
 package messagequeueservice
 
 import (
-	"github.com/duanhf2012/origin/log"
-	"github.com/duanhf2012/origin/rpc"
+	"github.com/duanhf2012/origin/v2/log"
+	"github.com/duanhf2012/origin/v2/rpc"
 
 	"sync"
 )

@@ -2,8 +2,8 @@ package timer
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/log"
-	"github.com/duanhf2012/origin/util/sync"
+	"github.com/duanhf2012/origin/v2/log"
+	"github.com/duanhf2012/origin/v2/util/sync"
 	"reflect"
 	"runtime"
 	"time"

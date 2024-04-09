@@ -2,13 +2,13 @@ package rpc
 
 import (
 	"errors"
-	"github.com/duanhf2012/origin/network"
+	"github.com/duanhf2012/origin/v2/network"
 	"reflect"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 )
 
 const(

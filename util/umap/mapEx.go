@@ -2,7 +2,7 @@ package umap
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/util/hash"
+	"github.com/duanhf2012/origin/v2/util/hash"
 	"sync"
 	"sync/atomic"
 )

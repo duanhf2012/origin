@@ -1,7 +1,7 @@
 package math
 
 import (
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 )
 
 type NumberType interface {

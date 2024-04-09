@@ -2,12 +2,12 @@ package wsservice
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/event"
-	"github.com/duanhf2012/origin/log"
-	"github.com/duanhf2012/origin/network"
-	"github.com/duanhf2012/origin/network/processor"
-	"github.com/duanhf2012/origin/service"
-	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/v2/event"
+	"github.com/duanhf2012/origin/v2/log"
+	"github.com/duanhf2012/origin/v2/network"
+	"github.com/duanhf2012/origin/v2/network/processor"
+	"github.com/duanhf2012/origin/v2/service"
+	"github.com/duanhf2012/origin/v2/node"
 	"sync"
 	"sync/atomic"
 	"time"

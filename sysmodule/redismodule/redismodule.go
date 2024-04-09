@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 	"strconv"
 	"time"
 
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/service"
 	"github.com/gomodule/redigo/redis"
 )
 

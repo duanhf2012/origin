@@ -2,8 +2,8 @@ package messagequeueservice
 
 import (
 	"errors"
-	"github.com/duanhf2012/origin/log"
-	"github.com/duanhf2012/origin/util/coroutine"
+	"github.com/duanhf2012/origin/v2/log"
+	"github.com/duanhf2012/origin/v2/util/coroutine"
 	"sync"
 	"sync/atomic"
 	"time"
