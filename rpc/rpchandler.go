@@ -14,9 +14,9 @@ import (
 
 const maxClusterNode int = 128
 
-type FuncRpcClient func(nodeId int, serviceMethod string,filterRetire bool, client []*Client) (error, int)
+type FuncRpcClient func(nodeId string, serviceMethod string,filterRetire bool, client []*Client) (error, int)
 type FuncRpcServer func() *Server
-
+const NodeIdNull = ""
 
 var nilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
 
@@ -65,15 +65,15 @@ type RpcHandler struct {
 	pClientList []*Client
 }
 
-type TriggerRpcConnEvent func(bConnect bool, clientSeq uint32, nodeId int)
+type TriggerRpcConnEvent func(bConnect bool, clientSeq uint32, nodeId string)
 type INodeListener interface {
-	OnNodeConnected(nodeId int)
-	OnNodeDisconnect(nodeId int)
+	OnNodeConnected(nodeId string)
+	OnNodeDisconnect(nodeId string)
 }
 
 type IDiscoveryServiceListener interface {
-	OnDiscoveryService(nodeId int, serviceName []string)
-	OnUnDiscoveryService(nodeId int)
+	OnDiscoveryService(nodeId string, serviceName []string)
+	OnUnDiscoveryService(nodeId string)
 }
 
 type CancelRpc func()
@@ -89,18 +89,18 @@ type IRpcHandler interface {
 	CallMethod(client *Client,ServiceMethod string, param interface{},callBack reflect.Value, reply interface{}) error
 
 	Call(serviceMethod string, args interface{}, reply interface{}) error
-	CallNode(nodeId int, serviceMethod string, args interface{}, reply interface{}) error
+	CallNode(nodeId string, serviceMethod string, args interface{}, reply interface{}) error
 	AsyncCall(serviceMethod string, args interface{}, callback interface{}) error
-	AsyncCallNode(nodeId int, serviceMethod string, args interface{}, callback interface{}) error
+	AsyncCallNode(nodeId string, serviceMethod string, args interface{}, callback interface{}) error
 
 	CallWithTimeout(timeout time.Duration,serviceMethod string, args interface{}, reply interface{}) error
-	CallNodeWithTimeout(timeout time.Duration,nodeId int, serviceMethod string, args interface{}, reply interface{}) error
+	CallNodeWithTimeout(timeout time.Duration,nodeId string, serviceMethod string, args interface{}, reply interface{}) error
 	AsyncCallWithTimeout(timeout time.Duration,serviceMethod string, args interface{}, callback interface{})  (CancelRpc,error)
-	AsyncCallNodeWithTimeout(timeout time.Duration,nodeId int, serviceMethod string, args interface{}, callback interface{})  (CancelRpc,error)
+	AsyncCallNodeWithTimeout(timeout time.Duration,nodeId string, serviceMethod string, args interface{}, callback interface{})  (CancelRpc,error)
 
 	Go(serviceMethod string, args interface{}) error
-	GoNode(nodeId int, serviceMethod string, args interface{}) error
-	RawGoNode(rpcProcessorType RpcProcessorType, nodeId int, rpcMethodId uint32, serviceName string, rawArgs []byte) error
+	GoNode(nodeId string, serviceMethod string, args interface{}) error
+	RawGoNode(rpcProcessorType RpcProcessorType, nodeId string, rpcMethodId uint32, serviceName string, rawArgs []byte) error
 	CastGo(serviceMethod string, args interface{}) error
 	IsSingleCoroutine() bool
 	UnmarshalInParam(rpcProcessor IRpcProcessor, serviceMethod string, rawRpcMethodId uint32, inParam []byte) (interface{}, error)
@@ -426,7 +426,7 @@ func (handler *RpcHandler) CallMethod(client *Client,ServiceMethod string, param
 	return err
 }
 
-func (handler *RpcHandler) goRpc(processor IRpcProcessor, bCast bool, nodeId int, serviceMethod string, args interface{}) error {
+func (handler *RpcHandler) goRpc(processor IRpcProcessor, bCast bool, nodeId string, serviceMethod string, args interface{}) error {
 	var pClientList [maxClusterNode]*Client
 	err, count := handler.funcRpcClient(nodeId, serviceMethod,false, pClientList[:])
 	if count == 0 {
@@ -456,7 +456,7 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor, bCast bool, nodeId int
 	return err
 }
 
-func (handler *RpcHandler) callRpc(timeout time.Duration,nodeId int, serviceMethod string, args interface{}, reply interface{}) error {
+func (handler *RpcHandler) callRpc(timeout time.Duration,nodeId string, serviceMethod string, args interface{}, reply interface{}) error {
 	var pClientList [maxClusterNode]*Client
 	err, count := handler.funcRpcClient(nodeId, serviceMethod,false, pClientList[:])
 	if err != nil {
@@ -480,7 +480,7 @@ func (handler *RpcHandler) callRpc(timeout time.Duration,nodeId int, serviceMeth
 	return err
 }
 
-func (handler *RpcHandler) asyncCallRpc(timeout time.Duration,nodeId int, serviceMethod string, args interface{}, callback interface{}) (CancelRpc,error) {
+func (handler *RpcHandler) asyncCallRpc(timeout time.Duration,nodeId string, serviceMethod string, args interface{}, callback interface{}) (CancelRpc,error) {
 	fVal := reflect.ValueOf(callback)
 	if fVal.Kind() != reflect.Func {
 		err := errors.New("call " + serviceMethod + " input callback param is error!")
@@ -505,14 +505,14 @@ func (handler *RpcHandler) asyncCallRpc(timeout time.Duration,nodeId int, servic
 	err, count := handler.funcRpcClient(nodeId, serviceMethod,false, pClientList[:])
 	if count == 0 || err != nil {
 		if err == nil {
-			if nodeId  > 0 {
+			if nodeId  != NodeIdNull {
 				err = fmt.Errorf("cannot find %s from nodeId %d",serviceMethod,nodeId)
 			}else {
 				err = fmt.Errorf("No %s service found in the origin network",serviceMethod)
 			}
 		}
 		fVal.Call([]reflect.Value{reflect.ValueOf(reply), reflect.ValueOf(err)})
-		log.Error("cannot find serviceMethod from node",log.String("serviceMethod",serviceMethod),log.Int("nodeId",nodeId))
+		log.Error("cannot find serviceMethod from node",log.String("serviceMethod",serviceMethod),log.String("nodeId",nodeId))
 		return emptyCancelRpc,nil
 	}
 
@@ -537,53 +537,53 @@ func (handler *RpcHandler) IsSingleCoroutine() bool {
 }
 
 func (handler *RpcHandler) CallWithTimeout(timeout time.Duration,serviceMethod string, args interface{}, reply interface{}) error {
-	return handler.callRpc(timeout,0, serviceMethod, args, reply)
+	return handler.callRpc(timeout,NodeIdNull, serviceMethod, args, reply)
 }
 
-func (handler *RpcHandler) CallNodeWithTimeout(timeout time.Duration,nodeId int, serviceMethod string, args interface{}, reply interface{})  error{
+func (handler *RpcHandler) CallNodeWithTimeout(timeout time.Duration,nodeId string, serviceMethod string, args interface{}, reply interface{})  error{
 	return handler.callRpc(timeout,nodeId, serviceMethod, args, reply)
 }
 
 func (handler *RpcHandler) AsyncCallWithTimeout(timeout time.Duration,serviceMethod string, args interface{}, callback interface{})  (CancelRpc,error){
-	return handler.asyncCallRpc(timeout,0, serviceMethod, args, callback)
+	return handler.asyncCallRpc(timeout,NodeIdNull, serviceMethod, args, callback)
 }
 
-func (handler *RpcHandler) AsyncCallNodeWithTimeout(timeout time.Duration,nodeId int, serviceMethod string, args interface{}, callback interface{})  (CancelRpc,error){
+func (handler *RpcHandler) AsyncCallNodeWithTimeout(timeout time.Duration,nodeId string, serviceMethod string, args interface{}, callback interface{})  (CancelRpc,error){
 	return handler.asyncCallRpc(timeout,nodeId, serviceMethod, args, callback)
 }
 
 func (handler *RpcHandler) AsyncCall(serviceMethod string, args interface{}, callback interface{}) error {
-	_,err := handler.asyncCallRpc(DefaultRpcTimeout,0, serviceMethod, args, callback)
+	_,err := handler.asyncCallRpc(DefaultRpcTimeout,NodeIdNull, serviceMethod, args, callback)
 	return err
 }
 
 func (handler *RpcHandler) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	return handler.callRpc(DefaultRpcTimeout,0, serviceMethod, args, reply)
+	return handler.callRpc(DefaultRpcTimeout,NodeIdNull, serviceMethod, args, reply)
 }
 
 func (handler *RpcHandler) Go(serviceMethod string, args interface{}) error {
-	return handler.goRpc(nil, false, 0, serviceMethod, args)
+	return handler.goRpc(nil, false, NodeIdNull, serviceMethod, args)
 }
 
-func (handler *RpcHandler) AsyncCallNode(nodeId int, serviceMethod string, args interface{}, callback interface{}) error {
+func (handler *RpcHandler) AsyncCallNode(nodeId string, serviceMethod string, args interface{}, callback interface{}) error {
 	_,err:= handler.asyncCallRpc(DefaultRpcTimeout,nodeId, serviceMethod, args, callback)
 
 	return err
 }
 
-func (handler *RpcHandler) CallNode(nodeId int, serviceMethod string, args interface{}, reply interface{}) error {
+func (handler *RpcHandler) CallNode(nodeId string, serviceMethod string, args interface{}, reply interface{}) error {
 	return handler.callRpc(DefaultRpcTimeout,nodeId, serviceMethod, args, reply)
 }
 
-func (handler *RpcHandler) GoNode(nodeId int, serviceMethod string, args interface{}) error {
+func (handler *RpcHandler) GoNode(nodeId string, serviceMethod string, args interface{}) error {
 	return handler.goRpc(nil, false, nodeId, serviceMethod, args)
 }
 
 func (handler *RpcHandler) CastGo(serviceMethod string, args interface{}) error {
-	return handler.goRpc(nil, true, 0, serviceMethod, args)
+	return handler.goRpc(nil, true, NodeIdNull, serviceMethod, args)
 }
 
-func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType, nodeId int, rpcMethodId uint32, serviceName string, rawArgs []byte) error {
+func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType, nodeId string, rpcMethodId uint32, serviceName string, rawArgs []byte) error {
 	processor := GetProcessor(uint8(rpcProcessorType))
 	err, count := handler.funcRpcClient(nodeId, serviceName,false, handler.pClientList)
 	if count == 0 || err != nil {

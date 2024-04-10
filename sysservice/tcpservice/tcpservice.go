@@ -6,7 +6,6 @@ import (
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/network"
 	"github.com/duanhf2012/origin/v2/network/processor"
-	"github.com/duanhf2012/origin/v2/node"
 	"github.com/duanhf2012/origin/v2/service"
 	"github.com/duanhf2012/origin/v2/util/bytespool"
 	"runtime"
@@ -22,6 +21,7 @@ type TcpService struct {
 	mapClientLocker sync.RWMutex
 	mapClient       map[uint64] *Client
 	process processor.IProcessor
+	machineId uint16
 }
 
 type TcpPackType int8
@@ -33,7 +33,7 @@ const(
 )
 
 const (
-	MaxNodeId = 1<<14 - 1  //最大值 16383
+	MaxMachineId = 1<<14 - 1  //最大值 16383
 	MaxSeed   = 1<<19 - 1  //最大值 524287
 	MaxTime   = 1<<31 - 1  //最大值 2147483647
 )
@@ -55,7 +55,7 @@ type Client struct {
 func (tcpService *TcpService) genId() uint64 {
 	newSeed := atomic.AddUint32(&seed,1) % MaxSeed
 	nowTime := uint64(time.Now().Unix())%MaxTime
-	return (uint64(node.GetNodeId()%MaxNodeId)<<50)|(nowTime<<19)|uint64(newSeed)
+	return (uint64(tcpService.machineId)<<50)|(nowTime<<19)|uint64(newSeed)
 }
 
 func (tcpService *TcpService) OnInit() error{
@@ -74,6 +74,17 @@ func (tcpService *TcpService) OnInit() error{
 	if ok == true {
 		tcpService.tcpServer.MaxConnNum = int(MaxConnNum.(float64))
 	}
+
+	MachineId,ok := tcpCfg["MachineId"]
+	if ok == true {
+		tcpService.machineId = uint16(MachineId.(float64))
+		if tcpService.machineId > MaxMachineId {
+			return fmt.Errorf("MachineId is error!")
+		}
+	}else {
+		return fmt.Errorf("MachineId is error!")
+	}
+
 	PendingWriteNum,ok := tcpCfg["PendingWriteNum"]
 	if ok == true {
 		tcpService.tcpServer.PendingWriteNum = int(PendingWriteNum.(float64))

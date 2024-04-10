@@ -31,7 +31,7 @@ func (cls *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList, error) {
 	return c, nil
 }
 
-func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]interface{}, map[int]map[string]interface{}, error) {
+func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]interface{}, map[string]map[string]interface{}, error) {
 	c := map[string]interface{}{}
 	//读取配置
 	d, err := os.ReadFile(filepath)
@@ -50,7 +50,7 @@ func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]
 		serviceConfig = serviceCfg.(map[string]interface{})
 	}
 
-	mapNodeService := map[int]map[string]interface{}{}
+	mapNodeService := map[string]map[string]interface{}{}
 	nodeServiceCfg, ok := c["NodeService"]
 	if ok == true {
 		nodeServiceList := nodeServiceCfg.([]interface{})
@@ -60,13 +60,13 @@ func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]
 			if ok == false {
 				log.Fatal("NodeService list not find nodeId field")
 			}
-			mapNodeService[int(nodeId.(float64))] = serviceCfg
+			mapNodeService[nodeId.(string)] = serviceCfg
 		}
 	}
 	return GlobalCfg, serviceConfig, mapNodeService, nil
 }
 
-func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo, []NodeInfo, error) {
+func (cls *Cluster) readLocalClusterConfig(nodeId string) ([]NodeInfo, []NodeInfo, error) {
 	var nodeInfoList []NodeInfo
 	var masterDiscoverNodeList []NodeInfo
 	clusterCfgPath := strings.TrimRight(configDir, "/") + "/cluster"
@@ -85,14 +85,14 @@ func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo, []NodeInfo, 
 			}
 			masterDiscoverNodeList = append(masterDiscoverNodeList, localNodeInfoList.MasterDiscoveryNode...)
 			for _, nodeInfo := range localNodeInfoList.NodeList {
-				if nodeInfo.NodeId == nodeId || nodeId == 0 {
+				if nodeInfo.NodeId == nodeId || nodeId == rpc.NodeIdNull {
 					nodeInfoList = append(nodeInfoList, nodeInfo)
 				}
 			}
 		}
 	}
 
-	if nodeId != 0 && (len(nodeInfoList) != 1) {
+	if nodeId != rpc.NodeIdNull && (len(nodeInfoList) != 1) {
 		return nil, nil, fmt.Errorf("%d configurations were found for the configuration with node ID %d!", len(nodeInfoList), nodeId)
 	}
 
@@ -110,7 +110,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId int) ([]NodeInfo, []NodeInfo, 
 	return masterDiscoverNodeList, nodeInfoList, nil
 }
 
-func (cls *Cluster) readLocalService(localNodeId int) error {
+func (cls *Cluster) readLocalService(localNodeId string) error {
 	clusterCfgPath := strings.TrimRight(configDir, "/") + "/cluster"
 	fileInfoList, err := os.ReadDir(clusterCfgPath)
 	if err != nil {
@@ -207,7 +207,7 @@ func (cls *Cluster) parseLocalCfg() {
 
 	for _, sName := range cls.localNodeInfo.ServiceList {
 		if _, ok := cls.mapServiceNode[sName]; ok == false {
-			cls.mapServiceNode[sName] = make(map[int]struct{})
+			cls.mapServiceNode[sName] = make(map[string]struct{})
 		}
 
 		cls.mapServiceNode[sName][cls.localNodeInfo.NodeId] = struct{}{}
@@ -227,10 +227,10 @@ func (cls *Cluster) checkDiscoveryNodeList(discoverMasterNode []NodeInfo) bool {
 	return true
 }
 
-func (cls *Cluster) InitCfg(localNodeId int) error {
+func (cls *Cluster) InitCfg(localNodeId string) error {
 	cls.localServiceCfg = map[string]interface{}{}
-	cls.mapRpc = map[int]*NodeRpcInfo{}
-	cls.mapServiceNode = map[string]map[int]struct{}{}
+	cls.mapRpc = map[string]*NodeRpcInfo{}
+	cls.mapServiceNode = map[string]map[string]struct{}{}
 
 	//加载本地结点的NodeList配置
 	discoveryNode, nodeInfoList, err := cls.readLocalClusterConfig(localNodeId)

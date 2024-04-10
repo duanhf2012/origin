@@ -67,14 +67,14 @@ type Service struct {
 // RpcConnEvent Node结点连接事件
 type RpcConnEvent struct{
 	IsConnect bool
-	NodeId int
+	NodeId string
 }
 
 // DiscoveryServiceEvent 发现服务结点
 type DiscoveryServiceEvent struct{
 	IsDiscovery bool
 	ServiceName []string
-	NodeId int
+	NodeId string
 }
 
 func SetMaxServiceChannel(maxEventChannel int){

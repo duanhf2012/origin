@@ -119,7 +119,7 @@ func (lc *LClient) AsyncCall(timeout time.Duration,rpcHandler IRpcHandler, servi
 	return calcelRpc,nil
 }
 
-func NewLClient(nodeId int) *Client{
+func NewLClient(nodeId string) *Client{
 	client := &Client{}
 	client.clientId = atomic.AddUint32(&clientSeq, 1)
 	client.nodeId = nodeId

@@ -40,8 +40,8 @@ type IRealClient interface {
 }
 
 type Client struct {
-	clientId 		uint32
-	nodeId        int
+	clientId             uint32
+	nodeId               string
 	pendingLock          sync.RWMutex
 	startSeq             uint64
 	pending              map[uint64]*Call
@@ -176,7 +176,7 @@ func (bc *Client) generateSeq() uint64 {
 	return atomic.AddUint64(&bc.startSeq, 1)
 }
 
-func (client *Client) GetNodeId() int {
+func (client *Client) GetNodeId() string {
 	return client.nodeId
 }
 

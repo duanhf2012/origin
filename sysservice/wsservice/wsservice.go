@@ -7,7 +7,6 @@ import (
 	"github.com/duanhf2012/origin/v2/network"
 	"github.com/duanhf2012/origin/v2/network/processor"
 	"github.com/duanhf2012/origin/v2/service"
-	"github.com/duanhf2012/origin/v2/node"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,8 +21,7 @@ type WSService struct {
 	mapClientLocker sync.RWMutex
 	mapClient       map[uint64] *WSClient
 	process         processor.IProcessor
-
-
+	machineId    	uint16
 }
 
 var seed uint32
@@ -41,7 +39,7 @@ const Default_WS_PendingWriteNum = 10000
 const Default_WS_MaxMsgLen = 65535
 
 const (
-	MaxNodeId = 1<<14 - 1  //最大值 16383
+	MaxMachineId = 1<<14 - 1  //最大值 16383
 	MaxSeed   = 1<<19 - 1  //最大值 524287
 	MaxTime   = 1<<31 - 1  //最大值 2147483647
 )
@@ -78,6 +76,15 @@ func (ws *WSService) OnInit() error{
 	MaxConnNum,ok := wsCfg["MaxConnNum"]
 	if ok == true {
 		ws.wsServer.MaxConnNum = int(MaxConnNum.(float64))
+	}
+	MachineId,ok := wsCfg["MachineId"]
+	if ok == true {
+		ws.machineId = uint16(MachineId.(float64))
+		if ws.machineId > MaxMachineId {
+			return fmt.Errorf("MachineId is error!")
+		}
+	}else {
+		return fmt.Errorf("MachineId is error!")
 	}
 	PendingWriteNum,ok := wsCfg["PendingWriteNum"]
 	if ok == true {
@@ -119,13 +126,9 @@ func (ws *WSService) SetProcessor(process processor.IProcessor,handler event.IEv
 }
 
 func (ws *WSService) genId() uint64 {
-	if node.GetNodeId()>MaxNodeId{
-		panic("nodeId exceeds the maximum!")
-	}
-
 	newSeed := atomic.AddUint32(&seed,1) % MaxSeed
 	nowTime := uint64(time.Now().Unix())%MaxTime
-	return (uint64(node.GetNodeId())<<50)|(nowTime<<19)|uint64(newSeed)
+	return (uint64(ws.machineId)<<50)|(nowTime<<19)|uint64(newSeed)
 }
 
 func (ws *WSService) NewWSClient(conn *network.WSConn) network.Agent {

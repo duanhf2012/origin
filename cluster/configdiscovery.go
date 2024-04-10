@@ -1,19 +1,21 @@
 package cluster
 
+import "github.com/duanhf2012/origin/v2/rpc"
+
 type ConfigDiscovery struct {
 	funDelService FunDelNode
 	funSetService FunSetNodeInfo
-	localNodeId int
+	localNodeId string
 }
 
 
-func (discovery *ConfigDiscovery) InitDiscovery(localNodeId int,funDelNode FunDelNode,funSetNodeInfo FunSetNodeInfo) error{
+func (discovery *ConfigDiscovery) InitDiscovery(localNodeId string,funDelNode FunDelNode,funSetNodeInfo FunSetNodeInfo) error{
 	discovery.localNodeId = localNodeId
 	discovery.funDelService = funDelNode
 	discovery.funSetService = funSetNodeInfo
 
 	//解析本地其他服务配置
-	_,nodeInfoList,err := GetCluster().readLocalClusterConfig(0)
+	_,nodeInfoList,err := GetCluster().readLocalClusterConfig(rpc.NodeIdNull)
 	if err != nil {
 		return err
 	}

@@ -3,13 +3,12 @@ package rpc;
 option go_package = ".;rpc";
 
 message NodeInfo{
-    int32 NodeId = 1;
-    string NodeName = 2;
-    string ListenAddr  = 3;
-    uint32 MaxRpcParamLen = 4;
-    bool Private = 5;
-	bool Retire = 6;
-    repeated string PublicServiceList = 7;
+    string NodeId = 1;
+    string ListenAddr  = 2;
+    uint32 MaxRpcParamLen = 3;
+    bool Private = 4;
+	bool Retire = 5;
+    repeated string PublicServiceList = 6;
 }
 
 //Client->Master
@@ -19,9 +18,9 @@ message ServiceDiscoverReq{
 
 //Master->Client
 message SubscribeDiscoverNotify{
-    int32 MasterNodeId = 1;
+    string MasterNodeId = 1;
     bool IsFull = 2;
-    int32 DelNodeId    = 3;
+    string DelNodeId    = 3;
     repeated NodeInfo nodeInfo = 4;
 }
 

@@ -17,7 +17,7 @@ Hello world!
 下面我们来一步步的建立origin服务器,先下载[origin引擎](https://github.com/duanhf2012/origin "origin引擎"),或者使用如下命令：
 
 ```go
-go get -v -u  github.com/duanhf2012/origin
+go get -v -u  github.com/duanhf2012/origin/v2
 ```
 [README.md](README.md)
 于是下载到GOPATH环境目录中,在src中加入main.go,内容如下：

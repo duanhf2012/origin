@@ -23,7 +23,7 @@ import (
 )
 
 var sig chan os.Signal
-var nodeId int
+var nodeId string
 var preSetupService []service.IService //预安装
 var profilerInterval time.Duration
 var bValid bool
@@ -116,7 +116,7 @@ func setConfigPath(val interface{}) error {
 	return nil
 }
 
-func getRunProcessPid(nodeId int) (int, error) {
+func getRunProcessPid(nodeId string) (int, error) {
 	f, err := os.OpenFile(fmt.Sprintf("%s_%d.pid", os.Args[0], nodeId), os.O_RDONLY, 0600)
 	defer f.Close()
 	if err != nil {
@@ -131,9 +131,9 @@ func getRunProcessPid(nodeId int) (int, error) {
 	return strconv.Atoi(string(pidByte))
 }
 
-func writeProcessPid(nodeId int) {
+func writeProcessPid(nodeId string) {
 	//pid
-	f, err := os.OpenFile(fmt.Sprintf("%s_%d.pid", os.Args[0], nodeId), os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0600)
+	f, err := os.OpenFile(fmt.Sprintf("%s_%s.pid", os.Args[0], nodeId), os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0600)
 	defer f.Close()
 	if err != nil {
 		fmt.Println(err.Error())
@@ -147,11 +147,11 @@ func writeProcessPid(nodeId int) {
 	}
 }
 
-func GetNodeId() int {
+func GetNodeId() string {
 	return nodeId
 }
 
-func initNode(id int) {
+func initNode(id string) {
 	//1.初始化集群
 	nodeId = id
 	err := cluster.GetCluster().Init(GetNodeId(), Setup)
@@ -194,7 +194,7 @@ func initLog() error {
 	}
 
 	localnodeinfo := cluster.GetCluster().GetLocalNodeInfo()
-	filepre := fmt.Sprintf("%s_%d_", localnodeinfo.NodeName, localnodeinfo.NodeId)
+	filepre := fmt.Sprintf("%s_", localnodeinfo.NodeId)
 	logger, err := log.NewTextLogger(log.LogLevel,log.LogPath,filepre,true,log.LogChannelCap)
 	if err != nil {
 		fmt.Printf("cannot create log file!\n")
@@ -227,8 +227,8 @@ func retireNode(args interface{}) error {
 	if sParam[0] != "nodeid" {
 		return fmt.Errorf("invalid option %s", param)
 	}
-	nId, err := strconv.Atoi(sParam[1])
-	if err != nil {
+	nId := strings.TrimSpace(sParam[1])
+	if nId == "" {
 		return fmt.Errorf("invalid option %s", param)
 	}
 
@@ -257,8 +257,8 @@ func stopNode(args interface{}) error {
 	if sParam[0] != "nodeid" {
 		return fmt.Errorf("invalid option %s", param)
 	}
-	nId, err := strconv.Atoi(sParam[1])
-	if err != nil {
+	nId := strings.TrimSpace(sParam[1])
+	if nId == "" {
 		return fmt.Errorf("invalid option %s", param)
 	}
 
@@ -285,12 +285,13 @@ func startNode(args interface{}) error {
 	if sParam[0] != "nodeid" {
 		return fmt.Errorf("invalid option %s", param)
 	}
-	nodeId, err := strconv.Atoi(sParam[1])
-	if err != nil {
+	strNodeId := strings.TrimSpace(sParam[1])
+	if strNodeId == "" {
 		return fmt.Errorf("invalid option %s", param)
 	}
+
 	for{
-		processId, pErr := getRunProcessPid(nodeId)
+		processId, pErr := getRunProcessPid(strNodeId)
 		if pErr != nil {
 			break
 		}
@@ -299,13 +300,13 @@ func startNode(args interface{}) error {
 		myName, mErr := sysprocess.GetMyProcessName()
 		//当前进程名获取失败，不应该发生
 		if mErr != nil {
-			log.SInfo("get my process's name is error,", err.Error())
+			log.SInfo("get my process's name is error,", mErr.Error())
 			os.Exit(-1)
 		}
 
 		//进程id存在，而且进程名也相同，被认为是当前进程重复运行
 		if cErr == nil && name == myName {
-			log.SInfo(fmt.Sprintf("repeat runs are not allowed,node is %d,processid is %d",nodeId,processId))
+			log.SInfo(fmt.Sprintf("repeat runs are not allowed,node is %s,processid is %d",strNodeId,processId))
 			os.Exit(-1)
 		}
 		break
@@ -313,11 +314,11 @@ func startNode(args interface{}) error {
 
 	//2.记录进程id号
 	log.Info("Start running server.")
-	writeProcessPid(nodeId)
+	writeProcessPid(strNodeId)
 	timer.StartTimer(10*time.Millisecond, 1000000)
 
 	//3.初始化node
-	initNode(nodeId)
+	initNode(strNodeId)
 
 	//4.运行service
 	service.Start()
