@@ -1,6 +1,9 @@
 package service
 
-import "errors"
+import (
+	"github.com/duanhf2012/origin/v2/log"
+	"os"
+)
 
 //本地所有的service
 var mapServiceName map[string]IService
@@ -23,8 +26,8 @@ func Init() {
 	for _,s := range setupServiceList {
 		err := s.OnInit()
 		if err != nil {
-			errs := errors.New("Failed to initialize "+s.GetName()+" service:"+err.Error())
-			panic(errs)
+			log.SError("Failed to initialize "+s.GetName()+" service:"+err.Error())
+			os.Exit(1)
 		}
 	}
 }

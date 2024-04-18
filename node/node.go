@@ -156,7 +156,8 @@ func initNode(id string) {
 	nodeId = id
 	err := cluster.GetCluster().Init(GetNodeId(), Setup)
 	if err != nil {
-		log.Fatal("read system config is error ",log.ErrorAttr("error",err))
+		log.Error("Init cluster fail",log.ErrorAttr("error",err))
+		os.Exit(1)
 	}
 
 	err = initLog()

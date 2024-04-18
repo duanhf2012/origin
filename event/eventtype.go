@@ -14,8 +14,9 @@ const (
 	Sys_Event_DiscoverService 	EventType = -7
 	Sys_Event_DiscardGoroutine 	EventType = -8
 	Sys_Event_QueueTaskFinish  	EventType = -9
-	Sys_Event_Retire       	EventType = -10
-
+	Sys_Event_Retire       		EventType = -10
+	Sys_Event_EtcdDiscovery 	EventType = -11
+	
 	Sys_Event_User_Define 		EventType = 1
 )
 

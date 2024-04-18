@@ -3,17 +3,17 @@ package cluster
 import "github.com/duanhf2012/origin/v2/rpc"
 
 type ConfigDiscovery struct {
-	funDelService FunDelNode
-	funSetService FunSetNodeInfo
+	funDelNode FunDelNode
+	funSetNode FunSetNode
 	localNodeId string
 }
 
 
-func (discovery *ConfigDiscovery) InitDiscovery(localNodeId string,funDelNode FunDelNode,funSetNodeInfo FunSetNodeInfo) error{
+func (discovery *ConfigDiscovery) InitDiscovery(localNodeId string,funDelNode FunDelNode,funSetNode FunSetNode) error{
 	discovery.localNodeId = localNodeId
-	discovery.funDelService = funDelNode
-	discovery.funSetService = funSetNodeInfo
-
+	discovery.funDelNode = funDelNode
+	discovery.funSetNode = funSetNode
+	
 	//解析本地其他服务配置
 	_,nodeInfoList,err := GetCluster().readLocalClusterConfig(rpc.NodeIdNull)
 	if err != nil {
@@ -25,12 +25,10 @@ func (discovery *ConfigDiscovery) InitDiscovery(localNodeId string,funDelNode Fu
 			continue
 		}
 
-		discovery.funSetService(&nodeInfo)
+		discovery.funSetNode(&nodeInfo)
 	}
 
 	return nil
 }
 
-func (discovery *ConfigDiscovery) OnNodeStop(){
-}
 

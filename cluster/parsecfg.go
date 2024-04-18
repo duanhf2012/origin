@@ -8,13 +8,125 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
+type EtcdList struct {
+	NetworkName []string
+	Endpoints []string
+}
+
+type EtcdDiscovery struct {
+	DialTimeoutMillisecond time.Duration
+	TTLSecond int64
+
+	EtcdList []EtcdList
+}
+
+type DiscoveryType int
+
+const (
+	InvalidType = 0
+	OriginType = 1
+	EtcdType = 2
+)
+
+type DiscoveryInfo struct {
+	discoveryType DiscoveryType
+	Etcd          *EtcdDiscovery  //etcd
+	Origin        []NodeInfo      //orign
+}
+
 type NodeInfoList struct {
-	MasterDiscoveryNode []NodeInfo //用于服务发现Node
+	Discovery 			DiscoveryInfo
 	NodeList            []NodeInfo
+}
+
+func (d *DiscoveryInfo) getDiscoveryType() DiscoveryType{
+	return d.discoveryType
+}
+
+func (d *DiscoveryInfo) setDiscovery(discoveryInfo *DiscoveryInfo) error{
+	var err error
+	err = d.setOrigin(discoveryInfo.Origin)
+	if err != nil {
+		return err
+	}
+
+	err = d.setEtcd(discoveryInfo.Etcd)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *DiscoveryInfo) setEtcd(etcd *EtcdDiscovery) error{
+	if etcd == nil {
+		return nil
+	}
+
+	if  d.discoveryType != InvalidType {
+		return fmt.Errorf("Repeat configuration of Discovery")
+	}
+
+	etcd.TTLSecond = etcd.TTLSecond
+	etcd.DialTimeoutMillisecond = etcd.DialTimeoutMillisecond * time.Millisecond
+
+	//Endpoints不允许重复
+	mapAddr:=make (map[string]struct{})
+	for _, n := range etcd.EtcdList {
+		for _,endPoint := range n.Endpoints {
+			if _,ok:=mapAddr[endPoint];ok == true {
+				return fmt.Errorf("etcd discovery config Etcd.EtcdList.Endpoints %+v is repeat",endPoint)
+			}
+			mapAddr[endPoint] = struct{}{}
+		}
+
+		//networkName不允许重复
+		mapNetworkName := make(map[string]struct{})
+		for _,netName := range n.NetworkName{
+			if _,ok := mapNetworkName[netName];ok == true {
+				return fmt.Errorf("etcd discovery config Etcd.EtcdList.NetworkName %+v is repeat",n.NetworkName)
+			}
+
+			mapNetworkName[netName] = struct{}{}
+		}
+	}
+
+	d.Etcd = etcd
+	d.discoveryType = EtcdType
+	return nil
+}
+
+func (d *DiscoveryInfo) setOrigin(nodeInfos []NodeInfo) error{
+	if nodeInfos == nil {
+		return nil
+	}
+
+	if d.discoveryType != InvalidType {
+		return fmt.Errorf("Repeat configuration of Discovery")
+	}
+
+	mapListenAddr := make(map[string]struct{})
+	mapNodeId := make(map[string]struct{})
+	for _, n := range nodeInfos {
+		if _, ok := mapListenAddr[n.ListenAddr]; ok == true {
+			return fmt.Errorf("discovery config Origin.ListenAddr %s is repeat", n.ListenAddr)
+		}
+		mapListenAddr[n.ListenAddr] = struct{}{}
+
+		if _, ok := mapNodeId[n.NodeId]; ok == true {
+			return fmt.Errorf("discovery config Origin.NodeId %s is repeat", n.NodeId)
+		}
+		mapNodeId[n.NodeId] = struct{}{}
+	}
+
+	d.Origin = nodeInfos
+	d.discoveryType = OriginType
+	return nil
 }
 
 func (cls *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList, error) {
@@ -66,25 +178,32 @@ func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]
 	return GlobalCfg, serviceConfig, mapNodeService, nil
 }
 
-func (cls *Cluster) readLocalClusterConfig(nodeId string) ([]NodeInfo, []NodeInfo, error) {
+func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []NodeInfo, error) {
 	var nodeInfoList []NodeInfo
-	var masterDiscoverNodeList []NodeInfo
+	var discoveryInfo DiscoveryInfo
+
 	clusterCfgPath := strings.TrimRight(configDir, "/") + "/cluster"
 	fileInfoList, err := os.ReadDir(clusterCfgPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Read dir %s is fail :%+v", clusterCfgPath, err)
+		return discoveryInfo, nil, fmt.Errorf("Read dir %s is fail :%+v", clusterCfgPath, err)
 	}
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
 	for _, f := range fileInfoList {
 		if f.IsDir() == false {
 			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath, "/"), "\\") + "/" + f.Name()
-			localNodeInfoList, err := cls.ReadClusterConfig(filePath)
-			if err != nil {
-				return nil, nil, fmt.Errorf("read file path %s is error:%+v", filePath, err)
+			fileNodeInfoList, rerr := cls.ReadClusterConfig(filePath)
+
+			if rerr != nil {
+				return discoveryInfo, nil, fmt.Errorf("read file path %s is error:%+v", filePath, rerr)
 			}
-			masterDiscoverNodeList = append(masterDiscoverNodeList, localNodeInfoList.MasterDiscoveryNode...)
-			for _, nodeInfo := range localNodeInfoList.NodeList {
+
+			err = discoveryInfo.setDiscovery(&fileNodeInfoList.Discovery)
+			if err != nil {
+				return  discoveryInfo,nil,err
+			}
+
+			for _, nodeInfo := range fileNodeInfoList.NodeList {
 				if nodeInfo.NodeId == nodeId || nodeId == rpc.NodeIdNull {
 					nodeInfoList = append(nodeInfoList, nodeInfo)
 				}
@@ -93,7 +212,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) ([]NodeInfo, []NodeInf
 	}
 
 	if nodeId != rpc.NodeIdNull && (len(nodeInfoList) != 1) {
-		return nil, nil, fmt.Errorf("%d configurations were found for the configuration with node ID %d!", len(nodeInfoList), nodeId)
+		return discoveryInfo, nil, fmt.Errorf("%d configurations were found for the configuration with node ID %d!", len(nodeInfoList), nodeId)
 	}
 
 	for i, _ := range nodeInfoList {
@@ -107,7 +226,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) ([]NodeInfo, []NodeInf
 		}
 	}
 
-	return masterDiscoverNodeList, nodeInfoList, nil
+	return discoveryInfo, nodeInfoList, nil
 }
 
 func (cls *Cluster) readLocalService(localNodeId string) error {
@@ -214,34 +333,18 @@ func (cls *Cluster) parseLocalCfg() {
 	}
 }
 
-func (cls *Cluster) checkDiscoveryNodeList(discoverMasterNode []NodeInfo) bool {
-	for i := 0; i < len(discoverMasterNode)-1; i++ {
-		for j := i + 1; j < len(discoverMasterNode); j++ {
-			if discoverMasterNode[i].NodeId == discoverMasterNode[j].NodeId ||
-				discoverMasterNode[i].ListenAddr == discoverMasterNode[j].ListenAddr {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
 func (cls *Cluster) InitCfg(localNodeId string) error {
 	cls.localServiceCfg = map[string]interface{}{}
 	cls.mapRpc = map[string]*NodeRpcInfo{}
 	cls.mapServiceNode = map[string]map[string]struct{}{}
 
 	//加载本地结点的NodeList配置
-	discoveryNode, nodeInfoList, err := cls.readLocalClusterConfig(localNodeId)
+	discoveryInfo, nodeInfoList, err := cls.readLocalClusterConfig(localNodeId)
 	if err != nil {
 		return err
 	}
 	cls.localNodeInfo = nodeInfoList[0]
-	if cls.checkDiscoveryNodeList(discoveryNode) == false {
-		return fmt.Errorf("DiscoveryNode config is error!")
-	}
-	cls.masterDiscoveryNodeList = discoveryNode
+	cls.discoveryInfo = discoveryInfo
 
 	//读取本地服务配置
 	err = cls.readLocalService(localNodeId)

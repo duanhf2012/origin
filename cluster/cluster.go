@@ -20,23 +20,25 @@ const (
 	Discard NodeStatus = 1 //丢弃
 )
 
-type MasterDiscoveryService struct {
+type DiscoveryService struct {
 	MasterNodeId string //要筛选的主结点Id，如果不配置或者配置成0，表示针对所有的主结点
-	DiscoveryService  []string  //只发现的服务列表
+	NetworkName string  //如果是etcd，指定要筛选的网络名中的服务，不配置，表示所有的网络
+	ServiceList  []string  //只发现的服务列表
 }
 
 type NodeInfo struct {
 	NodeId            string
-	//NodeName          string
 	Private           bool
 	ListenAddr        string
 	MaxRpcParamLen    uint32   //最大Rpc参数长度
 	CompressBytesLen  int   //超过字节进行压缩的长度
 	ServiceList  	  []string //所有的有序服务列表
 	PublicServiceList []string //对外公开的服务列表
-	MasterDiscoveryService  []MasterDiscoveryService //筛选发现的服务，如果不配置，不进行筛选
+	DiscoveryService  []DiscoveryService //筛选发现的服务，如果不配置，不进行筛选
 	status            NodeStatus
 	Retire bool
+
+	NetworkName string
 }
 
 type NodeRpcInfo struct {
@@ -48,7 +50,9 @@ var cluster Cluster
 
 type Cluster struct {
 	localNodeInfo           NodeInfo    //本结点配置信息
-	masterDiscoveryNodeList []NodeInfo  //配置发现Master结点
+
+	discoveryInfo DiscoveryInfo //服务发现配置
+	//masterDiscoveryNodeList []NodeInfo  //配置发现Master结点
 	globalCfg               interface{} //全局配置
 
 	localServiceCfg  map[string]interface{} //map[serviceName]配置数据*
@@ -83,7 +87,6 @@ func (cls *Cluster) Start() {
 }
 
 func (cls *Cluster) Stop() {
-	cls.serviceDiscovery.OnNodeStop()
 }
 
 func (cls *Cluster) DiscardNode(nodeId string) {
@@ -99,7 +102,7 @@ func (cls *Cluster) DiscardNode(nodeId string) {
 
 func (cls *Cluster) DelNode(nodeId string, immediately bool) {
 	//MasterDiscover结点与本地结点不删除
-	if cls.GetMasterDiscoveryNodeInfo(nodeId) != nil || nodeId == cls.localNodeInfo.NodeId {
+	if cls.IsOriginMasterDiscoveryNode(nodeId) || nodeId == cls.localNodeInfo.NodeId {
 		return
 	}
 	cls.locker.Lock()
@@ -132,10 +135,6 @@ func (cls *Cluster) DelNode(nodeId string, immediately bool) {
 }
 
 func (cls *Cluster) serviceDiscoveryDelNode(nodeId string, immediately bool) {
-	//if nodeId == "" {
-	//	return
-	//}
-
 	cls.DelNode(nodeId, immediately)
 }
 
@@ -198,7 +197,6 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo(nodeInfo *NodeInfo) {
 }
 
 
-
 func (cls *Cluster) Init(localNodeId string, setupServiceFun SetupServiceFun) error {
 	//1.初始化配置
 	err := cls.InitCfg(localNodeId)
@@ -209,7 +207,11 @@ func (cls *Cluster) Init(localNodeId string, setupServiceFun SetupServiceFun) er
 	cls.rpcServer.Init(cls)
 
 	//2.安装服务发现结点
-	cls.SetupServiceDiscovery(localNodeId, setupServiceFun)
+	err = cls.setupDiscovery(localNodeId, setupServiceFun)
+	if err != nil {
+		log.Error("setupDiscovery fail",log.ErrorAttr("err",err))
+		return err
+	}
 	service.RegRpcEventFun = cls.RegRpcEvent
 	service.UnRegRpcEventFun = cls.UnRegRpcEvent
 	service.RegDiscoveryServiceEventFun = cls.RegDiscoveryEvent
@@ -223,73 +225,6 @@ func (cls *Cluster) Init(localNodeId string, setupServiceFun SetupServiceFun) er
 	return nil
 }
 
-func (cls *Cluster) checkDynamicDiscovery(localNodeId string) (bool, bool) {
-	var localMaster bool //本结点是否为Master结点
-	var hasMaster bool   //是否配置Master服务
-
-	//遍历所有结点
-	for _, nodeInfo := range cls.masterDiscoveryNodeList {
-		if nodeInfo.NodeId == localNodeId {
-			localMaster = true
-		}
-		hasMaster = true
-	}
-
-	//返回查询结果
-	return localMaster, hasMaster
-}
-
-func (cls *Cluster) AddDynamicDiscoveryService(serviceName string, bPublicService bool) {
-	addServiceList := append([]string{},serviceName)
-	cls.localNodeInfo.ServiceList = append(addServiceList,cls.localNodeInfo.ServiceList...)
-	if bPublicService {
-		cls.localNodeInfo.PublicServiceList = append(cls.localNodeInfo.PublicServiceList, serviceName)
-	}
-
-	if _, ok := cls.mapServiceNode[serviceName]; ok == false {
-		cls.mapServiceNode[serviceName] = map[string]struct{}{}
-	}
-	cls.mapServiceNode[serviceName][cls.localNodeInfo.NodeId] = struct{}{}
-}
-
-func (cls *Cluster) GetDiscoveryNodeList() []NodeInfo {
-	return cls.masterDiscoveryNodeList
-}
-
-func (cls *Cluster) GetMasterDiscoveryNodeInfo(nodeId string) *NodeInfo {
-	for i := 0; i < len(cls.masterDiscoveryNodeList); i++ {
-		if cls.masterDiscoveryNodeList[i].NodeId == nodeId {
-			return &cls.masterDiscoveryNodeList[i]
-		}
-	}
-
-	return nil
-}
-
-func (cls *Cluster) IsMasterDiscoveryNode() bool {
-	return cls.GetMasterDiscoveryNodeInfo(cls.GetLocalNodeInfo().NodeId) != nil
-}
-
-func (cls *Cluster) SetupServiceDiscovery(localNodeId string, setupServiceFun SetupServiceFun) {
-	if cls.serviceDiscovery != nil {
-		return
-	}
-
-	//1.如果没有配置DiscoveryNode配置，则使用默认配置文件发现服务
-	localMaster, hasMaster := cls.checkDynamicDiscovery(localNodeId)
-	if hasMaster == false {
-		cls.serviceDiscovery = &ConfigDiscovery{}
-		return
-	}
-	setupServiceFun(&masterService, &clientService)
-
-	//2.如果为动态服务发现安装本地发现服务
-	cls.serviceDiscovery = getDynamicDiscovery()
-	cls.AddDynamicDiscoveryService(DynamicDiscoveryClientName, true)
-	if localMaster == true {
-		cls.AddDynamicDiscoveryService(DynamicDiscoveryMasterName, false)
-	}
-}
 
 func (cls *Cluster) FindRpcHandler(serviceName string) rpc.IRpcHandler {
 	pService := service.GetService(serviceName)
@@ -487,4 +422,27 @@ func (cls *Cluster) GetNodeInfo(nodeId string) (NodeInfo,bool) {
 	}
 
 	return nodeInfo.nodeInfo,true
+}
+
+func (dc *Cluster) CanDiscoveryService(fromMasterNodeId string,serviceName string) bool{
+	canDiscovery := true
+
+	for i:=0;i<len(dc.GetLocalNodeInfo().DiscoveryService);i++{
+		masterNodeId := dc.GetLocalNodeInfo().DiscoveryService[i].MasterNodeId
+		//无效的配置，则跳过
+		if masterNodeId == rpc.NodeIdNull && len(dc.GetLocalNodeInfo().DiscoveryService[i].ServiceList)==0 {
+			continue
+		}
+
+		canDiscovery = false
+		if masterNodeId == fromMasterNodeId || masterNodeId == rpc.NodeIdNull {
+			for _,discoveryService := range dc.GetLocalNodeInfo().DiscoveryService[i].ServiceList {
+				if discoveryService == serviceName {
+					return true
+				}
+			}
+		}
+	}
+
+	return canDiscovery
 }

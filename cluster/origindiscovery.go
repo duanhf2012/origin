@@ -10,49 +10,51 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const DynamicDiscoveryMasterName = "DiscoveryMaster"
-const DynamicDiscoveryClientName = "DiscoveryClient"
-const RegServiceDiscover = DynamicDiscoveryMasterName + ".RPC_RegServiceDiscover"
-const SubServiceDiscover = DynamicDiscoveryClientName + ".RPC_SubServiceDiscover"
-const AddSubServiceDiscover = DynamicDiscoveryMasterName + ".RPC_AddSubServiceDiscover"
-const NodeRetireRpcMethod = DynamicDiscoveryMasterName+".RPC_NodeRetire"
+const OriginDiscoveryMasterName = "DiscoveryMaster"
+const OriginDiscoveryClientName = "DiscoveryClient"
+const RegServiceDiscover = OriginDiscoveryMasterName + ".RPC_RegServiceDiscover"
+const SubServiceDiscover = OriginDiscoveryClientName + ".RPC_SubServiceDiscover"
+const AddSubServiceDiscover = OriginDiscoveryMasterName + ".RPC_AddSubServiceDiscover"
+const NodeRetireRpcMethod = OriginDiscoveryMasterName+".RPC_NodeRetire"
 
-type DynamicDiscoveryMaster struct {
+type OriginDiscoveryMaster struct {
 	service.Service
 
 	mapNodeInfo map[string]struct{}
 	nodeInfo    []*rpc.NodeInfo
 }
 
-type DynamicDiscoveryClient struct {
+type OriginDiscoveryClient struct {
 	service.Service
 
-	funDelService FunDelNode
-	funSetService FunSetNodeInfo
+	funDelNode FunDelNode
+	funSetNode FunSetNode
 	localNodeId   string
 
 	mapDiscovery map[string]map[string]struct{} //map[masterNodeId]map[nodeId]struct{}
+	mapMasterNetwork map[string]string
 	bRetire bool
 }
 
-var masterService DynamicDiscoveryMaster
-var clientService DynamicDiscoveryClient
+var masterService OriginDiscoveryMaster
+var clientService OriginDiscoveryClient
 
-func getDynamicDiscovery() IServiceDiscovery {
+func getOriginDiscovery() IServiceDiscovery {
 	return &clientService
 }
 
 func init() {
-	masterService.SetName(DynamicDiscoveryMasterName)
-	clientService.SetName(DynamicDiscoveryClientName)
+	masterService.SetName(OriginDiscoveryMasterName)
+	clientService.SetName(OriginDiscoveryClientName)
 }
 
-func (ds *DynamicDiscoveryMaster) isRegNode(nodeId string) bool {
+
+func (ds *OriginDiscoveryMaster) isRegNode(nodeId string) bool {
 	_, ok := ds.mapNodeInfo[nodeId]
 	return ok
 }
 
-func (ds *DynamicDiscoveryMaster) updateNodeInfo(nInfo *rpc.NodeInfo) {
+func (ds *OriginDiscoveryMaster) updateNodeInfo(nInfo *rpc.NodeInfo) {
 	if _,ok:= ds.mapNodeInfo[nInfo.NodeId];ok == false {
 		return
 	}
@@ -66,7 +68,7 @@ func (ds *DynamicDiscoveryMaster) updateNodeInfo(nInfo *rpc.NodeInfo) {
 	}
 }
 
-func (ds *DynamicDiscoveryMaster) addNodeInfo(nInfo *rpc.NodeInfo) {
+func (ds *OriginDiscoveryMaster) addNodeInfo(nInfo *rpc.NodeInfo) {
 	if len(nInfo.PublicServiceList) == 0 {
 		return
 	}
@@ -81,7 +83,7 @@ func (ds *DynamicDiscoveryMaster) addNodeInfo(nInfo *rpc.NodeInfo) {
 	ds.nodeInfo = append(ds.nodeInfo, nodeInfo)
 }
 
-func (ds *DynamicDiscoveryMaster) removeNodeInfo(nodeId string) {
+func (ds *OriginDiscoveryMaster) removeNodeInfo(nodeId string) {
 	if _,ok:= ds.mapNodeInfo[nodeId];ok == false {
 		return
 	}
@@ -96,14 +98,14 @@ func (ds *DynamicDiscoveryMaster) removeNodeInfo(nodeId string) {
 	delete(ds.mapNodeInfo,nodeId)
 }
 
-func (ds *DynamicDiscoveryMaster) OnInit() error {
+func (ds *OriginDiscoveryMaster) OnInit() error {
 	ds.mapNodeInfo = make(map[string]struct{}, 20)
 	ds.RegRpcListener(ds)
 
 	return nil
 }
 
-func (ds *DynamicDiscoveryMaster) OnStart() {
+func (ds *OriginDiscoveryMaster) OnStart() {
 	var nodeInfo rpc.NodeInfo
 	localNodeInfo := cluster.GetLocalNodeInfo()
 	nodeInfo.NodeId = localNodeInfo.NodeId
@@ -112,11 +114,10 @@ func (ds *DynamicDiscoveryMaster) OnStart() {
 	nodeInfo.MaxRpcParamLen = localNodeInfo.MaxRpcParamLen
 	nodeInfo.Private = localNodeInfo.Private
 	nodeInfo.Retire = localNodeInfo.Retire
-
 	ds.addNodeInfo(&nodeInfo)
 }
 
-func (ds *DynamicDiscoveryMaster) OnNodeConnected(nodeId string) {
+func (ds *OriginDiscoveryMaster) OnNodeConnected(nodeId string) {
 	//没注册过结点不通知
 	if ds.isRegNode(nodeId) == false {
 		return
@@ -131,7 +132,7 @@ func (ds *DynamicDiscoveryMaster) OnNodeConnected(nodeId string) {
 	ds.GoNode(nodeId, SubServiceDiscover, &notifyDiscover)
 }
 
-func (ds *DynamicDiscoveryMaster) OnNodeDisconnect(nodeId string) {
+func (ds *OriginDiscoveryMaster) OnNodeDisconnect(nodeId string) {
 	if ds.isRegNode(nodeId) == false {
 		return
 	}
@@ -148,13 +149,13 @@ func (ds *DynamicDiscoveryMaster) OnNodeDisconnect(nodeId string) {
 	ds.CastGo(SubServiceDiscover, &notifyDiscover)
 }
 
-func (ds *DynamicDiscoveryMaster) RpcCastGo(serviceMethod string, args interface{}) {
+func (ds *OriginDiscoveryMaster) RpcCastGo(serviceMethod string, args interface{}) {
 	for nodeId, _ := range ds.mapNodeInfo {
 		ds.GoNode(nodeId, serviceMethod, args)
 	}
 }
 
-func (ds *DynamicDiscoveryMaster) RPC_NodeRetire(req *rpc.NodeRetireReq, res *rpc.Empty) error {
+func (ds *OriginDiscoveryMaster) RPC_NodeRetire(req *rpc.NodeRetireReq, res *rpc.Empty) error {
 	log.Info("node is retire",log.String("nodeId",req.NodeInfo.NodeId),log.Bool("retire",req.NodeInfo.Retire))
 
 	ds.updateNodeInfo(req.NodeInfo)
@@ -168,7 +169,7 @@ func (ds *DynamicDiscoveryMaster) RPC_NodeRetire(req *rpc.NodeRetireReq, res *rp
 }
 
 // 收到注册过来的结点
-func (ds *DynamicDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscoverReq, res *rpc.Empty) error {
+func (ds *OriginDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscoverReq, res *rpc.Empty) error {
 	if req.NodeInfo == nil {
 		err := errors.New("RPC_RegServiceDiscover req is error.")
 		log.Error(err.Error())
@@ -204,13 +205,15 @@ func (ds *DynamicDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscove
 	return nil
 }
 
-func (dc *DynamicDiscoveryClient) OnInit() error {
+func (dc *OriginDiscoveryClient) OnInit() error {
 	dc.RegRpcListener(dc)
 	dc.mapDiscovery = map[string]map[string]struct{}{}
+	dc.mapMasterNetwork = map[string]string{}
+
 	return nil
 }
 
-func (dc *DynamicDiscoveryClient) addMasterNode(masterNodeId string, nodeId string) {
+func (dc *OriginDiscoveryClient) addMasterNode(masterNodeId string, nodeId string) {
 	_, ok := dc.mapDiscovery[masterNodeId]
 	if ok == false {
 		dc.mapDiscovery[masterNodeId] = map[string]struct{}{}
@@ -218,7 +221,7 @@ func (dc *DynamicDiscoveryClient) addMasterNode(masterNodeId string, nodeId stri
 	dc.mapDiscovery[masterNodeId][nodeId] = struct{}{}
 }
 
-func (dc *DynamicDiscoveryClient) removeMasterNode(masterNodeId string, nodeId string) {
+func (dc *OriginDiscoveryClient) removeMasterNode(masterNodeId string, nodeId string) {
 	mapNodeId, ok := dc.mapDiscovery[masterNodeId]
 	if ok == false {
 		return
@@ -227,7 +230,7 @@ func (dc *DynamicDiscoveryClient) removeMasterNode(masterNodeId string, nodeId s
 	delete(mapNodeId, nodeId)
 }
 
-func (dc *DynamicDiscoveryClient) findNodeId(nodeId string) bool {
+func (dc *OriginDiscoveryClient) findNodeId(nodeId string) bool {
 	for _, mapNodeId := range dc.mapDiscovery {
 		_, ok := mapNodeId[nodeId]
 		if ok == true {
@@ -238,22 +241,22 @@ func (dc *DynamicDiscoveryClient) findNodeId(nodeId string) bool {
 	return false
 }
 
-func (dc *DynamicDiscoveryClient) OnStart() {
+func (dc *OriginDiscoveryClient) OnStart() {
 	//2.添加并连接发现主结点
 	dc.addDiscoveryMaster()
 }
 
-func (dc *DynamicDiscoveryClient) addDiscoveryMaster() {
-	discoveryNodeList := cluster.GetDiscoveryNodeList()
+func (dc *OriginDiscoveryClient) addDiscoveryMaster() {
+	discoveryNodeList := cluster.GetOriginDiscoveryNodeList()
 	for i := 0; i < len(discoveryNodeList); i++ {
 		if discoveryNodeList[i].NodeId == cluster.GetLocalNodeInfo().NodeId {
 			continue
 		}
-		dc.funSetService(&discoveryNodeList[i])
+		dc.funSetNode(&discoveryNodeList[i])
 	}
 }
 
-func (dc *DynamicDiscoveryClient) fullCompareDiffNode(masterNodeId string, mapNodeInfo map[string]*rpc.NodeInfo) []string {
+func (dc *OriginDiscoveryClient) fullCompareDiffNode(masterNodeId string, mapNodeInfo map[string]*rpc.NodeInfo) []string {
 	if mapNodeInfo == nil {
 		return nil
 	}
@@ -277,7 +280,7 @@ func (dc *DynamicDiscoveryClient) fullCompareDiffNode(masterNodeId string, mapNo
 }
 
 //订阅发现的服务通知
-func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDiscoverNotify) error {
+func (dc *OriginDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDiscoverNotify) error {
 	mapNodeInfo := map[string]*rpc.NodeInfo{}
 	for _, nodeInfo := range req.NodeInfo {
 		//不对本地结点或者不存在任何公开服务的结点
@@ -285,8 +288,8 @@ func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDisco
 			continue
 		}
 
-		if cluster.IsMasterDiscoveryNode() == false && len(nodeInfo.PublicServiceList) == 1 &&
-			nodeInfo.PublicServiceList[0] == DynamicDiscoveryClientName {
+		if cluster.IsOriginMasterDiscoveryNode(cluster.GetLocalNodeInfo().NodeId) == false && len(nodeInfo.PublicServiceList) == 1 &&
+			nodeInfo.PublicServiceList[0] == OriginDiscoveryClientName {
 			continue
 		}
 
@@ -327,7 +330,7 @@ func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDisco
 		cluster.TriggerDiscoveryEvent(false,nodeId,nil)
 		dc.removeMasterNode(req.MasterNodeId, nodeId)
 		if dc.findNodeId(nodeId) == false {
-			dc.funDelService(nodeId, false)
+			dc.funDelNode(nodeId, false)
 		}
 	}
 
@@ -344,24 +347,15 @@ func (dc *DynamicDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDisco
 	return nil
 }
 
-func (dc *DynamicDiscoveryClient) isDiscoverNode(nodeId string) bool {
-	for i := 0; i < len(cluster.masterDiscoveryNodeList); i++ {
-		if cluster.masterDiscoveryNodeList[i].NodeId == nodeId {
-			return true
-		}
-	}
 
-	return false
-}
-
-func (dc *DynamicDiscoveryClient) OnNodeConnected(nodeId string) {
+func (dc *OriginDiscoveryClient) OnNodeConnected(nodeId string) {
 	dc.regServiceDiscover(nodeId)
 }
 
-func (dc *DynamicDiscoveryClient) OnRetire(){
+func (dc *OriginDiscoveryClient) OnRetire(){
 	dc.bRetire = true
 
-	masterNodeList := cluster.GetDiscoveryNodeList()
+	masterNodeList := cluster.GetOriginDiscoveryNodeList()
 	for i:=0;i<len(masterNodeList);i++{
 		var nodeRetireReq rpc.NodeRetireReq
 
@@ -380,8 +374,8 @@ func (dc *DynamicDiscoveryClient) OnRetire(){
 	}
 }
 
-func (dc *DynamicDiscoveryClient) regServiceDiscover(nodeId string){
-	nodeInfo := cluster.GetMasterDiscoveryNodeInfo(nodeId)
+func (dc *OriginDiscoveryClient) regServiceDiscover(nodeId string){
+	nodeInfo := cluster.getOriginMasterDiscoveryNodeInfo(nodeId)
 	if nodeInfo == nil {
 		return
 	}
@@ -411,27 +405,7 @@ func (dc *DynamicDiscoveryClient) regServiceDiscover(nodeId string){
 	}
 }
 
-func (dc *DynamicDiscoveryClient) canDiscoveryService(fromMasterNodeId string,serviceName string) bool{
-	canDiscovery := true
-
-	for i:=0;i<len(cluster.GetLocalNodeInfo().MasterDiscoveryService);i++{
-		masterNodeId := cluster.GetLocalNodeInfo().MasterDiscoveryService[i].MasterNodeId
-
-		if masterNodeId == fromMasterNodeId || masterNodeId == rpc.NodeIdNull {
-			canDiscovery = false
-
-			for _,discoveryService := range cluster.GetLocalNodeInfo().MasterDiscoveryService[i].DiscoveryService {
-				if discoveryService == serviceName {
-					return true
-				}
-			}
-		}
-	}
-
-	return canDiscovery
-}
-
-func (dc *DynamicDiscoveryClient) setNodeInfo(masterNodeId string,nodeInfo *rpc.NodeInfo) bool{
+func (dc *OriginDiscoveryClient) setNodeInfo(masterNodeId string,nodeInfo *rpc.NodeInfo) bool{
 	if nodeInfo == nil || nodeInfo.Private == true || nodeInfo.NodeId == dc.localNodeId {
 		return false
 	}
@@ -439,7 +413,7 @@ func (dc *DynamicDiscoveryClient) setNodeInfo(masterNodeId string,nodeInfo *rpc.
 	//筛选关注的服务
 	var discoverServiceSlice = make([]string, 0, 24)
 	for _, pubService := range nodeInfo.PublicServiceList {
-		if dc.canDiscoveryService(masterNodeId,pubService) == true {
+		if cluster.CanDiscoveryService(masterNodeId,pubService) == true {
 			discoverServiceSlice = append(discoverServiceSlice,pubService)
 		}
 	}
@@ -457,23 +431,66 @@ func (dc *DynamicDiscoveryClient) setNodeInfo(masterNodeId string,nodeInfo *rpc.
 	nInfo.Retire = nodeInfo.Retire
 	nInfo.Private = nodeInfo.Private
 
-	dc.funSetService(&nInfo)
+	dc.funSetNode(&nInfo)
 
 	return true
 }
 
-func (dc *DynamicDiscoveryClient) OnNodeDisconnect(nodeId string) {
+func (dc *OriginDiscoveryClient) OnNodeDisconnect(nodeId string) {
 	//将Discard结点清理
 	cluster.DiscardNode(nodeId)
 }
 
-func (dc *DynamicDiscoveryClient) InitDiscovery(localNodeId string, funDelNode FunDelNode, funSetNodeInfo FunSetNodeInfo) error {
+func (dc *OriginDiscoveryClient) InitDiscovery(localNodeId string, funDelNode FunDelNode, funSetNode FunSetNode) error {
 	dc.localNodeId = localNodeId
-	dc.funDelService = funDelNode
-	dc.funSetService = funSetNodeInfo
+	dc.funDelNode = funDelNode
+	dc.funSetNode = funSetNode
 
 	return nil
 }
 
-func (dc *DynamicDiscoveryClient) OnNodeStop() {
+func (cls *Cluster) checkOriginDiscovery(localNodeId string) (bool, bool) {
+	var localMaster bool //本结点是否为Master结点
+	var hasMaster bool   //是否配置Master服务
+
+	//遍历所有结点
+	for _, nodeInfo := range cls.discoveryInfo.Origin {
+		if nodeInfo.NodeId == localNodeId {
+			localMaster = true
+		}
+		hasMaster = true
+	}
+
+	//返回查询结果
+	return localMaster, hasMaster
 }
+
+func (cls *Cluster) AddDiscoveryService(serviceName string, bPublicService bool) {
+	addServiceList := append([]string{},serviceName)
+	cls.localNodeInfo.ServiceList = append(addServiceList,cls.localNodeInfo.ServiceList...)
+	if bPublicService {
+		cls.localNodeInfo.PublicServiceList = append(cls.localNodeInfo.PublicServiceList, serviceName)
+	}
+
+	if _, ok := cls.mapServiceNode[serviceName]; ok == false {
+		cls.mapServiceNode[serviceName] = map[string]struct{}{}
+	}
+	cls.mapServiceNode[serviceName][cls.localNodeInfo.NodeId] = struct{}{}
+}
+
+
+func (cls *Cluster) IsOriginMasterDiscoveryNode(nodeId string) bool {
+	//return cls.GetMasterDiscoveryNodeInfo(cls.GetLocalNodeInfo().NodeId) != nil
+	return cls.getOriginMasterDiscoveryNodeInfo(nodeId) != nil
+}
+
+func (cls *Cluster) getOriginMasterDiscoveryNodeInfo(nodeId string) *NodeInfo {
+	for i := 0; i < len(cls.discoveryInfo.Origin); i++ {
+		if cls.discoveryInfo.Origin[i].NodeId == nodeId {
+			return &cls.discoveryInfo.Origin[i]
+		}
+	}
+
+	return nil
+}
+
