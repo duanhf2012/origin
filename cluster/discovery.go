@@ -62,7 +62,7 @@ func (cls *Cluster) setupConfigDiscovery(localNodeId string, setupServiceFun Set
 	return nil
 }
 
-func (cls *Cluster) GetOriginDiscoveryNodeList() []NodeInfo {
+func (cls *Cluster) GetOriginDiscovery() *OriginDiscovery {
 	return cls.discoveryInfo.Origin
 }
 

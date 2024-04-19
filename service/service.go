@@ -77,6 +77,17 @@ type DiscoveryServiceEvent struct{
 	NodeId string
 }
 
+type EtcdServiceRecordEvent struct {
+	NetworkName string
+	TTLSecond int64
+	RecordKey string
+	RecordInfo string
+}
+
+type Empty struct {
+
+}
+
 func SetMaxServiceChannel(maxEventChannel int){
 	maxServiceEventChannelNum = maxEventChannel
 }

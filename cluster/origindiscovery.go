@@ -5,9 +5,9 @@ import (
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/rpc"
 	"github.com/duanhf2012/origin/v2/service"
-	"time"
 	"github.com/duanhf2012/origin/v2/util/timer"
 	"google.golang.org/protobuf/proto"
+	"time"
 )
 
 const OriginDiscoveryMasterName = "DiscoveryMaster"
@@ -16,6 +16,71 @@ const RegServiceDiscover = OriginDiscoveryMasterName + ".RPC_RegServiceDiscover"
 const SubServiceDiscover = OriginDiscoveryClientName + ".RPC_SubServiceDiscover"
 const AddSubServiceDiscover = OriginDiscoveryMasterName + ".RPC_AddSubServiceDiscover"
 const NodeRetireRpcMethod = OriginDiscoveryMasterName+".RPC_NodeRetire"
+//
+//type nodeTTL struct {
+//	nodeId string
+//	refreshTime time.Time
+//}
+//
+//type nodeSetTTL struct {
+//	l *list.List
+//	mapElement map[string]*list.Element
+//	ttl time.Duration
+//}
+//
+//func (ns *nodeSetTTL) init(ttl time.Duration) {
+//	ns.ttl = ttl
+//	ns.mapElement = make(map[string]*list.Element,32)
+//	ns.l = list.New()
+//}
+//
+//func (ns *nodeSetTTL) removeNode(nodeId string) {
+//	ele,ok:=ns.mapElement[nodeId]
+//	if ok == false {
+//		return
+//	}
+//
+//	ns.l.Remove(ele)
+//	delete(ns.mapElement,nodeId)
+//}
+//
+//func (ns *nodeSetTTL) addAndRefreshNode(nodeId string){
+//	ele,ok:=ns.mapElement[nodeId]
+//	if ok == false {
+//		ele = ns.l.PushBack(nodeId)
+//		ele.Value = &nodeTTL{nodeId,time.Now()}
+//		ns.mapElement[nodeId] = ele
+//		return
+//	}
+//
+//	ele.Value.(*nodeTTL).refreshTime =  time.Now()
+//	ns.l.MoveToBack(ele)
+//}
+//
+//func (ns *nodeSetTTL) checkTTL(cb func(nodeIdList []string)){
+//	nodeIdList := []string{}
+//	for{
+//		f := ns.l.Front()
+//		if f == nil {
+//			break
+//		}
+//
+//		nt := f.Value.(*nodeTTL)
+//		if time.Now().Sub(nt.refreshTime) > ns.ttl {
+//			nodeIdList = append(nodeIdList,nt.nodeId)
+//		}else{
+//			break
+//		}
+//
+//		//删除结点
+//		ns.l.Remove(f)
+//		delete(ns.mapElement,nt.nodeId)
+//	}
+//
+//	if len(nodeIdList) >0 {
+//		cb(nodeIdList)
+//	}
+//}
 
 type OriginDiscoveryMaster struct {
 	service.Service
@@ -47,7 +112,6 @@ func init() {
 	masterService.SetName(OriginDiscoveryMasterName)
 	clientService.SetName(OriginDiscoveryClientName)
 }
-
 
 func (ds *OriginDiscoveryMaster) isRegNode(nodeId string) bool {
 	_, ok := ds.mapNodeInfo[nodeId]
@@ -247,12 +311,14 @@ func (dc *OriginDiscoveryClient) OnStart() {
 }
 
 func (dc *OriginDiscoveryClient) addDiscoveryMaster() {
-	discoveryNodeList := cluster.GetOriginDiscoveryNodeList()
-	for i := 0; i < len(discoveryNodeList); i++ {
-		if discoveryNodeList[i].NodeId == cluster.GetLocalNodeInfo().NodeId {
+	discoveryNodeList := cluster.GetOriginDiscovery()
+
+	for i := 0; i < len(discoveryNodeList.MasterNodeList); i++ {
+		if discoveryNodeList.MasterNodeList[i].NodeId == cluster.GetLocalNodeInfo().NodeId {
 			continue
 		}
-		dc.funSetNode(&discoveryNodeList[i])
+		dc.funSetNode(&discoveryNodeList.MasterNodeList[i])
+
 	}
 }
 
@@ -355,8 +421,8 @@ func (dc *OriginDiscoveryClient) OnNodeConnected(nodeId string) {
 func (dc *OriginDiscoveryClient) OnRetire(){
 	dc.bRetire = true
 
-	masterNodeList := cluster.GetOriginDiscoveryNodeList()
-	for i:=0;i<len(masterNodeList);i++{
+	masterNodeList := cluster.GetOriginDiscovery()
+	for i:=0;i<len(masterNodeList.MasterNodeList);i++{
 		var nodeRetireReq rpc.NodeRetireReq
 
 		nodeRetireReq.NodeInfo = &rpc.NodeInfo{}
@@ -367,11 +433,17 @@ func (dc *OriginDiscoveryClient) OnRetire(){
 		nodeRetireReq.NodeInfo.Retire = dc.bRetire
 		nodeRetireReq.NodeInfo.Private = cluster.localNodeInfo.Private
 
-		err := dc.GoNode(masterNodeList[i].NodeId,NodeRetireRpcMethod,&nodeRetireReq)
+		err := dc.GoNode(masterNodeList.MasterNodeList[i].NodeId,NodeRetireRpcMethod,&nodeRetireReq)
 		if err!= nil {
 			log.Error("call "+NodeRetireRpcMethod+" is fail",log.ErrorAttr("err",err))
 		}
 	}
+}
+
+func (dc *OriginDiscoveryClient) tryRegServiceDiscover(nodeId string){
+	dc.AfterFunc(time.Second*3, func(timer *timer.Timer) {
+		dc.regServiceDiscover(nodeId)
+	})
 }
 
 func (dc *OriginDiscoveryClient) regServiceDiscover(nodeId string){
@@ -393,15 +465,14 @@ func (dc *OriginDiscoveryClient) regServiceDiscover(nodeId string){
 	err := dc.AsyncCallNode(nodeId, RegServiceDiscover, &req, func(res *rpc.Empty, err error) {
 		if err != nil {
 			log.Error("call "+RegServiceDiscover+" is fail :"+ err.Error())
-			dc.AfterFunc(time.Second*3, func(timer *timer.Timer) {
-				dc.regServiceDiscover(nodeId)
-			})
-
+			dc.tryRegServiceDiscover(nodeId)
 			return
 		}
 	})
+
 	if err != nil {
 		log.Error("call "+ RegServiceDiscover+" is fail :"+ err.Error())
+		dc.tryRegServiceDiscover(nodeId)
 	}
 }
 
@@ -454,7 +525,7 @@ func (cls *Cluster) checkOriginDiscovery(localNodeId string) (bool, bool) {
 	var hasMaster bool   //是否配置Master服务
 
 	//遍历所有结点
-	for _, nodeInfo := range cls.discoveryInfo.Origin {
+	for _, nodeInfo := range cls.discoveryInfo.Origin.MasterNodeList {
 		if nodeInfo.NodeId == localNodeId {
 			localMaster = true
 		}
@@ -485,9 +556,9 @@ func (cls *Cluster) IsOriginMasterDiscoveryNode(nodeId string) bool {
 }
 
 func (cls *Cluster) getOriginMasterDiscoveryNodeInfo(nodeId string) *NodeInfo {
-	for i := 0; i < len(cls.discoveryInfo.Origin); i++ {
-		if cls.discoveryInfo.Origin[i].NodeId == nodeId {
-			return &cls.discoveryInfo.Origin[i]
+	for i := 0; i < len(cls.discoveryInfo.Origin.MasterNodeList); i++ {
+		if cls.discoveryInfo.Origin.MasterNodeList[i].NodeId == nodeId {
+			return &cls.discoveryInfo.Origin.MasterNodeList[i]
 		}
 	}
 

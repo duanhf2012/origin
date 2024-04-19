@@ -25,6 +25,11 @@ type EtcdDiscovery struct {
 	EtcdList []EtcdList
 }
 
+type OriginDiscovery struct {
+	TTLSecond int64
+	MasterNodeList []NodeInfo
+}
+
 type DiscoveryType int
 
 const (
@@ -36,7 +41,7 @@ const (
 type DiscoveryInfo struct {
 	discoveryType DiscoveryType
 	Etcd          *EtcdDiscovery  //etcd
-	Origin        []NodeInfo      //orign
+	Origin        *OriginDiscovery      //orign
 }
 
 type NodeInfoList struct {
@@ -101,8 +106,8 @@ func (d *DiscoveryInfo) setEtcd(etcd *EtcdDiscovery) error{
 	return nil
 }
 
-func (d *DiscoveryInfo) setOrigin(nodeInfos []NodeInfo) error{
-	if nodeInfos == nil {
+func (d *DiscoveryInfo) setOrigin(originDiscovery *OriginDiscovery) error{
+	if originDiscovery== nil || len(originDiscovery.MasterNodeList)==0 {
 		return nil
 	}
 
@@ -112,7 +117,7 @@ func (d *DiscoveryInfo) setOrigin(nodeInfos []NodeInfo) error{
 
 	mapListenAddr := make(map[string]struct{})
 	mapNodeId := make(map[string]struct{})
-	for _, n := range nodeInfos {
+	for _, n := range originDiscovery.MasterNodeList {
 		if _, ok := mapListenAddr[n.ListenAddr]; ok == true {
 			return fmt.Errorf("discovery config Origin.ListenAddr %s is repeat", n.ListenAddr)
 		}
@@ -124,7 +129,7 @@ func (d *DiscoveryInfo) setOrigin(nodeInfos []NodeInfo) error{
 		mapNodeId[n.NodeId] = struct{}{}
 	}
 
-	d.Origin = nodeInfos
+	d.Origin = originDiscovery
 	d.discoveryType = OriginType
 	return nil
 }

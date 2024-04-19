@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -38,7 +39,7 @@ type EtcdDiscoveryService struct {
 	byteLocalNodeInfo string
 	mapClient map[*clientv3.Client]*etcdClientInfo
 	isClose int32
-
+	bRetire bool
 	mapDiscoveryNodeId map[string]map[string]struct{} //map[networkName]map[nodeId]
 }
 
@@ -100,7 +101,8 @@ func (ed *EtcdDiscoveryService) OnInit() error {
 		}
 
 		ctx,_:=context.WithTimeout(context.Background(),time.Second*3)
-		_,err = client.Put(ctx,testKey,"")
+		_,err = client.Leases(ctx)
+		//_,err = client.Put(ctx,testKey,"")
 		if err != nil {
 			log.Error("etcd discovery init fail",log.Any("endpoint",etcdDiscoveryCfg.EtcdList[i].Endpoints),log.ErrorAttr("err",err))
 			return err
@@ -186,9 +188,37 @@ func (ed *EtcdDiscoveryService) tryWatch(client *clientv3.Client,etcdClient *etc
 	})
 }
 
+func (ed *EtcdDiscoveryService) tryLaterRetire() {
+	ed.AfterFunc(time.Second, func(*timer.Timer) {
+		if ed.retire() != nil {
+			ed.tryLaterRetire()
+		}
+	})
+}
+
+func (ed *EtcdDiscoveryService) retire() error{
+	//从etcd中更新
+	for c,ec := range ed.mapClient {
+		for _, watchKey := range ec.watchKeys {
+			// 注册服务节点到 etcd
+			_, err := c.Put(context.Background(), ed.getRegisterKey(watchKey), ed.byteLocalNodeInfo, clientv3.WithLease(ec.leaseID))
+			if err != nil {
+				log.Error("etcd Put fail", log.ErrorAttr("err", err))
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func (ed *EtcdDiscoveryService) OnRetire(){
-	atomic.StoreInt32(&ed.isClose,1)
-	ed.close()
+	ed.bRetire = true
+	ed.marshalNodeInfo()
+
+	if ed.retire()!= nil {
+		ed.tryLaterRetire()
+	}
 }
 
 func (ed *EtcdDiscoveryService) OnRelease(){
@@ -212,7 +242,7 @@ func (ed *EtcdDiscoveryService) marshalNodeInfo() error{
 	var nodeInfo rpc.NodeInfo
 	nodeInfo.NodeId = nInfo.NodeId
 	nodeInfo.ListenAddr = nInfo.ListenAddr
-	nodeInfo.Retire = nInfo.Retire
+	nodeInfo.Retire = ed.bRetire
 	nodeInfo.PublicServiceList = nInfo.PublicServiceList
 	nodeInfo.MaxRpcParamLen = nInfo.MaxRpcParamLen
 
@@ -344,7 +374,7 @@ func (ed *EtcdDiscoveryService) delNode(fullKey string) string{
 		return ""
 	}
 
-	 ed.funDelNode(nodeId,true)
+	 ed.funDelNode(nodeId,false)
 	return nodeId
 }
 
@@ -415,7 +445,7 @@ func (ed *EtcdDiscoveryService) OnEventGets(watchKey string,Kvs []*mvccpb.KeyVal
 	mapLastNodeId := ed.mapDiscoveryNodeId[watchKey] // 根据watchKey获取对应的节点ID集合
 	for nodeId := range mapLastNodeId { // 遍历所有节点ID
 	    if _,ok := mapNode[nodeId];ok == false && nodeId != ed.localNodeId { // 检查节点是否不存在于mapNode且不是本地节点
-	        ed.funDelNode(nodeId,true) // 调用函数删除该节点
+	        ed.funDelNode(nodeId,false) // 调用函数删除该节点
 			delete(ed.mapDiscoveryNodeId[watchKey],nodeId)
 			log.Debug(">>etcd OnEventGets Delete",log.String("watchKey",watchKey),log.String("nodeId",nodeId))
 	    }
@@ -440,4 +470,57 @@ func (ed *EtcdDiscoveryService) addNodeId(watchKey string,nodeId string) {
 	}
 
 	ed.mapDiscoveryNodeId[watchKey][nodeId] = struct{}{}
+}
+
+func (ed *EtcdDiscoveryService) OnNodeDisconnect(nodeId string) {
+	//将Discard结点清理
+	cluster.DiscardNode(nodeId)
+}
+
+func (ed *EtcdDiscoveryService) RPC_ServiceRecord(etcdServiceRecord *service.EtcdServiceRecordEvent,empty *service.Empty) error{
+		var client *clientv3.Client
+
+		//写入到etcd中
+		for c, info := range ed.mapClient{
+			for _,watchKey := range info.watchKeys {
+				if ed.getNetworkNameByWatchKey(watchKey) == etcdServiceRecord.NetworkName {
+					client = c
+					break
+				}
+			}
+		}
+
+		if client == nil {
+			log.Error("etcd record fail,cannot find network name",log.String("networkName",etcdServiceRecord.NetworkName))
+			return errors.New("annot find network name")
+		}
+
+		var lg *clientv3.LeaseGrantResponse
+		var err error
+
+		if etcdServiceRecord.TTLSecond > 0 {
+			ctx,_:=context.WithTimeout(context.Background(),time.Second*3)
+			lg, err = client.Grant(ctx, etcdServiceRecord.TTLSecond)
+			if err != nil {
+				log.Error("etcd record fail,cannot grant lease",log.ErrorAttr("err",err))
+				return errors.New("cannot grant lease")
+			}
+		}
+
+		if lg != nil {
+			ctx,_:=context.WithTimeout(context.Background(),time.Second*3)
+			_, err = client.Put(ctx, path.Join(originDir,etcdServiceRecord.RecordKey),etcdServiceRecord.RecordInfo, clientv3.WithLease(lg.ID))
+			if err != nil {
+				log.Error("etcd record fail,cannot put record",log.ErrorAttr("err",err))
+			}
+			return errors.New("cannot put record")
+		}
+
+		_,err = client.Put(context.Background(), path.Join(originDir,etcdServiceRecord.RecordKey),etcdServiceRecord.RecordInfo)
+		if err != nil {
+			log.Error("etcd record fail,cannot put record",log.ErrorAttr("err",err))
+			return errors.New("cannot put record")
+		}
+
+		return nil
 }
