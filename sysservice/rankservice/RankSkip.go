@@ -250,7 +250,7 @@ func (rs *RankSkip) UpsetRank(upsetData *rpc.RankData, refreshTimestamp int64, f
 		//找到的情况对比排名数据是否有变化,无变化进行data更新,有变化则进行删除更新
 		if compareIsEqual(rankNode.SortData, upsetData.SortData) {
 			rankNode.Data = upsetData.GetData()
-			rankNode.refreshTimestamp = refreshTimestamp
+			rankNode.RefreshTimestamp = refreshTimestamp
 
 			if fromLoad == false {
 				rs.rankModule.OnChangeRankData(rs, rankNode)
