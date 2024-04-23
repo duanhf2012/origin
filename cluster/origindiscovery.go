@@ -318,7 +318,6 @@ func (dc *OriginDiscoveryClient) addDiscoveryMaster() {
 			continue
 		}
 		dc.funSetNode(&discoveryNodeList.MasterNodeList[i])
-
 	}
 }
 
@@ -556,6 +555,10 @@ func (cls *Cluster) IsOriginMasterDiscoveryNode(nodeId string) bool {
 }
 
 func (cls *Cluster) getOriginMasterDiscoveryNodeInfo(nodeId string) *NodeInfo {
+	if cls.discoveryInfo.Origin == nil {
+		return nil
+	}
+	
 	for i := 0; i < len(cls.discoveryInfo.Origin.MasterNodeList); i++ {
 		if cls.discoveryInfo.Origin.MasterNodeList[i].NodeId == nodeId {
 			return &cls.discoveryInfo.Origin.MasterNodeList[i]

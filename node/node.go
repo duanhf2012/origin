@@ -326,9 +326,7 @@ func startNode(args interface{}) error {
 
 	//5.运行集群
 	cluster.GetCluster().Start()
-
-
-
+	
 	//6.监听程序退出信号&性能报告
 	bRun := true
 	var pProfilerTicker *time.Ticker = &time.Ticker{}
@@ -352,9 +350,10 @@ func startNode(args interface{}) error {
 		}
 	}
 
-	cluster.GetCluster().Stop()
+
 	//7.退出
 	service.StopAllService()
+	cluster.GetCluster().Stop()
 
 	log.Info("Server is stop.")
 	log.Close()

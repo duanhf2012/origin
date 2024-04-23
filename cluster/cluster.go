@@ -52,19 +52,21 @@ type Cluster struct {
 	localNodeInfo           NodeInfo    //本结点配置信息
 
 	discoveryInfo DiscoveryInfo //服务发现配置
+	rpcMode RpcMode
 	//masterDiscoveryNodeList []NodeInfo  //配置发现Master结点
 	globalCfg               interface{} //全局配置
 
 	localServiceCfg  map[string]interface{} //map[serviceName]配置数据*
 	serviceDiscovery IServiceDiscovery      //服务发现接口
 
-
 	locker         sync.RWMutex                //结点与服务关系保护锁
 	mapRpc           map[string]*NodeRpcInfo    //nodeId
-	//mapIdNode      map[int]NodeInfo            //map[NodeId]NodeInfo
 	mapServiceNode map[string]map[string]struct{} //map[serviceName]map[NodeId]
 
-	rpcServer                rpc.Server
+	callSet rpc.CallSet
+	rpcNats rpc.RpcNats
+	rpcServer rpc.IServer
+
 	rpcEventLocker           sync.RWMutex        //Rpc事件监听保护锁
 	mapServiceListenRpcEvent map[string]struct{} //ServiceName
 	mapServiceListenDiscoveryEvent map[string]struct{} //ServiceName
@@ -82,11 +84,12 @@ func SetServiceDiscovery(serviceDiscovery IServiceDiscovery) {
 	cluster.serviceDiscovery = serviceDiscovery
 }
 
-func (cls *Cluster) Start() {
-	cls.rpcServer.Start(cls.localNodeInfo.ListenAddr, cls.localNodeInfo.MaxRpcParamLen,cls.localNodeInfo.CompressBytesLen)
+func (cls *Cluster) Start() error{
+	return cls.rpcServer.Start()
 }
 
 func (cls *Cluster) Stop() {
+	cls.rpcServer.Stop()
 }
 
 func (cls *Cluster) DiscardNode(nodeId string) {
@@ -191,7 +194,12 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo(nodeInfo *NodeInfo) {
 	//不存在时，则建立连接
 	rpcInfo := NodeRpcInfo{}
 	rpcInfo.nodeInfo = *nodeInfo
-	rpcInfo.client =rpc.NewRClient(nodeInfo.NodeId, nodeInfo.ListenAddr, nodeInfo.MaxRpcParamLen,cls.localNodeInfo.CompressBytesLen,cls.triggerRpcEvent)
+
+	if cls.IsNatsMode() {
+		rpcInfo.client = cls.rpcNats.NewNatsClient(nodeInfo.NodeId, cls.GetLocalNodeInfo().NodeId,&cls.callSet)
+	}else{
+		rpcInfo.client =rpc.NewRClient(nodeInfo.NodeId, nodeInfo.ListenAddr, nodeInfo.MaxRpcParamLen,cls.localNodeInfo.CompressBytesLen,cls.triggerRpcEvent,&cls.callSet)
+	}
 	cls.mapRpc[nodeInfo.NodeId] = &rpcInfo
 	log.Info("Discovery nodeId and new rpc client",log.String("NodeId", nodeInfo.NodeId),log.Any("services:", nodeInfo.PublicServiceList),log.Bool("Retire",nodeInfo.Retire),log.String("nodeListenAddr",nodeInfo.ListenAddr))
 }
@@ -204,7 +212,15 @@ func (cls *Cluster) Init(localNodeId string, setupServiceFun SetupServiceFun) er
 		return err
 	}
 
-	cls.rpcServer.Init(cls)
+	cls.callSet.Init()
+	if cls.IsNatsMode() {
+		cls.rpcNats.Init(cls.rpcMode.Nats.NatsUrl,cls.rpcMode.Nats.NoRandomize,cls.GetLocalNodeInfo().NodeId,cls.localNodeInfo.CompressBytesLen,cls)
+		cls.rpcServer = &cls.rpcNats
+	}else{
+		s := &rpc.Server{}
+		s.Init(cls.localNodeInfo.ListenAddr,cls.localNodeInfo.MaxRpcParamLen,cls.localNodeInfo.CompressBytesLen,cls)
+		cls.rpcServer = s
+	}
 
 	//2.安装服务发现结点
 	err = cls.setupDiscovery(localNodeId, setupServiceFun)
@@ -224,7 +240,6 @@ func (cls *Cluster) Init(localNodeId string, setupServiceFun SetupServiceFun) er
 
 	return nil
 }
-
 
 func (cls *Cluster) FindRpcHandler(serviceName string) rpc.IRpcHandler {
 	pService := service.GetService(serviceName)
@@ -276,8 +291,8 @@ func GetRpcClient(nodeId string, serviceMethod string,filterRetire bool, clientL
 	return GetCluster().GetNodeIdByService(serviceName, clientList, filterRetire)
 }
 
-func GetRpcServer() *rpc.Server {
-	return &cluster.rpcServer
+func GetRpcServer() rpc.IServer {
+	return cluster.rpcServer
 }
 
 func (cls *Cluster) IsNodeConnected(nodeId string) bool {

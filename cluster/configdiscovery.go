@@ -15,7 +15,7 @@ func (discovery *ConfigDiscovery) InitDiscovery(localNodeId string,funDelNode Fu
 	discovery.funSetNode = funSetNode
 	
 	//解析本地其他服务配置
-	_,nodeInfoList,err := GetCluster().readLocalClusterConfig(rpc.NodeIdNull)
+	_,nodeInfoList,_,err := GetCluster().readLocalClusterConfig(rpc.NodeIdNull)
 	if err != nil {
 		return err
 	}

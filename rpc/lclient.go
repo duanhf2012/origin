@@ -37,7 +37,7 @@ func (lc *LClient) SetConn(conn *network.TCPConn){
 func (lc *LClient) Close(waitDone bool){
 }
 
-func (lc *LClient) Go(timeout time.Duration,rpcHandler IRpcHandler,noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
+func (lc *LClient) Go(nodeId string,timeout time.Duration,rpcHandler IRpcHandler,noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
 	pLocalRpcServer := rpcHandler.GetRpcServer()()
 	//判断是否是同一服务
 	findIndex := strings.Index(serviceMethod, ".")
@@ -70,7 +70,7 @@ func (lc *LClient) Go(timeout time.Duration,rpcHandler IRpcHandler,noReply bool,
 }
 
 
-func (rc *LClient) RawGo(timeout time.Duration,rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceName string, rawArgs []byte, reply interface{}) *Call {
+func (rc *LClient) RawGo(nodeId string,timeout time.Duration,rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceName string, rawArgs []byte, reply interface{}) *Call {
 	pLocalRpcServer := rpcHandler.GetRpcServer()()
 	
 	//服务自我调用
@@ -92,7 +92,7 @@ func (rc *LClient) RawGo(timeout time.Duration,rpcHandler IRpcHandler,processor 
 }
 
 
-func (lc *LClient) AsyncCall(timeout time.Duration,rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, reply interface{},cancelable bool)  (CancelRpc,error) {
+func (lc *LClient) AsyncCall(nodeId string,timeout time.Duration,rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, reply interface{},cancelable bool)  (CancelRpc,error) {
 	pLocalRpcServer := rpcHandler.GetRpcServer()()
 
 	//判断是否是同一服务
@@ -119,17 +119,19 @@ func (lc *LClient) AsyncCall(timeout time.Duration,rpcHandler IRpcHandler, servi
 	return calcelRpc,nil
 }
 
-func NewLClient(nodeId string) *Client{
+func NewLClient(localNodeId string,callSet *CallSet) *Client{
 	client := &Client{}
 	client.clientId = atomic.AddUint32(&clientSeq, 1)
-	client.nodeId = nodeId
-	client.maxCheckCallRpcCount = DefaultMaxCheckCallRpcCount
-	client.callRpcTimeout = DefaultRpcTimeout
+	client.targetNodeId = localNodeId
+	//client.maxCheckCallRpcCount = DefaultMaxCheckCallRpcCount
+	//client.callRpcTimeout = DefaultRpcTimeout
 
 	lClient := &LClient{}
 	lClient.selfClient = client
 	client.IRealClient = lClient
-	client.InitPending()
-	go client.checkRpcCallTimeout()
+	client.CallSet = callSet
 	return client
+}
+
+func (rc *LClient) Bind(server IServer){
 }

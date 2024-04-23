@@ -6,6 +6,8 @@ import (
 	"net"
 	"sync"
 	"time"
+	"fmt"
+	"errors"
 )
 
 const(
@@ -36,15 +38,20 @@ type TCPServer struct {
 	MsgParser
 }
 
-func (server *TCPServer) Start() {
-	server.init()
+func (server *TCPServer) Start() error{
+	err := server.init()
+	if err != nil {
+		return err
+	}
 	go server.run()
+
+	return nil
 }
 
-func (server *TCPServer) init() {
+func (server *TCPServer) init() error{
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		log.Fatal("Listen tcp fail",log.String("error", err.Error()))
+		return fmt.Errorf("Listen tcp fail,error:%s",err.Error())
 	}
 
 	if server.MaxConnNum <= 0 {
@@ -89,12 +96,14 @@ func (server *TCPServer) init() {
 	}
 
 	if server.NewAgent == nil {
-		log.Fatal("NewAgent must not be nil")
+		return errors.New("NewAgent must not be nil")
 	}
 
 	server.ln = ln
 	server.conns = make(ConnSet)
 	server.MsgParser.init()
+	
+	return nil
 }
 
 func (server *TCPServer) SetNetMempool(mempool bytespool.IBytesMempool){

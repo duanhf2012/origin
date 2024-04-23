@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"errors"
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -44,7 +45,19 @@ type DiscoveryInfo struct {
 	Origin        *OriginDiscovery      //orign
 }
 
+type NatsConfig struct {
+	NatsUrl string
+	NoRandomize bool
+}
+
+type RpcMode struct {
+	Typ string `json:"Type"`
+	Nats  NatsConfig
+
+}
+
 type NodeInfoList struct {
+	RpcMode             RpcMode
 	Discovery 			DiscoveryInfo
 	NodeList            []NodeInfo
 }
@@ -183,14 +196,41 @@ func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]
 	return GlobalCfg, serviceConfig, mapNodeService, nil
 }
 
-func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []NodeInfo, error) {
+func (cls *Cluster) SetRpcMode(cfgRpcMode *RpcMode,rpcMode *RpcMode) error {
+	//忽略掉没有设置的配置
+	if cfgRpcMode.Typ == "" {
+		return nil
+	}
+
+	//不允许重复的配置Rpc模式
+
+	if cfgRpcMode.Typ != "" && rpcMode.Typ != ""{
+		return errors.New("repeat config RpcMode")
+	}
+
+	//检查Typ是否合法
+	if cfgRpcMode.Typ!="Nats" && cfgRpcMode.Typ!="Default" {
+		return fmt.Errorf("RpcMode %s is not support", rpcMode.Typ)
+	}
+
+	if cfgRpcMode.Typ == "Nats" && len(cfgRpcMode.Nats.NatsUrl)==0 {
+		return fmt.Errorf("nats rpc mode config NatsUrl is empty")
+	}
+
+	*rpcMode = *cfgRpcMode
+
+	return nil
+}
+
+func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []NodeInfo,RpcMode, error) {
 	var nodeInfoList []NodeInfo
 	var discoveryInfo DiscoveryInfo
+	var rpcMode RpcMode
 
 	clusterCfgPath := strings.TrimRight(configDir, "/") + "/cluster"
 	fileInfoList, err := os.ReadDir(clusterCfgPath)
 	if err != nil {
-		return discoveryInfo, nil, fmt.Errorf("Read dir %s is fail :%+v", clusterCfgPath, err)
+		return discoveryInfo, nil,rpcMode, fmt.Errorf("Read dir %s is fail :%+v", clusterCfgPath, err)
 	}
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
@@ -200,12 +240,17 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []Node
 			fileNodeInfoList, rerr := cls.ReadClusterConfig(filePath)
 
 			if rerr != nil {
-				return discoveryInfo, nil, fmt.Errorf("read file path %s is error:%+v", filePath, rerr)
+				return discoveryInfo, nil,rpcMode, fmt.Errorf("read file path %s is error:%+v", filePath, rerr)
+			}
+
+			err = cls.SetRpcMode(&fileNodeInfoList.RpcMode,&rpcMode)
+			if err != nil {
+				return discoveryInfo, nil,rpcMode, err
 			}
 
 			err = discoveryInfo.setDiscovery(&fileNodeInfoList.Discovery)
 			if err != nil {
-				return  discoveryInfo,nil,err
+				return  discoveryInfo,nil,rpcMode,err
 			}
 
 			for _, nodeInfo := range fileNodeInfoList.NodeList {
@@ -217,7 +262,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []Node
 	}
 
 	if nodeId != rpc.NodeIdNull && (len(nodeInfoList) != 1) {
-		return discoveryInfo, nil, fmt.Errorf("%d configurations were found for the configuration with node ID %d!", len(nodeInfoList), nodeId)
+		return discoveryInfo, nil,rpcMode, fmt.Errorf("%d configurations were found for the configuration with node ID %d!", len(nodeInfoList), nodeId)
 	}
 
 	for i, _ := range nodeInfoList {
@@ -231,7 +276,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []Node
 		}
 	}
 
-	return discoveryInfo, nodeInfoList, nil
+	return discoveryInfo, nodeInfoList, rpcMode,nil
 }
 
 func (cls *Cluster) readLocalService(localNodeId string) error {
@@ -325,7 +370,7 @@ func (cls *Cluster) readLocalService(localNodeId string) error {
 func (cls *Cluster) parseLocalCfg() {
 	rpcInfo := NodeRpcInfo{}
 	rpcInfo.nodeInfo = cls.localNodeInfo
-	rpcInfo.client = rpc.NewLClient(rpcInfo.nodeInfo.NodeId)
+	rpcInfo.client = rpc.NewLClient(rpcInfo.nodeInfo.NodeId,&cls.callSet)
 
 	cls.mapRpc[cls.localNodeInfo.NodeId] = &rpcInfo
 
@@ -338,18 +383,27 @@ func (cls *Cluster) parseLocalCfg() {
 	}
 }
 
+func (cls *Cluster) IsNatsMode() bool {
+	return cls.rpcMode.Typ == "Nats"
+}
+
+func (cls *Cluster) GetNatsUrl() string {
+	return cls.rpcMode.Nats.NatsUrl
+}
+
 func (cls *Cluster) InitCfg(localNodeId string) error {
 	cls.localServiceCfg = map[string]interface{}{}
 	cls.mapRpc = map[string]*NodeRpcInfo{}
 	cls.mapServiceNode = map[string]map[string]struct{}{}
 
 	//加载本地结点的NodeList配置
-	discoveryInfo, nodeInfoList, err := cls.readLocalClusterConfig(localNodeId)
+	discoveryInfo, nodeInfoList,rpcMode, err := cls.readLocalClusterConfig(localNodeId)
 	if err != nil {
 		return err
 	}
 	cls.localNodeInfo = nodeInfoList[0]
 	cls.discoveryInfo = discoveryInfo
+	cls.rpcMode = rpcMode
 
 	//读取本地服务配置
 	err = cls.readLocalService(localNodeId)

@@ -15,7 +15,7 @@ import (
 const maxClusterNode int = 128
 
 type FuncRpcClient func(nodeId string, serviceMethod string,filterRetire bool, client []*Client) (error, int)
-type FuncRpcServer func() *Server
+type FuncRpcServer func() IServer
 const NodeIdNull = ""
 
 var nilError = reflect.Zero(reflect.TypeOf((*error)(nil)).Elem())
@@ -445,7 +445,7 @@ func (handler *RpcHandler) goRpc(processor IRpcProcessor, bCast bool, nodeId str
 
 	//2.rpcClient调用
 	for i := 0; i < count; i++ {
-		pCall := pClientList[i].Go(DefaultRpcTimeout,handler.rpcHandler,true, serviceMethod, args, nil)
+		pCall := pClientList[i].Go(pClientList[i].GetTargetNodeId(),DefaultRpcTimeout,handler.rpcHandler,true, serviceMethod, args, nil)
 		if pCall.Err != nil {
 			err = pCall.Err
 		}
@@ -472,7 +472,7 @@ func (handler *RpcHandler) callRpc(timeout time.Duration,nodeId string, serviceM
 	}
 
 	pClient := pClientList[0]
-	pCall := pClient.Go(timeout,handler.rpcHandler,false, serviceMethod, args, reply)
+	pCall := pClient.Go(pClient.GetTargetNodeId(),timeout,handler.rpcHandler,false, serviceMethod, args, reply)
 
 	err = pCall.Done().Err
 	pClient.RemovePending(pCall.Seq)
@@ -525,7 +525,7 @@ func (handler *RpcHandler) asyncCallRpc(timeout time.Duration,nodeId string, ser
 
 	//2.rpcClient调用
 	//如果调用本结点服务
-	return pClientList[0].AsyncCall(timeout,handler.rpcHandler, serviceMethod, fVal, args, reply,false)
+	return pClientList[0].AsyncCall(pClientList[0].GetTargetNodeId(),timeout,handler.rpcHandler, serviceMethod, fVal, args, reply,false)
 }
 
 func (handler *RpcHandler) GetName() string {
@@ -600,7 +600,7 @@ func (handler *RpcHandler) RawGoNode(rpcProcessorType RpcProcessorType, nodeId s
 	//如果调用本结点服务
 	for i := 0; i < count; i++ {
 		//跨node调用
-		pCall := handler.pClientList[i].RawGo(DefaultRpcTimeout,handler.rpcHandler,processor, true, rpcMethodId, serviceName, rawArgs, nil)
+		pCall := handler.pClientList[i].RawGo(handler.pClientList[i].GetTargetNodeId(),DefaultRpcTimeout,handler.rpcHandler,processor, true, rpcMethodId, serviceName, rawArgs, nil)
 		if pCall.Err != nil {
 			err = pCall.Err
 		}
