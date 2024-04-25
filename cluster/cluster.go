@@ -100,11 +100,11 @@ func (cls *Cluster) DiscardNode(nodeId string) {
 	cls.locker.Unlock()
 
 	if bDel {
-		cls.DelNode(nodeId, true)
+		cls.DelNode(nodeId)
 	}
 }
 
-func (cls *Cluster) DelNode(nodeId string, immediately bool) {
+func (cls *Cluster) DelNode(nodeId string) {
 	//MasterDiscover结点与本地结点不删除
 	if cls.IsOriginMasterDiscoveryNode(nodeId) || nodeId == cls.localNodeInfo.NodeId {
 		return
@@ -117,15 +117,7 @@ func (cls *Cluster) DelNode(nodeId string, immediately bool) {
 		return
 	}
 
-	if immediately ==false {
-		//正在连接中不主动断开，只断开没有连接中的
-		if rpc.client.IsConnected() {
-			rpc.nodeInfo.status = Discard
-			log.Info("Discard node",log.String("nodeId",rpc.nodeInfo.NodeId),log.String("ListenAddr", rpc.nodeInfo.ListenAddr))
-			return
-		}
-	}
-
+	cls.TriggerDiscoveryEvent(false,nodeId,rpc.nodeInfo.ServiceList)
 	for _, serviceName := range rpc.nodeInfo.ServiceList {
 		cls.delServiceNode(serviceName, nodeId)
 	}
@@ -138,8 +130,8 @@ func (cls *Cluster) DelNode(nodeId string, immediately bool) {
 	log.Info("remove node ",log.String("NodeId", rpc.nodeInfo.NodeId),log.String("ListenAddr", rpc.nodeInfo.ListenAddr))
 }
 
-func (cls *Cluster) serviceDiscoveryDelNode(nodeId string, immediately bool) {
-	cls.DelNode(nodeId, immediately)
+func (cls *Cluster) serviceDiscoveryDelNode(nodeId string) {
+	cls.DelNode(nodeId)
 }
 
 func (cls *Cluster) delServiceNode(serviceName string, nodeId string) {
@@ -171,6 +163,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo(nodeInfo *NodeInfo) {
 		}
 	}
 
+	cluster.TriggerDiscoveryEvent(true,nodeInfo.NodeId,nodeInfo.PublicServiceList)
 	//再重新组装
 	mapDuplicate := map[string]interface{}{} //预防重复数据
 	for _, serviceName := range nodeInfo.PublicServiceList {
@@ -202,7 +195,7 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo(nodeInfo *NodeInfo) {
 		rpcInfo.client =rpc.NewRClient(nodeInfo.NodeId, nodeInfo.ListenAddr, nodeInfo.MaxRpcParamLen,cls.localNodeInfo.CompressBytesLen,&cls.callSet,cls.NotifyAllService)
 	}
 	cls.mapRpc[nodeInfo.NodeId] = &rpcInfo
-	if cls.IsNatsMode() == true {
+	if cls.IsNatsMode() == true || cls.discoveryInfo.discoveryType!=OriginType {
 		log.Info("Discovery nodeId and new rpc client",log.String("NodeId", nodeInfo.NodeId),log.Any("services:", nodeInfo.PublicServiceList),log.Bool("Retire",nodeInfo.Retire))
 	}else{
 		log.Info("Discovery nodeId and new rpc client",log.String("NodeId", nodeInfo.NodeId),log.Any("services:", nodeInfo.PublicServiceList),log.Bool("Retire",nodeInfo.Retire),log.String("nodeListenAddr",nodeInfo.ListenAddr))

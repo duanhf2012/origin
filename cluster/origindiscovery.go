@@ -175,7 +175,7 @@ func (ds *OriginDiscoveryMaster) OnNodeDisconnect(nodeId string) {
 	notifyDiscover.DelNodeId = nodeId
 
 	//删除结点
-	cluster.DelNode(nodeId, true)
+	cluster.DelNode(nodeId)
 
 	//无注册过的结点不广播，避免非当前Master网络中的连接断开时通知到本网络
 	ds.CastGo(SubServiceDiscover, &notifyDiscover)
@@ -244,7 +244,7 @@ func (ds *OriginDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.RegServiceDisco
 	nodeInfo.Retire = req.NodeInfo.Retire
 
 	//主动删除已经存在的结点,确保先断开，再连接
-	cluster.serviceDiscoveryDelNode(nodeInfo.NodeId, true)
+	cluster.serviceDiscoveryDelNode(nodeInfo.NodeId)
 
 	//加入到本地Cluster模块中，将连接该结点
 	cluster.serviceDiscoverySetNodeInfo(&nodeInfo)
@@ -429,8 +429,7 @@ func (dc *OriginDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDiscov
 
 	//删除不必要的结点
 	for _, nodeId := range willDelNodeId {
-		cluster.TriggerDiscoveryEvent(false,nodeId,dc.getNodePublicService(req.MasterNodeId, nodeId))
-		dc.funDelNode(nodeId, true)
+		dc.funDelNode(nodeId)
 		dc.removeMasterNode(req.MasterNodeId, nodeId)
 	}
 
@@ -441,8 +440,6 @@ func (dc *OriginDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDiscov
 		if bSet == false {
 			continue
 		}
-
-		cluster.TriggerDiscoveryEvent(true,nodeInfo.NodeId,nodeInfo.PublicServiceList)
 	}
 
 	return nil

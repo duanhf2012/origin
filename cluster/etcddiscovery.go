@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"path"
 	"runtime"
 	"strings"
@@ -93,6 +94,7 @@ func (ed *EtcdDiscoveryService) OnInit() error {
 		client, cerr := clientv3.New(clientv3.Config{
 			Endpoints:  etcdDiscoveryCfg.EtcdList[i].Endpoints,
 			DialTimeout: etcdDiscoveryCfg.DialTimeoutMillisecond,
+			Logger: zap.NewNop(),
 		})
 
 		if cerr != nil {
@@ -102,7 +104,6 @@ func (ed *EtcdDiscoveryService) OnInit() error {
 
 		ctx,_:=context.WithTimeout(context.Background(),time.Second*3)
 		_,err = client.Leases(ctx)
-		//_,err = client.Put(ctx,testKey,"")
 		if err != nil {
 			log.Error("etcd discovery init fail",log.Any("endpoint",etcdDiscoveryCfg.EtcdList[i].Endpoints),log.ErrorAttr("err",err))
 			return err
@@ -111,7 +112,6 @@ func (ed *EtcdDiscoveryService) OnInit() error {
 		ec := &etcdClientInfo{}
 		for _, networkName := range etcdDiscoveryCfg.EtcdList[i].NetworkName {
 			ec.watchKeys = append(ec.watchKeys,fmt.Sprintf("%s/%s",originDir,networkName))
-			//ec.etcdKey = append(ec.etcdKey,fmt.Sprintf("%s/%s/%s",originDir,networkName,nd.localNodeId))
 		}
 
 		ed.mapClient[client] = ec
@@ -334,7 +334,6 @@ func (ed *EtcdDiscoveryService) watcher(client *clientv3.Client,etcdClient *etcd
 		}
 	}()
 
-	log.Debug(">>try watcher")
 	rch := client.Watch(context.Background(), watchKey, clientv3.WithPrefix())
 
 	if ed.getServices(client,etcdClient,watchKey) == false {
@@ -374,7 +373,7 @@ func (ed *EtcdDiscoveryService) delNode(fullKey string) string{
 		return ""
 	}
 
-	 ed.funDelNode(nodeId,false)
+	 ed.funDelNode(nodeId)
 	return nodeId
 }
 
@@ -437,29 +436,25 @@ func (ed *EtcdDiscoveryService) OnEventGets(watchKey string,Kvs []*mvccpb.KeyVal
 		mapNode[nodeId] = struct{}{}
 		ed.addNodeId(watchKey,nodeId)
 	}
-
-	log.Debug(">>etcd OnEventGets",log.String("watchKey",watchKey),log.Any("mapNode",mapNode))
+	
 	// 此段代码为遍历并删除过期节点的逻辑。
 	// 对于mapDiscoveryNodeId中与watchKey关联的所有节点ID，遍历该集合。
 	// 如果某个节点ID不在mapNode中且不是本地节点ID，则调用funDelNode函数删除该节点。
 	mapLastNodeId := ed.mapDiscoveryNodeId[watchKey] // 根据watchKey获取对应的节点ID集合
 	for nodeId := range mapLastNodeId { // 遍历所有节点ID
 	    if _,ok := mapNode[nodeId];ok == false && nodeId != ed.localNodeId { // 检查节点是否不存在于mapNode且不是本地节点
-	        ed.funDelNode(nodeId,false) // 调用函数删除该节点
+	        ed.funDelNode(nodeId) // 调用函数删除该节点
 			delete(ed.mapDiscoveryNodeId[watchKey],nodeId)
-			log.Debug(">>etcd OnEventGets Delete",log.String("watchKey",watchKey),log.String("nodeId",nodeId))
 	    }
 	}
 }
 
 func (ed *EtcdDiscoveryService) OnEventPut(watchKey string,Kv *mvccpb.KeyValue) {
-	log.Debug(">>etcd OnEventPut",log.String("watchKey",watchKey),log.String("nodeId",ed.getNodeId(string(Kv.Key))))
 	nodeId := ed.setNode(ed.getNetworkNameByFullKey(string(Kv.Key)), Kv.Value)
 	ed.addNodeId(watchKey,nodeId)
 }
 
 func (ed *EtcdDiscoveryService) OnEventDelete(watchKey string,Kv *mvccpb.KeyValue) {
-	log.Debug(">>etcd OnEventDelete",log.String("watchKey",watchKey),log.String("nodeId",ed.getNodeId(string(Kv.Key))))
 	nodeId := ed.delNode(string(Kv.Key))
 	delete(ed.mapDiscoveryNodeId[watchKey],nodeId)
 }
