@@ -12,7 +12,7 @@ message NodeInfo{
 }
 
 //Client->Master
-message ServiceDiscoverReq{
+message RegServiceDiscoverReq{
     NodeInfo nodeInfo = 1;
 }
 
@@ -32,4 +32,18 @@ message NodeRetireReq{
 
 //Master->Client
 message Empty{
+}
+
+//Client->Master
+message Ping{
+    string NodeId = 1;
+}
+
+//Master->Client
+message Pong{
+    bool ok = 1;
+}
+
+message UnRegServiceDiscoverReq{
+    string NodeId = 1;
 }

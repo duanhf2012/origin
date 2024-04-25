@@ -14,8 +14,8 @@ const(
 	DefaultRpcLenMsgLen         = 4
 	DefaultRpcMinMsgLen         = 2
 	DefaultMaxCheckCallRpcCount = 1000
-	DefaultMaxPendingWriteNum 	 = 200000
-	
+	DefaultMaxPendingWriteNum 	 = 1000000
+
 	DefaultConnectInterval = 2*time.Second
 	DefaultCheckRpcCallTimeoutInterval = 1*time.Second
 	DefaultRpcTimeout = 15*time.Second

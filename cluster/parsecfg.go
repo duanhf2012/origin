@@ -39,6 +39,8 @@ const (
 	EtcdType = 2
 )
 
+const MinTTL = 3
+
 type DiscoveryInfo struct {
 	discoveryType DiscoveryType
 	Etcd          *EtcdDiscovery  //etcd
@@ -90,9 +92,6 @@ func (d *DiscoveryInfo) setEtcd(etcd *EtcdDiscovery) error{
 		return fmt.Errorf("Repeat configuration of Discovery")
 	}
 
-	etcd.TTLSecond = etcd.TTLSecond
-	etcd.DialTimeoutMillisecond = etcd.DialTimeoutMillisecond * time.Millisecond
-
 	//Endpoints不允许重复
 	mapAddr:=make (map[string]struct{})
 	for _, n := range etcd.EtcdList {
@@ -114,8 +113,14 @@ func (d *DiscoveryInfo) setEtcd(etcd *EtcdDiscovery) error{
 		}
 	}
 
+	if etcd.TTLSecond < MinTTL {
+		etcd.TTLSecond = MinTTL
+	}
+	etcd.DialTimeoutMillisecond = etcd.DialTimeoutMillisecond * time.Millisecond
+
 	d.Etcd = etcd
 	d.discoveryType = EtcdType
+
 	return nil
 }
 
@@ -143,6 +148,9 @@ func (d *DiscoveryInfo) setOrigin(originDiscovery *OriginDiscovery) error{
 	}
 
 	d.Origin = originDiscovery
+	if d.Origin.TTLSecond < MinTTL {
+		d.Origin.TTLSecond = MinTTL
+	}
 	d.discoveryType = OriginType
 	return nil
 }

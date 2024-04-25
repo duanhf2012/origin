@@ -15,6 +15,7 @@ type NatsServer struct {
 
 	nodeSubTopic string
 	compressBytesLen int
+	notifyEventFun NotifyEventFun
 }
 
 func (ns *NatsServer) Start() error{
@@ -23,10 +24,18 @@ func (ns *NatsServer) Start() error{
 
 	options = append(options,nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
 		log.Error("nats is disconnect",log.String("connUrl",nc.ConnectedUrl()))
+		ns.notifyEventFun(&NatsConnEvent{IsConnect:false})
+		// handle disconnect error event
+	}))
+
+	options = append(options,nats.ConnectHandler(func(nc *nats.Conn) {
+		ns.notifyEventFun(&NatsConnEvent{IsConnect:true})
+		//log.Error("nats is connect",log.String("connUrl",nc.ConnectedUrl()))
 		// handle disconnect error event
 	}))
 
 	options = append(options,nats.ReconnectHandler(func(nc *nats.Conn) {
+		ns.notifyEventFun(&NatsConnEvent{IsConnect:true})
 		log.Error("nats is reconnection",log.String("connUrl",nc.ConnectedUrl()))
 		// handle reconnect event
 	}))
@@ -109,11 +118,12 @@ func (ns *NatsServer) Stop(){
 	}
 }
 
-func (ns *NatsServer) initServer(natsUrl string, noRandomize bool,localNodeId string,compressBytesLen int,rpcHandleFinder RpcHandleFinder){
+func (ns *NatsServer) initServer(natsUrl string, noRandomize bool,localNodeId string,compressBytesLen int,rpcHandleFinder RpcHandleFinder,notifyEventFun NotifyEventFun){
 	ns.natsUrl = natsUrl
 	ns.NoRandomize = noRandomize
 	ns.localNodeId = localNodeId
 	ns.compressBytesLen = compressBytesLen
+	ns.notifyEventFun = notifyEventFun
 	ns.initBaseServer(compressBytesLen,rpcHandleFinder)
 	ns.nodeSubTopic = "os."+localNodeId //服务器
 }

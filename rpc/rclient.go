@@ -16,7 +16,8 @@ type RClient struct {
 	selfClient *Client
 	network.TCPClient
 	conn *network.TCPConn
-	TriggerRpcConnEvent
+
+	notifyEventFun NotifyEventFun
 }
 
 func (rc *RClient) IsConnected() bool {
@@ -80,7 +81,11 @@ func (rc *RClient) Run() {
 		}
 	}()
 
-	rc.TriggerRpcConnEvent(true, rc.selfClient.GetClientId(), rc.selfClient.GetTargetNodeId())
+	var eventData RpcConnEvent
+	eventData.IsConnect = true
+	eventData.NodeId =  rc.selfClient.GetTargetNodeId()
+	rc.notifyEventFun(&eventData)
+	
 	for {
 		bytes, err := rc.conn.ReadMsg()
 		if err != nil {
@@ -97,15 +102,16 @@ func (rc *RClient) Run() {
 }
 
 func (rc *RClient) OnClose() {
-	rc.TriggerRpcConnEvent(false, rc.selfClient.GetClientId(), rc.selfClient.GetTargetNodeId())
+	var connEvent RpcConnEvent
+	connEvent.IsConnect = false
+	connEvent.NodeId = rc.selfClient.GetTargetNodeId()
+	rc.notifyEventFun(&connEvent)
 }
 
-func NewRClient(targetNodeId string, addr string, maxRpcParamLen uint32,compressBytesLen int,triggerRpcConnEvent TriggerRpcConnEvent,callSet *CallSet) *Client{
+func NewRClient(targetNodeId string, addr string, maxRpcParamLen uint32,compressBytesLen int,callSet *CallSet,notifyEventFun NotifyEventFun) *Client{
 	client := &Client{}
 	client.clientId = atomic.AddUint32(&clientSeq, 1)
 	client.targetNodeId = targetNodeId
-	//client.maxCheckCallRpcCount = DefaultMaxCheckCallRpcCount
-	//client.callRpcTimeout = DefaultRpcTimeout
 	client.compressBytesLen = compressBytesLen
 
 	c:= &RClient{}
@@ -114,7 +120,7 @@ func NewRClient(targetNodeId string, addr string, maxRpcParamLen uint32,compress
 	c.ConnectInterval = DefaultConnectInterval
 	c.PendingWriteNum = DefaultMaxPendingWriteNum
 	c.AutoReconnect = true
-	c.TriggerRpcConnEvent = triggerRpcConnEvent
+	c.notifyEventFun = notifyEventFun
 	c.ConnNum = DefaultRpcConnNum
 	c.LenMsgLen = DefaultRpcLenMsgLen
 	c.MinMsgLen = DefaultRpcMinMsgLen

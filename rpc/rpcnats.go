@@ -16,13 +16,13 @@ func (rn *RpcNats) Start() error{
 	return rn.NatsClient.Start(rn.NatsServer.natsConn)
 }
 
-func (rn *RpcNats) Init(natsUrl string, noRandomize bool, nodeId string,compressBytesLen int,rpcHandleFinder RpcHandleFinder){
+func (rn *RpcNats) Init(natsUrl string, noRandomize bool, nodeId string,compressBytesLen int,rpcHandleFinder RpcHandleFinder,notifyEventFun NotifyEventFun){
 	rn.NatsClient.localNodeId = nodeId
-	rn.NatsServer.initServer(natsUrl,noRandomize, nodeId,compressBytesLen,rpcHandleFinder)
+	rn.NatsServer.initServer(natsUrl,noRandomize, nodeId,compressBytesLen,rpcHandleFinder,notifyEventFun)
 	rn.NatsServer.iServer = rn
 }
 
-func  (rn *RpcNats) NewNatsClient(targetNodeId string,localNodeId string,callSet *CallSet) *Client{
+func  (rn *RpcNats) NewNatsClient(targetNodeId string,localNodeId string,callSet *CallSet,notifyEventFun NotifyEventFun) *Client{
 	var client Client
 
 	client.clientId = atomic.AddUint32(&clientSeq, 1)
@@ -33,6 +33,7 @@ func  (rn *RpcNats) NewNatsClient(targetNodeId string,localNodeId string,callSet
 	natsClient := &rn.NatsClient
 	natsClient.localNodeId = localNodeId
 	natsClient.client = &client
+	natsClient.notifyEventFun = notifyEventFun
 
 	client.IRealClient = natsClient
 	client.CallSet = callSet

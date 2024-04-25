@@ -10,7 +10,8 @@ import (
 //跨结点连接的Client
 type NatsClient struct {
 	localNodeId string
-
+	notifyEventFun NotifyEventFun
+	
 	natsConn *nats.Conn
 	client *Client
 }
@@ -85,5 +86,5 @@ func (rc *NatsClient) WriteMsg (nodeId string,args ...[]byte) error{
 }
 
 func (rc *NatsClient) IsConnected() bool{
-	return rc.natsConn.Status() == nats.CONNECTED
+	return rc.natsConn!=nil && rc.natsConn.Status() == nats.CONNECTED
 }

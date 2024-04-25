@@ -58,17 +58,14 @@ type Service struct {
 	retire int32
 	eventProcessor event.IEventProcessor
 	profiler *profiler.Profiler //性能分析器
-	nodeEventLister rpc.INodeListener
+	nodeConnLister rpc.INodeConnListener
+	natsConnListener rpc.INatsConnListener
 	discoveryServiceLister rpc.IDiscoveryServiceListener
 	chanEvent chan event.IEvent
 	closeSig chan struct{}
 }
 
-// RpcConnEvent Node结点连接事件
-type RpcConnEvent struct{
-	IsConnect bool
-	NodeId string
-}
+
 
 // DiscoveryServiceEvent 发现服务结点
 type DiscoveryServiceEvent struct{
@@ -96,9 +93,6 @@ func (rpcEventData *DiscoveryServiceEvent)  GetEventType() event.EventType{
 	return event.Sys_Event_DiscoverService
 }
 
-func (rpcEventData *RpcConnEvent) GetEventType() event.EventType{
-	return event.Sys_Event_Node_Event
-}
 
 func (s *Service) OnSetup(iService IService){
 	if iService.GetName() == "" {
@@ -322,12 +316,21 @@ func (s *Service) RegRawRpc(rpcMethodId uint32,rawRpcCB rpc.RawRpcCallBack){
 func (s *Service) OnStart(){
 }
 
-func (s *Service) OnNodeEvent(ev event.IEvent){
-	event := ev.(*RpcConnEvent)
+func (s *Service) OnNodeConnEvent(ev event.IEvent){
+	event := ev.(*rpc.RpcConnEvent)
 	if event.IsConnect {
-		s.nodeEventLister.OnNodeConnected(event.NodeId)
+		s.nodeConnLister.OnNodeConnected(event.NodeId)
 	}else{
-		s.nodeEventLister.OnNodeDisconnect(event.NodeId)
+		s.nodeConnLister.OnNodeDisconnect(event.NodeId)
+	}
+}
+
+func (s *Service) OnNatsConnEvent(ev event.IEvent){
+	event := ev.(*rpc.NatsConnEvent)
+	if event.IsConnect {
+		s.natsConnListener.OnNatsConnected()
+	}else{
+		s.natsConnListener.OnNatsDisconnect()
 	}
 }
 
@@ -340,14 +343,25 @@ func (s *Service) OnDiscoverServiceEvent(ev event.IEvent){
 	}
 }
 
-func (s *Service) RegRpcListener(rpcEventLister rpc.INodeListener) {
-	s.nodeEventLister = rpcEventLister
-	s.RegEventReceiverFunc(event.Sys_Event_Node_Event,s.GetEventHandler(),s.OnNodeEvent)
+func (s *Service) RegNodeConnListener(nodeConnListener rpc.INodeConnListener) {
+	s.nodeConnLister = nodeConnListener
+	s.RegEventReceiverFunc(event.Sys_Event_Node_Conn_Event,s.GetEventHandler(),s.OnNodeConnEvent)
 	RegRpcEventFun(s.GetName())
 }
 
-func (s *Service) UnRegRpcListener(rpcLister rpc.INodeListener) {
-	s.UnRegEventReceiverFunc(event.Sys_Event_Node_Event,s.GetEventHandler())
+func (s *Service) UnRegNodeConnListener() {
+	s.UnRegEventReceiverFunc(event.Sys_Event_Node_Conn_Event,s.GetEventHandler())
+	UnRegRpcEventFun(s.GetName())
+}
+
+func (s *Service) RegNatsConnListener(natsConnListener rpc.INatsConnListener) {
+	s.natsConnListener = natsConnListener
+	s.RegEventReceiverFunc(event.Sys_Event_Nats_Conn_Event,s.GetEventHandler(),s.OnNatsConnEvent)
+	RegRpcEventFun(s.GetName())
+}
+
+func (s *Service) UnRegNatsConnListener() {
+	s.UnRegEventReceiverFunc(event.Sys_Event_Nats_Conn_Event,s.GetEventHandler())
 	UnRegRpcEventFun(s.GetName())
 }
 
@@ -357,7 +371,7 @@ func (s *Service) RegDiscoverListener(discoveryServiceListener rpc.IDiscoverySer
 	RegDiscoveryServiceEventFun(s.GetName())
 }
 
-func (s *Service) UnRegDiscoverListener(rpcLister rpc.INodeListener) {
+func (s *Service) UnRegDiscoverListener() {
 	s.UnRegEventReceiverFunc(event.Sys_Event_DiscoverService,s.GetEventHandler())
 	UnRegDiscoveryServiceEventFun(s.GetName())
 }

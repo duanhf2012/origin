@@ -7,6 +7,7 @@ import (
 	"github.com/duanhf2012/origin/v2/service"
 	"strings"
 	"sync"
+	"github.com/duanhf2012/origin/v2/event"
 )
 
 var configDir = "./config/"
@@ -196,9 +197,9 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo(nodeInfo *NodeInfo) {
 	rpcInfo.nodeInfo = *nodeInfo
 
 	if cls.IsNatsMode() {
-		rpcInfo.client = cls.rpcNats.NewNatsClient(nodeInfo.NodeId, cls.GetLocalNodeInfo().NodeId,&cls.callSet)
+		rpcInfo.client = cls.rpcNats.NewNatsClient(nodeInfo.NodeId, cls.GetLocalNodeInfo().NodeId,&cls.callSet,cls.NotifyAllService)
 	}else{
-		rpcInfo.client =rpc.NewRClient(nodeInfo.NodeId, nodeInfo.ListenAddr, nodeInfo.MaxRpcParamLen,cls.localNodeInfo.CompressBytesLen,cls.triggerRpcEvent,&cls.callSet)
+		rpcInfo.client =rpc.NewRClient(nodeInfo.NodeId, nodeInfo.ListenAddr, nodeInfo.MaxRpcParamLen,cls.localNodeInfo.CompressBytesLen,&cls.callSet,cls.NotifyAllService)
 	}
 	cls.mapRpc[nodeInfo.NodeId] = &rpcInfo
 	log.Info("Discovery nodeId and new rpc client",log.String("NodeId", nodeInfo.NodeId),log.Any("services:", nodeInfo.PublicServiceList),log.Bool("Retire",nodeInfo.Retire),log.String("nodeListenAddr",nodeInfo.ListenAddr))
@@ -214,7 +215,7 @@ func (cls *Cluster) Init(localNodeId string, setupServiceFun SetupServiceFun) er
 
 	cls.callSet.Init()
 	if cls.IsNatsMode() {
-		cls.rpcNats.Init(cls.rpcMode.Nats.NatsUrl,cls.rpcMode.Nats.NoRandomize,cls.GetLocalNodeInfo().NodeId,cls.localNodeInfo.CompressBytesLen,cls)
+		cls.rpcNats.Init(cls.rpcMode.Nats.NatsUrl,cls.rpcMode.Nats.NoRandomize,cls.GetLocalNodeInfo().NodeId,cls.localNodeInfo.CompressBytesLen,cls,cluster.NotifyAllService)
 		cls.rpcServer = &cls.rpcNats
 	}else{
 		s := &rpc.Server{}
@@ -308,18 +309,10 @@ func (cls *Cluster) IsNodeRetire(nodeId string) bool {
 	return retire
 }
 
-
-func (cls *Cluster) triggerRpcEvent(bConnect bool, clientId uint32, nodeId string) {
-	cls.locker.Lock()
-	nodeInfo, ok := cls.mapRpc[nodeId]
-	if ok == false || nodeInfo.client == nil || nodeInfo.client.GetClientId() != clientId {
-		cls.locker.Unlock()
-		return
-	}
-	cls.locker.Unlock()
-
+func (cls *Cluster) NotifyAllService(event event.IEvent){
 	cls.rpcEventLocker.Lock()
 	defer cls.rpcEventLocker.Unlock()
+
 	for serviceName, _ := range cls.mapServiceListenRpcEvent {
 		ser := service.GetService(serviceName)
 		if ser == nil {
@@ -327,10 +320,7 @@ func (cls *Cluster) triggerRpcEvent(bConnect bool, clientId uint32, nodeId strin
 			continue
 		}
 
-		var eventData service.RpcConnEvent
-		eventData.IsConnect = bConnect
-		eventData.NodeId = nodeId
-		ser.(service.IModule).NotifyEvent(&eventData)
+		ser.(service.IModule).NotifyEvent(event)
 	}
 }
 

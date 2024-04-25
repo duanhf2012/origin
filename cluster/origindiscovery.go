@@ -16,77 +16,16 @@ const RegServiceDiscover = OriginDiscoveryMasterName + ".RPC_RegServiceDiscover"
 const SubServiceDiscover = OriginDiscoveryClientName + ".RPC_SubServiceDiscover"
 const AddSubServiceDiscover = OriginDiscoveryMasterName + ".RPC_AddSubServiceDiscover"
 const NodeRetireRpcMethod = OriginDiscoveryMasterName+".RPC_NodeRetire"
-//
-//type nodeTTL struct {
-//	nodeId string
-//	refreshTime time.Time
-//}
-//
-//type nodeSetTTL struct {
-//	l *list.List
-//	mapElement map[string]*list.Element
-//	ttl time.Duration
-//}
-//
-//func (ns *nodeSetTTL) init(ttl time.Duration) {
-//	ns.ttl = ttl
-//	ns.mapElement = make(map[string]*list.Element,32)
-//	ns.l = list.New()
-//}
-//
-//func (ns *nodeSetTTL) removeNode(nodeId string) {
-//	ele,ok:=ns.mapElement[nodeId]
-//	if ok == false {
-//		return
-//	}
-//
-//	ns.l.Remove(ele)
-//	delete(ns.mapElement,nodeId)
-//}
-//
-//func (ns *nodeSetTTL) addAndRefreshNode(nodeId string){
-//	ele,ok:=ns.mapElement[nodeId]
-//	if ok == false {
-//		ele = ns.l.PushBack(nodeId)
-//		ele.Value = &nodeTTL{nodeId,time.Now()}
-//		ns.mapElement[nodeId] = ele
-//		return
-//	}
-//
-//	ele.Value.(*nodeTTL).refreshTime =  time.Now()
-//	ns.l.MoveToBack(ele)
-//}
-//
-//func (ns *nodeSetTTL) checkTTL(cb func(nodeIdList []string)){
-//	nodeIdList := []string{}
-//	for{
-//		f := ns.l.Front()
-//		if f == nil {
-//			break
-//		}
-//
-//		nt := f.Value.(*nodeTTL)
-//		if time.Now().Sub(nt.refreshTime) > ns.ttl {
-//			nodeIdList = append(nodeIdList,nt.nodeId)
-//		}else{
-//			break
-//		}
-//
-//		//删除结点
-//		ns.l.Remove(f)
-//		delete(ns.mapElement,nt.nodeId)
-//	}
-//
-//	if len(nodeIdList) >0 {
-//		cb(nodeIdList)
-//	}
-//}
+const RpcPingMethod = OriginDiscoveryMasterName+".RPC_Ping"
+const UnRegServiceDiscover = OriginDiscoveryMasterName+".RPC_UnRegServiceDiscover"
 
 type OriginDiscoveryMaster struct {
 	service.Service
 
 	mapNodeInfo map[string]struct{}
 	nodeInfo    []*rpc.NodeInfo
+
+	nsTTL nodeSetTTL
 }
 
 type OriginDiscoveryClient struct {
@@ -164,9 +103,33 @@ func (ds *OriginDiscoveryMaster) removeNodeInfo(nodeId string) {
 
 func (ds *OriginDiscoveryMaster) OnInit() error {
 	ds.mapNodeInfo = make(map[string]struct{}, 20)
-	ds.RegRpcListener(ds)
+	ds.RegNodeConnListener(ds)
+	ds.RegNatsConnListener(ds)
+
+	ds.nsTTL.init(time.Duration(cluster.GetOriginDiscovery().TTLSecond)*time.Second)
 
 	return nil
+}
+
+func (ds *OriginDiscoveryMaster) checkTTL(){
+	if cluster.IsNatsMode() == false {
+		return
+	}
+
+	interval := time.Duration(cluster.GetOriginDiscovery().TTLSecond)*time.Second
+	interval = interval /3 /2
+	if interval < time.Second {
+		interval = time.Second
+	}
+
+	ds.NewTicker(interval,func(t *timer.Ticker){
+		ds.nsTTL.checkTTL(func(nodeIdList []string) {
+			for _,nodeId := range nodeIdList {
+				log.Debug("TTL expiry",log.String("nodeId",nodeId))
+				ds.OnNodeDisconnect(nodeId)
+			}
+		})
+	})
 }
 
 func (ds *OriginDiscoveryMaster) OnStart() {
@@ -179,21 +142,23 @@ func (ds *OriginDiscoveryMaster) OnStart() {
 	nodeInfo.Private = localNodeInfo.Private
 	nodeInfo.Retire = localNodeInfo.Retire
 	ds.addNodeInfo(&nodeInfo)
+
+	ds.checkTTL()
+}
+
+func (dc *OriginDiscoveryMaster) OnNatsConnected(){
+	//向所有的节点同步服务发现信息
+	var notifyDiscover rpc.SubscribeDiscoverNotify
+	notifyDiscover.IsFull = true
+	notifyDiscover.NodeInfo = dc.nodeInfo
+	notifyDiscover.MasterNodeId = cluster.GetLocalNodeInfo().NodeId
+	dc.RpcCastGo(SubServiceDiscover, &notifyDiscover)
+}
+
+func (dc *OriginDiscoveryMaster)  OnNatsDisconnect(){
 }
 
 func (ds *OriginDiscoveryMaster) OnNodeConnected(nodeId string) {
-	//没注册过结点不通知
-	if ds.isRegNode(nodeId) == false {
-		return
-	}
-
-	//向它发布所有服务列表信息
-	var notifyDiscover rpc.SubscribeDiscoverNotify
-	notifyDiscover.IsFull = true
-	notifyDiscover.NodeInfo = ds.nodeInfo
-	notifyDiscover.MasterNodeId = cluster.GetLocalNodeInfo().NodeId
-
-	ds.GoNode(nodeId, SubServiceDiscover, &notifyDiscover)
 }
 
 func (ds *OriginDiscoveryMaster) OnNodeDisconnect(nodeId string) {
@@ -203,9 +168,11 @@ func (ds *OriginDiscoveryMaster) OnNodeDisconnect(nodeId string) {
 
 	ds.removeNodeInfo(nodeId)
 
+	//主动删除已经存在的结点,确保先断开，再连接
 	var notifyDiscover rpc.SubscribeDiscoverNotify
 	notifyDiscover.MasterNodeId = cluster.GetLocalNodeInfo().NodeId
 	notifyDiscover.DelNodeId = nodeId
+
 	//删除结点
 	cluster.DelNode(nodeId, true)
 
@@ -217,6 +184,18 @@ func (ds *OriginDiscoveryMaster) RpcCastGo(serviceMethod string, args interface{
 	for nodeId, _ := range ds.mapNodeInfo {
 		ds.GoNode(nodeId, serviceMethod, args)
 	}
+}
+
+func (ds *OriginDiscoveryMaster) RPC_Ping(req *rpc.Ping, res *rpc.Pong) error {
+	if ds.isRegNode(req.NodeId) == false{
+		res.Ok = false
+		return nil
+	}
+
+	return nil
+	res.Ok = true
+	ds.nsTTL.addAndRefreshNode(req.NodeId)
+	return nil
 }
 
 func (ds *OriginDiscoveryMaster) RPC_NodeRetire(req *rpc.NodeRetireReq, res *rpc.Empty) error {
@@ -233,12 +212,16 @@ func (ds *OriginDiscoveryMaster) RPC_NodeRetire(req *rpc.NodeRetireReq, res *rpc
 }
 
 // 收到注册过来的结点
-func (ds *OriginDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscoverReq, res *rpc.Empty) error {
+func (ds *OriginDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.RegServiceDiscoverReq, res *rpc.SubscribeDiscoverNotify) error {
 	if req.NodeInfo == nil {
 		err := errors.New("RPC_RegServiceDiscover req is error.")
 		log.Error(err.Error())
 
 		return err
+	}
+
+	if req.NodeInfo.NodeId != cluster.GetLocalNodeInfo().NodeId {
+		ds.nsTTL.addAndRefreshNode(req.NodeInfo.NodeId)
 	}
 
 	//广播给其他所有结点
@@ -266,11 +249,17 @@ func (ds *OriginDiscoveryMaster) RPC_RegServiceDiscover(req *rpc.ServiceDiscover
 	//加入到本地Cluster模块中，将连接该结点
 	cluster.serviceDiscoverySetNodeInfo(&nodeInfo)
 
+
+	res.IsFull = true
+	res.NodeInfo = ds.nodeInfo
+	res.MasterNodeId = cluster.GetLocalNodeInfo().NodeId
 	return nil
 }
 
 func (dc *OriginDiscoveryClient) OnInit() error {
-	dc.RegRpcListener(dc)
+	dc.RegNodeConnListener(dc)
+	dc.RegNatsConnListener(dc)
+
 	dc.mapDiscovery = map[string]map[string]struct{}{}
 	dc.mapMasterNetwork = map[string]string{}
 
@@ -305,9 +294,42 @@ func (dc *OriginDiscoveryClient) findNodeId(nodeId string) bool {
 	return false
 }
 
+func (dc *OriginDiscoveryClient) ping(){
+	if cluster.IsNatsMode() == false {
+		return
+	}
+
+	interval := time.Duration(cluster.GetOriginDiscovery().TTLSecond)*time.Second
+	interval = interval /3
+	if interval < time.Second {
+		interval = time.Second
+	}
+
+	dc.NewTicker(interval,func(t *timer.Ticker){
+		var ping rpc.Ping
+		ping.NodeId = cluster.GetLocalNodeInfo().NodeId
+		masterNodes := GetCluster().GetOriginDiscovery().MasterNodeList
+		for i:=0;i<len(masterNodes);i++ {
+			if masterNodes[i].NodeId == cluster.GetLocalNodeInfo().NodeId {
+				continue
+			}
+
+			masterNodeId := masterNodes[i].NodeId
+			dc.AsyncCallNode(masterNodeId,RpcPingMethod,&ping, func(empty *rpc.Pong,err error) {
+				if err == nil && empty.Ok == false{
+					//断开master重
+					dc.regServiceDiscover(masterNodeId)
+				}
+			})
+		}
+	})
+}
+
+
 func (dc *OriginDiscoveryClient) OnStart() {
 	//2.添加并连接发现主结点
 	dc.addDiscoveryMaster()
+	dc.ping()
 }
 
 func (dc *OriginDiscoveryClient) addDiscoveryMaster() {
@@ -412,9 +434,26 @@ func (dc *OriginDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDiscov
 	return nil
 }
 
-
 func (dc *OriginDiscoveryClient) OnNodeConnected(nodeId string) {
 	dc.regServiceDiscover(nodeId)
+}
+
+func (dc *OriginDiscoveryClient) OnRelease(){
+	//取消注册
+	var nodeRetireReq rpc.UnRegServiceDiscoverReq
+	nodeRetireReq.NodeId = cluster.GetLocalNodeInfo().NodeId
+
+	masterNodeList := cluster.GetOriginDiscovery()
+	for i:=0;i<len(masterNodeList.MasterNodeList);i++{
+		if masterNodeList.MasterNodeList[i].NodeId == cluster.GetLocalNodeInfo().NodeId {
+			continue
+		}
+
+		err := dc.CallNodeWithTimeout(3*time.Second,masterNodeList.MasterNodeList[i].NodeId,UnRegServiceDiscover,&nodeRetireReq,&rpc.Empty{})
+		if err!= nil {
+			log.Error("call "+UnRegServiceDiscover+" is fail",log.ErrorAttr("err",err))
+		}
+	}
 }
 
 func (dc *OriginDiscoveryClient) OnRetire(){
@@ -446,12 +485,15 @@ func (dc *OriginDiscoveryClient) tryRegServiceDiscover(nodeId string){
 }
 
 func (dc *OriginDiscoveryClient) regServiceDiscover(nodeId string){
+	if nodeId == cluster.GetLocalNodeInfo().NodeId {
+		return
+	}
 	nodeInfo := cluster.getOriginMasterDiscoveryNodeInfo(nodeId)
 	if nodeInfo == nil {
 		return
 	}
 
-	var req rpc.ServiceDiscoverReq
+	var req rpc.RegServiceDiscoverReq
 	req.NodeInfo = &rpc.NodeInfo{}
 	req.NodeInfo.NodeId = cluster.localNodeInfo.NodeId
 	req.NodeInfo.ListenAddr = cluster.localNodeInfo.ListenAddr
@@ -459,14 +501,16 @@ func (dc *OriginDiscoveryClient) regServiceDiscover(nodeId string){
 	req.NodeInfo.PublicServiceList =  cluster.localNodeInfo.PublicServiceList
 	req.NodeInfo.Retire = dc.bRetire
 	req.NodeInfo.Private = cluster.localNodeInfo.Private
-
+	log.Debug("regServiceDiscover",log.String("nodeId",nodeId))
 	//向Master服务同步本Node服务信息
-	err := dc.AsyncCallNode(nodeId, RegServiceDiscover, &req, func(res *rpc.Empty, err error) {
+	_,err := dc.AsyncCallNodeWithTimeout(3*time.Second,nodeId, RegServiceDiscover, &req, func(res *rpc.SubscribeDiscoverNotify, err error) {
 		if err != nil {
 			log.Error("call "+RegServiceDiscover+" is fail :"+ err.Error())
 			dc.tryRegServiceDiscover(nodeId)
 			return
 		}
+
+		dc.RPC_SubServiceDiscover(res)
 	})
 
 	if err != nil {
@@ -507,6 +551,7 @@ func (dc *OriginDiscoveryClient) setNodeInfo(masterNodeId string,nodeInfo *rpc.N
 }
 
 func (dc *OriginDiscoveryClient) OnNodeDisconnect(nodeId string) {
+	log.Debug("OnNodeDisconnect",log.String("nodeId",nodeId))
 	//将Discard结点清理
 	cluster.DiscardNode(nodeId)
 }
@@ -558,7 +603,7 @@ func (cls *Cluster) getOriginMasterDiscoveryNodeInfo(nodeId string) *NodeInfo {
 	if cls.discoveryInfo.Origin == nil {
 		return nil
 	}
-	
+
 	for i := 0; i < len(cls.discoveryInfo.Origin.MasterNodeList); i++ {
 		if cls.discoveryInfo.Origin.MasterNodeList[i].NodeId == nodeId {
 			return &cls.discoveryInfo.Origin.MasterNodeList[i]
@@ -568,3 +613,14 @@ func (cls *Cluster) getOriginMasterDiscoveryNodeInfo(nodeId string) *NodeInfo {
 	return nil
 }
 
+func (dc *OriginDiscoveryClient) OnNatsConnected(){
+	log.Debug("OnNatsConnected")
+	masterNodes := GetCluster().GetOriginDiscovery().MasterNodeList
+	for i:=0;i<len(masterNodes);i++ {
+		dc.regServiceDiscover(masterNodes[i].NodeId)
+	}
+}
+
+func (dc *OriginDiscoveryClient)  OnNatsDisconnect(){
+
+}

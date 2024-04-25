@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+	"github.com/duanhf2012/origin/v2/event"
 	"time"
 )
 
@@ -65,10 +66,17 @@ type RpcHandler struct {
 	pClientList []*Client
 }
 
-type TriggerRpcConnEvent func(bConnect bool, clientSeq uint32, nodeId string)
-type INodeListener interface {
+//type TriggerRpcConnEvent func(bConnect bool, clientSeq uint32, nodeId string)
+type NotifyEventToAllService func(event event.IEvent)
+
+type INodeConnListener interface {
 	OnNodeConnected(nodeId string)
 	OnNodeDisconnect(nodeId string)
+}
+
+type INatsConnListener interface {
+	OnNatsConnected()
+	OnNatsDisconnect()
 }
 
 type IDiscoveryServiceListener interface {
