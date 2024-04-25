@@ -81,7 +81,7 @@ type INatsConnListener interface {
 
 type IDiscoveryServiceListener interface {
 	OnDiscoveryService(nodeId string, serviceName []string)
-	OnUnDiscoveryService(nodeId string)
+	OnUnDiscoveryService(nodeId string, serviceName []string)
 }
 
 type CancelRpc func()

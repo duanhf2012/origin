@@ -18,31 +18,29 @@ type NatsServer struct {
 	notifyEventFun NotifyEventFun
 }
 
+const reconnectWait = 3*time.Second
 func (ns *NatsServer) Start() error{
 	var err error
 	var options []nats.Option
 
 	options = append(options,nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-		log.Error("nats is disconnect",log.String("connUrl",nc.ConnectedUrl()))
+		log.Error("nats is disconnected",log.String("connUrl",nc.ConnectedUrl()))
 		ns.notifyEventFun(&NatsConnEvent{IsConnect:false})
-		// handle disconnect error event
 	}))
 
 	options = append(options,nats.ConnectHandler(func(nc *nats.Conn) {
+		log.Info("nats is connected",log.String("connUrl",nc.ConnectedUrl()))
 		ns.notifyEventFun(&NatsConnEvent{IsConnect:true})
 		//log.Error("nats is connect",log.String("connUrl",nc.ConnectedUrl()))
-		// handle disconnect error event
 	}))
 
 	options = append(options,nats.ReconnectHandler(func(nc *nats.Conn) {
 		ns.notifyEventFun(&NatsConnEvent{IsConnect:true})
-		log.Error("nats is reconnection",log.String("connUrl",nc.ConnectedUrl()))
-		// handle reconnect event
+		log.Info("nats is reconnected",log.String("connUrl",nc.ConnectedUrl()))
 	}))
 
 	options = append(options,nats.MaxReconnects(-1))
-
-	options = append(options,nats.ReconnectWait(time.Second*3))
+	options = append(options,nats.ReconnectWait(reconnectWait))
 
 	if ns.NoRandomize {
 		options = append(options,nats.DontRandomize())

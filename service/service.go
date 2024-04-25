@@ -339,7 +339,7 @@ func (s *Service) OnDiscoverServiceEvent(ev event.IEvent){
 	if event.IsDiscovery {
 		s.discoveryServiceLister.OnDiscoveryService(event.NodeId,event.ServiceName)
 	}else{
-		s.discoveryServiceLister.OnUnDiscoveryService(event.NodeId)
+		s.discoveryServiceLister.OnUnDiscoveryService(event.NodeId,event.ServiceName)
 	}
 }
 

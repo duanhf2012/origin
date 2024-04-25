@@ -36,7 +36,6 @@ type OriginDiscoveryClient struct {
 	localNodeId   string
 
 	mapDiscovery map[string]map[string][]string //map[masterNodeId]map[nodeId]struct{}
-	//mapMasterNetwork map[string]string
 	bRetire bool
 	isRegisterOk bool
 }
@@ -127,7 +126,7 @@ func (ds *OriginDiscoveryMaster) checkTTL(){
 	ds.NewTicker(interval,func(t *timer.Ticker){
 		ds.nsTTL.checkTTL(func(nodeIdList []string) {
 			for _,nodeId := range nodeIdList {
-				log.Debug("TTL expiry",log.String("nodeId",nodeId))
+				log.Info("TTL expiry",log.String("nodeId",nodeId))
 				ds.OnNodeDisconnect(nodeId)
 			}
 		})
@@ -189,13 +188,11 @@ func (ds *OriginDiscoveryMaster) RpcCastGo(serviceMethod string, args interface{
 }
 
 func (ds *OriginDiscoveryMaster) RPC_Ping(req *rpc.Ping, res *rpc.Pong) error {
-	log.Debug("ping",log.String("nodeId",req.NodeId))
 	if ds.isRegNode(req.NodeId) == false{
 		res.Ok = false
 		return nil
 	}
 
-	//return nil
 	res.Ok = true
 	ds.nsTTL.addAndRefreshNode(req.NodeId)
 	return nil
@@ -386,7 +383,6 @@ func (dc *OriginDiscoveryClient) fullCompareDiffNode(masterNodeId string, mapNod
 
 //订阅发现的服务通知
 func (dc *OriginDiscoveryClient) RPC_SubServiceDiscover(req *rpc.SubscribeDiscoverNotify) error {
-	log.Debug("RPC_SubServiceDiscover",log.String("masterNodeId",req.MasterNodeId),log.String("delNodeId",req.GetDelNodeId()))
 	mapNodeInfo := map[string]*rpc.NodeInfo{}
 	for _, nodeInfo := range req.NodeInfo {
 		//不对本地结点或者不存在任何公开服务的结点
@@ -572,7 +568,6 @@ func (dc *OriginDiscoveryClient) setNodeInfo(masterNodeId string,nodeInfo *rpc.N
 }
 
 func (dc *OriginDiscoveryClient) OnNodeDisconnect(nodeId string) {
-	log.Debug("OnNodeDisconnect",log.String("nodeId",nodeId))
 	//将Discard结点清理
 	cluster.DiscardNode(nodeId)
 }
@@ -616,7 +611,6 @@ func (cls *Cluster) AddDiscoveryService(serviceName string, bPublicService bool)
 
 
 func (cls *Cluster) IsOriginMasterDiscoveryNode(nodeId string) bool {
-	//return cls.GetMasterDiscoveryNodeInfo(cls.GetLocalNodeInfo().NodeId) != nil
 	return cls.getOriginMasterDiscoveryNodeInfo(nodeId) != nil
 }
 
@@ -635,7 +629,6 @@ func (cls *Cluster) getOriginMasterDiscoveryNodeInfo(nodeId string) *NodeInfo {
 }
 
 func (dc *OriginDiscoveryClient) OnNatsConnected(){
-	log.Debug("OnNatsConnected")
 	masterNodes := GetCluster().GetOriginDiscovery().MasterNodeList
 	for i:=0;i<len(masterNodes);i++ {
 		dc.regServiceDiscover(masterNodes[i].NodeId)
@@ -643,5 +636,4 @@ func (dc *OriginDiscoveryClient) OnNatsConnected(){
 }
 
 func (dc *OriginDiscoveryClient)  OnNatsDisconnect(){
-
 }
