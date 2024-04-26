@@ -13,9 +13,9 @@ type MessageJsonInfo struct {
 	msgHandler MessageJsonHandler
 }
 
-type MessageJsonHandler func(clientId uint64,msg interface{})
-type ConnectJsonHandler func(clientId uint64)
-type UnknownMessageJsonHandler func(clientId uint64,msg []byte)
+type MessageJsonHandler func(clientId string,msg interface{})
+type ConnectJsonHandler func(clientId string)
+type UnknownMessageJsonHandler func(clientId string,msg []byte)
 
 type JsonProcessor struct {
 	mapMsg map[uint16]MessageJsonInfo
@@ -45,7 +45,7 @@ func (jsonProcessor *JsonProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // must goroutine safe
-func (jsonProcessor *JsonProcessor ) MsgRoute(clientId uint64,msg interface{}) error{
+func (jsonProcessor *JsonProcessor ) MsgRoute(clientId string,msg interface{}) error{
 	pPackInfo := msg.(*JsonPackInfo)
 	v,ok := jsonProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
@@ -56,7 +56,7 @@ func (jsonProcessor *JsonProcessor ) MsgRoute(clientId uint64,msg interface{}) e
 	return nil
 }
 
-func (jsonProcessor *JsonProcessor) Unmarshal(clientId uint64,data []byte) (interface{}, error) {
+func (jsonProcessor *JsonProcessor) Unmarshal(clientId string,data []byte) (interface{}, error) {
 	typeStruct := struct {Type int `json:"typ"`}{}
 	defer jsonProcessor.ReleaseBytes(data)
 	err := json.Unmarshal(data, &typeStruct)
@@ -79,7 +79,7 @@ func (jsonProcessor *JsonProcessor) Unmarshal(clientId uint64,data []byte) (inte
 	return &JsonPackInfo{typ:msgType,msg:msgData},nil
 }
 
-func (jsonProcessor *JsonProcessor) Marshal(clientId uint64,msg interface{}) ([]byte, error) {
+func (jsonProcessor *JsonProcessor) Marshal(clientId string,msg interface{}) ([]byte, error) {
 	rawMsg,err := json.Marshal(msg)
 	if err != nil {
 		return nil,err
@@ -104,9 +104,9 @@ func (jsonProcessor *JsonProcessor) MakeRawMsg(msgType uint16,msg []byte) *JsonP
 	return &JsonPackInfo{typ:msgType,rawMsg:msg}
 }
 
-func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId uint64,msg interface{}){
+func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId string,msg interface{}){
 	if jsonProcessor.unknownMessageHandler==nil {
-		log.Debug("Unknown message",log.Uint64("clientId",clientId))
+		log.Debug("Unknown message",log.String("clientId",clientId))
 		return
 	}
 
@@ -114,13 +114,13 @@ func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId uint64,msg interfac
 
 }
 
-func (jsonProcessor *JsonProcessor) ConnectedRoute(clientId uint64){
+func (jsonProcessor *JsonProcessor) ConnectedRoute(clientId string){
 	if jsonProcessor.connectHandler != nil {
 		jsonProcessor.connectHandler(clientId)
 	}
 }
 
-func (jsonProcessor *JsonProcessor) DisConnectedRoute(clientId uint64){
+func (jsonProcessor *JsonProcessor) DisConnectedRoute(clientId string){
 	if jsonProcessor.disconnectHandler != nil {
 		jsonProcessor.disconnectHandler(clientId)
 	}

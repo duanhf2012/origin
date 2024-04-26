@@ -8,23 +8,18 @@ import (
 	"github.com/duanhf2012/origin/v2/network/processor"
 	"github.com/duanhf2012/origin/v2/service"
 	"sync"
-	"sync/atomic"
-	"time"
+	"github.com/google/uuid"
+	"strings"
 )
-
-
 
 type WSService struct {
 	service.Service
 	wsServer network.WSServer
 
 	mapClientLocker sync.RWMutex
-	mapClient       map[uint64] *WSClient
+	mapClient       map[string] *WSClient
 	process         processor.IProcessor
-	machineId    	uint16
 }
-
-var seed uint32
 
 type WSPackType int8
 const(
@@ -38,14 +33,8 @@ const Default_WS_MaxConnNum = 3000
 const Default_WS_PendingWriteNum = 10000
 const Default_WS_MaxMsgLen = 65535
 
-const (
-	MaxMachineId = 1<<14 - 1  //最大值 16383
-	MaxSeed   = 1<<19 - 1  //最大值 524287
-	MaxTime   = 1<<31 - 1  //最大值 2147483647
-)
-
 type WSClient struct {
-	id uint64
+	id string
 	wsConn *network.WSConn
 	wsService *WSService
 }
@@ -53,7 +42,7 @@ type WSClient struct {
 type WSPack struct {
 	Type         WSPackType //0表示连接 1表示断开 2表示数据
 	MsgProcessor processor.IProcessor
-	ClientId     uint64
+	ClientId     string
 	Data         interface{}
 }
 
@@ -77,15 +66,7 @@ func (ws *WSService) OnInit() error{
 	if ok == true {
 		ws.wsServer.MaxConnNum = int(MaxConnNum.(float64))
 	}
-	MachineId,ok := wsCfg["MachineId"]
-	if ok == true {
-		ws.machineId = uint16(MachineId.(float64))
-		if ws.machineId > MaxMachineId {
-			return fmt.Errorf("MachineId is error!")
-		}
-	}else {
-		return fmt.Errorf("MachineId is error!")
-	}
+
 	PendingWriteNum,ok := wsCfg["PendingWriteNum"]
 	if ok == true {
 		ws.wsServer.PendingWriteNum = int(PendingWriteNum.(float64))
@@ -96,7 +77,7 @@ func (ws *WSService) OnInit() error{
 		ws.wsServer.MaxMsgLen = uint32(MaxMsgLen.(float64))
 	}
 
-	ws.mapClient = make( map[uint64] *WSClient, ws.wsServer.MaxConnNum)
+	ws.mapClient = make( map[string] *WSClient, ws.wsServer.MaxConnNum)
 	ws.wsServer.NewAgent = ws.NewWSClient
 	ws.wsServer.Start()
 	return nil
@@ -125,33 +106,21 @@ func (ws *WSService) SetProcessor(process processor.IProcessor,handler event.IEv
 	ws.RegEventReceiverFunc(event.Sys_Event_WebSocket,handler, ws.WSEventHandler)
 }
 
-func (ws *WSService) genId() uint64 {
-	newSeed := atomic.AddUint32(&seed,1) % MaxSeed
-	nowTime := uint64(time.Now().Unix())%MaxTime
-	return (uint64(ws.machineId)<<50)|(nowTime<<19)|uint64(newSeed)
-}
-
 func (ws *WSService) NewWSClient(conn *network.WSConn) network.Agent {
 	ws.mapClientLocker.Lock()
 	defer ws.mapClientLocker.Unlock()
 
-	for {
-		clientId := ws.genId()
-		_,ok := ws.mapClient[clientId]
-		if ok == true {
-			continue
-		}
-
-		pClient := &WSClient{wsConn:conn, id: clientId}
-		pClient.wsService = ws
-		ws.mapClient[clientId] = pClient
-		return pClient
-	}
+	uuId, _ := uuid.NewUUID()
+	clientId := strings.ReplaceAll(uuId.String(), "-", "")
+	pClient := &WSClient{wsConn: conn, id: clientId}
+	pClient.wsService = ws
+	ws.mapClient[clientId] = pClient
+	return pClient
 
 	return nil
 }
 
-func (slf *WSClient) GetId() uint64 {
+func (slf *WSClient) GetId() string {
 	return slf.id
 }
 
@@ -179,7 +148,7 @@ func (slf *WSClient) OnClose(){
 	delete (slf.wsService.mapClient,slf.GetId())
 }
 
-func (ws *WSService) SendMsg(clientid uint64,msg interface{}) error{
+func (ws *WSService) SendMsg(clientid string,msg interface{}) error{
 	ws.mapClientLocker.Lock()
 	client,ok := ws.mapClient[clientid]
 	if ok == false{
@@ -195,7 +164,7 @@ func (ws *WSService) SendMsg(clientid uint64,msg interface{}) error{
 	return client.wsConn.WriteMsg(bytes)
 }
 
-func (ws *WSService) Close(clientid uint64) {
+func (ws *WSService) Close(clientid string) {
 	ws.mapClientLocker.Lock()
 	defer ws.mapClientLocker.Unlock()
 

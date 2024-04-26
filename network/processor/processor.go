@@ -3,17 +3,17 @@ package processor
 
 type IProcessor interface {
 	// must goroutine safe
-	MsgRoute(clientId uint64,msg interface{}) error
+	MsgRoute(clientId string,msg interface{}) error
 	//must goroutine safe
-	UnknownMsgRoute(clientId uint64,msg interface{})
+	UnknownMsgRoute(clientId string,msg interface{})
 	// connect event
-	ConnectedRoute(clientId uint64)
-	DisConnectedRoute(clientId uint64)
+	ConnectedRoute(clientId string)
+	DisConnectedRoute(clientId string)
 
 	// must goroutine safe
-	Unmarshal(clientId uint64,data []byte) (interface{}, error)
+	Unmarshal(clientId string,data []byte) (interface{}, error)
 	// must goroutine safe
-	Marshal(clientId uint64,msg interface{}) ([]byte, error)
+	Marshal(clientId string,msg interface{}) ([]byte, error)
 }
 
 type IRawProcessor interface {

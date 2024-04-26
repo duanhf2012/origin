@@ -13,9 +13,9 @@ type MessageInfo struct {
 	msgHandler MessageHandler
 }
 
-type MessageHandler func(clientId uint64, msg proto.Message)
-type ConnectHandler func(clientId uint64)
-type UnknownMessageHandler func(clientId uint64, msg []byte)
+type MessageHandler func(clientId string, msg proto.Message)
+type ConnectHandler func(clientId string)
+type UnknownMessageHandler func(clientId string, msg []byte)
 
 const MsgTypeSize = 2
 
@@ -54,7 +54,7 @@ func (slf *PBPackInfo) GetMsg() proto.Message {
 }
 
 // must goroutine safe
-func (pbProcessor *PBProcessor) MsgRoute(clientId uint64, msg interface{}) error {
+func (pbProcessor *PBProcessor) MsgRoute(clientId string, msg interface{}) error {
 	pPackInfo := msg.(*PBPackInfo)
 	v, ok := pbProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
@@ -66,13 +66,13 @@ func (pbProcessor *PBProcessor) MsgRoute(clientId uint64, msg interface{}) error
 }
 
 // must goroutine safe
-func (pbProcessor *PBProcessor) Unmarshal(clientId uint64, data []byte) (interface{}, error) {
+func (pbProcessor *PBProcessor) Unmarshal(clientId string, data []byte) (interface{}, error) {
 	defer pbProcessor.ReleaseBytes(data)
 	return pbProcessor.UnmarshalWithOutRelease(clientId, data)
 }
 
 // unmarshal but not release data
-func (pbProcessor *PBProcessor) UnmarshalWithOutRelease(clientId uint64, data []byte) (interface{}, error) {
+func (pbProcessor *PBProcessor) UnmarshalWithOutRelease(clientId string, data []byte) (interface{}, error) {
 	var msgType uint16
 	if pbProcessor.LittleEndian == true {
 		msgType = binary.LittleEndian.Uint16(data[:2])
@@ -95,7 +95,7 @@ func (pbProcessor *PBProcessor) UnmarshalWithOutRelease(clientId uint64, data []
 }
 
 // must goroutine safe
-func (pbProcessor *PBProcessor) Marshal(clientId uint64, msg interface{}) ([]byte, error) {
+func (pbProcessor *PBProcessor) Marshal(clientId string, msg interface{}) ([]byte, error) {
 	pMsg := msg.(*PBPackInfo)
 
 	var err error
@@ -133,16 +133,16 @@ func (pbProcessor *PBProcessor) MakeRawMsg(msgType uint16, msg []byte) *PBPackIn
 	return &PBPackInfo{typ: msgType, rawMsg: msg}
 }
 
-func (pbProcessor *PBProcessor) UnknownMsgRoute(clientId uint64, msg interface{}) {
+func (pbProcessor *PBProcessor) UnknownMsgRoute(clientId string, msg interface{}) {
 	pbProcessor.unknownMessageHandler(clientId, msg.([]byte))
 }
 
 // connect event
-func (pbProcessor *PBProcessor) ConnectedRoute(clientId uint64) {
+func (pbProcessor *PBProcessor) ConnectedRoute(clientId string) {
 	pbProcessor.connectHandler(clientId)
 }
 
-func (pbProcessor *PBProcessor) DisConnectedRoute(clientId uint64) {
+func (pbProcessor *PBProcessor) DisConnectedRoute(clientId string) {
 	pbProcessor.disconnectHandler(clientId)
 }
 

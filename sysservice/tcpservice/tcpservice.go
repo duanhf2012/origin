@@ -10,8 +10,9 @@ import (
 	"github.com/duanhf2012/origin/v2/util/bytespool"
 	"runtime"
 	"sync"
-	"sync/atomic"
+	"github.com/google/uuid"
 	"time"
+	"strings"
 )
 
 type TcpService struct {
@@ -19,9 +20,8 @@ type TcpService struct {
 	service.Service
 
 	mapClientLocker sync.RWMutex
-	mapClient       map[uint64] *Client
+	mapClient       map[string] *Client
 	process processor.IProcessor
-	machineId uint16
 }
 
 type TcpPackType int8
@@ -32,30 +32,16 @@ const(
 	TPT_UnknownPack TcpPackType = 3
 )
 
-const (
-	MaxMachineId = 1<<14 - 1  //最大值 16383
-	MaxSeed   = 1<<19 - 1  //最大值 524287
-	MaxTime   = 1<<31 - 1  //最大值 2147483647
-)
-
-var seed uint32
-
 type TcpPack struct {
 	Type         TcpPackType //0表示连接 1表示断开 2表示数据
-	ClientId     uint64
+	ClientId     string
 	Data         interface{}
 }
 
 type Client struct {
-	id uint64
+	id string
 	tcpConn *network.TCPConn
 	tcpService *TcpService
-}
-
-func (tcpService *TcpService) genId() uint64 {
-	newSeed := atomic.AddUint32(&seed,1) % MaxSeed
-	nowTime := uint64(time.Now().Unix())%MaxTime
-	return (uint64(tcpService.machineId)<<50)|(nowTime<<19)|uint64(newSeed)
 }
 
 func (tcpService *TcpService) OnInit() error{
@@ -74,17 +60,7 @@ func (tcpService *TcpService) OnInit() error{
 	if ok == true {
 		tcpService.tcpServer.MaxConnNum = int(MaxConnNum.(float64))
 	}
-
-	MachineId,ok := tcpCfg["MachineId"]
-	if ok == true {
-		tcpService.machineId = uint16(MachineId.(float64))
-		if tcpService.machineId > MaxMachineId {
-			return fmt.Errorf("MachineId is error!")
-		}
-	}else {
-		return fmt.Errorf("MachineId is error!")
-	}
-
+	
 	PendingWriteNum,ok := tcpCfg["PendingWriteNum"]
 	if ok == true {
 		tcpService.tcpServer.PendingWriteNum = int(PendingWriteNum.(float64))
@@ -116,7 +92,7 @@ func (tcpService *TcpService) OnInit() error{
 		tcpService.tcpServer.WriteDeadline = time.Second*time.Duration(writeDeadline.(float64))
 	}
 
-	tcpService.mapClient = make( map[uint64] *Client, tcpService.tcpServer.MaxConnNum)
+	tcpService.mapClient = make( map[string] *Client, tcpService.tcpServer.MaxConnNum)
 	tcpService.tcpServer.NewAgent = tcpService.NewClient
 	tcpService.tcpServer.Start()
 
@@ -146,24 +122,16 @@ func (tcpService *TcpService) NewClient(conn *network.TCPConn) network.Agent {
 	tcpService.mapClientLocker.Lock()
 	defer tcpService.mapClientLocker.Unlock()
 
-	for {
-		clientId := tcpService.genId()
-		_,ok := tcpService.mapClient[clientId]
-		if ok == true {
-			continue
-		}
+	uuId,_ := uuid.NewUUID()
+	clientId := strings.ReplaceAll(uuId.String(), "-", "")
+	pClient := &Client{tcpConn: conn, id: clientId}
+	pClient.tcpService = tcpService
+	tcpService.mapClient[clientId] = pClient
 
-		pClient := &Client{tcpConn:conn, id:clientId}
-		pClient.tcpService = tcpService
-		tcpService.mapClient[clientId] = pClient
-
-		return pClient
-	}
-
-	return nil
+	return pClient
 }
 
-func (slf *Client) GetId() uint64 {
+func (slf *Client) GetId() string {
 	return slf.id
 }
 
@@ -186,7 +154,7 @@ func (slf *Client) Run() {
 		slf.tcpConn.SetReadDeadline(slf.tcpService.tcpServer.ReadDeadline)
 		bytes,err := slf.tcpConn.ReadMsg()
 		if err != nil {
-			log.Debug("read client failed",log.ErrorAttr("error",err),log.Uint64("clientId",slf.id))
+			log.Debug("read client failed",log.ErrorAttr("error",err),log.String("clientId",slf.id))
 			break
 		}
 		data,err:=slf.tcpService.process.Unmarshal(slf.id,bytes)
@@ -206,7 +174,7 @@ func (slf *Client) OnClose(){
 	delete (slf.tcpService.mapClient,slf.GetId())
 }
 
-func (tcpService *TcpService) SendMsg(clientId uint64,msg interface{}) error{
+func (tcpService *TcpService) SendMsg(clientId string,msg interface{}) error{
 	tcpService.mapClientLocker.Lock()
 	client,ok := tcpService.mapClient[clientId]
 	if ok == false{
@@ -222,7 +190,7 @@ func (tcpService *TcpService) SendMsg(clientId uint64,msg interface{}) error{
 	return client.tcpConn.WriteMsg(bytes)
 }
 
-func (tcpService *TcpService) Close(clientId uint64) {
+func (tcpService *TcpService) Close(clientId string) {
 	tcpService.mapClientLocker.Lock()
 	defer tcpService.mapClientLocker.Unlock()
 
@@ -238,7 +206,7 @@ func (tcpService *TcpService) Close(clientId uint64) {
 	return
 }
 
-func (tcpService *TcpService) GetClientIp(clientid uint64) string{
+func (tcpService *TcpService) GetClientIp(clientid string) string{
 	tcpService.mapClientLocker.Lock()
 	defer tcpService.mapClientLocker.Unlock()
 	pClient,ok := tcpService.mapClient[clientid]
@@ -250,7 +218,7 @@ func (tcpService *TcpService) GetClientIp(clientid uint64) string{
 }
 
 
-func (tcpService *TcpService) SendRawMsg(clientId uint64,msg []byte) error{
+func (tcpService *TcpService) SendRawMsg(clientId string,msg []byte) error{
 	tcpService.mapClientLocker.Lock()
 	client,ok := tcpService.mapClient[clientId]
 	if ok == false{
@@ -261,7 +229,7 @@ func (tcpService *TcpService) SendRawMsg(clientId uint64,msg []byte) error{
 	return client.tcpConn.WriteMsg(msg)
 }
 
-func (tcpService *TcpService) SendRawData(clientId uint64,data []byte) error{
+func (tcpService *TcpService) SendRawData(clientId string,data []byte) error{
 	tcpService.mapClientLocker.Lock()
 	client,ok := tcpService.mapClient[clientId]
 	if ok == false{
