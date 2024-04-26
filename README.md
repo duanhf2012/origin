@@ -592,8 +592,8 @@ package simple_module
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/node"
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
 )
 
 func init(){
@@ -672,9 +672,9 @@ Module1 Release.
 package simple_event
 
 import (
-	"github.com/duanhf2012/origin/event"
-	"github.com/duanhf2012/origin/node"
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/event"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
 	"time"
 )
 
@@ -717,9 +717,9 @@ package simple_event
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/event"
-	"github.com/duanhf2012/origin/node"
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/event"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
 )
 
 func init(){
@@ -788,8 +788,8 @@ simple_rpc/TestService6.go文件如下：
 package simple_rpc
 
 import (
-	"github.com/duanhf2012/origin/node"
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
 )
 
 func init(){
@@ -824,8 +824,8 @@ package simple_rpc
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/node"
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
 	"time"
 )
 
@@ -1029,9 +1029,9 @@ package simple_http
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/node"
-	"github.com/duanhf2012/origin/service"
-	"github.com/duanhf2012/origin/sysservice"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
+	"github.com/duanhf2012/origin/v2/sysservice"
 	"net/http"
 )
 
@@ -1108,10 +1108,10 @@ package simple_tcp
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/network/processor"
-	"github.com/duanhf2012/origin/node"
-	"github.com/duanhf2012/origin/service"
-	"github.com/duanhf2012/origin/sysservice"
+	"github.com/duanhf2012/origin/v2/network/processor"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
+	"github.com/duanhf2012/origin/v2/sysservice"
 	"github.com/golang/protobuf/proto"
 	"orginserver/simple_tcp/msgpb"
 )
