@@ -43,7 +43,7 @@ func main() {
 一个origin进程需要创建一个node对象,Start开始运行。您也可以直接下载origin引擎示例:
 
 ```
-go get -v -u github.com/duanhf2012/originserver
+go get -v -u github.com/duanhf2012/originserver_v2
 ```
 
 本文所有的说明都是基于该示例为主。
@@ -54,8 +54,6 @@ origin引擎三大对象关系
 * Node:   可以认为每一个Node代表着一个origin进程
 * Service:一个独立的服务可以认为是一个大的功能模块，他是Node的子集，创建完成并安装Node对象中。服务可以支持对外部RPC等功能。
 * Module: 这是origin最小对象单元，强烈建议所有的业务模块都划分成各个小的Module组合，origin引擎将监控所有服务与Module运行状态，例如可以监控它们的慢处理和死循环函数。Module可以建立树状关系。Service本身也是Module的类型。
-
-origin集群核心配置文件在config的cluster目录下，如github.com/duanhf2012/originserver的config/cluster目录下有cluster.json与service.json配置：
 
 ## origin配置说明
 
@@ -352,7 +350,7 @@ areaId, ok := mapGlobal["AreaId"]
 第一章：origin基础:
 -------------------
 
-查看github.com/duanhf2012/originserver中的simple_service中新建两个服务，分别是TestService1.go与CTestService2.go。
+查看github.com/duanhf2012/originserver_v2中的simple_service中新建两个服务，分别是TestService1.go与CTestService2.go。
 
 simple_service/TestService1.go如下：
 
@@ -585,7 +583,7 @@ func (ts *TestService) OnNodeDisconnect(nodeId int){
 Module创建与销毁:
 -----------------
 
-可以认为Service就是一种Module，它有Module所有的功能。在示例代码中可以参考originserver/simple_module/TestService3.go。
+可以认为Service就是一种Module，它有Module所有的功能。在示例代码中可以参考originserver_v2/simple_module/TestService3.go。
 
 ```
 package simple_module
