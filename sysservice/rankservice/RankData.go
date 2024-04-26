@@ -19,7 +19,7 @@ type RankData struct {
 	Data                 []byte
 	ExData               []int64
 
-	refreshTimestamp int64 //刷新时间
+	RefreshTimestamp int64 //刷新时间
 	//bRelease bool
 	ref         bool
 	compareFunc func(other skip.Comparator) int
@@ -39,7 +39,7 @@ func NewRankData(isDec bool, data *rpc.RankData,refreshTimestamp int64) *RankDat
 		ret.ExData = append(ret.ExData,d.InitValue+d.IncreaseValue)
 	}
 
-	ret.refreshTimestamp = refreshTimestamp
+	ret.RefreshTimestamp = refreshTimestamp
 
 	return ret
 }
