@@ -1,5 +1,5 @@
 origin 游戏服务器引擎简介
-=========================
+-------------------------
 
 origin 是一个由 Go 语言（golang）编写的分布式开源游戏服务器引擎。origin适用于各类游戏服务器的开发，包括 H5（HTML5）游戏服务器。
 
@@ -19,6 +19,10 @@ Hello world!
 ```go
 go get -v -u  github.com/duanhf2012/origin/v2
 ```
+建议使用origin v2版本（import引用中都加入v2）
+
+
+
 [README.md](README.md)
 于是下载到GOPATH环境目录中,在src中加入main.go,内容如下：
 
@@ -26,7 +30,7 @@ go get -v -u  github.com/duanhf2012/origin/v2
 package main
 
 import (
-	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/v2/node"
 )
 
 func main() {
@@ -53,29 +57,140 @@ origin引擎三大对象关系
 
 origin集群核心配置文件在config的cluster目录下，如github.com/duanhf2012/originserver的config/cluster目录下有cluster.json与service.json配置：
 
-cluster.json如下：
-------------------
+## origin配置说明
+
+origin的配置文件以json格式，主要包含Discovery、RpcMode、NodeList、Service部分，具体格式如下：
+
+```json
+{
+    "Discovery":{},
+    "RpcMode":{},
+    "NodeList":[],
+	"Service":{},
+    "Global": {}
+}
+```
+
+
+
+
+
+### Discovery部分
+
+origin目前支持etcd与origin自带的服务发现类型。
+
+
+
+Etcd方式示例：
+
+```json
+  "Discovery": {
+    "Etcd": {
+      "TTLSecond": 10,
+      "DialTimeoutMillisecond": 3000,
+      "EtcdList": [
+        {
+          "NetworkName": ["network1"],
+          "Endpoints": ["http://192.168.13.24:12379"]
+        }
+      ]
+    }
+  }
+```
+
+TTLSecond：表示健康检查TTL失效时间10秒
+
+DialTimeoutMillisecond: 与etcd连接超时时间
+
+EtcdList：Etcd列表，可以多个Etcd服务器连接
+
+NetworkName：所在的网络名称，可以配置多个。node会往对应的网络名称中注册、监听发现Service。NetworkName也起到发现隔离的作用。
+
+Endpoints：Etcd服务器地址
+
+
+
+Origin方式示例：
+
+```json
+{
+  "Discovery": {
+    "Origin":{
+      "TTLSecond": 10,
+      "MasterNodeList": [
+        {
+          "NodeId": "test_1",
+          "ListenAddr": "127.0.0.1:8801"
+        }
+      ]
+    }
+  }
+}
+```
+
+TTLSecond：表示健康检查TTL失效时间10秒
+
+MasterNodeList：指定哪些Node为服务发现Master结点，需要配置NodeId与ListenAddr，注意它们要与实际的Node配置一致。
+
+
+
+### RpcMode部分
+
+默认模式
+
+```json
+{
+	"RpcMode":{
+		"Type": "Default"
+	}
+}
+```
+
+默认模式下，origin的node之前通过tcp连接组网。
+
+
+
+Nats模式
+
+```json
+{
+	"RpcMode":{
+		"Type": "Nats",
+		"remark": "support Default or Nats",
+		"Nats": {
+			"NatsUrl":"127.0.0.1:4222",
+			"NoRandomize": true
+		}
+	}
+}
+```
+
+NatsUrl：Nats连接url串
+
+NoRandomize:在多连接集群模式下，连接nats节点是否顺序策略。false表示随机连接，true表示顺序连接。
+
+
+
+### NodeList部分
 
 ```
 {
     "NodeList":[
         {
-          "NodeId": 1,
+          "NodeId": "node_1",
           "Private": false,
           "ListenAddr":"127.0.0.1:8001",
           "MaxRpcParamLen": 409600,
           "CompressBytesLen": 20480,
-          "NodeName": "Node_Test1",
           "remark":"//以_打头的，表示只在本机进程，不对整个子网公开",
           "ServiceList": ["TestService1","TestService2","TestServiceCall","GateService","_TcpService","HttpService","WSService"]
         },
         {
-          "NodeId": 2,
+          "NodeId": "node_2",
           "Private": false,
           "ListenAddr":"127.0.0.1:8002",
           "MaxRpcParamLen": 409600,
           "CompressBytesLen": 20480,
-          "NodeName": "Node_Test1",
           "remark":"//以_打头的，表示只在本机进程，不对整个子网公开",
           "ServiceList": ["TestService1","TestService2","TestServiceCall","GateService","TcpService","HttpService","WSService"]
         }
@@ -86,27 +201,27 @@ cluster.json如下：
 
 以上配置了两个结点服务器程序:
 
-* NodeId: 表示origin程序的结点Id标识，不允许重复。
+* NodeId: 表示origin程序的结点Id标识，同一个服务发现网络中不允许重复。
 * Private: 是否私有结点，如果为true，表示其他结点不会发现它，但可以自我运行。
 * ListenAddr:Rpc通信服务的监听地址
 * MaxRpcParamLen:Rpc参数数据包最大长度，该参数可以缺省，默认一次Rpc调用支持最大4294967295byte长度数据。
 * CompressBytesLen:Rpc网络数据压缩，当数据>=20480byte时将被压缩。该参数可以缺省或者填0时不进行压缩。
-* NodeName:结点名称
 * remark:备注，可选项
 * ServiceList:该Node拥有的服务列表，注意：origin按配置的顺序进行安装初始化。但停止服务的顺序是相反。
 
 ---
 
-在启动程序命令originserver -start nodeid=1中nodeid就是根据该配置装载服务。
+在启动程序命令originserver -start nodeid="node_1"中nodeid就是根据该配置装载服务。
 更多参数使用，请使用originserver -help查看。
+
+
+
+### Service 部分
+
 service.json如下：
-------------------
 
 ```
 {
-"Global": {
-		"AreaId": 1
-	},
   "Service":{
 	  "HttpService":{
 		"ListenAddr":"0.0.0.0:9402",
@@ -206,6 +321,32 @@ service.json如下：
 * PendingWriteNum：发送网络队列最大数量
 * MaxMsgLen:包最大长度
 
+
+
+### Global部分
+
+```json
+{
+"Global": {
+		"AreaId": 1
+	}
+}
+```
+
+这部分，在所有的服务中都可以类似以下代码获取：
+
+```go
+globalCfg := cluster.GetCluster().GetGlobalCfg()
+mapGlobal, ok := globalCfg.(map[string]interface{})
+if ok == false {
+	return fmt.Errorf("Canot find Global from config.")
+}
+
+areaId, ok := mapGlobal["AreaId"]
+```
+
+
+
 ---
 
 第一章：origin基础:
@@ -219,8 +360,8 @@ simple_service/TestService1.go如下：
 package simple_service
 
 import (
-	"github.com/duanhf2012/origin/node"
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
 )
 
 //模块加载时自动安装TestService1服务
@@ -230,7 +371,6 @@ func init(){
 
 //新建自定义服务TestService1
 type TestService1 struct {
-
 	//所有的自定义服务必需加入service.Service基服务
 	//那么该自定义服务将有各种功能特性
 	//例如: Rpc,事件驱动,定时器等
@@ -249,8 +389,8 @@ simple_service/TestService2.go如下：
 
 ```
 import (
-	"github.com/duanhf2012/origin/node"
-	"github.com/duanhf2012/origin/service"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
 )
 
 func init(){
@@ -274,7 +414,7 @@ func (slf *TestService2) OnInit() error {
 package main
 
 import (
-	"github.com/duanhf2012/origin/node"
+	"github.com/duanhf2012/origin/v2/node"
 	//导入simple_service模块
 	_"orginserver/simple_service"
 )
@@ -291,10 +431,9 @@ func main(){
 {
     "NodeList":[
         {
-          "NodeId": 1,
+          "NodeId": "nodeid_1",
           "Private": false,
           "ListenAddr":"127.0.0.1:8001",
-          "NodeName": "Node_Test1",
 		  "remark":"//以_打头的，表示只在本机进程，不对整个子网开发",
           "ServiceList": ["TestService1","TestService2"]
         }
@@ -305,7 +444,7 @@ func main(){
 编译后运行结果如下：
 
 ```
-#originserver -start nodeid=1
+#originserver -start nodeid="nodeid_1"
 TestService1 OnInit.
 TestService2 OnInit.
 ```
@@ -720,7 +859,7 @@ func (slf *TestService7) CallTest(){
 	}
 	
 	
-	//自定义超时,默认rpc超时时间为15s
+	//自定义超时,默认rpc超时时间为15s,以下设置1秒钟超过
 	err = slf.CallWithTimeout(time.Second*1, "TestService6.RPC_Sum", &input, &output)
 	if err != nil {
 		fmt.Printf("Call error :%+v\n", err)
@@ -848,45 +987,35 @@ func (slf *TestService13) testAsyncDo() {
 ```
 
 
-第七章：配置服务发现
+第七章：服务发现
 --------------------
 
-origin引擎默认使用读取所有结点配置的进行确认结点有哪些Service。引擎也支持动态服务发现的方式，使用了内置的DiscoveryMaster服务用于中心Service，DiscoveryClient用于向DiscoveryMaster获取整个origin网络中所有的结点以及服务信息。具体实现细节请查看这两部分的服务实现。具体使用方式，在以下cluster配置中加入以下内容：
+origin引擎默认使用读取所有结点配置的进行确认结点有哪些Service。引擎也支持动态服务发现的方式，支持etcd与origin类型，具体请参照【配置说明】部分，Node结点可以配置只发现某些服务，如下示例：
 
 ```
 {
-	"MasterDiscoveryNode": [{
-		"NodeId": 2,
-		"ListenAddr": "127.0.0.1:10001",
-		"MaxRpcParamLen": 409600
-	},
-	{
-		"NodeId": 1,
-		"ListenAddr": "127.0.0.1:8801",
-		"MaxRpcParamLen": 409600
-	}],
-
-
 	"NodeList": [{
-		"NodeId": 1,
+		"NodeId": "nodeid_test",
 		"ListenAddr": "127.0.0.1:8801",
 		"MaxRpcParamLen": 409600,
-		"NodeName": "Node_Test1",
 		"Private": false,
 		"remark": "//以_打头的，表示只在本机进程，不对整个子网开发",
 		"ServiceList": ["_TestService1", "TestService9", "TestService10"],
-	    "MasterDiscoveryService": [
+	    "DiscoveryService": [
 		    {
-                "MasterNodeId": 2,
+                "MasterNodeId": "nodeid_1",
+                "NetworkName":"networkname1"
                 "DiscoveryService": ["TestService8"]
             }
 	    ]
 	}]
 }
 ```
-MasterDiscoveryNode: 配置了结点Id为1的服务发现Master，他的监听地址ListenAddr为127.0.0.1:8801，结点为2的也是一个服务发现Master。NodeId为1的结点会从结点为1和2的网络中发现服务。
+DiscoveryService：在当前nodeid为nodeid_test的结点中，只发现 MasterNodeId为nodeid_1或NetworkName为networkname1网络中的TestService8服务。
 
-MasterDiscoveryService: 表示将筛选origin网络中MasterNodeId为2中的TestService8服务，注意如果MasterDiscoveryService不配置，则筛选功能不生效。MasterNodeId也可以填为0，表示NodeId为1的结点，在所有网络中只发现TestService8的服务。
+**注意**：MasterNodeId与NetworkName只配置一个，分别在模式为origin或者etcd服务发现类型时。
+
+
 
 第八章：HttpService使用
 -----------------------
@@ -1019,16 +1148,16 @@ func (slf *TestTcpService) OnInit() error {
 }
 
 
-func (slf *TestTcpService) OnConnected(clientid uint64){
-	fmt.Printf("client id %d connected\n",clientid)
+func (slf *TestTcpService) OnConnected(clientid string){
+	fmt.Printf("client id %s connected\n",clientid)
 }
 
 
-func (slf *TestTcpService) OnDisconnected(clientid uint64){
-	fmt.Printf("client id %d disconnected\n",clientid)
+func (slf *TestTcpService) OnDisconnected(clientid string){
+	fmt.Printf("client id %s disconnected\n",clientid)
 }
 
-func (slf *TestTcpService) OnRequest (clientid uint64,msg proto.Message){
+func (slf *TestTcpService) OnRequest (clientid string,msg proto.Message){
 	//解析客户端发过来的数据
 	pReq := msg.(*msgpb.Req)
 	//发送数据给客户端
@@ -1072,4 +1201,5 @@ _
 bp-li
 阿正
 大头
+Now'C
 ```
