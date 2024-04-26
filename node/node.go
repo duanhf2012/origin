@@ -201,7 +201,7 @@ func initLog() error {
 		fmt.Printf("cannot create log file!\n")
 		return err
 	}
-	log.Export(logger)
+	log.SetLogger(logger)
 	return nil
 }
 
