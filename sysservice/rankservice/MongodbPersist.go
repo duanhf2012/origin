@@ -357,7 +357,7 @@ func (mp *MongoPersist) removeRankData(rankId uint64,keys []uint64) bool {
 
 func (mp *MongoPersist) upsertToDB(collectName string,rankData *RankData) error{
 	condition := bson.D{{"_id", rankData.Key}}
-	upsert := bson.M{"_id":rankData.Key,"RefreshTime": rankData.refreshTimestamp, "SortData": rankData.SortData, "Data": rankData.Data,"ExData":rankData.ExData}
+	upsert := bson.M{"_id":rankData.Key,"RefreshTime": rankData.RefreshTimestamp, "SortData": rankData.SortData, "Data": rankData.Data,"ExData":rankData.ExData}
 	update := bson.M{"$set": upsert}
 
 	s := mp.mongo.TakeSession()

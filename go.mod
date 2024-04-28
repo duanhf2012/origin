@@ -1,4 +1,4 @@
-module github.com/duanhf2012/origin
+module github.com/duanhf2012/origin/v2
 
 go 1.21
 

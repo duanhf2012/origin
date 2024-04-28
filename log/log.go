@@ -22,7 +22,10 @@ var LogSize int64
 var LogChannelCap int
 var LogPath string
 var LogLevel slog.Level = LevelTrace
+
+
 var gLogger, _ = NewTextLogger(LevelDebug, "", "",true,LogChannelCap)
+var isSetLogger bool
 var memPool = bytespool.NewMemAreaPool()
 
 // levels
@@ -37,6 +40,21 @@ const (
 	LevelFatal 				= slog.Level(20)
 )
 
+type ILogger interface {
+	Trace(msg string, args ...any)
+	Debug(msg string, args ...any)
+	Info(msg string, args ...any)
+	Warning(msg string, args ...any)
+	Error(msg string, args ...any)
+	Stack(msg string, args ...any)
+	Dump(msg string, args ...any)
+	Fatal(msg string, args ...any)
+
+	DoSPrintf(level slog.Level,a []interface{})
+	FormatHeader(buf *Buffer,level slog.Level,calldepth int)
+	Close()
+}
+
 type Logger struct {
 	Slogger *slog.Logger
 
@@ -47,7 +65,6 @@ type Logger struct {
 
 type IoWriter struct {
 	outFile    io.Writer  // destination for output
-	outConsole io.Writer  //os.Stdout
 	writeBytes  int64
 	logChannel chan []byte
 	wg             sync.WaitGroup
@@ -122,8 +139,8 @@ func (iw *IoWriter) Write(p []byte) (n int, err error){
 func (iw *IoWriter) writeIo(p []byte)  (n int, err error){
 	n,err = iw.writeFile(p)
 
-	if iw.outConsole != nil {
-		n,err = iw.outConsole.Write(p)
+	if OpenConsole {
+		n,err = os.Stdout.Write(p)
 	}
 
 	return
@@ -217,17 +234,12 @@ func (iw *IoWriter) swichFile() error{
 		iw.fileDay = now.Day()
 		iw.fileCreateTime = now.Unix()
 		atomic.StoreInt64(&iw.writeBytes,0)
-		if OpenConsole == true {
-			iw.outConsole = os.Stdout
-		}
-	}else{
-		iw.outConsole = os.Stdout
 	}
 
 	return nil
 }
 
-func NewTextLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (*Logger,error){
+func NewTextLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (ILogger,error){
 	var logger Logger
 	logger.ioWriter.filePath = pathName
 	logger.ioWriter.fileprefix = filePrefix
@@ -242,7 +254,7 @@ func NewTextLogger(level slog.Level,pathName string,filePrefix string,addSource 
 	return &logger,nil
 }
 
-func NewJsonLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (*Logger,error){
+func NewJsonLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (ILogger,error){
 	var logger Logger
 	logger.ioWriter.filePath = pathName
 	logger.ioWriter.fileprefix = filePrefix
@@ -296,11 +308,16 @@ func (logger *Logger) Fatal(msg string, args ...any) {
 	os.Exit(1)
 }
 
-// It's dangerous to call the method on logging
-func Export(logger *Logger) {
-	if logger != nil {
+// It's non-thread-safe
+func SetLogger(logger ILogger) {
+	if logger != nil && isSetLogger == false {
 		gLogger = logger
+		isSetLogger = true
 	}
+}
+
+func GetLogger() ILogger{
+	return gLogger
 }
 
 func Trace(msg string, args ...any){
@@ -415,7 +432,7 @@ func Group(key string, args ...any) slog.Attr {
 	return slog.Group(key, args...)
 }
 
-func (logger *Logger) doSPrintf(level slog.Level,a []interface{}) {
+func (logger *Logger) DoSPrintf(level slog.Level,a []interface{}) {
 	if logger.Slogger.Enabled(context.Background(),level) == false{
 		return
 	}
@@ -425,7 +442,7 @@ func (logger *Logger) doSPrintf(level slog.Level,a []interface{}) {
 
 	logger.sBuff.Reset()
 
-	logger.formatHeader(&logger.sBuff,level,3)
+	logger.FormatHeader(&logger.sBuff,level,3)
 
 	for _,s := range a {
 		logger.sBuff.AppendString(slog.AnyValue(s).String())
@@ -435,46 +452,46 @@ func (logger *Logger) doSPrintf(level slog.Level,a []interface{}) {
 }
 
  func (logger *Logger) STrace(a ...interface{}) {
-	 logger.doSPrintf(LevelTrace,a)
+	 logger.DoSPrintf(LevelTrace,a)
 }
 
 func (logger *Logger)  SDebug(a ...interface{}) {
-	logger.doSPrintf(LevelDebug,a)
+	logger.DoSPrintf(LevelDebug,a)
 }
 
 func (logger *Logger)  SInfo(a ...interface{}) {
-	logger.doSPrintf(LevelInfo,a)
+	logger.DoSPrintf(LevelInfo,a)
 }
 
 func (logger *Logger)  SWarning(a ...interface{}) {
-	logger.doSPrintf(LevelWarning,a)
+	logger.DoSPrintf(LevelWarning,a)
 }
 
 func (logger *Logger)  SError(a ...interface{}) {
-	logger.doSPrintf(LevelError,a)
+	logger.DoSPrintf(LevelError,a)
 }
 
 func STrace(a ...interface{}) {
-	gLogger.doSPrintf(LevelTrace,a)
+	gLogger.DoSPrintf(LevelTrace,a)
 }
 
 func SDebug(a ...interface{}) {
-	gLogger.doSPrintf(LevelDebug,a)
+	gLogger.DoSPrintf(LevelDebug,a)
 }
 
 func SInfo(a ...interface{}) {
-	gLogger.doSPrintf(LevelInfo,a)
+	gLogger.DoSPrintf(LevelInfo,a)
 }
 
 func SWarning(a ...interface{}) {
-	gLogger.doSPrintf(LevelWarning,a)
+	gLogger.DoSPrintf(LevelWarning,a)
 }
 
 func SError(a ...interface{}) {
-	gLogger.doSPrintf(LevelError,a)
+	gLogger.DoSPrintf(LevelError,a)
 }
 
-func (logger *Logger) formatHeader(buf *Buffer,level slog.Level,calldepth int) {
+func (logger *Logger) FormatHeader(buf *Buffer,level slog.Level,calldepth int) {
 	t := time.Now()
 	var file string
 	var line int
