@@ -10,9 +10,9 @@ type RawMessageInfo struct {
 	msgHandler RawMessageHandler
 }
 
-type RawMessageHandler func(clientId uint64,packType uint16,msg []byte)
-type RawConnectHandler func(clientId uint64)
-type UnknownRawMessageHandler func(clientId uint64,msg []byte)
+type RawMessageHandler func(clientId string,packType uint16,msg []byte)
+type RawConnectHandler func(clientId string)
+type UnknownRawMessageHandler func(clientId string,msg []byte)
 
 const RawMsgTypeSize = 2
 type PBRawProcessor struct {
@@ -38,14 +38,14 @@ func (pbRawProcessor *PBRawProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor ) MsgRoute(clientId uint64, msg interface{}) error{
+func (pbRawProcessor *PBRawProcessor ) MsgRoute(clientId string, msg interface{}) error{
 	pPackInfo := msg.(*PBRawPackInfo)
 	pbRawProcessor.msgHandler(clientId,pPackInfo.typ,pPackInfo.rawMsg)
 	return nil
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor ) Unmarshal(clientId uint64,data []byte) (interface{}, error) {
+func (pbRawProcessor *PBRawProcessor ) Unmarshal(clientId string,data []byte) (interface{}, error) {
 	var msgType uint16
 	if pbRawProcessor.LittleEndian == true {
 		msgType = binary.LittleEndian.Uint16(data[:2])
@@ -57,7 +57,7 @@ func (pbRawProcessor *PBRawProcessor ) Unmarshal(clientId uint64,data []byte) (i
 }
 
 // must goroutine safe
-func (pbRawProcessor *PBRawProcessor ) Marshal(clientId uint64,msg interface{}) ([]byte, error){
+func (pbRawProcessor *PBRawProcessor ) Marshal(clientId string,msg interface{}) ([]byte, error){
 	pMsg := msg.(*PBRawPackInfo)
 
 	buff := make([]byte, 2, len(pMsg.rawMsg)+RawMsgTypeSize)
@@ -80,7 +80,7 @@ func (pbRawProcessor *PBRawProcessor) MakeRawMsg(msgType uint16,msg []byte,pbRaw
 	pbRawPackInfo.rawMsg = msg
 }
 
-func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(clientId uint64,msg interface{}){
+func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(clientId string,msg interface{}){
 	if pbRawProcessor.unknownMessageHandler == nil {
 		return
 	}
@@ -88,11 +88,11 @@ func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(clientId uint64,msg interf
 }
 
 // connect event
-func (pbRawProcessor *PBRawProcessor) ConnectedRoute(clientId uint64){
+func (pbRawProcessor *PBRawProcessor) ConnectedRoute(clientId string){
 	pbRawProcessor.connectHandler(clientId)
 }
 
-func (pbRawProcessor *PBRawProcessor) DisConnectedRoute(clientId uint64){
+func (pbRawProcessor *PBRawProcessor) DisConnectedRoute(clientId string){
 	pbRawProcessor.disconnectHandler(clientId)
 }
 
