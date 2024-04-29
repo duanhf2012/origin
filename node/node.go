@@ -117,7 +117,7 @@ func setConfigPath(val interface{}) error {
 }
 
 func getRunProcessPid(nodeId string) (int, error) {
-	f, err := os.OpenFile(fmt.Sprintf("%s_%d.pid", os.Args[0], nodeId), os.O_RDONLY, 0600)
+	f, err := os.OpenFile(fmt.Sprintf("%s_%s.pid", os.Args[0], nodeId), os.O_RDONLY, 0600)
 	defer f.Close()
 	if err != nil {
 		return 0, err
