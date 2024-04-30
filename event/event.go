@@ -236,7 +236,6 @@ func (processor *EventProcessor) castEvent(event IEvent){
 
 	eventProcessor,ok := processor.mapListenerEvent[event.GetEventType()]
 	if ok == false || processor == nil{
-		log.Debug("event is not listen",log.Int("event type",int(event.GetEventType())))
 		return
 	}
 

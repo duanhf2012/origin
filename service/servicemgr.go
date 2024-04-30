@@ -14,9 +14,6 @@ type RegDiscoveryServiceEventFunType func(serviceName string)
 var RegRpcEventFun RegRpcEventFunType
 var UnRegRpcEventFun RegRpcEventFunType
 
-var RegDiscoveryServiceEventFun RegDiscoveryServiceEventFunType
-var UnRegDiscoveryServiceEventFun RegDiscoveryServiceEventFunType
-
 func init(){
 	mapServiceName = map[string]IService{}
 	setupServiceList = []IService{}

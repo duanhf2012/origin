@@ -368,12 +368,12 @@ func (s *Service) UnRegNatsConnListener() {
 func (s *Service) RegDiscoverListener(discoveryServiceListener rpc.IDiscoveryServiceListener) {
 	s.discoveryServiceLister = discoveryServiceListener
 	s.RegEventReceiverFunc(event.Sys_Event_DiscoverService,s.GetEventHandler(),s.OnDiscoverServiceEvent)
-	RegDiscoveryServiceEventFun(s.GetName())
+	RegRpcEventFun(s.GetName())
 }
 
 func (s *Service) UnRegDiscoverListener() {
 	s.UnRegEventReceiverFunc(event.Sys_Event_DiscoverService,s.GetEventHandler())
-	UnRegDiscoveryServiceEventFun(s.GetName())
+	UnRegRpcEventFun(s.GetName())
 }
 
 func (s *Service) PushRpcRequest(rpcRequest *rpc.RpcRequest) error{

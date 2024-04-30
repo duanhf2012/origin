@@ -54,7 +54,6 @@ type Cluster struct {
 
 	discoveryInfo DiscoveryInfo //服务发现配置
 	rpcMode RpcMode
-	//masterDiscoveryNodeList []NodeInfo  //配置发现Master结点
 	globalCfg               interface{} //全局配置
 
 	localServiceCfg  map[string]interface{} //map[serviceName]配置数据*
@@ -70,7 +69,6 @@ type Cluster struct {
 
 	rpcEventLocker           sync.RWMutex        //Rpc事件监听保护锁
 	mapServiceListenRpcEvent map[string]struct{} //ServiceName
-	mapServiceListenDiscoveryEvent map[string]struct{} //ServiceName
 }
 
 func GetCluster() *Cluster {
@@ -228,8 +226,6 @@ func (cls *Cluster) Init(localNodeId string, setupServiceFun SetupServiceFun) er
 	}
 	service.RegRpcEventFun = cls.RegRpcEvent
 	service.UnRegRpcEventFun = cls.UnRegRpcEvent
-	service.RegDiscoveryServiceEventFun = cls.RegDiscoveryEvent
-	service.UnRegDiscoveryServiceEventFun = cls.UnReDiscoveryEvent
 
 	err = cls.serviceDiscovery.InitDiscovery(localNodeId, cls.serviceDiscoveryDelNode, cls.serviceDiscoverySetNodeInfo)
 	if err != nil {
@@ -322,23 +318,12 @@ func (cls *Cluster) NotifyAllService(event event.IEvent){
 }
 
 func (cls *Cluster) TriggerDiscoveryEvent(bDiscovery bool, nodeId string, serviceName []string) {
-	cls.rpcEventLocker.Lock()
-	defer cls.rpcEventLocker.Unlock()
+	var eventData service.DiscoveryServiceEvent
+	eventData.IsDiscovery = bDiscovery
+	eventData.NodeId = nodeId
+	eventData.ServiceName = serviceName
 
-	for sName, _ := range cls.mapServiceListenDiscoveryEvent {
-		ser := service.GetService(sName)
-		if ser == nil {
-			log.Error("cannot find service",log.Any("services",serviceName))
-			continue
-		}
-
-		var eventData service.DiscoveryServiceEvent
-		eventData.IsDiscovery = bDiscovery
-		eventData.NodeId = nodeId
-		eventData.ServiceName = serviceName
-		ser.(service.IModule).NotifyEvent(&eventData)
-	}
-
+	cls.NotifyAllService(&eventData)
 }
 
 func (cls *Cluster) GetLocalNodeInfo() *NodeInfo {
@@ -360,25 +345,6 @@ func (cls *Cluster) UnRegRpcEvent(serviceName string) {
 	delete(cls.mapServiceListenRpcEvent, serviceName)
 	cls.rpcEventLocker.Unlock()
 }
-
-
-func (cls *Cluster) RegDiscoveryEvent(serviceName string) {
-	cls.rpcEventLocker.Lock()
-	if cls.mapServiceListenDiscoveryEvent == nil {
-		cls.mapServiceListenDiscoveryEvent = map[string]struct{}{}
-	}
-
-	cls.mapServiceListenDiscoveryEvent[serviceName] = struct{}{}
-	cls.rpcEventLocker.Unlock()
-}
-
-func (cls *Cluster) UnReDiscoveryEvent(serviceName string) {
-	cls.rpcEventLocker.Lock()
-	delete(cls.mapServiceListenDiscoveryEvent, serviceName)
-	cls.rpcEventLocker.Unlock()
-}
-
-
 
 func HasService(nodeId string, serviceName string) bool {
 	cluster.locker.RLock()
