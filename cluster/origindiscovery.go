@@ -183,6 +183,10 @@ func (ds *OriginDiscoveryMaster) OnNodeDisconnect(nodeId string) {
 
 func (ds *OriginDiscoveryMaster) RpcCastGo(serviceMethod string, args interface{}) {
 	for nodeId, _ := range ds.mapNodeInfo {
+		if nodeId == cluster.GetLocalNodeInfo().NodeId {
+			continue
+		}
+
 		ds.GoNode(nodeId, serviceMethod, args)
 	}
 }
