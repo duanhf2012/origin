@@ -17,6 +17,7 @@ const (
 	Sys_Event_QueueTaskFinish  	EventType = -10
 	Sys_Event_Retire       		EventType = -11
 	Sys_Event_EtcdDiscovery 	EventType = -12
+	Sys_Event_Gin_Event 		EventType = -13
 	
 	Sys_Event_User_Define 		EventType = 1
 )
