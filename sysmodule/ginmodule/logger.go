@@ -2,7 +2,7 @@ package ginmodule
 
 import (
 	"fmt"
-	"github.com/duanhf2012/origin/log"
+	"github.com/duanhf2012/origin/v2/log"
 	"github.com/gin-gonic/gin"
 	"time"
 )

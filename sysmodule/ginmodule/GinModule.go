@@ -2,7 +2,6 @@ package ginmodule
 
 import (
 	"context"
-	"datacenter/common/processor"
 	"github.com/duanhf2012/origin/v2/event"
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/service"
@@ -10,34 +9,35 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
+
+type IGinProcessor interface {
+	Process(data *gin.Context) (*gin.Context, error)
+}
 
 type GinModule struct {
 	service.Module
 
-	*GinConf
 	*gin.Engine
 	srv *http.Server
 
-	processor []processor.IGinProcessor
+	listenAddr string
+	handleTimeout time.Duration
+	processor []IGinProcessor
 }
 
-type GinConf struct {
-	Addr string
-}
-
-const Sys_Event_Gin_Event event.EventType = -11
-
-func (gm *GinModule) Init(conf *GinConf, engine *gin.Engine) {
-	gm.GinConf = conf
+func (gm *GinModule) Init(addr string, handleTimeout time.Duration,engine *gin.Engine) {
+	gm.listenAddr = addr
+	gm.handleTimeout = handleTimeout
 	gm.Engine = engine
 }
 
-func (gm *GinModule) SetupDataProcessor(processor ...processor.IGinProcessor) {
+func (gm *GinModule) SetupDataProcessor(processor ...IGinProcessor) {
 	gm.processor = processor
 }
 
-func (gm *GinModule) AppendDataProcessor(processor ...processor.IGinProcessor) {
+func (gm *GinModule) AppendDataProcessor(processor ...IGinProcessor) {
 	gm.processor = append(gm.processor, processor...)
 }
 
@@ -47,13 +47,13 @@ func (gm *GinModule) OnInit() error {
 	}
 
 	gm.srv = &http.Server{
-		Addr:    gm.Addr,
+		Addr:    gm.listenAddr,
 		Handler: gm.Engine,
 	}
 
 	gm.Engine.Use(Logger())
 	gm.Engine.Use(gin.Recovery())
-	gm.GetEventProcessor().RegEventReceiverFunc(Sys_Event_Gin_Event, gm.GetEventHandler(), gm.eventHandler)
+	gm.GetEventProcessor().RegEventReceiverFunc(event.Sys_Event_Gin_Event, gm.GetEventHandler(), gm.eventHandler)
 	return nil
 }
 
@@ -67,7 +67,8 @@ func (gm *GinModule) eventHandler(ev event.IEvent) {
 }
 
 func (gm *GinModule) Start() {
-	log.Info("http start listen", slog.Any("addr", gm.Addr))
+	gm.srv.Addr = gm.listenAddr
+	log.Info("http start listen", slog.Any("addr", gm.listenAddr))
 	go func() {
 		err := gm.srv.ListenAndServe()
 		if err != nil {
@@ -77,7 +78,7 @@ func (gm *GinModule) Start() {
 }
 
 func (gm *GinModule) StartTLS(certFile, keyFile string) {
-	log.Info("http start listen", slog.Any("addr", gm.Addr))
+	log.Info("http start listen", slog.Any("addr", gm.listenAddr))
 	go func() {
 		err := gm.srv.ListenAndServeTLS(certFile, keyFile)
 		if err != nil {
@@ -99,7 +100,7 @@ type GinEvent struct {
 }
 
 func (ge *GinEvent) GetEventType() event.EventType {
-	return Sys_Event_Gin_Event
+	return event.Sys_Event_Gin_Event
 }
 
 func (gm *GinModule) handleMethod(httpMethod, relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
@@ -112,32 +113,70 @@ func (gm *GinModule) handleMethod(httpMethod, relativePath string, handlers ...g
 		}
 
 		var ev GinEvent
-		chanWait := make(chan struct{})
+		chanWait := make(chan struct{},2)
 		ev.chanWait = chanWait
 		ev.handlersChain = handlers
 		ev.c = c
 		gm.NotifyEvent(&ev)
 
-		<-chanWait
+		ctx,cancel := context.WithTimeout(context.Background(), gm.handleTimeout)
+		defer cancel()
+
+		select{
+		case <-ctx.Done():
+			log.Error("GinModule process timeout", slog.Any("path", c.Request.URL.Path))
+			c.AbortWithStatus(http.StatusRequestTimeout)
+		case <-chanWait:
+		}
 	})
 }
 
+// GET 回调处理是在gin协程中
+func (gm *GinModule) GET(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	return gm.Engine.GET(relativePath, handlers...)
+}
+
+// POST 回调处理是在gin协程中
+func (gm *GinModule) POST(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	return gm.Engine.POST(relativePath, handlers...)
+}
+
+// DELETE 回调处理是在gin协程中
+func (gm *GinModule) DELETE(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	return gm.Engine.DELETE(relativePath, handlers...)
+}
+
+// PATCH 回调处理是在gin协程中
+func (gm *GinModule) PATCH(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	return gm.Engine.PATCH(relativePath, handlers...)
+}
+
+// Put 回调处理是在gin协程中
+func (gm *GinModule) Put(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	return gm.Engine.PUT(relativePath, handlers...)
+}
+
+// SafeGET 回调处理是在service协程中
 func (gm *GinModule) SafeGET(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodGet, relativePath, handlers...)
 }
 
+// SafePOST 回调处理是在service协程中
 func (gm *GinModule) SafePOST(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodPost, relativePath, handlers...)
 }
 
+// SafeDELETE 回调处理是在service协程中
 func (gm *GinModule) SafeDELETE(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodDelete, relativePath, handlers...)
 }
 
+// SafePATCH 回调处理是在service协程中
 func (gm *GinModule) SafePATCH(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodPatch, relativePath, handlers...)
 }
 
+// SafePut 回调处理是在service协程中
 func (gm *GinModule) SafePut(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodPut, relativePath, handlers...)
 }
