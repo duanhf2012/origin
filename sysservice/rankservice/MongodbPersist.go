@@ -263,7 +263,7 @@ func (mp *MongoPersist) JugeTimeoutSave() bool{
 
 func (mp *MongoPersist)  persistCoroutine(){
 	defer mp.waitGroup.Done()
-	for atomic.LoadInt32(&mp.stop)==0 || mp.hasPersistData(){
+	for atomic.LoadInt32(&mp.stop)==0 {
 		//间隔时间sleep
 		time.Sleep(time.Second*1)
 
