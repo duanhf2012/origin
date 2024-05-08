@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"io"
 )
 
 type IGinProcessor interface {
@@ -60,10 +61,10 @@ func (gm *GinModule) OnInit() error {
 func (gm *GinModule) eventHandler(ev event.IEvent) {
 	ginEvent := ev.(*GinEvent)
 	for _, handler := range ginEvent.handlersChain {
-		handler(ginEvent.c)
+		handler(&ginEvent.c)
 	}
 
-	ginEvent.chanWait <- struct{}{}
+	//ginEvent.chanWait <- struct{}{}
 }
 
 func (gm *GinModule) Start() {
@@ -93,17 +94,102 @@ func (gm *GinModule) Stop(ctx context.Context) {
 	}
 }
 
-type GinEvent struct {
-	handlersChain gin.HandlersChain
+type SafeContext struct {
+	*gin.Context
 	chanWait      chan struct{}
-	c             *gin.Context
 }
+
+func (c *SafeContext) JSONAndDone(code int, obj any) {
+	c.Context.JSON(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) AsciiJSONAndDone(code int, obj any){
+	c.Context.AsciiJSON(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) PureJSONAndDone(code int, obj any){
+	c.Context.PureJSON(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) XMLAndDone(code int, obj any){
+	c.Context.XML(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) YAMLAndDone(code int, obj any){
+	c.Context.YAML(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) TOMLAndDone(code int, obj any){
+	c.Context.TOML(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) ProtoBufAndDone(code int, obj any){
+	c.Context.ProtoBuf(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) StringAndDone(code int, format string, values ...any){
+	c.Context.String(code,format,values...)
+	c.Done()
+}
+
+func (c *SafeContext) RedirectAndDone(code int, location string){
+	c.Context.Redirect(code,location)
+	c.Done()
+}
+
+func (c *SafeContext) DataAndDone(code int, contentType string, data []byte){
+	c.Context.Data(code,contentType,data)
+	c.Done()
+}
+
+func (c *SafeContext) DataFromReaderAndDone(code int, contentLength int64, contentType string, reader io.Reader, extraHeaders map[string]string){
+	c.DataFromReader(code,contentLength,contentType,reader,extraHeaders)
+	c.Done()
+}
+
+func (c *SafeContext) HTMLAndDone(code int, name string, obj any){
+	c.Context.HTML(code,name,obj)
+	c.Done()
+}
+
+func (c *SafeContext) IndentedJSONAndDone(code int, obj any){
+	c.Context.IndentedJSON(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) SecureJSONAndDone(code int, obj any){
+	c.Context.SecureJSON(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) JSONPAndDone(code int, obj any){
+	c.Context.JSONP(code,obj)
+	c.Done()
+}
+
+func (c *SafeContext) Done(){
+	c.chanWait <- struct{}{}
+}
+
+type GinEvent struct {
+	handlersChain []SafeHandlerFunc
+	c SafeContext
+}
+
+type SafeHandlerFunc func(*SafeContext)
 
 func (ge *GinEvent) GetEventType() event.EventType {
 	return event.Sys_Event_Gin_Event
 }
 
-func (gm *GinModule) handleMethod(httpMethod, relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+func (gm *GinModule) handleMethod(httpMethod, relativePath string, handlers ...SafeHandlerFunc) gin.IRoutes {
 	return gm.Engine.Handle(httpMethod, relativePath, func(c *gin.Context) {
 		for _, p := range gm.processor {
 			_, err := p.Process(c)
@@ -114,9 +200,9 @@ func (gm *GinModule) handleMethod(httpMethod, relativePath string, handlers ...g
 
 		var ev GinEvent
 		chanWait := make(chan struct{},2)
-		ev.chanWait = chanWait
+		ev.c.chanWait = chanWait
 		ev.handlersChain = handlers
-		ev.c = c
+		ev.c.Context = c
 		gm.NotifyEvent(&ev)
 
 		ctx,cancel := context.WithTimeout(context.Background(), gm.handleTimeout)
@@ -157,27 +243,27 @@ func (gm *GinModule) Put(relativePath string, handlers ...gin.HandlerFunc) gin.I
 }
 
 // SafeGET 回调处理是在service协程中
-func (gm *GinModule) SafeGET(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+func (gm *GinModule) SafeGET(relativePath string, handlers ...SafeHandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodGet, relativePath, handlers...)
 }
 
 // SafePOST 回调处理是在service协程中
-func (gm *GinModule) SafePOST(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+func (gm *GinModule) SafePOST(relativePath string, handlers ...SafeHandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodPost, relativePath, handlers...)
 }
 
 // SafeDELETE 回调处理是在service协程中
-func (gm *GinModule) SafeDELETE(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+func (gm *GinModule) SafeDELETE(relativePath string, handlers ...SafeHandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodDelete, relativePath, handlers...)
 }
 
 // SafePATCH 回调处理是在service协程中
-func (gm *GinModule) SafePATCH(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+func (gm *GinModule) SafePATCH(relativePath string, handlers ...SafeHandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodPatch, relativePath, handlers...)
 }
 
 // SafePut 回调处理是在service协程中
-func (gm *GinModule) SafePut(relativePath string, handlers ...gin.HandlerFunc) gin.IRoutes {
+func (gm *GinModule) SafePut(relativePath string, handlers ...SafeHandlerFunc) gin.IRoutes {
 	return gm.handleMethod(http.MethodPut, relativePath, handlers...)
 }
 
