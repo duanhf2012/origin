@@ -31,7 +31,7 @@ func (ss *Subscriber) PersistTopicData(topic string, topics []TopicData, retryCo
 	return ss.dataPersist.PersistTopicData(topic, topics, retryCount)
 }
 
-func (ss *Subscriber) TopicSubscribe(rpcHandler rpc.IRpcHandler, subScribeType rpc.SubscribeType, subscribeMethod SubscribeMethod, fromNodeId int, callBackRpcMethod string, topic string, customerId string, StartIndex uint64, oneBatchQuantity int32) error {
+func (ss *Subscriber) TopicSubscribe(rpcHandler rpc.IRpcHandler, subScribeType rpc.SubscribeType, subscribeMethod SubscribeMethod, fromNodeId string, callBackRpcMethod string, topic string, customerId string, StartIndex uint64, oneBatchQuantity int32) error {
 	//取消订阅时
 	if subScribeType == rpc.SubscribeType_Unsubscribe {
 		ss.UnSubscribe(customerId)

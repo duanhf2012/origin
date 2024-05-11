@@ -25,6 +25,7 @@ import (
 var sig chan os.Signal
 var nodeId string
 var preSetupService []service.IService //预安装
+var preSetupTemplateService []func()service.IService
 var profilerInterval time.Duration
 var bValid bool
 var configDir = "./config/"
@@ -169,6 +170,31 @@ func initNode(id string) {
 	serviceOrder := cluster.GetCluster().GetLocalNodeInfo().ServiceList
 	for _,serviceName:= range serviceOrder{
 		bSetup := false
+
+		//判断是否有配置模板服务
+		splitServiceName := strings.Split(serviceName,":")
+		if len(splitServiceName) == 2 {
+			serviceName = splitServiceName[0]
+			templateServiceName :=  splitServiceName[1]
+			for _,newSer := range preSetupTemplateService {
+				ser := newSer()
+				ser.OnSetup(ser)
+				if ser.GetName() == templateServiceName {
+					ser.SetName(serviceName)
+					ser.Init(ser,cluster.GetRpcClient,cluster.GetRpcServer,cluster.GetCluster().GetServiceCfg(ser.GetName()))
+					service.Setup(ser)
+
+					bSetup = true
+					break
+				}
+			}
+
+			if bSetup == false{
+				log.Error("Template service not found",log.String("service name",serviceName),log.String("template service name",templateServiceName))
+				os.Exit(1)
+			}
+		}
+
 		for _, s := range preSetupService {
 			if s.GetName() != serviceName {
 				continue
@@ -364,6 +390,12 @@ func Setup(s ...service.IService) {
 	for _, sv := range s {
 		sv.OnSetup(sv)
 		preSetupService = append(preSetupService, sv)
+	}
+}
+
+func SetupTemplate(fs ...func()service.IService){
+	for _, f := range fs {
+		preSetupTemplateService = append(preSetupTemplateService, f)
 	}
 }
 

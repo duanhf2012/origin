@@ -62,6 +62,7 @@ type Cluster struct {
 	locker         sync.RWMutex                //结点与服务关系保护锁
 	mapRpc           map[string]*NodeRpcInfo    //nodeId
 	mapServiceNode map[string]map[string]struct{} //map[serviceName]map[NodeId]
+	mapTemplateServiceNode map[string]map[string]struct{} //map[templateServiceName]map[serviceName]nodeId
 
 	callSet rpc.CallSet
 	rpcNats rpc.RpcNats
@@ -137,6 +138,20 @@ func (cls *Cluster) delServiceNode(serviceName string, nodeId string) {
 		return
 	}
 
+	//处理模板服务
+	splitServiceName := strings.Split(serviceName,":")
+	if len(splitServiceName) == 2 {
+		serviceName = splitServiceName[0]
+		templateServiceName := splitServiceName[1]
+
+		mapService := cls.mapTemplateServiceNode[templateServiceName]
+		delete(mapService,serviceName)
+
+		if len(cls.mapTemplateServiceNode[templateServiceName]) == 0 {
+			delete(cls.mapTemplateServiceNode,templateServiceName)
+		}
+	}
+
 	mapNode := cls.mapServiceNode[serviceName]
 	delete(mapNode, nodeId)
 	if len(mapNode) == 0 {
@@ -171,7 +186,20 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo(nodeInfo *NodeInfo) {
 			continue
 		}
 		mapDuplicate[serviceName] = nil
-		if _, ok := cls.mapServiceNode[serviceName]; ok == false {
+
+		//如果是模板服务，则记录模板关系
+		splitServiceName := strings.Split(serviceName,":")
+		if len(splitServiceName) == 2 {
+			serviceName = splitServiceName[0]
+			templateServiceName := splitServiceName[1]
+			//记录模板
+			if _, ok = cls.mapTemplateServiceNode[templateServiceName]; ok == false {
+				cls.mapTemplateServiceNode[templateServiceName]=map[string]struct{}{}
+			}
+			cls.mapTemplateServiceNode[templateServiceName][serviceName] = struct{}{}
+		}
+
+		if _, ok = cls.mapServiceNode[serviceName]; ok == false {
 			cls.mapServiceNode[serviceName] = make(map[string]struct{}, 1)
 		}
 		cls.mapServiceNode[serviceName][nodeInfo.NodeId] = struct{}{}
@@ -259,25 +287,29 @@ func (cls *Cluster) GetRpcClient(nodeId string) (*rpc.Client,bool) {
 	return cls.getRpcClient(nodeId)
 }
 
-func GetRpcClient(nodeId string, serviceMethod string,filterRetire bool, clientList []*rpc.Client) (error, int) {
+func GetNodeIdByTemplateService(templateServiceName string, rpcClientList []*rpc.Client, filterRetire bool) (error, []*rpc.Client) {
+	return GetCluster().GetNodeIdByTemplateService(templateServiceName, rpcClientList, filterRetire)
+}
+
+func GetRpcClient(nodeId string, serviceMethod string,filterRetire bool, clientList []*rpc.Client) (error, []*rpc.Client) {
 	if nodeId != rpc.NodeIdNull {
 		pClient,retire := GetCluster().GetRpcClient(nodeId)
 		if pClient == nil {
-			return fmt.Errorf("cannot find  nodeid %d!", nodeId), 0
+			return fmt.Errorf("cannot find  nodeid %d!", nodeId), nil
 		}
 
 		//如果需要筛选掉退休结点
 		if filterRetire == true && retire == true {
-			return fmt.Errorf("cannot find  nodeid %d!", nodeId), 0
+			return fmt.Errorf("cannot find  nodeid %d!", nodeId), nil
 		}
 
-		clientList[0] = pClient
-		return nil, 1
+		clientList = append(clientList,pClient)
+		return nil, clientList
 	}
 
 	findIndex := strings.Index(serviceMethod, ".")
 	if findIndex == -1 {
-		return fmt.Errorf("servicemethod param  %s is error!", serviceMethod), 0
+		return fmt.Errorf("servicemethod param  %s is error!", serviceMethod), nil
 	}
 	serviceName := serviceMethod[:findIndex]
 
@@ -371,6 +403,27 @@ func GetNodeByServiceName(serviceName string) map[string]struct{} {
 	mapNodeId := map[string]struct{}{}
 	for nodeId,_ := range mapNode {
 		mapNodeId[nodeId] = struct{}{}
+	}
+
+	return mapNodeId
+}
+
+// GetNodeByTemplateServiceName 通过模板服务名获取服务名,返回 map[serviceName真实服务名]NodeId
+func GetNodeByTemplateServiceName(templateServiceName string) map[string]string {
+	cluster.locker.RLock()
+	defer cluster.locker.RUnlock()
+
+	mapServiceName := cluster.mapTemplateServiceNode[templateServiceName]
+	mapNodeId := make(map[string]string,9)
+	for serviceName := range mapServiceName {
+		mapNode, ok := cluster.mapServiceNode[serviceName]
+		if ok == false {
+			return nil
+		}
+
+		for nodeId,_ := range mapNode {
+			mapNodeId[serviceName] = nodeId
+		}
 	}
 
 	return mapNodeId

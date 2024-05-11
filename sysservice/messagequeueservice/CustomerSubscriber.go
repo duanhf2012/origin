@@ -16,7 +16,7 @@ type CustomerSubscriber struct {
 	rpc.IRpcHandler
 	topic             string
 	subscriber        *Subscriber
-	fromNodeId        int
+	fromNodeId        string
 	callBackRpcMethod string
 	serviceName       string
 	StartIndex        uint64
@@ -37,7 +37,7 @@ const (
 	MethodLast   SubscribeMethod = 1 //Last模式，以该消费者上次记录的位置开始订阅
 )
 
-func (cs *CustomerSubscriber) trySetSubscriberBaseInfo(rpcHandler rpc.IRpcHandler, ss *Subscriber, topic string, subscribeMethod SubscribeMethod, customerId string, fromNodeId int, callBackRpcMethod string, startIndex uint64, oneBatchQuantity int32) error {
+func (cs *CustomerSubscriber) trySetSubscriberBaseInfo(rpcHandler rpc.IRpcHandler, ss *Subscriber, topic string, subscribeMethod SubscribeMethod, customerId string, fromNodeId string, callBackRpcMethod string, startIndex uint64, oneBatchQuantity int32) error {
 	cs.subscriber = ss
 	cs.fromNodeId = fromNodeId
 	cs.callBackRpcMethod = callBackRpcMethod
@@ -85,7 +85,7 @@ func (cs *CustomerSubscriber) trySetSubscriberBaseInfo(rpcHandler rpc.IRpcHandle
 }
 
 // 开始订阅
-func (cs *CustomerSubscriber) Subscribe(rpcHandler rpc.IRpcHandler, ss *Subscriber, topic string, subscribeMethod SubscribeMethod, customerId string, fromNodeId int, callBackRpcMethod string, startIndex uint64, oneBatchQuantity int32) error {
+func (cs *CustomerSubscriber) Subscribe(rpcHandler rpc.IRpcHandler, ss *Subscriber, topic string, subscribeMethod SubscribeMethod, customerId string, fromNodeId string, callBackRpcMethod string, startIndex uint64, oneBatchQuantity int32) error {
 	err := cs.trySetSubscriberBaseInfo(rpcHandler, ss, topic, subscribeMethod, customerId, fromNodeId, callBackRpcMethod, startIndex, oneBatchQuantity)
 	if err != nil {
 		return err

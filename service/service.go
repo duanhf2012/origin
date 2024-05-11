@@ -19,6 +19,8 @@ import (
 var timerDispatcherLen = 100000
 var maxServiceEventChannelNum = 2000000
 
+
+
 type IService interface {
 	concurrent.IConcurrent
 	Init(iService IService,getClientFun rpc.FuncRpcClient,getServerFun rpc.FuncRpcServer,serviceCfg interface{})

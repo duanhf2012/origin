@@ -270,7 +270,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []Node
 	}
 
 	if nodeId != rpc.NodeIdNull && (len(nodeInfoList) != 1) {
-		return discoveryInfo, nil,rpcMode, fmt.Errorf("%d configurations were found for the configuration with node ID %d!", len(nodeInfoList), nodeId)
+		return discoveryInfo, nil,rpcMode, fmt.Errorf("nodeid %s configuration error in NodeList", nodeId)
 	}
 
 	for i, _ := range nodeInfoList {
@@ -382,12 +382,24 @@ func (cls *Cluster) parseLocalCfg() {
 
 	cls.mapRpc[cls.localNodeInfo.NodeId] = &rpcInfo
 
-	for _, sName := range cls.localNodeInfo.ServiceList {
-		if _, ok := cls.mapServiceNode[sName]; ok == false {
-			cls.mapServiceNode[sName] = make(map[string]struct{})
+	for _, serviceName := range cls.localNodeInfo.ServiceList {
+		splitServiceName := strings.Split(serviceName,":")
+		if len(splitServiceName) == 2 {
+			serviceName = splitServiceName[0]
+			templateServiceName := splitServiceName[1]
+			//记录模板
+			if _, ok := cls.mapTemplateServiceNode[templateServiceName]; ok == false {
+				cls.mapTemplateServiceNode[templateServiceName]=map[string]struct{}{}
+			}
+			cls.mapTemplateServiceNode[templateServiceName][serviceName] = struct{}{}
 		}
 
-		cls.mapServiceNode[sName][cls.localNodeInfo.NodeId] = struct{}{}
+
+		if _, ok := cls.mapServiceNode[serviceName]; ok == false {
+			cls.mapServiceNode[serviceName] = make(map[string]struct{})
+		}
+
+		cls.mapServiceNode[serviceName][cls.localNodeInfo.NodeId] = struct{}{}
 	}
 }
 
@@ -403,6 +415,7 @@ func (cls *Cluster) InitCfg(localNodeId string) error {
 	cls.localServiceCfg = map[string]interface{}{}
 	cls.mapRpc = map[string]*NodeRpcInfo{}
 	cls.mapServiceNode = map[string]map[string]struct{}{}
+	cls.mapTemplateServiceNode = map[string]map[string]struct{}{}
 
 	//加载本地结点的NodeList配置
 	discoveryInfo, nodeInfoList,rpcMode, err := cls.readLocalClusterConfig(localNodeId)
@@ -436,12 +449,37 @@ func (cls *Cluster) IsConfigService(serviceName string) bool {
 	return ok
 }
 
+func (cls *Cluster) GetNodeIdByTemplateService(templateServiceName string, rpcClientList []*rpc.Client, filterRetire bool) (error, []*rpc.Client) {
+	cls.locker.RLock()
+	defer cls.locker.RUnlock()
 
-func (cls *Cluster) GetNodeIdByService(serviceName string, rpcClientList []*rpc.Client, filterRetire bool) (error, int) {
+	mapServiceName := cls.mapTemplateServiceNode[templateServiceName]
+	 for serviceName := range mapServiceName {
+		 mapNodeId, ok := cls.mapServiceNode[serviceName]
+		 if ok == true {
+			 for nodeId, _ := range mapNodeId {
+				 pClient,retire := GetCluster().getRpcClient(nodeId)
+				 if pClient == nil || pClient.IsConnected() == false {
+					 continue
+				 }
+
+				 //如果需要筛选掉退休的，对retire状态的结点略过
+				 if filterRetire == true && retire == true {
+					 continue
+				 }
+
+				 rpcClientList = append(rpcClientList,pClient)
+			 }
+		 }
+	 }
+
+	return nil, rpcClientList
+}
+
+func (cls *Cluster) GetNodeIdByService(serviceName string, rpcClientList []*rpc.Client, filterRetire bool) (error, []*rpc.Client) {
 	cls.locker.RLock()
 	defer cls.locker.RUnlock()
 	mapNodeId, ok := cls.mapServiceNode[serviceName]
-	count := 0
 	if ok == true {
 		for nodeId, _ := range mapNodeId {
 			pClient,retire := GetCluster().getRpcClient(nodeId)
@@ -454,15 +492,11 @@ func (cls *Cluster) GetNodeIdByService(serviceName string, rpcClientList []*rpc.
 				continue
 			}
 
-			rpcClientList[count] = pClient
-			count++
-			if count >= cap(rpcClientList) {
-				break
-			}
+			rpcClientList = append(rpcClientList,pClient)
 		}
 	}
 
-	return nil, count
+	return nil, rpcClientList
 }
 
 func (cls *Cluster) GetServiceCfg(serviceName string) interface{} {
