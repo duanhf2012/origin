@@ -325,6 +325,10 @@ func (cls *Cluster) readLocalService(localNodeId string) error {
 		//保存公共配置
 		for _, s := range cls.localNodeInfo.ServiceList {
 			for {
+				splitServiceName := strings.Split(s,":")
+				if len(splitServiceName) == 2 {
+					s = splitServiceName[0]
+				}
 				//取公共服务配置
 				pubCfg, ok := serviceConfig[s]
 				if ok == true {
@@ -355,6 +359,11 @@ func (cls *Cluster) readLocalService(localNodeId string) error {
 
 	//组合所有的配置
 	for _, s := range cls.localNodeInfo.ServiceList {
+		splitServiceName := strings.Split(s,":")
+		if len(splitServiceName) == 2 {
+			s = splitServiceName[0]
+		}
+
 		//先从NodeService中找
 		var serviceCfg interface{}
 		var ok bool
