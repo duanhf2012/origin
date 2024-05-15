@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"github.com/duanhf2012/origin/v2/event"
+	"errors"
+	"reflect"
 )
 
 var configDir = "./config/"
@@ -431,6 +433,25 @@ func GetNodeByTemplateServiceName(templateServiceName string) map[string]string 
 
 func (cls *Cluster) GetGlobalCfg() interface{} {
 	return cls.globalCfg
+}
+
+
+func (cls *Cluster) ParseGlobalCfg(cfg interface{}) error{
+	if  cls.globalCfg == nil {
+		return errors.New("no service configuration found")
+	}
+
+	rv := reflect.ValueOf(cls.globalCfg)
+	if  rv.Kind() == reflect.Ptr && rv.IsNil() {
+		return errors.New("no service configuration found")
+	}
+
+	bytes,err := json.Marshal(cls.globalCfg)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(bytes,cfg)
 }
 
 func (cls *Cluster) GetNodeInfo(nodeId string) (NodeInfo,bool) {

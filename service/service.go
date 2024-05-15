@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"github.com/duanhf2012/origin/v2/concurrent"
+	"encoding/json"
 )
 
 var timerDispatcherLen = 100000
@@ -293,6 +294,24 @@ func (s *Service) Stop(){
 
 func (s *Service) GetServiceCfg()interface{}{
 	return s.serviceCfg
+}
+
+func (s *Service) ParseServiceCfg(cfg interface{}) error{
+	if s.serviceCfg == nil {
+		return errors.New("no service configuration found")
+	}
+
+	rv := reflect.ValueOf(s.serviceCfg)
+	if  rv.Kind() == reflect.Ptr && rv.IsNil() {
+		return errors.New("no service configuration found")
+	}
+
+	bytes,err := json.Marshal(s.serviceCfg)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(bytes,cfg)
 }
 
 func (s *Service) GetProfiler() *profiler.Profiler{
