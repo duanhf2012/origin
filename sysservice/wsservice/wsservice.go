@@ -129,7 +129,7 @@ func (slf *WSClient) Run() {
 	for{
 		bytes,err := slf.wsConn.ReadMsg()
 		if err != nil {
-			log.Debug("read client id %d is error:%+v",slf.id,err)
+			log.Debug("read client id %s is error:%+v",slf.id,err)
 			break
 		}
 		data,err:=slf.wsService.process.Unmarshal(slf.id,bytes)
@@ -153,7 +153,7 @@ func (ws *WSService) SendMsg(clientid string,msg interface{}) error{
 	client,ok := ws.mapClient[clientid]
 	if ok == false{
 		ws.mapClientLocker.Unlock()
-		return fmt.Errorf("client %d is disconnect!",clientid)
+		return fmt.Errorf("client %s is disconnect!",clientid)
 	}
 
 	ws.mapClientLocker.Unlock()
