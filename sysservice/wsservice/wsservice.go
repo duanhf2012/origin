@@ -95,9 +95,9 @@ func (ws *WSService) WSEventHandler(ev event.IEvent) {
 	case WPT_DisConnected:
 		pack.MsgProcessor.DisConnectedRoute(pack.ClientId)
 	case WPT_UnknownPack:
-		pack.MsgProcessor.UnknownMsgRoute(pack.ClientId,pack.Data)
+		pack.MsgProcessor.UnknownMsgRoute(pack.ClientId,pack.Data,ws.recyclerReaderBytes)
 	case WPT_Pack:
-		pack.MsgProcessor.MsgRoute(pack.ClientId,pack.Data)
+		pack.MsgProcessor.MsgRoute(pack.ClientId,pack.Data,ws.recyclerReaderBytes)
 	}
 }
 
@@ -180,3 +180,5 @@ func (ws *WSService) Close(clientid string) {
 	return
 }
 
+func (ws *WSService) recyclerReaderBytes(data []byte) {
+}

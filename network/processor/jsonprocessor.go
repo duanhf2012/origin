@@ -45,8 +45,10 @@ func (jsonProcessor *JsonProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // must goroutine safe
-func (jsonProcessor *JsonProcessor ) MsgRoute(clientId string,msg interface{}) error{
+func (jsonProcessor *JsonProcessor ) MsgRoute(clientId string,msg interface{},recyclerReaderBytes func(data []byte)) error{
 	pPackInfo := msg.(*JsonPackInfo)
+	defer recyclerReaderBytes(pPackInfo.rawMsg)
+
 	v,ok := jsonProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
 		return fmt.Errorf("cannot find msgtype %d is register!",pPackInfo.typ)
@@ -58,7 +60,6 @@ func (jsonProcessor *JsonProcessor ) MsgRoute(clientId string,msg interface{}) e
 
 func (jsonProcessor *JsonProcessor) Unmarshal(clientId string,data []byte) (interface{}, error) {
 	typeStruct := struct {Type int `json:"typ"`}{}
-	defer jsonProcessor.ReleaseBytes(data)
 	err := json.Unmarshal(data, &typeStruct)
 	if err != nil {
 		return nil, err
@@ -76,7 +77,7 @@ func (jsonProcessor *JsonProcessor) Unmarshal(clientId string,data []byte) (inte
 		return nil,err
 	}
 
-	return &JsonPackInfo{typ:msgType,msg:msgData},nil
+	return &JsonPackInfo{typ:msgType,msg:msgData,rawMsg: data},nil
 }
 
 func (jsonProcessor *JsonProcessor) Marshal(clientId string,msg interface{}) ([]byte, error) {
@@ -104,7 +105,8 @@ func (jsonProcessor *JsonProcessor) MakeRawMsg(msgType uint16,msg []byte) *JsonP
 	return &JsonPackInfo{typ:msgType,rawMsg:msg}
 }
 
-func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId string,msg interface{}){
+func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId string,msg interface{},recyclerReaderBytes func(data []byte)){
+	defer recyclerReaderBytes(msg.([]byte))
 	if jsonProcessor.unknownMessageHandler==nil {
 		log.Debug("Unknown message",log.String("clientId",clientId))
 		return

@@ -3,9 +3,9 @@ package processor
 
 type IProcessor interface {
 	// must goroutine safe
-	MsgRoute(clientId string,msg interface{}) error
+	MsgRoute(clientId string,msg interface{},recyclerReaderBytes func(data []byte)) error
 	//must goroutine safe
-	UnknownMsgRoute(clientId string,msg interface{})
+	UnknownMsgRoute(clientId string,msg interface{},recyclerReaderBytes func(data []byte))
 	// connect event
 	ConnectedRoute(clientId string)
 	DisConnectedRoute(clientId string)

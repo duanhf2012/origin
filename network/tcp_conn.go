@@ -129,6 +129,13 @@ func (tcpConn *TCPConn) ReadMsg() ([]byte, error) {
 	return tcpConn.msgParser.Read(tcpConn)
 }
 
+func (tcpConn *TCPConn) GetRecyclerReaderBytes() func (data []byte) {
+	bytePool := tcpConn.msgParser.IBytesMempool
+	return func(data []byte) {
+		bytePool.ReleaseBytes(data)
+	}
+}
+
 func (tcpConn *TCPConn) ReleaseReadMsg(byteBuff []byte){
 	tcpConn.msgParser.ReleaseBytes(byteBuff)
 }

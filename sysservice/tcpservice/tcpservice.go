@@ -107,11 +107,15 @@ func (tcpService *TcpService) TcpEventHandler(ev event.IEvent) {
 	case TPT_DisConnected:
 		tcpService.process.DisConnectedRoute(pack.ClientId)
 	case TPT_UnknownPack:
-		tcpService.process.UnknownMsgRoute(pack.ClientId,pack.Data)
+		tcpService.process.UnknownMsgRoute(pack.ClientId,pack.Data,tcpService.recyclerReaderBytes)
 	case TPT_Pack:
-		tcpService.process.MsgRoute(pack.ClientId,pack.Data)
+		tcpService.process.MsgRoute(pack.ClientId,pack.Data,tcpService.recyclerReaderBytes)
 	}
 }
+
+func (tcpService *TcpService) recyclerReaderBytes(data []byte) {
+}
+
 
 func (tcpService *TcpService) SetProcessor(process processor.IProcessor,handler event.IEventHandler){
 	tcpService.process = process
