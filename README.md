@@ -1181,6 +1181,8 @@ func (slf *TestTcpService) OnRequest (clientid string,msg proto.Message){
 * log/log.go:日志的封装，可以使用它构建对象记录业务文件日志
 * util:在该目录下，有常用的uuid,hash,md5,协程封装等工具库
 * https://github.com/duanhf2012/originservice: 其他扩展支持的服务可以在该工程上看到，目前支持firebase推送的封装。
+* https://github.com/duanhf2012/origingame: 基础游戏服务器的框架
+* etcd与nats开发环境搭建可以从https://github.com/duanhf2012/originserver_v2下的docker-compose获取
 
 备注:
 -----
