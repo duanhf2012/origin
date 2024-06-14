@@ -58,6 +58,7 @@ type Service struct {
 	serviceCfg     interface{}
 	goroutineNum   int32
 	startStatus    bool
+	isRelease      int32
 	retire int32
 	eventProcessor event.IEventProcessor
 	profiler *profiler.Profiler //性能分析器
@@ -148,6 +149,7 @@ func (s *Service) Init(iService IService,getClientFun rpc.FuncRpcClient,getServe
 
 func (s *Service) Start() {
 	s.startStatus = true
+	atomic.StoreInt32(&s.isRelease,0)
 	var waitRun sync.WaitGroup
 
 	for i:=int32(0);i< s.goroutineNum;i++{
@@ -176,6 +178,7 @@ func (s *Service) Run() {
 		select {
 		case <- s.closeSig:
 			bStop = true
+			s.Release()
 			concurrent.Close()
 		case cb:=<-concurrentCBChannel:
 			concurrent.DoCallback(cb)
@@ -248,10 +251,6 @@ func (s *Service) Run() {
 		}
 
 		if bStop == true {
-			if atomic.AddInt32(&s.goroutineNum,-1)<=0 {
-				s.startStatus = false
-				s.Release()
-			}
 			break
 		}
 	}
@@ -274,8 +273,11 @@ func (s *Service) Release(){
 			log.Dump(string(buf[:l]),log.String("error",errString))
 		}
 	}()
-	
-	s.self.OnRelease()
+
+	if atomic.AddInt32(&s.isRelease,-1) == -1{
+		s.self.OnRelease()
+	}
+
 }
 
 func (s *Service) OnRelease(){
@@ -324,10 +326,6 @@ func (s *Service) RegEventReceiverFunc(eventType event.EventType, receiver event
 
 func (s *Service) UnRegEventReceiverFunc(eventType event.EventType, receiver event.IEventHandler){
 	s.eventProcessor.UnRegEventReceiverFun(eventType, receiver)
-}
-
-func (s *Service) IsSingleCoroutine() bool {
-	return s.goroutineNum == 1
 }
 
 func (s *Service) RegRawRpc(rpcMethodId uint32,rawRpcCB rpc.RawRpcCallBack){

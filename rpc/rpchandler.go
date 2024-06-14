@@ -110,7 +110,6 @@ type IRpcHandler interface {
 	GoNode(nodeId string, serviceMethod string, args interface{}) error
 	RawGoNode(rpcProcessorType RpcProcessorType, nodeId string, rpcMethodId uint32, serviceName string, rawArgs []byte) error
 	CastGo(serviceMethod string, args interface{}) error
-	IsSingleCoroutine() bool
 	UnmarshalInParam(rpcProcessor IRpcProcessor, serviceMethod string, rawRpcMethodId uint32, inParam []byte) (interface{}, error)
 	GetRpcServer() FuncRpcServer
 }
@@ -537,10 +536,6 @@ func (handler *RpcHandler) asyncCallRpc(timeout time.Duration,nodeId string, ser
 
 func (handler *RpcHandler) GetName() string {
 	return handler.rpcHandler.GetName()
-}
-
-func (handler *RpcHandler) IsSingleCoroutine() bool {
-	return handler.rpcHandler.IsSingleCoroutine()
 }
 
 func (handler *RpcHandler) CallWithTimeout(timeout time.Duration,serviceMethod string, args interface{}, reply interface{}) error {
