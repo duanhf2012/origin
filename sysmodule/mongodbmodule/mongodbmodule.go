@@ -5,7 +5,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/x/bsonx"
 	"time"
 )
 
@@ -86,12 +85,12 @@ func (s *Session) EnsureUniqueIndex(db string, collection string, indexKeys [][]
 func (s *Session) ensureIndex(db string, collection string, indexKeys [][]string, bBackground bool, unique bool, sparse bool, asc bool) error {
 	var indexes []mongo.IndexModel
 	for _, keys := range indexKeys {
-		keysDoc := bsonx.Doc{}
+		keysDoc := bson.D{}
 		for _, key := range keys {
 			if asc {
-				keysDoc = keysDoc.Append(key, bsonx.Int32(1))
+				keysDoc = append(keysDoc, bson.E{Key:key,Value:1})
 			} else {
-				keysDoc = keysDoc.Append(key, bsonx.Int32(-1))
+				keysDoc = append(keysDoc, bson.E{Key:key,Value:-1})
 			}
 
 		}
