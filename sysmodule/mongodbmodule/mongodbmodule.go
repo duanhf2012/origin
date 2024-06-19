@@ -47,6 +47,10 @@ func (mm *MongoModule) Start() error {
 	return nil
 }
 
+func (mm *MongoModule) Stop() error {
+	return mm.client.Disconnect(context.Background())
+}
+
 func (mm *MongoModule) TakeSession() Session {
 	return Session{Client: mm.client, maxOperatorTimeOut: mm.maxOperatorTimeOut}
 }
