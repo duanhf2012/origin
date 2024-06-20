@@ -29,6 +29,7 @@ var preSetupTemplateService []func()service.IService
 var profilerInterval time.Duration
 var bValid bool
 var configDir = "./config/"
+var NodeIsRun = false
 
 const(
 	SingleStop   syscall.Signal = 10
@@ -354,13 +355,14 @@ func startNode(args interface{}) error {
 	cluster.GetCluster().Start()
 	
 	//6.监听程序退出信号&性能报告
-	bRun := true
+
 	var pProfilerTicker *time.Ticker = &time.Ticker{}
 	if profilerInterval > 0 {
 		pProfilerTicker = time.NewTicker(profilerInterval)
 	}
 
-	for bRun {
+	NodeIsRun = true
+	for NodeIsRun {
 		select {
 		case s := <-sig:
 			signal := s.(syscall.Signal)
@@ -368,7 +370,7 @@ func startNode(args interface{}) error {
 				log.Info("receipt retire signal.")
 				notifyAllServiceRetire()
 			}else {
-				bRun = false
+				NodeIsRun = false
 				log.Info("receipt stop signal.")
 			}
 		case <-pProfilerTicker.C:
