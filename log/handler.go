@@ -10,16 +10,20 @@ import (
 	"sync"
 )
 
+const defaultSkip = 7
 type IOriginHandler interface {
 	slog.Handler
 	Lock()
 	UnLock()
+	SetSkip(skip int)
+	GetSkip() int
 }
 
 type BaseHandler struct {
 	addSource bool
 	w io.Writer
 	locker sync.Mutex
+	skip int
 }
 
 type OriginTextHandler struct {
@@ -30,6 +34,14 @@ type OriginTextHandler struct {
 type OriginJsonHandler struct {
 	BaseHandler
 	*slog.JSONHandler
+}
+
+func (bh *BaseHandler) SetSkip(skip int){
+	bh.skip = skip
+}
+
+func (bh *BaseHandler) GetSkip() int{
+	return bh.skip
 }
 
 func getStrLevel(level slog.Level) string{
@@ -78,6 +90,7 @@ func NewOriginTextHandler(level slog.Level,w io.Writer,addSource bool,replaceAtt
 		ReplaceAttr: replaceAttr,
 	})
 
+	textHandler.skip  = defaultSkip
 	return &textHandler
 }
 
@@ -124,6 +137,7 @@ func NewOriginJsonHandler(level slog.Level,w io.Writer,addSource bool,replaceAtt
 		ReplaceAttr: replaceAttr,
 	})
 
+	jsonHandler.skip = defaultSkip
 	return &jsonHandler
 }
 
@@ -141,7 +155,7 @@ func (oh *OriginJsonHandler) Handle(context context.Context, record slog.Record)
 func (b *BaseHandler) Fill(context context.Context, record *slog.Record) {
 	if b.addSource {
 		var pcs [1]uintptr
-		runtime.Callers(7, pcs[:])
+		runtime.Callers(b.skip, pcs[:])
 		record.PC = pcs[0]
 	}
 }

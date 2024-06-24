@@ -239,6 +239,10 @@ func (iw *IoWriter) swichFile() error{
 	return nil
 }
 
+func GetDefaultHandler() IOriginHandler{
+	return gLogger.(*Logger).Slogger.Handler().(IOriginHandler)
+}
+
 func NewTextLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (ILogger,error){
 	var logger Logger
 	logger.ioWriter.filePath = pathName
