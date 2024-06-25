@@ -58,7 +58,7 @@ func init() {
 	console.RegisterCommandString("loglevel", "debug", "<-loglevel debug|release|warning|error|fatal> Set loglevel.", setLevel)
 	console.RegisterCommandString("logpath", "", "<-logpath path> Set log file path.", setLogPath)
 	console.RegisterCommandInt("logsize", 0, "<-logsize size> Set log size(MB).", setLogSize)
-	console.RegisterCommandInt("logchannelcap", 0, "<-logchannelcap num> Set log channel cap.", setLogChannelCapNum)
+	console.RegisterCommandInt("logchannelcap", -1, "<-logchannelcap num> Set log channel cap.", setLogChannelCapNum)
 	console.RegisterCommandString("pprof", "", "<-pprof ip:port> Open performance analysis.", setPprof)
 }
 
@@ -504,6 +504,10 @@ func setLogChannelCapNum(args interface{}) error {
 	logChannelCap,ok := args.(int)
 	if ok == false{
 		return errors.New("param logsize is error")
+	}
+
+	if logChannelCap == -1 {
+		return nil
 	}
 
 	log.LogChannelCap = logChannelCap
