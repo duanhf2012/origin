@@ -160,6 +160,12 @@ func (dc *OriginDiscoveryMaster)  OnNatsDisconnect(){
 }
 
 func (ds *OriginDiscoveryMaster) OnNodeConnected(nodeId string) {
+	var notifyDiscover rpc.SubscribeDiscoverNotify
+	notifyDiscover.IsFull = true
+	notifyDiscover.NodeInfo = ds.nodeInfo
+	notifyDiscover.MasterNodeId = cluster.GetLocalNodeInfo().NodeId
+
+	ds.GoNode(nodeId, SubServiceDiscover, &notifyDiscover)
 }
 
 func (ds *OriginDiscoveryMaster) OnNodeDisconnect(nodeId string) {
