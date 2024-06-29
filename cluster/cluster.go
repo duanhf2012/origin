@@ -469,6 +469,11 @@ func (cls *Cluster) GetNodeInfo(nodeId string) (NodeInfo,bool) {
 func (dc *Cluster) CanDiscoveryService(fromMasterNodeId string,serviceName string) bool{
 	canDiscovery := true
 
+	splitServiceName := strings.Split(serviceName,":")
+	if len(splitServiceName) == 2 {
+		serviceName = splitServiceName[0]
+	}
+
 	for i:=0;i<len(dc.GetLocalNodeInfo().DiscoveryService);i++{
 		masterNodeId := dc.GetLocalNodeInfo().DiscoveryService[i].MasterNodeId
 		//无效的配置，则跳过
