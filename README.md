@@ -661,51 +661,7 @@ Module1 Release.
 第四章：事件使用
 ----------------
 
-事件是origin中一个重要的组成部分，可以在同一个node中的service与service或者与module之间进行事件通知。系统内置的几个服务，如：TcpService/HttpService等都是通过事件功能实现。他也是一个典型的观察者设计模型。在event中有两个类型的interface，一个是event.IEventProcessor它提供注册与卸载功能，另一个是event.IEventHandler提供消息广播等功能。
-
-在目录simple_event/TestService4.go中
-
-```
-package simple_event
-
-import (
-    "github.com/duanhf2012/origin/v2/event"
-    "github.com/duanhf2012/origin/v2/node"
-    "github.com/duanhf2012/origin/v2/service"
-    "time"
-)
-
-const (
-    //自定义事件类型，必需从event.Sys_Event_User_Define开始
-    //event.Sys_Event_User_Define以内给系统预留
-    EVENT1 event.EventType =event.Sys_Event_User_Define+1
-)
-
-func init(){
-    node.Setup(&TestService4{})
-}
-
-type TestService4 struct {
-    service.Service
-}
-
-func (slf *TestService4) OnInit() error {
-    //10秒后触发广播事件
-    slf.AfterFunc(time.Second*10,slf.TriggerEvent)
-    return nil
-}
-
-func (slf *TestService4) TriggerEvent(){
-    //广播事件，传入event.Event对象，类型为EVENT1,Data可以自定义任何数据
-    //这样，所有监听者都可以收到该事件
-    slf.GetEventHandler().NotifyEvent(&event.Event{
-        Type: EVENT1,
-        Data: "event data.",
-    })
-}
-
-
-```
+事件是origin中一个重要的组成部分，可以在服务与各module之间进行事件通知。它也是一个典型的观察者设计模型。在event中有两个类型的interface，一个是event.IEventProcessor它提供注册与卸载功能，另一个是event.IEventHandler提供消息广播等功能。
 
 在目录simple_event/TestService5.go中
 
@@ -713,53 +669,68 @@ func (slf *TestService4) TriggerEvent(){
 package simple_event
 
 import (
-    "fmt"
-    "github.com/duanhf2012/origin/v2/event"
-    "github.com/duanhf2012/origin/v2/node"
-    "github.com/duanhf2012/origin/v2/service"
+	"fmt"
+	"github.com/duanhf2012/origin/v2/event"
+	"github.com/duanhf2012/origin/v2/node"
+	"github.com/duanhf2012/origin/v2/service"
+	"github.com/duanhf2012/origin/v2/util/timer"
+	"time"
 )
 
-func init(){
-    node.Setup(&TestService5{})
+func init() {
+	node.Setup(&TestService5{})
 }
 
+const (
+	//自定义事件类型，必需从event.Sys_Event_User_Define开始
+	//event.Sys_Event_User_Define以内给系统预留
+	EVENT1 event.EventType = event.Sys_Event_User_Define + 1
+)
+
 type TestService5 struct {
-    service.Service
+	service.Service
 }
 
 type TestModule struct {
-    service.Module
+	service.Module
 }
 
-func (slf *TestModule) OnInit() error{
-    //在当前node中查找TestService4
-    pService := node.GetService("TestService4")
+func (slf *TestModule) OnInit() error {
+	//在TestModule中注册监听EVENT1事件
+	slf.GetEventProcessor().RegEventReceiverFunc(EVENT1, slf.GetEventHandler(), slf.OnModuleEvent)
 
-    //在TestModule中，往TestService4中注册EVENT1类型事件监听
-    pService.(*TestService4).GetEventProcessor().RegEventReciverFunc(EVENT1,slf.GetEventHandler(),slf.OnModuleEvent)
-    return nil
+	return nil
 }
 
-func (slf *TestModule) OnModuleEvent(ev event.IEvent){
-    event := ev.(*event.Event)
-    fmt.Printf("OnModuleEvent type :%d data:%+v\n",event.GetEventType(),event.Data)
+// OnModuleEvent 模块监听事件回调
+func (slf *TestModule) OnModuleEvent(ev event.IEvent) {
+	event := ev.(*event.Event)
+	fmt.Printf("OnModuleEvent type :%d data:%+v\n", event.GetEventType(), event.Data)
 }
 
-
-//服务初始化函数，在安装服务时，服务将自动调用OnInit函数
+// OnInit 服务初始化函数，在安装服务时，服务将自动调用OnInit函数
 func (slf *TestService5) OnInit() error {
-    //通过服务名获取服务对象
-    pService := node.GetService("TestService4")
+	//在服务中注册监听EVENT1类型事件
+	slf.RegEventReceiverFunc(EVENT1, slf.GetEventHandler(), slf.OnServiceEvent)
+	slf.AddModule(&TestModule{})
 
-    ////在TestModule中，往TestService4中注册EVENT1类型事件监听
-    pService.(*TestService4).GetEventProcessor().RegEventReciverFunc(EVENT1,slf.GetEventHandler(),slf.OnServiceEvent)
-    slf.AddModule(&TestModule{})
-    return nil
+	slf.AfterFunc(time.Second*10, slf.TriggerEvent)
+	return nil
 }
 
-func (slf *TestService5) OnServiceEvent(ev event.IEvent){
-    event := ev.(*event.Event)
-    fmt.Printf("OnServiceEvent type :%d data:%+v\n",event.Type,event.Data)
+// OnServiceEvent 服务监听事件回调
+func (slf *TestService5) OnServiceEvent(ev event.IEvent) {
+	event := ev.(*event.Event)
+	fmt.Printf("OnServiceEvent type :%d data:%+v\n", event.Type, event.Data)
+}
+
+func (slf *TestService5) TriggerEvent(t *timer.Timer) {
+	//广播事件，传入event.Event对象，类型为EVENT1,Data可以自定义任何数据
+	//这样，所有监听者都可以收到该事件
+	slf.GetEventHandler().NotifyEvent(&event.Event{
+		Type: EVENT1,
+		Data: "event data.",
+	})
 }
 
 
@@ -768,8 +739,8 @@ func (slf *TestService5) OnServiceEvent(ev event.IEvent){
 程序运行10秒后，调用slf.TriggerEvent函数广播事件，于是在TestService5中会收到
 
 ```
-OnServiceEvent type :1001 data:event data.
-OnModuleEvent type :1001 data:event data.
+OnServiceEvent type :2 data:event data.
+OnModuleEvent type :2 data:event data.
 ```
 
 在上面的TestModule中监听的事情，当这个Module被Release时监听会自动卸载。
