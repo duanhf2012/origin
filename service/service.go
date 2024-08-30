@@ -151,28 +151,28 @@ func (s *Service) Start() {
 	s.startStatus = true
 	atomic.StoreInt32(&s.isRelease,0)
 	var waitRun sync.WaitGroup
+	log.Info(s.GetName()+" service is running",)
+	s.self.(IService).OnStart()
 
 	for i:=int32(0);i< s.goroutineNum;i++{
 		s.wg.Add(1)
 		waitRun.Add(1)
 		go func(){
-			log.Info(s.GetName()+" service is running",)
 			waitRun.Done()
-			s.Run()
+			s.run()
 		}()
 	}
 
 	waitRun.Wait()
 }
 
-func (s *Service) Run() {
+func (s *Service) run() {
 	defer s.wg.Done()
 	var bStop = false
 	
 	concurrent := s.IConcurrent.(*concurrent.Concurrent)
 	concurrentCBChannel := concurrent.GetCallBackChannel()
 
-	s.self.(IService).OnStart()
 	for{
 		var analyzer *profiler.Analyzer
 		select {
