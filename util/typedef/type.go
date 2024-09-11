@@ -17,7 +17,7 @@ type Integer interface {
 }
 
 type Number interface {
-	Signed|Unsigned
+	Signed|Unsigned|Float
 }
 
 type Ordered interface {
