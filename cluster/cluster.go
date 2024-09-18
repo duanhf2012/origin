@@ -466,7 +466,7 @@ func (cls *Cluster) GetNodeInfo(nodeId string) (NodeInfo,bool) {
 	return nodeInfo.nodeInfo,true
 }
 
-func (dc *Cluster) CanDiscoveryService(fromMasterNodeId string,serviceName string) bool{
+func (cls *Cluster) CanDiscoveryService(fromMasterNodeId string,serviceName string) bool{
 	canDiscovery := true
 
 	splitServiceName := strings.Split(serviceName,":")
@@ -474,16 +474,16 @@ func (dc *Cluster) CanDiscoveryService(fromMasterNodeId string,serviceName strin
 		serviceName = splitServiceName[0]
 	}
 
-	for i:=0;i<len(dc.GetLocalNodeInfo().DiscoveryService);i++{
-		masterNodeId := dc.GetLocalNodeInfo().DiscoveryService[i].MasterNodeId
+	for i:=0;i<len(cls.GetLocalNodeInfo().DiscoveryService);i++{
+		masterNodeId := cls.GetLocalNodeInfo().DiscoveryService[i].MasterNodeId
 		//无效的配置，则跳过
-		if masterNodeId == rpc.NodeIdNull && len(dc.GetLocalNodeInfo().DiscoveryService[i].ServiceList)==0 {
+		if masterNodeId == rpc.NodeIdNull && len(cls.GetLocalNodeInfo().DiscoveryService[i].ServiceList)==0 {
 			continue
 		}
 
 		canDiscovery = false
 		if masterNodeId == fromMasterNodeId || masterNodeId == rpc.NodeIdNull {
-			for _,discoveryService := range dc.GetLocalNodeInfo().DiscoveryService[i].ServiceList {
+			for _,discoveryService := range cls.GetLocalNodeInfo().DiscoveryService[i].ServiceList {
 				if discoveryService == serviceName {
 					return true
 				}
