@@ -196,3 +196,8 @@ func (fg *FrameGroup) CancelTimer(timerID FrameTimerID) {
 	fg.preGlobalFrameNum = 0
 	fg.refreshMinFrame()
 }
+
+func (fg *FrameGroup) Close(){
+	fg.ft.removeGroup(fg.groupID, fg.preGlobalFrameNum)
+	delete(fg.ft.mapGroup,fg.groupID)
+}
