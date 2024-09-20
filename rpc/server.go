@@ -7,17 +7,18 @@ import (
 	"math"
 	"net"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
-	"runtime"
 )
 
-const Default_ReadWriteDeadline = 15*time.Second
+const Default_ReadWriteDeadline = 15 * time.Second
+
 type RpcProcessorType uint8
 
 const (
-	RpcProcessorJson   RpcProcessorType = 0
-	RpcProcessorPB RpcProcessorType = 1
+	RpcProcessorJson RpcProcessorType = 0
+	RpcProcessorPB   RpcProcessorType = 1
 )
 
 var arrayProcessor = []IRpcProcessor{&JsonProcessor{}, &PBProcessor{}}
@@ -28,20 +29,20 @@ type IServer interface {
 	Start() error
 	Stop()
 
-	selfNodeRpcHandlerGo(timeout time.Duration,processor IRpcProcessor, client *Client, noReply bool, handlerName string, rpcMethodId uint32, serviceMethod string, args interface{}, reply interface{}, rawArgs []byte) *Call
-	myselfRpcHandlerGo(client *Client,handlerName string, serviceMethod string, args interface{},callBack reflect.Value, reply interface{}) error
-	selfNodeRpcHandlerAsyncGo(timeout time.Duration,client *Client, callerRpcHandler IRpcHandler, noReply bool, handlerName string, serviceMethod string, args interface{}, reply interface{}, callback reflect.Value,cancelable bool) (CancelRpc,error)
+	selfNodeRpcHandlerGo(timeout time.Duration, processor IRpcProcessor, client *Client, noReply bool, handlerName string, rpcMethodId uint32, serviceMethod string, args interface{}, reply interface{}, rawArgs []byte) *Call
+	myselfRpcHandlerGo(client *Client, handlerName string, serviceMethod string, args interface{}, callBack reflect.Value, reply interface{}) error
+	selfNodeRpcHandlerAsyncGo(timeout time.Duration, client *Client, callerRpcHandler IRpcHandler, noReply bool, handlerName string, serviceMethod string, args interface{}, reply interface{}, callback reflect.Value, cancelable bool) (CancelRpc, error)
 }
 
-type  writeResponse func(processor IRpcProcessor,connTag string, serviceMethod string, seq uint64, reply interface{}, rpcError RpcError)
+type writeResponse func(processor IRpcProcessor, connTag string, serviceMethod string, seq uint64, reply interface{}, rpcError RpcError)
 
 type Server struct {
 	BaseServer
 
-	functions       map[interface{}]interface{}
-	rpcServer       *network.TCPServer
+	functions map[interface{}]interface{}
+	rpcServer *network.TCPServer
 
-	listenAddr string
+	listenAddr     string
 	maxRpcParamLen uint32
 }
 
@@ -73,15 +74,15 @@ func GetProcessor(processorType uint8) IRpcProcessor {
 	return arrayProcessor[processorType]
 }
 
-func (server *Server) Init(listenAddr string, maxRpcParamLen uint32,compressBytesLen int,rpcHandleFinder RpcHandleFinder) {
-	server.initBaseServer(compressBytesLen,rpcHandleFinder)
+func (server *Server) Init(listenAddr string, maxRpcParamLen uint32, compressBytesLen int, rpcHandleFinder RpcHandleFinder) {
+	server.initBaseServer(compressBytesLen, rpcHandleFinder)
 	server.listenAddr = listenAddr
 	server.maxRpcParamLen = maxRpcParamLen
 
 	server.rpcServer = &network.TCPServer{}
 }
 
-func (server *Server) Start() error{
+func (server *Server) Start() error {
 	splitAddr := strings.Split(server.listenAddr, ":")
 	if len(splitAddr) != 2 {
 		return fmt.Errorf("listen addr is failed,listenAddr:%s", server.listenAddr)
@@ -89,7 +90,6 @@ func (server *Server) Start() error{
 
 	server.rpcServer.Addr = ":" + splitAddr[1]
 	server.rpcServer.MinMsgLen = 2
-	server.compressBytesLen = server.compressBytesLen
 	if server.maxRpcParamLen > 0 {
 		server.rpcServer.MaxMsgLen = server.maxRpcParamLen
 	} else {
@@ -107,7 +107,7 @@ func (server *Server) Start() error{
 	return server.rpcServer.Start()
 }
 
-func (server *Server) Stop(){
+func (server *Server) Stop() {
 	server.rpcServer.Close()
 }
 
@@ -130,32 +130,32 @@ func (agent *RpcAgent) WriteResponse(processor IRpcProcessor, connTag string, se
 	defer processor.ReleaseRpcResponse(rpcResponse.RpcResponseData)
 
 	if errM != nil {
-		log.Error("mashal RpcResponseData failed",log.String("serviceMethod",serviceMethod),log.ErrorAttr("error",errM))
+		log.Error("marshal RpcResponseData failed", log.String("serviceMethod", serviceMethod), log.ErrorAttr("error", errM))
 		return
 	}
 
-	var compressBuff[]byte
+	var compressBuff []byte
 	bCompress := uint8(0)
-	if agent.rpcServer.compressBytesLen >0 && len(bytes) >= agent.rpcServer.compressBytesLen {
+	if agent.rpcServer.compressBytesLen > 0 && len(bytes) >= agent.rpcServer.compressBytesLen {
 		var cErr error
 
-		compressBuff,cErr = compressor.CompressBlock(bytes)
+		compressBuff, cErr = compressor.CompressBlock(bytes)
 		if cErr != nil {
-			log.Error("CompressBlock failed",log.String("serviceMethod",serviceMethod),log.ErrorAttr("error",cErr))
+			log.Error("CompressBlock failed", log.String("serviceMethod", serviceMethod), log.ErrorAttr("error", cErr))
 			return
 		}
 		if len(compressBuff) < len(bytes) {
 			bytes = compressBuff
-			bCompress = 1<<7
+			bCompress = 1 << 7
 		}
 	}
 
-	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType())|bCompress}, bytes)
-	if cap(compressBuff) >0 {
+	errM = agent.conn.WriteMsg([]byte{uint8(processor.GetProcessorType()) | bCompress}, bytes)
+	if cap(compressBuff) > 0 {
 		compressor.CompressBufferCollection(compressBuff)
 	}
 	if errM != nil {
-		log.Error("WriteMsg error,Rpc return is fail",log.String("serviceMethod",serviceMethod),log.ErrorAttr("error",errM))
+		log.Error("WriteMsg error,Rpc return is fail", log.String("serviceMethod", serviceMethod), log.ErrorAttr("error", errM))
 	}
 }
 
@@ -163,27 +163,29 @@ func (agent *RpcAgent) Run() {
 	defer func() {
 		if r := recover(); r != nil {
 			buf := make([]byte, 4096)
-			l := runtime.Stack(buf, false) 
+			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.Dump(string(buf[:l]),log.String("error",errString))
+			log.Dump(string(buf[:l]), log.String("error", errString))
 		}
 	}()
 
 	for {
 		data, err := agent.conn.ReadMsg()
 		if err != nil {
-			log.Error("read message is error",log.String("remoteAddress",agent.conn.RemoteAddr().String()),log.ErrorAttr("error",err))
-			//will close tcpconn
+			//will close conn
+			log.Error("read message is error", log.String("remoteAddress", agent.conn.RemoteAddr().String()), log.ErrorAttr("error", err))
 			break
 		}
 
-		defer agent.conn.ReleaseReadMsg(data)
-		err = agent.rpcServer.processRpcRequest( data,"",agent.WriteResponse)
+		err = agent.rpcServer.processRpcRequest(data, "", agent.WriteResponse)
 		if err != nil {
-			log.Error("processRpcRequest is error",log.String("remoteAddress",agent.conn.RemoteAddr().String()),log.ErrorAttr("error",err))
-			//will close tcpconn
+			//will close conn
+			agent.conn.ReleaseReadMsg(data)
+			log.Error("processRpcRequest is error", log.String("remoteAddress", agent.conn.RemoteAddr().String()), log.ErrorAttr("error", err))
+
 			break
 		}
+		agent.conn.ReleaseReadMsg(data)
 	}
 }
 
@@ -214,4 +216,3 @@ func (server *Server) NewAgent(c *network.TCPConn) network.Agent {
 
 	return agent
 }
-

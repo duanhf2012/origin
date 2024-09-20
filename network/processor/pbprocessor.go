@@ -26,7 +26,7 @@ type PBProcessor struct {
 	unknownMessageHandler UnknownMessageHandler
 	connectHandler        ConnectHandler
 	disconnectHandler     ConnectHandler
-	bytespool.IBytesMempool
+	bytespool.IBytesMemPool
 }
 
 type PBPackInfo struct {
@@ -37,7 +37,7 @@ type PBPackInfo struct {
 
 func NewPBProcessor() *PBProcessor {
 	processor := &PBProcessor{mapMsg: map[uint16]MessageInfo{}}
-	processor.IBytesMempool = bytespool.NewMemAreaPool()
+	processor.IBytesMemPool = bytespool.NewMemAreaPool()
 	return processor
 }
 
@@ -53,26 +53,26 @@ func (slf *PBPackInfo) GetMsg() proto.Message {
 	return slf.msg
 }
 
-// must goroutine safe
-func (pbProcessor *PBProcessor) MsgRoute(clientId string, msg interface{},recyclerReaderBytes func(data []byte)) error {
+// MsgRoute must goroutine safe
+func (pbProcessor *PBProcessor) MsgRoute(clientId string, msg interface{}, recyclerReaderBytes func(data []byte)) error {
 	pPackInfo := msg.(*PBPackInfo)
 	defer recyclerReaderBytes(pPackInfo.rawMsg)
-	
+
 	v, ok := pbProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
-		return fmt.Errorf("Cannot find msgtype %d is register!", pPackInfo.typ)
+		return fmt.Errorf("cannot find msgtype %d is register", pPackInfo.typ)
 	}
 
 	v.msgHandler(clientId, pPackInfo.msg)
 	return nil
 }
 
-// must goroutine safe
+// Unmarshal must goroutine safe
 func (pbProcessor *PBProcessor) Unmarshal(clientId string, data []byte) (interface{}, error) {
 	return pbProcessor.UnmarshalWithOutRelease(clientId, data)
 }
 
-// unmarshal but not release data
+// UnmarshalWithOutRelease not release data
 func (pbProcessor *PBProcessor) UnmarshalWithOutRelease(clientId string, data []byte) (interface{}, error) {
 	var msgType uint16
 	if pbProcessor.LittleEndian == true {
@@ -83,7 +83,7 @@ func (pbProcessor *PBProcessor) UnmarshalWithOutRelease(clientId string, data []
 
 	info, ok := pbProcessor.mapMsg[msgType]
 	if ok == false {
-		return nil, fmt.Errorf("cannot find register %d msgtype!", msgType)
+		return nil, fmt.Errorf("cannot find register %d msgtype", msgType)
 	}
 	msg := reflect.New(info.msgType.Elem()).Interface()
 	protoMsg := msg.(proto.Message)
@@ -92,10 +92,10 @@ func (pbProcessor *PBProcessor) UnmarshalWithOutRelease(clientId string, data []
 		return nil, err
 	}
 
-	return &PBPackInfo{typ: msgType, msg: protoMsg,rawMsg:data}, nil
+	return &PBPackInfo{typ: msgType, msg: protoMsg, rawMsg: data}, nil
 }
 
-// must goroutine safe
+// Marshal must goroutine safe
 func (pbProcessor *PBProcessor) Marshal(clientId string, msg interface{}) ([]byte, error) {
 	pMsg := msg.(*PBPackInfo)
 
@@ -118,12 +118,12 @@ func (pbProcessor *PBProcessor) Marshal(clientId string, msg interface{}) ([]byt
 	return buff, nil
 }
 
-func (pbProcessor *PBProcessor) Register(msgtype uint16, msg proto.Message, handle MessageHandler) {
+func (pbProcessor *PBProcessor) Register(msgType uint16, msg proto.Message, handle MessageHandler) {
 	var info MessageInfo
 
 	info.msgType = reflect.TypeOf(msg.(proto.Message))
 	info.msgHandler = handle
-	pbProcessor.mapMsg[msgtype] = info
+	pbProcessor.mapMsg[msgType] = info
 }
 
 func (pbProcessor *PBProcessor) MakeMsg(msgType uint16, protoMsg proto.Message) *PBPackInfo {
@@ -134,12 +134,11 @@ func (pbProcessor *PBProcessor) MakeRawMsg(msgType uint16, msg []byte) *PBPackIn
 	return &PBPackInfo{typ: msgType, rawMsg: msg}
 }
 
-func (pbProcessor *PBProcessor) UnknownMsgRoute(clientId string, msg interface{},recyclerReaderBytes func(data []byte)) {
+func (pbProcessor *PBProcessor) UnknownMsgRoute(clientId string, msg interface{}, recyclerReaderBytes func(data []byte)) {
 	pbProcessor.unknownMessageHandler(clientId, msg.([]byte))
 	recyclerReaderBytes(msg.([]byte))
 }
 
-// connect event
 func (pbProcessor *PBProcessor) ConnectedRoute(clientId string) {
 	pbProcessor.connectHandler(clientId)
 }

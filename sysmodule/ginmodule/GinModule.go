@@ -6,11 +6,11 @@ import (
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/service"
 	"github.com/gin-gonic/gin"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
-	"io"
 )
 
 type IGinProcessor interface {
@@ -23,12 +23,12 @@ type GinModule struct {
 	*gin.Engine
 	srv *http.Server
 
-	listenAddr string
+	listenAddr    string
 	handleTimeout time.Duration
-	processor []IGinProcessor
+	processor     []IGinProcessor
 }
 
-func (gm *GinModule) Init(addr string, handleTimeout time.Duration,engine *gin.Engine) {
+func (gm *GinModule) Init(addr string, handleTimeout time.Duration, engine *gin.Engine) {
 	gm.listenAddr = addr
 	gm.handleTimeout = handleTimeout
 	gm.Engine = engine
@@ -96,91 +96,91 @@ func (gm *GinModule) Stop(ctx context.Context) {
 
 type SafeContext struct {
 	*gin.Context
-	chanWait      chan struct{}
+	chanWait chan struct{}
 }
 
 func (c *SafeContext) JSONAndDone(code int, obj any) {
-	c.Context.JSON(code,obj)
+	c.Context.JSON(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) AsciiJSONAndDone(code int, obj any){
-	c.Context.AsciiJSON(code,obj)
+func (c *SafeContext) AsciiJSONAndDone(code int, obj any) {
+	c.Context.AsciiJSON(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) PureJSONAndDone(code int, obj any){
-	c.Context.PureJSON(code,obj)
+func (c *SafeContext) PureJSONAndDone(code int, obj any) {
+	c.Context.PureJSON(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) XMLAndDone(code int, obj any){
-	c.Context.XML(code,obj)
+func (c *SafeContext) XMLAndDone(code int, obj any) {
+	c.Context.XML(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) YAMLAndDone(code int, obj any){
-	c.Context.YAML(code,obj)
+func (c *SafeContext) YAMLAndDone(code int, obj any) {
+	c.Context.YAML(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) TOMLAndDone(code int, obj any){
-	c.Context.TOML(code,obj)
+func (c *SafeContext) TOMLAndDone(code int, obj any) {
+	c.Context.TOML(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) ProtoBufAndDone(code int, obj any){
-	c.Context.ProtoBuf(code,obj)
+func (c *SafeContext) ProtoBufAndDone(code int, obj any) {
+	c.Context.ProtoBuf(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) StringAndDone(code int, format string, values ...any){
-	c.Context.String(code,format,values...)
+func (c *SafeContext) StringAndDone(code int, format string, values ...any) {
+	c.Context.String(code, format, values...)
 	c.Done()
 }
 
-func (c *SafeContext) RedirectAndDone(code int, location string){
-	c.Context.Redirect(code,location)
+func (c *SafeContext) RedirectAndDone(code int, location string) {
+	c.Context.Redirect(code, location)
 	c.Done()
 }
 
-func (c *SafeContext) DataAndDone(code int, contentType string, data []byte){
-	c.Context.Data(code,contentType,data)
+func (c *SafeContext) DataAndDone(code int, contentType string, data []byte) {
+	c.Context.Data(code, contentType, data)
 	c.Done()
 }
 
-func (c *SafeContext) DataFromReaderAndDone(code int, contentLength int64, contentType string, reader io.Reader, extraHeaders map[string]string){
-	c.DataFromReader(code,contentLength,contentType,reader,extraHeaders)
+func (c *SafeContext) DataFromReaderAndDone(code int, contentLength int64, contentType string, reader io.Reader, extraHeaders map[string]string) {
+	c.DataFromReader(code, contentLength, contentType, reader, extraHeaders)
 	c.Done()
 }
 
-func (c *SafeContext) HTMLAndDone(code int, name string, obj any){
-	c.Context.HTML(code,name,obj)
+func (c *SafeContext) HTMLAndDone(code int, name string, obj any) {
+	c.Context.HTML(code, name, obj)
 	c.Done()
 }
 
-func (c *SafeContext) IndentedJSONAndDone(code int, obj any){
-	c.Context.IndentedJSON(code,obj)
+func (c *SafeContext) IndentedJSONAndDone(code int, obj any) {
+	c.Context.IndentedJSON(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) SecureJSONAndDone(code int, obj any){
-	c.Context.SecureJSON(code,obj)
+func (c *SafeContext) SecureJSONAndDone(code int, obj any) {
+	c.Context.SecureJSON(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) JSONPAndDone(code int, obj any){
-	c.Context.JSONP(code,obj)
+func (c *SafeContext) JSONPAndDone(code int, obj any) {
+	c.Context.JSONP(code, obj)
 	c.Done()
 }
 
-func (c *SafeContext) Done(){
+func (c *SafeContext) Done() {
 	c.chanWait <- struct{}{}
 }
 
 type GinEvent struct {
 	handlersChain []SafeHandlerFunc
-	c SafeContext
+	c             SafeContext
 }
 
 type SafeHandlerFunc func(*SafeContext)
@@ -199,16 +199,16 @@ func (gm *GinModule) handleMethod(httpMethod, relativePath string, handlers ...S
 		}
 
 		var ev GinEvent
-		chanWait := make(chan struct{},2)
+		chanWait := make(chan struct{}, 2)
 		ev.c.chanWait = chanWait
 		ev.handlersChain = handlers
 		ev.c.Context = c
 		gm.NotifyEvent(&ev)
 
-		ctx,cancel := context.WithTimeout(context.Background(), gm.handleTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), gm.handleTimeout)
 		defer cancel()
 
-		select{
+		select {
 		case <-ctx.Done():
 			log.Error("GinModule process timeout", slog.Any("path", c.Request.URL.Path))
 			c.AbortWithStatus(http.StatusRequestTimeout)

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-//跨结点连接的Client
+// RClient 跨结点连接的Client
 type RClient struct {
 	selfClient *Client
 	network.TCPClient
@@ -27,7 +27,7 @@ func (rc *RClient) IsConnected() bool {
 	return rc.conn != nil && rc.conn.IsConnected() == true
 }
 
-func (rc *RClient) GetConn() *network.TCPConn{
+func (rc *RClient) GetConn() *network.TCPConn {
 	rc.Lock()
 	conn := rc.conn
 	rc.Unlock()
@@ -35,40 +35,40 @@ func (rc *RClient) GetConn() *network.TCPConn{
 	return conn
 }
 
-func (rc *RClient) SetConn(conn *network.TCPConn){
+func (rc *RClient) SetConn(conn *network.TCPConn) {
 	rc.Lock()
 	rc.conn = conn
 	rc.Unlock()
 }
 
-func (rc *RClient) WriteMsg (nodeId string,args ...[]byte) error{
+func (rc *RClient) WriteMsg(nodeId string, args ...[]byte) error {
 	return rc.conn.WriteMsg(args...)
 }
 
-func (rc *RClient) Go(nodeId string,timeout time.Duration,rpcHandler IRpcHandler,noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
+func (rc *RClient) Go(nodeId string, timeout time.Duration, rpcHandler IRpcHandler, noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
 	_, processor := GetProcessorType(args)
 	InParam, err := processor.Marshal(args)
 	if err != nil {
-		log.Error("Marshal is fail",log.ErrorAttr("error",err))
+		log.Error("Marshal is fail", log.ErrorAttr("error", err))
 		call := MakeCall()
 		call.DoError(err)
 		return call
 	}
 
-	return rc.selfClient.rawGo(nodeId,rc,timeout,rpcHandler,processor, noReply, 0, serviceMethod, InParam, reply)
+	return rc.selfClient.rawGo(nodeId, rc, timeout, rpcHandler, processor, noReply, 0, serviceMethod, InParam, reply)
 }
 
-func (rc *RClient) RawGo(nodeId string,timeout time.Duration,rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call {
-	return rc.selfClient.rawGo(nodeId,rc,timeout,rpcHandler,processor, noReply, rpcMethodId, serviceMethod, rawArgs, reply)
+func (rc *RClient) RawGo(nodeId string, timeout time.Duration, rpcHandler IRpcHandler, processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call {
+	return rc.selfClient.rawGo(nodeId, rc, timeout, rpcHandler, processor, noReply, rpcMethodId, serviceMethod, rawArgs, reply)
 }
 
-func (rc *RClient) AsyncCall(nodeId string,timeout time.Duration,rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{},cancelable bool)  (CancelRpc,error) {
-	cancelRpc,err := rc.selfClient.asyncCall(nodeId,rc,timeout,rpcHandler, serviceMethod, callback, args, replyParam,cancelable)
+func (rc *RClient) AsyncCall(nodeId string, timeout time.Duration, rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{}, cancelable bool) (CancelRpc, error) {
+	cancelRpc, err := rc.selfClient.asyncCall(nodeId, rc, timeout, rpcHandler, serviceMethod, callback, args, replyParam, cancelable)
 	if err != nil {
 		callback.Call([]reflect.Value{reflect.ValueOf(replyParam), reflect.ValueOf(err)})
 	}
 
-	return cancelRpc,nil
+	return cancelRpc, nil
 }
 
 func (rc *RClient) Run() {
@@ -77,19 +77,19 @@ func (rc *RClient) Run() {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.Dump(string(buf[:l]),log.String("error",errString))
+			log.Dump(string(buf[:l]), log.String("error", errString))
 		}
 	}()
 
 	var eventData RpcConnEvent
 	eventData.IsConnect = true
-	eventData.NodeId =  rc.selfClient.GetTargetNodeId()
+	eventData.NodeId = rc.selfClient.GetTargetNodeId()
 	rc.notifyEventFun(&eventData)
-	
+
 	for {
 		bytes, err := rc.conn.ReadMsg()
 		if err != nil {
-			log.Error("rclient read msg is failed",log.ErrorAttr("error",err))
+			log.Error("RClient read msg is failed", log.ErrorAttr("error", err))
 			return
 		}
 
@@ -108,13 +108,13 @@ func (rc *RClient) OnClose() {
 	rc.notifyEventFun(&connEvent)
 }
 
-func NewRClient(targetNodeId string, addr string, maxRpcParamLen uint32,compressBytesLen int,callSet *CallSet,notifyEventFun NotifyEventFun) *Client{
+func NewRClient(targetNodeId string, addr string, maxRpcParamLen uint32, compressBytesLen int, callSet *CallSet, notifyEventFun NotifyEventFun) *Client {
 	client := &Client{}
 	client.clientId = atomic.AddUint32(&clientSeq, 1)
 	client.targetNodeId = targetNodeId
 	client.compressBytesLen = compressBytesLen
 
-	c:= &RClient{}
+	c := &RClient{}
 	c.selfClient = client
 	c.Addr = addr
 	c.ConnectInterval = DefaultConnectInterval
@@ -140,13 +140,11 @@ func NewRClient(targetNodeId string, addr string, maxRpcParamLen uint32,compress
 	return client
 }
 
-
 func (rc *RClient) Close(waitDone bool) {
 	rc.TCPClient.Close(waitDone)
 	rc.selfClient.cleanPending()
 }
 
-
-func (rc *RClient) Bind(server IServer){
+func (rc *RClient) Bind(server IServer) {
 
 }

@@ -2,29 +2,29 @@ package rpc
 
 import (
 	"errors"
+	"fmt"
+	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/network"
 	"reflect"
 	"time"
-	"github.com/duanhf2012/origin/v2/log"
-	"fmt"
 )
 
-const(
+const (
 	DefaultRpcConnNum           = 1
 	DefaultRpcLenMsgLen         = 4
 	DefaultRpcMinMsgLen         = 2
 	DefaultMaxCheckCallRpcCount = 1000
-	DefaultMaxPendingWriteNum 	 = 1000000
+	DefaultMaxPendingWriteNum   = 1000000
 
-	DefaultConnectInterval = 2*time.Second
-	DefaultCheckRpcCallTimeoutInterval = 1*time.Second
-	DefaultRpcTimeout = 15*time.Second
+	DefaultConnectInterval             = 2 * time.Second
+	DefaultCheckRpcCallTimeoutInterval = 1 * time.Second
+	DefaultRpcTimeout                  = 15 * time.Second
 )
 
 var clientSeq uint32
 
 type IWriter interface {
-	WriteMsg (nodeId string,args ...[]byte) error
+	WriteMsg(nodeId string, args ...[]byte) error
 	IsConnected() bool
 }
 
@@ -32,9 +32,9 @@ type IRealClient interface {
 	SetConn(conn *network.TCPConn)
 	Close(waitDone bool)
 
-	AsyncCall(NodeId string,timeout time.Duration,rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{},cancelable bool)  (CancelRpc,error)
-	Go(NodeId string,timeout time.Duration,rpcHandler IRpcHandler, noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call
-	RawGo(NodeId string,timeout time.Duration,rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call
+	AsyncCall(NodeId string, timeout time.Duration, rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{}, cancelable bool) (CancelRpc, error)
+	Go(NodeId string, timeout time.Duration, rpcHandler IRpcHandler, noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call
+	RawGo(NodeId string, timeout time.Duration, rpcHandler IRpcHandler, processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call
 	IsConnected() bool
 
 	Run()
@@ -43,11 +43,9 @@ type IRealClient interface {
 	Bind(server IServer)
 }
 
-
-
 type Client struct {
-	clientId             uint32
-	targetNodeId               string
+	clientId         uint32
+	targetNodeId     string
 	compressBytesLen int
 
 	*CallSet
@@ -68,13 +66,12 @@ func (client *Client) GetClientId() uint32 {
 	return client.clientId
 }
 
-
-func (client *Client) processRpcResponse(responseData []byte) error{
-	bCompress := (responseData[0]>>7) > 0
-	processor := GetProcessor(responseData[0]&0x7f)
+func (client *Client) processRpcResponse(responseData []byte) error {
+	bCompress := (responseData[0] >> 7) > 0
+	processor := GetProcessor(responseData[0] & 0x7f)
 	if processor == nil {
 		//rc.conn.ReleaseReadMsg(responseData)
-		err:= errors.New(fmt.Sprintf("cannot find process %d",responseData[0]&0x7f))
+		err := errors.New(fmt.Sprintf("cannot find process %d", responseData[0]&0x7f))
 		log.Error(err.Error())
 		return err
 	}
@@ -89,10 +86,10 @@ func (client *Client) processRpcResponse(responseData []byte) error{
 
 	if bCompress == true {
 		var unCompressErr error
-		compressBuff,unCompressErr = compressor.UncompressBlock(byteData)
-		if unCompressErr!= nil {
+		compressBuff, unCompressErr = compressor.UncompressBlock(byteData)
+		if unCompressErr != nil {
 			//rc.conn.ReleaseReadMsg(responseData)
-			err := fmt.Errorf("uncompressBlock failed,err :%s",unCompressErr.Error())
+			err := fmt.Errorf("uncompressBlock failed,err :%s", unCompressErr.Error())
 			return err
 		}
 
@@ -107,19 +104,19 @@ func (client *Client) processRpcResponse(responseData []byte) error{
 	//rc.conn.ReleaseReadMsg(bytes)
 	if err != nil {
 		processor.ReleaseRpcResponse(response.RpcResponseData)
-		log.Error("rpcClient Unmarshal head error",log.ErrorAttr("error",err))
+		log.Error("rpcClient Unmarshal head error", log.ErrorAttr("error", err))
 		return nil
 	}
 
 	v := client.RemovePending(response.RpcResponseData.GetSeq())
 	if v == nil {
-		log.Error("rpcClient cannot find seq",log.Uint64("seq",response.RpcResponseData.GetSeq()))
+		log.Error("rpcClient cannot find seq", log.Uint64("seq", response.RpcResponseData.GetSeq()))
 	} else {
 		v.Err = nil
 		if len(response.RpcResponseData.GetReply()) > 0 {
 			err = processor.Unmarshal(response.RpcResponseData.GetReply(), v.Reply)
 			if err != nil {
-				log.Error("rpcClient Unmarshal body failed",log.ErrorAttr("error",err))
+				log.Error("rpcClient Unmarshal body failed", log.ErrorAttr("error", err))
 				v.Err = err
 			}
 		}
@@ -140,7 +137,6 @@ func (client *Client) processRpcResponse(responseData []byte) error{
 	return nil
 }
 
-
 //func (rc *Client) Go(timeout time.Duration,rpcHandler IRpcHandler,noReply bool, serviceMethod string, args interface{}, reply interface{}) *Call {
 //	_, processor := GetProcessorType(args)
 //	InParam, err := processor.Marshal(args)
@@ -154,11 +150,11 @@ func (client *Client) processRpcResponse(responseData []byte) error{
 //	return rc.RawGo(timeout,rpcHandler,processor, noReply, 0, serviceMethod, InParam, reply)
 //}
 
-func (rc *Client) rawGo(nodeId string,w IWriter,timeout time.Duration,rpcHandler IRpcHandler,processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call {
+func (client *Client) rawGo(nodeId string, w IWriter, timeout time.Duration, rpcHandler IRpcHandler, processor IRpcProcessor, noReply bool, rpcMethodId uint32, serviceMethod string, rawArgs []byte, reply interface{}) *Call {
 	call := MakeCall()
 	call.ServiceMethod = serviceMethod
 	call.Reply = reply
-	call.Seq = rc.generateSeq()
+	call.Seq = client.generateSeq()
 	call.TimeOut = timeout
 
 	request := MakeRpcRequest(processor, call.Seq, rpcMethodId, serviceMethod, noReply, rawArgs)
@@ -167,47 +163,47 @@ func (rc *Client) rawGo(nodeId string,w IWriter,timeout time.Duration,rpcHandler
 
 	if err != nil {
 		call.Seq = 0
-		log.Error("marshal is fail",log.String("error",err.Error()))
+		log.Error("marshal is fail", log.String("error", err.Error()))
 		call.DoError(err)
 		return call
 	}
 
-	if w == nil || w.IsConnected()==false {
+	if w == nil || w.IsConnected() == false {
 		call.Seq = 0
 		sErr := errors.New(serviceMethod + "  was called failed,rpc client is disconnect")
-		log.Error("conn is disconnect",log.String("error",sErr.Error()))
+		log.Error("conn is disconnect", log.String("error", sErr.Error()))
 		call.DoError(sErr)
 		return call
 	}
 
-	var compressBuff[]byte
+	var compressBuff []byte
 	bCompress := uint8(0)
-	if rc.compressBytesLen > 0 && len(bytes) >= rc.compressBytesLen {
+	if client.compressBytesLen > 0 && len(bytes) >= client.compressBytesLen {
 		var cErr error
-		compressBuff,cErr = compressor.CompressBlock(bytes)
+		compressBuff, cErr = compressor.CompressBlock(bytes)
 		if cErr != nil {
 			call.Seq = 0
-			log.Error("compress fail",log.String("error",cErr.Error()))
+			log.Error("compress fail", log.String("error", cErr.Error()))
 			call.DoError(cErr)
 			return call
 		}
 		if len(compressBuff) < len(bytes) {
 			bytes = compressBuff
-			bCompress = 1<<7
+			bCompress = 1 << 7
 		}
 	}
 
 	if noReply == false {
-		rc.AddPending(call)
+		client.AddPending(call)
 	}
 
-	err = w.WriteMsg(nodeId,[]byte{uint8(processor.GetProcessorType())|bCompress}, bytes)
-	if cap(compressBuff) >0 {
+	err = w.WriteMsg(nodeId, []byte{uint8(processor.GetProcessorType()) | bCompress}, bytes)
+	if cap(compressBuff) > 0 {
 		compressor.CompressBufferCollection(compressBuff)
 	}
 	if err != nil {
-		rc.RemovePending(call.Seq)
-		log.Error("WiteMsg is fail",log.ErrorAttr("error",err))
+		client.RemovePending(call.Seq)
+		log.Error("WriteMsg is fail", log.ErrorAttr("error", err))
 		call.Seq = 0
 		call.DoError(err)
 	}
@@ -215,37 +211,37 @@ func (rc *Client) rawGo(nodeId string,w IWriter,timeout time.Duration,rpcHandler
 	return call
 }
 
-func (rc *Client) asyncCall(nodeId string,w IWriter,timeout time.Duration,rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{},cancelable bool) (CancelRpc,error) {
+func (client *Client) asyncCall(nodeId string, w IWriter, timeout time.Duration, rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{}, cancelable bool) (CancelRpc, error) {
 	processorType, processor := GetProcessorType(args)
 	InParam, herr := processor.Marshal(args)
 	if herr != nil {
-		return emptyCancelRpc,herr
+		return emptyCancelRpc, herr
 	}
 
-	seq := rc.generateSeq()
+	seq := client.generateSeq()
 	request := MakeRpcRequest(processor, seq, 0, serviceMethod, false, InParam)
 	bytes, err := processor.Marshal(request.RpcRequestData)
 	ReleaseRpcRequest(request)
 	if err != nil {
-		return emptyCancelRpc,err
+		return emptyCancelRpc, err
 	}
 
-	if w == nil || w.IsConnected()==false {
-		return emptyCancelRpc,errors.New("Rpc server is disconnect,call " + serviceMethod)
+	if w == nil || w.IsConnected() == false {
+		return emptyCancelRpc, errors.New("Rpc server is disconnect,call " + serviceMethod)
 	}
 
-	var compressBuff[]byte
+	var compressBuff []byte
 	bCompress := uint8(0)
-	if rc.compressBytesLen>0 &&len(bytes) >= rc.compressBytesLen {
+	if client.compressBytesLen > 0 && len(bytes) >= client.compressBytesLen {
 		var cErr error
-		compressBuff,cErr = compressor.CompressBlock(bytes)
+		compressBuff, cErr = compressor.CompressBlock(bytes)
 		if cErr != nil {
-			return emptyCancelRpc,cErr
+			return emptyCancelRpc, cErr
 		}
 
 		if len(compressBuff) < len(bytes) {
 			bytes = compressBuff
-			bCompress = 1<<7
+			bCompress = 1 << 7
 		}
 	}
 
@@ -256,22 +252,22 @@ func (rc *Client) asyncCall(nodeId string,w IWriter,timeout time.Duration,rpcHan
 	call.ServiceMethod = serviceMethod
 	call.Seq = seq
 	call.TimeOut = timeout
-	rc.AddPending(call)
+	client.AddPending(call)
 
-	err = w.WriteMsg(nodeId,[]byte{uint8(processorType)|bCompress}, bytes)
-	if cap(compressBuff) >0 {
+	err = w.WriteMsg(nodeId, []byte{uint8(processorType) | bCompress}, bytes)
+	if cap(compressBuff) > 0 {
 		compressor.CompressBufferCollection(compressBuff)
 	}
 	if err != nil {
-		rc.RemovePending(call.Seq)
+		client.RemovePending(call.Seq)
 		ReleaseCall(call)
-		return emptyCancelRpc,err
+		return emptyCancelRpc, err
 	}
 
 	if cancelable {
-		rpcCancel := RpcCancel{CallSeq:seq,Cli: rc}
-		return rpcCancel.CancelRpc,nil
+		rpcCancel := RpcCancel{CallSeq: seq, Cli: client}
+		return rpcCancel.CancelRpc, nil
 	}
 
-	return emptyCancelRpc,nil
+	return emptyCancelRpc, nil
 }

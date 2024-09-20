@@ -19,16 +19,16 @@ type TCPConn struct {
 	msgParser *MsgParser
 }
 
-func freeChannel(conn *TCPConn){
-	for;len(conn.writeChan)>0;{
-		byteBuff := <- conn.writeChan
+func freeChannel(conn *TCPConn) {
+	for len(conn.writeChan) > 0 {
+		byteBuff := <-conn.writeChan
 		if byteBuff != nil {
 			conn.ReleaseReadMsg(byteBuff)
 		}
 	}
 }
 
-func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser,writeDeadline time.Duration) *TCPConn {
+func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser, writeDeadline time.Duration) *TCPConn {
 	tcpConn := new(TCPConn)
 	tcpConn.conn = conn
 	tcpConn.writeChan = make(chan []byte, pendingWriteNum)
@@ -50,7 +50,7 @@ func newTCPConn(conn net.Conn, pendingWriteNum int, msgParser *MsgParser,writeDe
 		conn.Close()
 		tcpConn.Lock()
 		freeChannel(tcpConn)
-		atomic.StoreInt32(&tcpConn.closeFlag,1)
+		atomic.StoreInt32(&tcpConn.closeFlag, 1)
 		tcpConn.Unlock()
 	}()
 
@@ -61,9 +61,9 @@ func (tcpConn *TCPConn) doDestroy() {
 	tcpConn.conn.(*net.TCPConn).SetLinger(0)
 	tcpConn.conn.Close()
 
-	if atomic.LoadInt32(&tcpConn.closeFlag)==0 {
+	if atomic.LoadInt32(&tcpConn.closeFlag) == 0 {
 		close(tcpConn.writeChan)
-		atomic.StoreInt32(&tcpConn.closeFlag,1)
+		atomic.StoreInt32(&tcpConn.closeFlag, 1)
 	}
 }
 
@@ -77,19 +77,19 @@ func (tcpConn *TCPConn) Destroy() {
 func (tcpConn *TCPConn) Close() {
 	tcpConn.Lock()
 	defer tcpConn.Unlock()
-	if atomic.LoadInt32(&tcpConn.closeFlag)==1 {
+	if atomic.LoadInt32(&tcpConn.closeFlag) == 1 {
 		return
 	}
 
 	tcpConn.doWrite(nil)
-	atomic.StoreInt32(&tcpConn.closeFlag,1)
+	atomic.StoreInt32(&tcpConn.closeFlag, 1)
 }
 
 func (tcpConn *TCPConn) GetRemoteIp() string {
 	return tcpConn.conn.RemoteAddr().String()
 }
 
-func (tcpConn *TCPConn) doWrite(b []byte) error{
+func (tcpConn *TCPConn) doWrite(b []byte) error {
 	if len(tcpConn.writeChan) == cap(tcpConn.writeChan) {
 		tcpConn.ReleaseReadMsg(b)
 		log.Error("close conn: channel full")
@@ -102,10 +102,10 @@ func (tcpConn *TCPConn) doWrite(b []byte) error{
 }
 
 // b must not be modified by the others goroutines
-func (tcpConn *TCPConn) Write(b []byte) error{
+func (tcpConn *TCPConn) Write(b []byte) error {
 	tcpConn.Lock()
 	defer tcpConn.Unlock()
-	if atomic.LoadInt32(&tcpConn.closeFlag)==1 || b == nil {
+	if atomic.LoadInt32(&tcpConn.closeFlag) == 1 || b == nil {
 		tcpConn.ReleaseReadMsg(b)
 		return errors.New("conn is close")
 	}
@@ -129,14 +129,14 @@ func (tcpConn *TCPConn) ReadMsg() ([]byte, error) {
 	return tcpConn.msgParser.Read(tcpConn)
 }
 
-func (tcpConn *TCPConn) GetRecyclerReaderBytes() func (data []byte) {
-	bytePool := tcpConn.msgParser.IBytesMempool
+func (tcpConn *TCPConn) GetRecyclerReaderBytes() func(data []byte) {
+	bytePool := tcpConn.msgParser.IBytesMemPool
 	return func(data []byte) {
 		bytePool.ReleaseBytes(data)
 	}
 }
 
-func (tcpConn *TCPConn) ReleaseReadMsg(byteBuff []byte){
+func (tcpConn *TCPConn) ReleaseReadMsg(byteBuff []byte) {
 	tcpConn.msgParser.ReleaseBytes(byteBuff)
 }
 
@@ -155,15 +155,14 @@ func (tcpConn *TCPConn) WriteRawMsg(args []byte) error {
 	return tcpConn.Write(args)
 }
 
-
 func (tcpConn *TCPConn) IsConnected() bool {
 	return atomic.LoadInt32(&tcpConn.closeFlag) == 0
 }
 
-func (tcpConn *TCPConn) SetReadDeadline(d time.Duration)  {
+func (tcpConn *TCPConn) SetReadDeadline(d time.Duration) {
 	tcpConn.conn.SetReadDeadline(time.Now().Add(d))
 }
 
-func (tcpConn *TCPConn) SetWriteDeadline(d time.Duration)  {
+func (tcpConn *TCPConn) SetWriteDeadline(d time.Duration) {
 	tcpConn.conn.SetWriteDeadline(time.Now().Add(d))
 }

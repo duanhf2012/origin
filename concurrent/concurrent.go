@@ -22,10 +22,12 @@ type Concurrent struct {
 
 	tasks     chan task
 	cbChannel chan func(error)
-	open int32
+	open      int32
 }
 
 /*
+	OpenConcurrentByNumCPU 函数使用说明
+
 cpuMul 表示cpu的倍数
 建议:(1)cpu密集型 使用1  (2)i/o密集型使用2或者更高
 */
@@ -35,10 +37,10 @@ func (c *Concurrent) OpenConcurrentByNumCPU(cpuNumMul float32) {
 }
 
 func (c *Concurrent) OpenConcurrent(minGoroutineNum int32, maxGoroutineNum int32, maxTaskChannelNum int) {
-	if atomic.AddInt32(&c.open,1) > 1 {
+	if atomic.AddInt32(&c.open, 1) > 1 {
 		panic("repeated calls to OpenConcurrent are not allowed!")
 	}
-	
+
 	c.tasks = make(chan task, maxTaskChannelNum)
 	c.cbChannel = make(chan func(error), maxTaskChannelNum)
 
@@ -66,7 +68,7 @@ func (c *Concurrent) AsyncDoByQueue(queueId int64, fn func() bool, cb func(err e
 	}
 
 	if queueId != 0 {
-		queueId = queueId % maxTaskQueueSessionId+1
+		queueId = queueId%maxTaskQueueSessionId + 1
 	}
 
 	select {

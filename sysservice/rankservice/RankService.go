@@ -45,7 +45,7 @@ func (rs *RankService) OnRelease() {
 	rs.rankModule.OnStop(rs.mapRankSkip)
 }
 
-// 安装排行模块
+// SetupRankModule 安装排行模块
 func (rs *RankService) SetupRankModule(rankModule IRankModule) {
 	rs.rankModule = rankModule
 }

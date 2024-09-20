@@ -9,6 +9,7 @@ import (
 	"github.com/duanhf2012/origin/v2/profiler"
 	"github.com/duanhf2012/origin/v2/service"
 	"github.com/duanhf2012/origin/v2/util/buildtime"
+	"github.com/duanhf2012/origin/v2/util/sysprocess"
 	"github.com/duanhf2012/origin/v2/util/timer"
 	"io"
 	"net/http"
@@ -19,34 +20,32 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"github.com/duanhf2012/origin/v2/util/sysprocess"
 )
 
 var sig chan os.Signal
 var nodeId string
 var preSetupService []service.IService //预安装
-var preSetupTemplateService []func()service.IService
+var preSetupTemplateService []func() service.IService
 var profilerInterval time.Duration
-var bValid bool
 var configDir = "./config/"
 var NodeIsRun = false
 
-const(
+const (
 	SingleStop   syscall.Signal = 10
 	SignalRetire syscall.Signal = 12
 )
 
 type BuildOSType = int8
 
-const(
+const (
 	Windows BuildOSType = 0
-	Linux 	BuildOSType = 1
-	Mac   	BuildOSType = 2
+	Linux   BuildOSType = 1
+	Mac     BuildOSType = 2
 )
 
 func init() {
 	sig = make(chan os.Signal, 4)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, SingleStop,SignalRetire)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, SingleStop, SignalRetire)
 
 	console.RegisterCommandBool("help", false, "<-help> This help.", usage)
 	console.RegisterCommandString("name", "", "<-name nodeName> Node's name.", setName)
@@ -62,8 +61,7 @@ func init() {
 	console.RegisterCommandString("pprof", "", "<-pprof ip:port> Open performance analysis.", setPprof)
 }
 
-
-func notifyAllServiceRetire(){
+func notifyAllServiceRetire() {
 	service.NotifyAllServiceRetire()
 }
 
@@ -83,7 +81,7 @@ func usage(val interface{}) error {
 	return nil
 }
 
-func setName(val interface{}) error {
+func setName(_ interface{}) error {
 	return nil
 }
 
@@ -110,7 +108,7 @@ func setConfigPath(val interface{}) error {
 	}
 	_, err := os.Stat(configPath)
 	if err != nil {
-		return fmt.Errorf("Cannot find file path %s", configPath)
+		return fmt.Errorf("cannot find file path %s", configPath)
 	}
 
 	cluster.SetConfigDir(configPath)
@@ -158,7 +156,7 @@ func initNode(id string) {
 	nodeId = id
 	err := cluster.GetCluster().Init(GetNodeId(), Setup)
 	if err != nil {
-		log.Error("Init cluster fail",log.ErrorAttr("error",err))
+		log.Error("Init cluster fail", log.ErrorAttr("error", err))
 		os.Exit(1)
 	}
 
@@ -169,20 +167,20 @@ func initNode(id string) {
 
 	//2.顺序安装服务
 	serviceOrder := cluster.GetCluster().GetLocalNodeInfo().ServiceList
-	for _,serviceName:= range serviceOrder{
+	for _, serviceName := range serviceOrder {
 		bSetup := false
 
 		//判断是否有配置模板服务
-		splitServiceName := strings.Split(serviceName,":")
+		splitServiceName := strings.Split(serviceName, ":")
 		if len(splitServiceName) == 2 {
 			serviceName = splitServiceName[0]
-			templateServiceName :=  splitServiceName[1]
-			for _,newSer := range preSetupTemplateService {
+			templateServiceName := splitServiceName[1]
+			for _, newSer := range preSetupTemplateService {
 				ser := newSer()
 				ser.OnSetup(ser)
 				if ser.GetName() == templateServiceName {
 					ser.SetName(serviceName)
-					ser.Init(ser,cluster.GetRpcClient,cluster.GetRpcServer,cluster.GetCluster().GetServiceCfg(ser.GetName()))
+					ser.Init(ser, cluster.GetRpcClient, cluster.GetRpcServer, cluster.GetCluster().GetServiceCfg(ser.GetName()))
 					service.Setup(ser)
 
 					bSetup = true
@@ -190,8 +188,8 @@ func initNode(id string) {
 				}
 			}
 
-			if bSetup == false{
-				log.Error("Template service not found",log.String("service name",serviceName),log.String("template service name",templateServiceName))
+			if bSetup == false {
+				log.Error("Template service not found", log.String("service name", serviceName), log.String("template service name", templateServiceName))
 				os.Exit(1)
 			}
 		}
@@ -208,7 +206,7 @@ func initNode(id string) {
 		}
 
 		if bSetup == false {
-			log.Fatal("Service name "+serviceName+" configuration error")
+			log.Fatal("Service name " + serviceName + " configuration error")
 		}
 	}
 
@@ -221,9 +219,9 @@ func initLog() error {
 		setLogPath("./log")
 	}
 
-	localnodeinfo := cluster.GetCluster().GetLocalNodeInfo()
-	filepre := fmt.Sprintf("%s_", localnodeinfo.NodeId)
-	logger, err := log.NewTextLogger(log.LogLevel,log.LogPath,filepre,true,log.LogChannelCap)
+	localNodeInfo := cluster.GetCluster().GetLocalNodeInfo()
+	filePre := fmt.Sprintf("%s_", localNodeInfo.NodeId)
+	logger, err := log.NewTextLogger(log.LogLevel, log.LogPath, filePre, true, log.LogChannelCap)
 	if err != nil {
 		fmt.Printf("cannot create log file!\n")
 		return err
@@ -239,7 +237,6 @@ func Start() {
 		return
 	}
 }
-
 
 func retireNode(args interface{}) error {
 	//1.解析参数
@@ -265,11 +262,9 @@ func retireNode(args interface{}) error {
 		return err
 	}
 
-
 	RetireProcess(processId)
 	return nil
 }
-
 
 func stopNode(args interface{}) error {
 	//1.解析参数
@@ -318,7 +313,7 @@ func startNode(args interface{}) error {
 		return fmt.Errorf("invalid option %s", param)
 	}
 
-	for{
+	for {
 		processId, pErr := getRunProcessPid(strNodeId)
 		if pErr != nil {
 			break
@@ -328,13 +323,13 @@ func startNode(args interface{}) error {
 		myName, mErr := sysprocess.GetMyProcessName()
 		//当前进程名获取失败，不应该发生
 		if mErr != nil {
-			log.Info("get my process's name is error",log.ErrorAttr("err", mErr))
+			log.Info("get my process's name is error", log.ErrorAttr("err", mErr))
 			os.Exit(-1)
 		}
 
 		//进程id存在，而且进程名也相同，被认为是当前进程重复运行
 		if cErr == nil && name == myName {
-			log.Info("repeat runs are not allowed",log.String("nodeId",strNodeId),log.Int("processId",processId))
+			log.Info("repeat runs are not allowed", log.String("nodeId", strNodeId), log.Int("processId", processId))
 			os.Exit(-1)
 		}
 		break
@@ -353,7 +348,7 @@ func startNode(args interface{}) error {
 
 	//5.运行集群
 	cluster.GetCluster().Start()
-	
+
 	//6.监听程序退出信号&性能报告
 
 	var pProfilerTicker *time.Ticker = &time.Ticker{}
@@ -369,7 +364,7 @@ func startNode(args interface{}) error {
 			if signal == SignalRetire {
 				log.Info("receipt retire signal.")
 				notifyAllServiceRetire()
-			}else {
+			} else {
 				NodeIsRun = false
 				log.Info("receipt stop signal.")
 			}
@@ -377,7 +372,6 @@ func startNode(args interface{}) error {
 			profiler.Report()
 		}
 	}
-
 
 	//7.退出
 	service.StopAllService()
@@ -395,7 +389,7 @@ func Setup(s ...service.IService) {
 	}
 }
 
-func SetupTemplate(fs ...func()service.IService){
+func SetupTemplate(fs ...func() service.IService) {
 	for _, f := range fs {
 		preSetupTemplateService = append(preSetupTemplateService, f)
 	}
@@ -428,7 +422,7 @@ func openConsole(args interface{}) error {
 	} else if strOpen == "true" {
 		log.OpenConsole = true
 	} else {
-		return errors.New("Parameter console error!")
+		return errors.New("parameter console error")
 	}
 	return nil
 }
@@ -486,12 +480,12 @@ func setLogSize(args interface{}) error {
 		return nil
 	}
 
-	logSize,ok := args.(int)
-	if ok == false{
+	logSize, ok := args.(int)
+	if ok == false {
 		return errors.New("param logsize is error")
 	}
 
-	log.LogSize = int64(logSize)*1024*1024
+	log.LogSize = int64(logSize) * 1024 * 1024
 
 	return nil
 }
@@ -501,8 +495,8 @@ func setLogChannelCapNum(args interface{}) error {
 		return nil
 	}
 
-	logChannelCap,ok := args.(int)
-	if ok == false{
+	logChannelCap, ok := args.(int)
+	if ok == false {
 		return errors.New("param logsize is error")
 	}
 

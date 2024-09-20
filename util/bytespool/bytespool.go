@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-type IBytesMempool interface {
+type IBytesMemPool interface {
 	MakeBytes(size int) []byte
 	ReleaseBytes(byteBuff []byte) bool
 }

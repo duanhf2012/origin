@@ -39,12 +39,13 @@ func RandN[E ~[]T, T any](arr E, num int) []T {
 	}
 	Shuffle(index)
 	if len(index) > num {
-		index = index
+		index = index[:num]
 	}
 	ret := make([]T, 0, len(index))
 	for i := range index {
 		ret = append(ret, arr[index[i]])
 	}
+	
 	return ret
 }
 

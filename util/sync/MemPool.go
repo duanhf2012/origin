@@ -5,34 +5,32 @@ import (
 )
 
 type Pool struct {
-	C chan interface{}  //最大缓存的数量
+	C        chan interface{} //最大缓存的数量
 	syncPool sysSync.Pool
 }
 
 type IPoolData interface {
 	Reset()
-	IsRef()bool
+	IsRef() bool
 	Ref()
 	UnRef()
 }
 
-type PoolEx struct{
-	C chan IPoolData  //最大缓存的数量
+type PoolEx struct {
+	C        chan IPoolData //最大缓存的数量
 	syncPool sysSync.Pool
 }
 
-func (pool *Pool) Get() interface{}{
+func (pool *Pool) Get() interface{} {
 	select {
 	case d := <-pool.C:
 		return d
 	default:
 		return pool.syncPool.Get()
 	}
-
-	return nil
 }
 
-func (pool *Pool) Put(data interface{}){
+func (pool *Pool) Put(data interface{}) {
 	select {
 	case pool.C <- data:
 	default:
@@ -41,14 +39,14 @@ func (pool *Pool) Put(data interface{}){
 
 }
 
-func NewPool(C chan interface{},New func()interface{}) *Pool{
+func NewPool(C chan interface{}, New func() interface{}) *Pool {
 	var p Pool
 	p.C = C
 	p.syncPool.New = New
 	return &p
 }
 
-func NewPoolEx(C chan IPoolData,New func()IPoolData) *PoolEx{
+func NewPoolEx(C chan IPoolData, New func() IPoolData) *PoolEx {
 	var pool PoolEx
 	pool.C = C
 	pool.syncPool.New = func() interface{} {
@@ -57,7 +55,7 @@ func NewPoolEx(C chan IPoolData,New func()IPoolData) *PoolEx{
 	return &pool
 }
 
-func (pool *PoolEx) Get() IPoolData{
+func (pool *PoolEx) Get() IPoolData {
 	select {
 	case d := <-pool.C:
 		if d.IsRef() {
@@ -79,7 +77,7 @@ func (pool *PoolEx) Get() IPoolData{
 	return nil
 }
 
-func (pool *PoolEx) Put(data IPoolData){
+func (pool *PoolEx) Put(data IPoolData) {
 	if data.IsRef() == false {
 		panic("Repeatedly freeing memory")
 	}
@@ -94,5 +92,3 @@ func (pool *PoolEx) Put(data IPoolData){
 		pool.syncPool.Put(data)
 	}
 }
-
-

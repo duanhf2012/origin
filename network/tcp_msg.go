@@ -17,9 +17,8 @@ type MsgParser struct {
 	MaxMsgLen    uint32
 	LittleEndian bool
 
-	bytespool.IBytesMempool
+	bytespool.IBytesMemPool
 }
-
 
 func (p *MsgParser) getMaxMsgLen(lenMsgLen int) uint32 {
 	switch p.LenMsgLen {
@@ -34,8 +33,8 @@ func (p *MsgParser) getMaxMsgLen(lenMsgLen int) uint32 {
 	}
 }
 
-func (p *MsgParser) init(){
-	p.IBytesMempool = bytespool.NewMemAreaPool()
+func (p *MsgParser) init() {
+	p.IBytesMemPool = bytespool.NewMemAreaPool()
 }
 
 // goroutine safe
@@ -73,7 +72,7 @@ func (p *MsgParser) Read(conn *TCPConn) ([]byte, error) {
 	} else if msgLen < p.MinMsgLen {
 		return nil, errors.New("message too short")
 	}
-	
+
 	// data
 	msgData := p.MakeBytes(int(msgLen))
 	if _, err := io.ReadFull(conn, msgData[:msgLen]); err != nil {
@@ -100,7 +99,7 @@ func (p *MsgParser) Write(conn *TCPConn, args ...[]byte) error {
 	}
 
 	//msg := make([]byte, uint32(p.lenMsgLen)+msgLen)
-	msg := p.MakeBytes(p.LenMsgLen+int(msgLen))
+	msg := p.MakeBytes(p.LenMsgLen + int(msgLen))
 	// write len
 	switch p.LenMsgLen {
 	case 1:

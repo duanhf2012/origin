@@ -342,7 +342,7 @@ func (rs *RankSkip) GetRankNodeData(findKey uint64) (*RankData, uint64) {
 	return rankNode, index + 1
 }
 
-// GetRankNodeDataByPos 获取,返回排名节点与名次
+// GetRankNodeDataByRank 获取,返回排名节点与名次
 func (rs *RankSkip) GetRankNodeDataByRank(rank uint64) (*RankData, uint64) {
 	rs.pickExpireKey()
 	rankNode := rs.skipList.ByPosition(rank - 1)
@@ -382,7 +382,7 @@ func (rs *RankSkip) GetRankKeyPrevToLimit(findKey, count uint64, result *rpc.Ran
 	return nil
 }
 
-// GetRankKeyPrevToLimit 获取key前count名的数据
+// GetRankKeyNextToLimit 获取key前count名的数据
 func (rs *RankSkip) GetRankKeyNextToLimit(findKey, count uint64, result *rpc.RankDataList) error {
 	if rs.GetRankLen() <= 0 {
 		return fmt.Errorf("rank[%d] no data", rs.rankId)
@@ -411,7 +411,7 @@ func (rs *RankSkip) GetRankKeyNextToLimit(findKey, count uint64, result *rpc.Ran
 	return nil
 }
 
-// GetRankList 获取排行榜数据,startPos开始的count个数据
+// GetRankDataFromToLimit 获取排行榜数据,startPos开始的count个数据
 func (rs *RankSkip) GetRankDataFromToLimit(startPos, count uint64, result *rpc.RankDataList) error {
 	if rs.GetRankLen() <= 0 {
 		//初始排行榜可能没有数据

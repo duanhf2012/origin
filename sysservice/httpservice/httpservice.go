@@ -20,7 +20,6 @@ var DefaultReadTimeout time.Duration = time.Second * 10
 var DefaultWriteTimeout time.Duration = time.Second * 10
 var DefaultProcessTimeout time.Duration = time.Second * 10
 
-//http redirect
 type HttpRedirectData struct {
 	Url        string
 	CookieList []*http.Cookie
@@ -53,7 +52,7 @@ type IHttpRouter interface {
 	POST(url string, handle HttpHandle) bool
 	Router(session *HttpSession)
 
-	SetServeFile(method HTTP_METHOD, urlpath string, dirname string) error
+	SetServeFile(method HTTP_METHOD, urlPath string, dirname string) error
 	SetFormFileKey(formFileKey string)
 	GetFormFileKey() string
 	AddHttpFiltrate(FiltrateFun HttpFiltrate) bool
@@ -93,7 +92,7 @@ type HttpService struct {
 	listenAddr     string
 	corsHeader     *CORSHeader
 	processTimeout time.Duration
-	manualStart 	bool
+	manualStart    bool
 }
 
 type HttpFiltrate func(session *HttpSession) bool //true is pass
@@ -118,7 +117,7 @@ func NewHttpHttpRouter() IHttpRouter {
 	return httpRouter
 }
 
-func (slf *HttpSession) GetRawQuery() string{
+func (slf *HttpSession) GetRawQuery() string {
 	return slf.r.URL.RawQuery
 }
 
@@ -215,7 +214,7 @@ func (slf *HttpRouter) analysisRouterUrl(url string) (string, error) {
 	//替换所有空格
 	url = strings.ReplaceAll(url, " ", "")
 	if len(url) <= 1 || url[0] != '/' {
-		return "", fmt.Errorf("url %s format is error!", url)
+		return "", fmt.Errorf("url %s format is error", url)
 	}
 
 	//去掉尾部的/
@@ -300,12 +299,12 @@ func (httpService *HttpService) SetHttpRouter(httpRouter IHttpRouter, eventHandl
 	httpService.RegEventReceiverFunc(event.Sys_Event_Http_Event, eventHandler, httpService.HttpEventHandler)
 }
 
-func (slf *HttpRouter) SetServeFile(method HTTP_METHOD, urlpath string, dirname string) error {
+func (slf *HttpRouter) SetServeFile(method HTTP_METHOD, urlPath string, dirname string) error {
 	_, err := os.Stat(dirname)
 	if err != nil {
 		return err
 	}
-	matchURL, aErr := slf.analysisRouterUrl(urlpath)
+	matchURL, aErr := slf.analysisRouterUrl(urlPath)
 	if aErr != nil {
 		return aErr
 	}
@@ -350,15 +349,15 @@ func (slf *HttpSession) redirects() {
 func (httpService *HttpService) OnInit() error {
 	iConfig := httpService.GetServiceCfg()
 	if iConfig == nil {
-		return fmt.Errorf("%s service config is error!", httpService.GetName())
+		return fmt.Errorf("%s service config is error", httpService.GetName())
 	}
 	httpCfg := iConfig.(map[string]interface{})
 	addr, ok := httpCfg["ListenAddr"]
 	if ok == false {
-		return fmt.Errorf("%s service config is error!", httpService.GetName())
+		return fmt.Errorf("%s service config is error", httpService.GetName())
 	}
-	var readTimeout time.Duration = DefaultReadTimeout
-	var writeTimeout time.Duration = DefaultWriteTimeout
+	var readTimeout = DefaultReadTimeout
+	var writeTimeout = DefaultWriteTimeout
 
 	if cfgRead, ok := httpCfg["ReadTimeout"]; ok == true {
 		readTimeout = time.Duration(cfgRead.(float64)) * time.Millisecond
@@ -370,8 +369,8 @@ func (httpService *HttpService) OnInit() error {
 
 	if manualStart, ok := httpCfg["ManualStart"]; ok == true {
 		httpService.manualStart = manualStart.(bool)
-	}else{
-		manualStart =false
+	} else {
+		manualStart = false
 	}
 
 	httpService.processTimeout = DefaultProcessTimeout

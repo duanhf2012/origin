@@ -90,18 +90,18 @@ func (m *RedisModule) Init(redisCfg *ConfigRedis) {
 func (m *RedisModule) getConn() (redis.Conn, error) {
 	if m.redisPool == nil {
 		log.Error("Not Init RedisModule")
-		return nil, fmt.Errorf("Not Init RedisModule")
+		return nil, fmt.Errorf("not Init RedisModule")
 	}
 	conn := m.redisPool.Get()
 	if conn == nil {
 		log.Error("Cannot get connection")
-		return nil, fmt.Errorf("Cannot get connection")
+		return nil, fmt.Errorf("cannot get connection")
 	}
 
 	if conn.Err() != nil {
 		err := conn.Err()
 		if err != nil {
-			log.Error("Get Conn have error,reason:%v", err)
+			log.Error("get Conn have error,reason:%v", err)
 		}
 		conn.Close()
 		return nil, err
@@ -153,7 +153,7 @@ func (m *RedisModule) SetStringJSONExpire(key interface{}, val interface{}, expi
 
 func (m *RedisModule) setStringByExpire(key, value, expire interface{}) error {
 	if key == "" {
-		return errors.New("Key Is Empty")
+		return errors.New("key is empty")
 	}
 
 	conn, err := m.getConn()
@@ -474,7 +474,7 @@ func (m *RedisModule) DelStringKeyList(keys []interface{}) (map[interface{}]bool
 
 func (m *RedisModule) SetHash(redisKey, hashKey, value interface{}) error {
 	if redisKey == "" || hashKey == "" {
-		return errors.New("Key Is Empty")
+		return errors.New("key is empty")
 	}
 	conn, err := m.getConn()
 	if err != nil {
@@ -490,10 +490,9 @@ func (m *RedisModule) SetHash(redisKey, hashKey, value interface{}) error {
 	return retErr
 }
 
-// GetRedisAllHashJSON ...
 func (m *RedisModule) GetAllHashJSON(redisKey string) (map[string]string, error) {
 	if redisKey == "" {
-		return nil, errors.New("Key Is Empty")
+		return nil, errors.New("key is empty")
 	}
 	conn, err := m.getConn()
 	if err != nil {
@@ -513,7 +512,7 @@ func (m *RedisModule) GetAllHashJSON(redisKey string) (map[string]string, error)
 func (m *RedisModule) GetHash(redisKey interface{}, fieldKey interface{}) (string, error) {
 	if redisKey == "" || fieldKey == "" {
 		log.Error("GetHashValueByKey key is empty!")
-		return "", errors.New("Key Is Empty")
+		return "", errors.New("key is empty")
 	}
 	conn, err := m.getConn()
 	if err != nil {
@@ -527,7 +526,7 @@ func (m *RedisModule) GetHash(redisKey interface{}, fieldKey interface{}) (strin
 		return "", err
 	}
 	if value == nil {
-		return "", errors.New("Reids Get Hash nil")
+		return "", errors.New("redis get hash nil")
 	}
 
 	return redis.String(value, nil)
@@ -536,7 +535,7 @@ func (m *RedisModule) GetHash(redisKey interface{}, fieldKey interface{}) (strin
 func (m *RedisModule) GetMuchHash(args ...interface{}) ([]string, error) {
 	if len(args) < 2 {
 		log.Error("GetHashValueByHashKeyList key len less than two!")
-		return nil, errors.New("Key Is Empty")
+		return nil, errors.New("key is empty")
 	}
 	conn, err := m.getConn()
 	if err != nil {
@@ -550,11 +549,11 @@ func (m *RedisModule) GetMuchHash(args ...interface{}) ([]string, error) {
 		return nil, err
 	}
 	if value == nil {
-		return nil, errors.New("Reids Get Hash nil")
+		return nil, errors.New("redis get hash nil")
 	}
 
 	valueList := value.([]interface{})
-	retList := []string{}
+	var retList []string
 	for _, valueItem := range valueList {
 		valueByte, ok := valueItem.([]byte)
 		if !ok {
@@ -572,7 +571,7 @@ func (m *RedisModule) ScanMatchKeys(cursorValue int, redisKey string, count int)
 	nextCursorValue := 0
 	if redisKey == "" {
 		log.Error("ScanMatchKeys key is empty!")
-		return nextCursorValue, nil, errors.New("Key Is Empty")
+		return nextCursorValue, nil, errors.New("key is empty")
 	}
 
 	conn, err := m.getConn()
@@ -587,7 +586,7 @@ func (m *RedisModule) ScanMatchKeys(cursorValue int, redisKey string, count int)
 		return nextCursorValue, nil, err
 	}
 	if value == nil {
-		return nextCursorValue, nil, errors.New("Reids Get Hash nil")
+		return nextCursorValue, nil, errors.New("redis get hash nil")
 	}
 
 	valueList := value.([]interface{})
@@ -669,7 +668,7 @@ func (m *RedisModule) RPushListJSON(key interface{}, value ...interface{}) error
 // LPUSH和RPUSH
 func (m *RedisModule) setListPush(setType string, args ...interface{}) error {
 	if setType != "LPUSH" && setType != "RPUSH" {
-		return errors.New("Redis List Push Type Error,Must Be LPUSH or RPUSH")
+		return errors.New("redis list push type error,must be LPUSH or RPUSH")
 	}
 	conn, err := m.getConn()
 	if err != nil {
@@ -697,7 +696,6 @@ func (m *RedisModule) setListJSONPush(setType string, key interface{}, value ...
 	return m.setListPush(setType, args...)
 }
 
-// Lrange ...
 func (m *RedisModule) LRangeList(key string, start, end int) ([]string, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -714,7 +712,7 @@ func (m *RedisModule) LRangeList(key string, start, end int) ([]string, error) {
 	return redis.Strings(reply, err)
 }
 
-// 获取List的长度
+// GetListLen 获取List的长度
 func (m *RedisModule) GetListLen(key string) (int, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -730,7 +728,7 @@ func (m *RedisModule) GetListLen(key string) (int, error) {
 	return redis.Int(reply, err)
 }
 
-// 弹出List最后条记录
+// RPOPListValue 弹出List最后条记录
 func (m *RedisModule) RPOPListValue(key string) (string, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -782,7 +780,7 @@ func (m *RedisModule) LRange(key string, start, stop int) ([]byte, error) {
 	return makeListJson(reply.([]interface{}), false), nil
 }
 
-// 弹出list(消息队列)数据,数据放入out fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
+// ListPopJson 弹出list(消息队列)数据,数据放入out fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
 func (m *RedisModule) ListPopJson(key string, fromLeft, block bool, timeout int, out interface{}) error {
 	b, err := m.ListPop(key, fromLeft, block, timeout)
 	if err != nil {
@@ -795,7 +793,7 @@ func (m *RedisModule) ListPopJson(key string, fromLeft, block bool, timeout int,
 	return nil
 }
 
-// 弹出list(消息队列)数据 fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
+// ListPop 弹出list(消息队列)数据 fromLeft表示是否从左侧弹出 block表示是否阻塞 timeout表示阻塞超时
 func (m *RedisModule) ListPop(key string, fromLeft, block bool, timeout int) ([]byte, error) {
 	cmd := ""
 	if fromLeft {
@@ -837,7 +835,7 @@ func (m *RedisModule) ListPop(key string, fromLeft, block bool, timeout int) ([]
 	return b, nil
 }
 
-// 有序集合插入Json
+// ZADDInsertJson 有序集合插入Json
 func (m *RedisModule) ZADDInsertJson(key string, score float64, value interface{}) error {
 
 	conn, err := m.getConn()
@@ -857,7 +855,7 @@ func (m *RedisModule) ZADDInsertJson(key string, score float64, value interface{
 	return nil
 }
 
-// 有序集合插入
+// ZADDInsert 有序集合插入
 func (m *RedisModule) ZADDInsert(key string, score float64, Data interface{}) error {
 	conn, err := m.getConn()
 	if err != nil {
@@ -897,7 +895,7 @@ func (m *RedisModule) ZRangeJSON(key string, start, stop int, ascend bool, withS
 	return nil
 }
 
-// 取有序set指定排名 ascend=true表示按升序遍历 否则按降序遍历
+// ZRange 取有序set指定排名 ascend=true表示按升序遍历 否则按降序遍历
 func (m *RedisModule) ZRange(key string, start, stop int, ascend bool, withScores bool) ([]byte, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -921,7 +919,7 @@ func (m *RedisModule) ZRange(key string, start, stop int, ascend bool, withScore
 	return makeListJson(reply.([]interface{}), withScores), nil
 }
 
-// 获取有序集合长度
+// Zcard 获取有序集合长度
 func (m *RedisModule) Zcard(key string) (int, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -1005,7 +1003,7 @@ func (m *RedisModule) ZRangeByScore(key string, start, stop float64, ascend bool
 	return makeListJson(reply.([]interface{}), withScores), nil
 }
 
-// 获取指定member的排名
+// ZScore 获取指定member的排名
 func (m *RedisModule) ZScore(key string, member interface{}) (float64, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -1021,7 +1019,7 @@ func (m *RedisModule) ZScore(key string, member interface{}) (float64, error) {
 	return redis.Float64(reply, err)
 }
 
-// 获取指定member的排名
+// ZRank 获取指定member的排名
 func (m *RedisModule) ZRank(key string, member interface{}, ascend bool) (int, error) {
 	conn, err := m.getConn()
 	if err != nil {
@@ -1080,7 +1078,7 @@ func (m *RedisModule) ZREMMulti(key string, member ...interface{}) (int, error) 
 
 func (m *RedisModule) HincrbyHashInt(redisKey, hashKey string, value int) error {
 	if redisKey == "" || hashKey == "" {
-		return errors.New("Key Is Empty")
+		return errors.New("key is empty")
 	}
 	conn, err := m.getConn()
 	if err != nil {
@@ -1140,7 +1138,7 @@ func (m *RedisModule) Keys(key string) ([]string, error) {
 		return nil, err
 	}
 
-	strs := []string{}
+	var strs []string
 	for _, val := range retList {
 		strVal, ok := val.([]byte)
 		if !ok {

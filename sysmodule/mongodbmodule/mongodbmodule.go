@@ -75,12 +75,12 @@ func (s *Session) NextSeq(db string, collection string, id interface{}) (int, er
 	return res.Seq, err
 }
 
-// indexKeys[索引][每个索引key字段]
+// EnsureIndex indexKeys[索引][每个索引key字段]
 func (s *Session) EnsureIndex(db string, collection string, indexKeys [][]string, bBackground bool, sparse bool, asc bool) error {
 	return s.ensureIndex(db, collection, indexKeys, bBackground, false, sparse, asc)
 }
 
-// indexKeys[索引][每个索引key字段]
+// EnsureUniqueIndex indexKeys[索引][每个索引key字段]
 func (s *Session) EnsureUniqueIndex(db string, collection string, indexKeys [][]string, bBackground bool, sparse bool, asc bool) error {
 	return s.ensureIndex(db, collection, indexKeys, bBackground, true, sparse, asc)
 }
@@ -92,9 +92,9 @@ func (s *Session) ensureIndex(db string, collection string, indexKeys [][]string
 		keysDoc := bson.D{}
 		for _, key := range keys {
 			if asc {
-				keysDoc = append(keysDoc, bson.E{Key:key,Value:1})
+				keysDoc = append(keysDoc, bson.E{Key: key, Value: 1})
 			} else {
-				keysDoc = append(keysDoc, bson.E{Key:key,Value:-1})
+				keysDoc = append(keysDoc, bson.E{Key: key, Value: -1})
 			}
 
 		}

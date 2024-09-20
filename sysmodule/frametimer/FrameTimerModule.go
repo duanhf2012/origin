@@ -58,7 +58,7 @@ func (ft *FrameTimer) addTimerData(timerID FrameTimerID, frameNum FrameNumber, t
 	td.cb = cb
 	td.idx = -1
 	td.tickerFrameNum = tickerFrameNum
-
+	td.ctx = ctx
 	ft.mapTimer[timerID] = td
 	return td
 }

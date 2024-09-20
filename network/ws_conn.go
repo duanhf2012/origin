@@ -18,7 +18,7 @@ type WSConn struct {
 	closeFlag bool
 }
 
-func newWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32,messageType int) *WSConn {
+func newWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32, messageType int) *WSConn {
 	wsConn := new(WSConn)
 	wsConn.conn = conn
 	wsConn.writeChan = make(chan []byte, pendingWriteNum)
@@ -91,13 +91,13 @@ func (wsConn *WSConn) RemoteAddr() net.Addr {
 	return wsConn.conn.RemoteAddr()
 }
 
-// goroutine not safe
+// ReadMsg goroutine not safe
 func (wsConn *WSConn) ReadMsg() ([]byte, error) {
 	_, b, err := wsConn.conn.ReadMessage()
 	return b, err
 }
 
-// args must not be modified by the others goroutines
+// WriteMsg args must not be modified by the others goroutines
 func (wsConn *WSConn) WriteMsg(args ...[]byte) error {
 	wsConn.Lock()
 	defer wsConn.Unlock()

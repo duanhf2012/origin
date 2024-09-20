@@ -1,24 +1,23 @@
 package network
 
 import (
+	"errors"
+	"fmt"
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/util/bytespool"
 	"net"
 	"sync"
 	"time"
-	"fmt"
-	"errors"
 )
 
-const(
-	Default_ReadDeadline  = time.Second*30 //默认读超时30s
-	Default_WriteDeadline = time.Second*30 //默认写超时30s
-	Default_MaxConnNum = 1000000						 //默认最大连接数
-	Default_PendingWriteNum = 100000				     //单连接写消息Channel容量
-	Default_LittleEndian = false						 //默认大小端
-	Default_MinMsgLen = 2								 //最小消息长度2byte
-	Default_LenMsgLen = 2								 //包头字段长度占用2byte
-	Default_MaxMsgLen = 65535                            //最大消息长度
+const (
+	Default_ReadDeadline    = time.Second * 30 //默认读超时30s
+	Default_WriteDeadline   = time.Second * 30 //默认写超时30s
+	Default_MaxConnNum      = 1000000          //默认最大连接数
+	Default_PendingWriteNum = 100000           //单连接写消息Channel容量
+	Default_MinMsgLen       = 2                //最小消息长度2byte
+	Default_LenMsgLen       = 2                //包头字段长度占用2byte
+	Default_MaxMsgLen       = 65535            //最大消息长度
 )
 
 type TCPServer struct {
@@ -26,19 +25,19 @@ type TCPServer struct {
 	MaxConnNum      int
 	PendingWriteNum int
 	ReadDeadline    time.Duration
-	WriteDeadline 	time.Duration
+	WriteDeadline   time.Duration
 
-	NewAgent        func(*TCPConn) Agent
-	ln              net.Listener
-	conns           ConnSet
-	mutexConns      sync.Mutex
-	wgLn            sync.WaitGroup
-	wgConns         sync.WaitGroup
+	NewAgent   func(*TCPConn) Agent
+	ln         net.Listener
+	conns      ConnSet
+	mutexConns sync.Mutex
+	wgLn       sync.WaitGroup
+	wgConns    sync.WaitGroup
 
 	MsgParser
 }
 
-func (server *TCPServer) Start() error{
+func (server *TCPServer) Start() error {
 	err := server.init()
 	if err != nil {
 		return err
@@ -48,20 +47,20 @@ func (server *TCPServer) Start() error{
 	return nil
 }
 
-func (server *TCPServer) init() error{
+func (server *TCPServer) init() error {
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		return fmt.Errorf("Listen tcp fail,error:%s",err.Error())
+		return fmt.Errorf("listen tcp fail,error:%s", err.Error())
 	}
 
 	if server.MaxConnNum <= 0 {
 		server.MaxConnNum = Default_MaxConnNum
-		log.Info("invalid MaxConnNum",log.Int("reset", server.MaxConnNum))
+		log.Info("invalid MaxConnNum", log.Int("reset", server.MaxConnNum))
 	}
 
 	if server.PendingWriteNum <= 0 {
 		server.PendingWriteNum = Default_PendingWriteNum
-		log.Info("invalid PendingWriteNum",log.Int("reset", server.PendingWriteNum))
+		log.Info("invalid PendingWriteNum", log.Int("reset", server.PendingWriteNum))
 	}
 
 	if server.LenMsgLen <= 0 {
@@ -77,22 +76,22 @@ func (server *TCPServer) init() error{
 	maxMsgLen := server.MsgParser.getMaxMsgLen(server.LenMsgLen)
 	if server.MaxMsgLen > maxMsgLen {
 		server.MaxMsgLen = maxMsgLen
-		log.Info("invalid MaxMsgLen",log.Uint32("reset", maxMsgLen))
+		log.Info("invalid MaxMsgLen", log.Uint32("reset", maxMsgLen))
 	}
-	
+
 	if server.MinMsgLen <= 0 {
 		server.MinMsgLen = Default_MinMsgLen
-		log.Info("invalid MinMsgLen",log.Uint32("reset", server.MinMsgLen))
+		log.Info("invalid MinMsgLen", log.Uint32("reset", server.MinMsgLen))
 	}
 
 	if server.WriteDeadline == 0 {
 		server.WriteDeadline = Default_WriteDeadline
-		log.Info("invalid WriteDeadline",log.Int64("reset",int64(server.WriteDeadline.Seconds())))
+		log.Info("invalid WriteDeadline", log.Int64("reset", int64(server.WriteDeadline.Seconds())))
 	}
 
 	if server.ReadDeadline == 0 {
 		server.ReadDeadline = Default_ReadDeadline
-		log.Info("invalid ReadDeadline",log.Int64("reset", int64(server.ReadDeadline.Seconds())))
+		log.Info("invalid ReadDeadline", log.Int64("reset", int64(server.ReadDeadline.Seconds())))
 	}
 
 	if server.NewAgent == nil {
@@ -102,16 +101,16 @@ func (server *TCPServer) init() error{
 	server.ln = ln
 	server.conns = make(ConnSet)
 	server.MsgParser.init()
-	
+
 	return nil
 }
 
-func (server *TCPServer) SetNetMempool(mempool bytespool.IBytesMempool){
-	server.IBytesMempool = mempool
+func (server *TCPServer) SetNetMemPool(memPool bytespool.IBytesMemPool) {
+	server.IBytesMemPool = memPool
 }
 
-func (server *TCPServer) GetNetMempool() bytespool.IBytesMempool {
-	return server.IBytesMempool
+func (server *TCPServer) GetNetMemPool() bytespool.IBytesMemPool {
+	return server.IBytesMemPool
 }
 
 func (server *TCPServer) run() {
@@ -131,7 +130,7 @@ func (server *TCPServer) run() {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				log.Info("accept fail",log.String("error",err.Error()),log.Duration("sleep time", tempDelay))
+				log.Info("accept fail", log.String("error", err.Error()), log.Duration("sleep time", tempDelay))
 				time.Sleep(tempDelay)
 				continue
 			}
@@ -153,7 +152,7 @@ func (server *TCPServer) run() {
 		server.mutexConns.Unlock()
 		server.wgConns.Add(1)
 
-		tcpConn := newTCPConn(conn, server.PendingWriteNum, &server.MsgParser,server.WriteDeadline)
+		tcpConn := newTCPConn(conn, server.PendingWriteNum, &server.MsgParser, server.WriteDeadline)
 		agent := server.NewAgent(tcpConn)
 
 		go func() {

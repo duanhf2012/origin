@@ -59,16 +59,16 @@ func (w *worker) exec(t *task) {
 			t.cb = func(err error) {
 				cb(errors.New(errString))
 			}
-			log.Dump(string(buf[:l]),log.String("error",errString))
-			w.endCallFun(true,t)
+			log.Dump(string(buf[:l]), log.String("error", errString))
+			w.endCallFun(true, t)
 		}
 	}()
 
-	w.endCallFun(t.fn(),t)
+	w.endCallFun(t.fn(), t)
 }
 
-func (w *worker) endCallFun(isDocallBack bool,t *task) {
-	if isDocallBack {
+func (w *worker) endCallFun(isDoCallBack bool, t *task) {
+	if isDoCallBack {
 		w.pushAsyncDoCallbackEvent(t.cb)
 	}
 

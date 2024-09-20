@@ -42,7 +42,7 @@ func setBitTagByIndex[Number BitNumber, UNumber UnsignedNumber](bitBuff []Number
 func GetBitwiseTag[Number BitNumber, UNumber UnsignedNumber](bitBuff []Number, bitPositionIndex UNumber) (bool, error) {
 	sliceIndex, sliceBitIndex, ret := getBitTagIndex(bitBuff, bitPositionIndex)
 	if ret == false {
-		return false, errors.New("Invalid parameter")
+		return false, errors.New("invalid parameter")
 	}
 
 	return (bitBuff[sliceIndex] & (1 << sliceBitIndex)) > 0, nil

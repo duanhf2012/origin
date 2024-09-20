@@ -6,11 +6,10 @@ import (
 	"github.com/duanhf2012/origin/v2/util/sync"
 	"reflect"
 	"runtime"
-	"time"
 	"sync/atomic"
+	"time"
 )
 
-// ITimer
 type ITimer interface {
 	GetId() uint64
 	Cancel()
@@ -27,10 +26,9 @@ type ITimer interface {
 type OnCloseTimer func(timer ITimer)
 type OnAddTimer func(timer ITimer)
 
-// Timer
 type Timer struct {
 	Id             uint64
-	cancelled      int32          //是否关闭
+	cancelled      int32         //是否关闭
 	C              chan ITimer   //定时器管道
 	interval       time.Duration // 时间间隔（用于循环定时器）
 	fireTime       time.Time     // 触发时间
@@ -46,12 +44,10 @@ type Timer struct {
 	ref bool
 }
 
-// Ticker
 type Ticker struct {
 	Timer
 }
 
-// Cron
 type Cron struct {
 	Timer
 }
@@ -101,7 +97,6 @@ func releaseCron(cron *Cron) {
 	cronPool.Put(cron)
 }
 
-// one dispatcher per goroutine (goroutine not safe)
 type Dispatcher struct {
 	ChanTimer chan ITimer
 }
@@ -132,7 +127,7 @@ func (t *Timer) Do() {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.Dump(string(buf[:l]),log.String("error",errString))
+			log.Dump(string(buf[:l]), log.String("error", errString))
 		}
 	}()
 
@@ -172,10 +167,10 @@ func (t *Timer) GetInterval() time.Duration {
 }
 
 func (t *Timer) Cancel() {
-	atomic.StoreInt32(&t.cancelled,1)
+	atomic.StoreInt32(&t.cancelled, 1)
 }
 
-// 判断定时器是否已经取消
+// IsActive 判断定时器是否已经取消
 func (t *Timer) IsActive() bool {
 	return atomic.LoadInt32(&t.cancelled) == 0
 }
@@ -218,7 +213,7 @@ func (c *Cron) Do() {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.Dump(string(buf[:l]),log.String("error",errString))
+			log.Dump(string(buf[:l]), log.String("error", errString))
 		}
 	}()
 
@@ -274,7 +269,7 @@ func (c *Ticker) Do() {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.Dump(string(buf[:l]),log.String("error",errString))
+			log.Dump(string(buf[:l]), log.String("error", errString))
 		}
 	}()
 

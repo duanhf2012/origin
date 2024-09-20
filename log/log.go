@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/duanhf2012/origin/v2/util/bytespool"
-	jsoniter "github.com/json-iterator/go"
 	"io"
 	"log/slog"
 	"os"
@@ -16,28 +15,26 @@ import (
 	"time"
 )
 
-var json = jsoniter.ConfigCompatibleWithStandardLibrary
 var OpenConsole bool
 var LogSize int64
 var LogChannelCap int
 var LogPath string
-var LogLevel slog.Level = LevelTrace
+var LogLevel = LevelTrace
 
-
-var gLogger, _ = NewTextLogger(LevelDebug, "", "",true,LogChannelCap)
+var gLogger, _ = NewTextLogger(LevelDebug, "", "", true, LogChannelCap)
 var isSetLogger bool
 var memPool = bytespool.NewMemAreaPool()
 
 // levels
 const (
-	LevelTrace          	= slog.Level(-8)
-	LevelDebug        	= slog.LevelDebug
-	LevelInfo       	= slog.LevelInfo
-	LevelWarning    	= slog.LevelWarn
-	LevelError        	= slog.LevelError
-	LevelStack   			= slog.Level(12)
-	LevelDump               = slog.Level(16)
-	LevelFatal 				= slog.Level(20)
+	LevelTrace   = slog.Level(-8)
+	LevelDebug   = slog.LevelDebug
+	LevelInfo    = slog.LevelInfo
+	LevelWarning = slog.LevelWarn
+	LevelError   = slog.LevelError
+	LevelStack   = slog.Level(12)
+	LevelDump    = slog.Level(16)
+	LevelFatal   = slog.Level(20)
 )
 
 type ILogger interface {
@@ -50,13 +47,13 @@ type ILogger interface {
 	Dump(msg string, args ...any)
 	Fatal(msg string, args ...any)
 
-	DoSPrintf(level slog.Level,a []interface{})
-	FormatHeader(buf *Buffer,level slog.Level,calldepth int)
+	DoSPrintf(level slog.Level, a []interface{})
+	FormatHeader(buf *Buffer, level slog.Level, callDepth int)
 	Close()
 }
 
 type Logger struct {
-	Slogger *slog.Logger
+	SLogger *slog.Logger
 
 	ioWriter IoWriter
 
@@ -64,17 +61,17 @@ type Logger struct {
 }
 
 type IoWriter struct {
-	outFile    io.Writer  // destination for output
-	writeBytes  int64
+	outFile    io.Writer // destination for output
+	writeBytes int64
 	logChannel chan []byte
-	wg             sync.WaitGroup
-	closeSig chan struct{}
+	wg         sync.WaitGroup
+	closeSig   chan struct{}
 
 	lockWrite sync.Mutex
 
-	filePath    string
-	fileprefix 	string
-	fileDay     int
+	filePath       string
+	filePrefix     string
+	fileDay        int
 	fileCreateTime int64 //second
 }
 
@@ -94,7 +91,7 @@ func (iw *IoWriter) close() error {
 	}
 	iw.wg.Wait()
 
-	if iw.outFile!= nil {
+	if iw.outFile != nil {
 		err := iw.outFile.(io.Closer).Close()
 		iw.outFile = nil
 		return err
@@ -103,21 +100,21 @@ func (iw *IoWriter) close() error {
 	return nil
 }
 
-func (iw *IoWriter) writeFile(p []byte) (n int, err error){
-	//swich log file
-	iw.swichFile()
+func (iw *IoWriter) writeFile(p []byte) (n int, err error) {
+	//switch log file
+	iw.switchFile()
 
 	if iw.outFile != nil {
-		n,err = iw.outFile.Write(p)
+		n, err = iw.outFile.Write(p)
 		if n > 0 {
-			atomic.AddInt64(&iw.writeBytes,int64(n))
+			atomic.AddInt64(&iw.writeBytes, int64(n))
 		}
 	}
 
-	return 0,nil
+	return 0, nil
 }
 
-func (iw *IoWriter) Write(p []byte) (n int, err error){
+func (iw *IoWriter) Write(p []byte) (n int, err error) {
 	iw.lockWrite.Lock()
 	defer iw.lockWrite.Unlock()
 
@@ -127,26 +124,26 @@ func (iw *IoWriter) Write(p []byte) (n int, err error){
 
 	copyBuff := memPool.MakeBytes(len(p))
 	if copyBuff == nil {
-		return 0,fmt.Errorf("MakeByteSlice failed")
+		return 0, fmt.Errorf("MakeByteSlice failed")
 	}
-	copy(copyBuff,p)
+	copy(copyBuff, p)
 
 	iw.logChannel <- copyBuff
 
 	return
 }
 
-func (iw *IoWriter) writeIo(p []byte)  (n int, err error){
-	n,err = iw.writeFile(p)
+func (iw *IoWriter) writeIo(p []byte) (n int, err error) {
+	n, err = iw.writeFile(p)
 
 	if OpenConsole {
-		n,err = os.Stdout.Write(p)
+		n, err = os.Stdout.Write(p)
 	}
 
 	return
 }
 
-func (iw *IoWriter) setLogChannel(logChannelNum int) (err error){
+func (iw *IoWriter) setLogChannel(logChannelNum int) (err error) {
 	iw.lockWrite.Lock()
 	defer iw.lockWrite.Unlock()
 	iw.close()
@@ -157,9 +154,9 @@ func (iw *IoWriter) setLogChannel(logChannelNum int) (err error){
 
 	//copy iw.logChannel
 	var logInfo []byte
-	logChannel := make(chan []byte,logChannelNum)
-	for i := 0; i < logChannelNum&&i<len(iw.logChannel); i++{
-		logInfo = <- iw.logChannel
+	logChannel := make(chan []byte, logChannelNum)
+	for i := 0; i < logChannelNum && i < len(iw.logChannel); i++ {
+		logInfo = <-iw.logChannel
 		logChannel <- logInfo
 	}
 	iw.logChannel = logChannel
@@ -171,13 +168,13 @@ func (iw *IoWriter) setLogChannel(logChannelNum int) (err error){
 	return nil
 }
 
-func (iw *IoWriter) run(){
+func (iw *IoWriter) run() {
 	defer iw.wg.Done()
 
 Loop:
-	for{
+	for {
 		select {
-		case <- iw.closeSig:
+		case <-iw.closeSig:
 			break Loop
 		case logs := <-iw.logChannel:
 			iw.writeIo(logs)
@@ -186,9 +183,9 @@ Loop:
 	}
 
 	for len(iw.logChannel) > 0 {
-			logs := <-iw.logChannel
-			iw.writeIo(logs)
-			memPool.ReleaseBytes(logs)
+		logs := <-iw.logChannel
+		iw.writeIo(logs)
+		memPool.ReleaseBytes(logs)
 	}
 }
 
@@ -200,11 +197,11 @@ func (iw *IoWriter) isFull() bool {
 	return atomic.LoadInt64(&iw.writeBytes) >= LogSize
 }
 
-func (logger *Logger) setLogChannel(logChannel int) (err error){
+func (logger *Logger) setLogChannel(logChannel int) (err error) {
 	return logger.ioWriter.setLogChannel(logChannel)
 }
 
-func (iw *IoWriter) swichFile() error{
+func (iw *IoWriter) switchFile() error {
 	now := time.Now()
 	if iw.fileCreateTime == now.Unix() {
 		return nil
@@ -217,7 +214,7 @@ func (iw *IoWriter) swichFile() error{
 	if iw.filePath != "" {
 		var err error
 		fileName := fmt.Sprintf("%s%d%02d%02d_%02d_%02d_%02d.log",
-			iw.fileprefix,
+			iw.filePrefix,
 			now.Year(),
 			now.Month(),
 			now.Day(),
@@ -227,92 +224,92 @@ func (iw *IoWriter) swichFile() error{
 
 		filePath := path.Join(iw.filePath, fileName)
 
-		iw.outFile,err = os.Create(filePath)
+		iw.outFile, err = os.Create(filePath)
 		if err != nil {
 			return err
 		}
 		iw.fileDay = now.Day()
 		iw.fileCreateTime = now.Unix()
-		atomic.StoreInt64(&iw.writeBytes,0)
+		atomic.StoreInt64(&iw.writeBytes, 0)
 	}
 
 	return nil
 }
 
-func GetDefaultHandler() IOriginHandler{
-	return gLogger.(*Logger).Slogger.Handler().(IOriginHandler)
+func GetDefaultHandler() IOriginHandler {
+	return gLogger.(*Logger).SLogger.Handler().(IOriginHandler)
 }
 
-func NewTextLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (ILogger,error){
+func NewTextLogger(level slog.Level, pathName string, filePrefix string, addSource bool, logChannelCap int) (ILogger, error) {
 	var logger Logger
 	logger.ioWriter.filePath = pathName
-	logger.ioWriter.fileprefix = filePrefix
+	logger.ioWriter.filePrefix = filePrefix
 
-	logger.Slogger = slog.New(NewOriginTextHandler(level,&logger.ioWriter,addSource,defaultReplaceAttr))
+	logger.SLogger = slog.New(NewOriginTextHandler(level, &logger.ioWriter, addSource, defaultReplaceAttr))
 	logger.setLogChannel(logChannelCap)
-	err := logger.ioWriter.swichFile()
+	err := logger.ioWriter.switchFile()
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
 
-	return &logger,nil
+	return &logger, nil
 }
 
-func NewJsonLogger(level slog.Level,pathName string,filePrefix string,addSource bool,logChannelCap int) (ILogger,error){
+func NewJsonLogger(level slog.Level, pathName string, filePrefix string, addSource bool, logChannelCap int) (ILogger, error) {
 	var logger Logger
 	logger.ioWriter.filePath = pathName
-	logger.ioWriter.fileprefix = filePrefix
+	logger.ioWriter.filePrefix = filePrefix
 
-	logger.Slogger = slog.New(NewOriginJsonHandler(level,&logger.ioWriter,true,defaultReplaceAttr))
+	logger.SLogger = slog.New(NewOriginJsonHandler(level, &logger.ioWriter, true, defaultReplaceAttr))
 	logger.setLogChannel(logChannelCap)
-	err := logger.ioWriter.swichFile()
+	err := logger.ioWriter.switchFile()
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
 
-	return &logger,nil
+	return &logger, nil
 }
 
-// It's dangerous to call the method on logging
+// Close It's dangerous to call the method on logging
 func (logger *Logger) Close() {
 	logger.ioWriter.Close()
 }
 
 func (logger *Logger) Trace(msg string, args ...any) {
-	logger.Slogger.Log(context.Background(),LevelTrace,msg,args...)
+	logger.SLogger.Log(context.Background(), LevelTrace, msg, args...)
 }
 
 func (logger *Logger) Debug(msg string, args ...any) {
 
-	logger.Slogger.Log(context.Background(),LevelDebug,msg,args...)
+	logger.SLogger.Log(context.Background(), LevelDebug, msg, args...)
 }
 
 func (logger *Logger) Info(msg string, args ...any) {
-	logger.Slogger.Log(context.Background(),LevelInfo,msg,args...)
+	logger.SLogger.Log(context.Background(), LevelInfo, msg, args...)
 }
 
 func (logger *Logger) Warning(msg string, args ...any) {
-	logger.Slogger.Log(context.Background(),LevelWarning,msg,args...)
+	logger.SLogger.Log(context.Background(), LevelWarning, msg, args...)
 }
 
 func (logger *Logger) Error(msg string, args ...any) {
-	logger.Slogger.Log(context.Background(),LevelError,msg,args...)
+	logger.SLogger.Log(context.Background(), LevelError, msg, args...)
 }
 
 func (logger *Logger) Stack(msg string, args ...any) {
-	logger.Slogger.Log(context.Background(),LevelStack,msg,args...)
+	logger.SLogger.Log(context.Background(), LevelStack, msg, args...)
 }
 
 func (logger *Logger) Dump(msg string, args ...any) {
-	logger.Slogger.Log(context.Background(),LevelDump,msg,args...)
+	logger.SLogger.Log(context.Background(), LevelDump, msg, args...)
 }
 
 func (logger *Logger) Fatal(msg string, args ...any) {
-	logger.Slogger.Log(context.Background(),LevelFatal,msg,args...)
+	logger.SLogger.Log(context.Background(), LevelFatal, msg, args...)
 	os.Exit(1)
 }
 
-// It's non-thread-safe
+// SetLogger It's non-thread-safe
 func SetLogger(logger ILogger) {
 	if logger != nil && isSetLogger == false {
 		gLogger = logger
@@ -320,189 +317,189 @@ func SetLogger(logger ILogger) {
 	}
 }
 
-func GetLogger() ILogger{
+func GetLogger() ILogger {
 	return gLogger
 }
 
-func Trace(msg string, args ...any){
+func Trace(msg string, args ...any) {
 	gLogger.Trace(msg, args...)
 }
 
-func Debug(msg string, args ...any){
-	gLogger.Debug(msg,args...)
+func Debug(msg string, args ...any) {
+	gLogger.Debug(msg, args...)
 }
 
-func Info(msg string, args ...any){
-	gLogger.Info(msg,args...)
+func Info(msg string, args ...any) {
+	gLogger.Info(msg, args...)
 }
 
-func Warning(msg string, args ...any){
-	gLogger.Warning(msg,args...)
+func Warning(msg string, args ...any) {
+	gLogger.Warning(msg, args...)
 }
 
-func Error(msg string, args ...any){
-	gLogger.Error(msg,args...)
+func Error(msg string, args ...any) {
+	gLogger.Error(msg, args...)
 }
 
-func Stack(msg string, args ...any){
-	gLogger.Stack(msg,args...)
+func Stack(msg string, args ...any) {
+	gLogger.Stack(msg, args...)
 }
 
-func Dump(dump string, args ...any){
-	gLogger.Dump(dump,args...)
+func Dump(dump string, args ...any) {
+	gLogger.Dump(dump, args...)
 }
 
-func Fatal(msg string, args ...any){
-	gLogger.Fatal(msg,args...)
+func Fatal(msg string, args ...any) {
+	gLogger.Fatal(msg, args...)
 }
 
 func Close() {
 	gLogger.Close()
 }
 
-func ErrorAttr(key string,value error) slog.Attr{
-	if value== nil {
-		return slog.Attr{key, slog.StringValue("nil")}
+func ErrorAttr(key string, value error) slog.Attr {
+	if value == nil {
+		return slog.Attr{Key: key, Value: slog.StringValue("nil")}
 	}
 
-	return slog.Attr{key, slog.StringValue(value.Error())}
+	return slog.Attr{Key: key, Value: slog.StringValue(value.Error())}
 }
 
 func String(key, value string) slog.Attr {
-	return slog.Attr{key, slog.StringValue(value)}
+	return slog.Attr{Key: key, Value: slog.StringValue(value)}
 }
 
 func Int(key string, value int) slog.Attr {
-	return slog.Attr{key, slog.Int64Value(int64(value))}
+	return slog.Attr{Key: key, Value: slog.Int64Value(int64(value))}
 }
 
 func Int64(key string, value int64) slog.Attr {
-	return slog.Attr{key, slog.Int64Value(value)}
+	return slog.Attr{Key: key, Value: slog.Int64Value(value)}
 }
 
 func Int32(key string, value int32) slog.Attr {
-	return slog.Attr{key, slog.Int64Value(int64(value))}
+	return slog.Attr{Key: key, Value: slog.Int64Value(int64(value))}
 }
 
 func Int16(key string, value int16) slog.Attr {
-	return slog.Attr{key, slog.Int64Value(int64(value))}
+	return slog.Attr{Key: key, Value: slog.Int64Value(int64(value))}
 }
 
 func Int8(key string, value int8) slog.Attr {
-	return slog.Attr{key, slog.Int64Value(int64(value))}
+	return slog.Attr{Key: key, Value: slog.Int64Value(int64(value))}
 }
 
 func Uint(key string, value uint) slog.Attr {
-	return slog.Attr{key, slog.Uint64Value(uint64(value))}
+	return slog.Attr{Key: key, Value: slog.Uint64Value(uint64(value))}
 }
 
 func Uint64(key string, v uint64) slog.Attr {
-	return slog.Attr{key, slog.Uint64Value(v)}
+	return slog.Attr{Key: key, Value: slog.Uint64Value(v)}
 }
 
 func Uint32(key string, value uint32) slog.Attr {
-	return slog.Attr{key, slog.Uint64Value(uint64(value))}
+	return slog.Attr{Key: key, Value: slog.Uint64Value(uint64(value))}
 }
 
 func Uint16(key string, value uint16) slog.Attr {
-	return slog.Attr{key, slog.Uint64Value(uint64(value))}
+	return slog.Attr{Key: key, Value: slog.Uint64Value(uint64(value))}
 }
 
 func Uint8(key string, value uint8) slog.Attr {
-	return slog.Attr{key, slog.Uint64Value(uint64(value))}
+	return slog.Attr{Key: key, Value: slog.Uint64Value(uint64(value))}
 }
 
 func Float64(key string, v float64) slog.Attr {
-	return slog.Attr{key, slog.Float64Value(v)}
+	return slog.Attr{Key: key, Value: slog.Float64Value(v)}
 }
 
 func Bool(key string, v bool) slog.Attr {
-	return slog.Attr{key, slog.BoolValue(v)}
+	return slog.Attr{Key: key, Value: slog.BoolValue(v)}
 }
 
 func Time(key string, v time.Time) slog.Attr {
-	return slog.Attr{key, slog.TimeValue(v)}
+	return slog.Attr{Key: key, Value: slog.TimeValue(v)}
 }
 
 func Duration(key string, v time.Duration) slog.Attr {
-	return slog.Attr{key, slog.DurationValue(v)}
+	return slog.Attr{Key: key, Value: slog.DurationValue(v)}
 }
 
 func Any(key string, value any) slog.Attr {
-	return slog.Attr{key, slog.AnyValue(value)}
+	return slog.Attr{Key: key, Value: slog.AnyValue(value)}
 }
 
 func Group(key string, args ...any) slog.Attr {
 	return slog.Group(key, args...)
 }
 
-func (logger *Logger) DoSPrintf(level slog.Level,a []interface{}) {
-	if logger.Slogger.Enabled(context.Background(),level) == false{
+func (logger *Logger) DoSPrintf(level slog.Level, a []interface{}) {
+	if logger.SLogger.Enabled(context.Background(), level) == false {
 		return
 	}
 
-	logger.Slogger.Handler().(IOriginHandler).Lock()
-	defer logger.Slogger.Handler().(IOriginHandler).UnLock()
+	logger.SLogger.Handler().(IOriginHandler).Lock()
+	defer logger.SLogger.Handler().(IOriginHandler).UnLock()
 
 	logger.sBuff.Reset()
 
-	logger.FormatHeader(&logger.sBuff,level,3)
+	logger.FormatHeader(&logger.sBuff, level, 3)
 
-	for _,s := range a {
+	for _, s := range a {
 		logger.sBuff.AppendString(slog.AnyValue(s).String())
 	}
 	logger.sBuff.AppendString("\"\n")
-	logger.ioWriter.Write([]byte(logger.sBuff.Bytes()))
+	logger.ioWriter.Write(logger.sBuff.Bytes())
 }
 
- func (logger *Logger) STrace(a ...interface{}) {
-	 logger.DoSPrintf(LevelTrace,a)
+func (logger *Logger) STrace(a ...interface{}) {
+	logger.DoSPrintf(LevelTrace, a)
 }
 
-func (logger *Logger)  SDebug(a ...interface{}) {
-	logger.DoSPrintf(LevelDebug,a)
+func (logger *Logger) SDebug(a ...interface{}) {
+	logger.DoSPrintf(LevelDebug, a)
 }
 
-func (logger *Logger)  SInfo(a ...interface{}) {
-	logger.DoSPrintf(LevelInfo,a)
+func (logger *Logger) SInfo(a ...interface{}) {
+	logger.DoSPrintf(LevelInfo, a)
 }
 
-func (logger *Logger)  SWarning(a ...interface{}) {
-	logger.DoSPrintf(LevelWarning,a)
+func (logger *Logger) SWarning(a ...interface{}) {
+	logger.DoSPrintf(LevelWarning, a)
 }
 
-func (logger *Logger)  SError(a ...interface{}) {
-	logger.DoSPrintf(LevelError,a)
+func (logger *Logger) SError(a ...interface{}) {
+	logger.DoSPrintf(LevelError, a)
 }
 
 func STrace(a ...interface{}) {
-	gLogger.DoSPrintf(LevelTrace,a)
+	gLogger.DoSPrintf(LevelTrace, a)
 }
 
 func SDebug(a ...interface{}) {
-	gLogger.DoSPrintf(LevelDebug,a)
+	gLogger.DoSPrintf(LevelDebug, a)
 }
 
 func SInfo(a ...interface{}) {
-	gLogger.DoSPrintf(LevelInfo,a)
+	gLogger.DoSPrintf(LevelInfo, a)
 }
 
 func SWarning(a ...interface{}) {
-	gLogger.DoSPrintf(LevelWarning,a)
+	gLogger.DoSPrintf(LevelWarning, a)
 }
 
 func SError(a ...interface{}) {
-	gLogger.DoSPrintf(LevelError,a)
+	gLogger.DoSPrintf(LevelError, a)
 }
 
-func (logger *Logger) FormatHeader(buf *Buffer,level slog.Level,calldepth int) {
+func (logger *Logger) FormatHeader(buf *Buffer, level slog.Level, callDepth int) {
 	t := time.Now()
 	var file string
 	var line int
 
 	// Release lock while getting caller info - it's expensive.
 	var ok bool
-	_, file, line, ok = runtime.Caller(calldepth)
+	_, file, line, ok = runtime.Caller(callDepth)
 	if !ok {
 		file = "???"
 		line = 0

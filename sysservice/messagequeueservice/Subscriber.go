@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// 订阅器
+// Subscriber 订阅器
 type Subscriber struct {
 	customerLocker sync.RWMutex
 	mapCustomer    map[string]*CustomerSubscriber

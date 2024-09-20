@@ -24,7 +24,7 @@ type CustomerSubscriber struct {
 	subscribeMethod   SubscribeMethod
 	customerId        string
 
-	isStop int32 //退出标记
+	isStop     int32       //退出标记
 	topicCache []TopicData // 从消息队列中取出来的消息的缓存
 }
 
@@ -62,13 +62,13 @@ func (cs *CustomerSubscriber) trySetSubscriberBaseInfo(rpcHandler rpc.IRpcHandle
 	cs.serviceName = strRpcMethod[0]
 
 	if cluster.HasService(fromNodeId, cs.serviceName) == false {
-		err := fmt.Errorf("nodeId %d cannot found %s", fromNodeId, cs.serviceName)
+		err := fmt.Errorf("nodeId %s cannot found %s", fromNodeId, cs.serviceName)
 		log.SError(err.Error())
 		return err
 	}
 
 	if cluster.GetCluster().IsNodeConnected(fromNodeId) == false {
-		err := fmt.Errorf("nodeId %d is disconnect", fromNodeId)
+		err := fmt.Errorf("nodeId %s is disconnect", fromNodeId)
 		log.SError(err.Error())
 		return err
 	}
@@ -84,7 +84,7 @@ func (cs *CustomerSubscriber) trySetSubscriberBaseInfo(rpcHandler rpc.IRpcHandle
 	return nil
 }
 
-// 开始订阅
+// Subscribe 开始订阅
 func (cs *CustomerSubscriber) Subscribe(rpcHandler rpc.IRpcHandler, ss *Subscriber, topic string, subscribeMethod SubscribeMethod, customerId string, fromNodeId string, callBackRpcMethod string, startIndex uint64, oneBatchQuantity int32) error {
 	err := cs.trySetSubscriberBaseInfo(rpcHandler, ss, topic, subscribeMethod, customerId, fromNodeId, callBackRpcMethod, startIndex, oneBatchQuantity)
 	if err != nil {
@@ -96,7 +96,7 @@ func (cs *CustomerSubscriber) Subscribe(rpcHandler rpc.IRpcHandler, ss *Subscrib
 	return nil
 }
 
-// 取消订阅
+// UnSubscribe 取消订阅
 func (cs *CustomerSubscriber) UnSubscribe() {
 	atomic.StoreInt32(&cs.isStop, 1)
 }
@@ -163,14 +163,14 @@ func (cs *CustomerSubscriber) subscribe() bool {
 		cs.publishToCustomer(topicData)
 		return true
 	}
-	
+
 	//从持久化数据中来找
-	topicData = cs.subscriber.dataPersist.FindTopicData(cs.topic, cs.StartIndex, int64(cs.oneBatchQuantity),cs.topicCache[:0])
+	topicData = cs.subscriber.dataPersist.FindTopicData(cs.topic, cs.StartIndex, int64(cs.oneBatchQuantity), cs.topicCache[:0])
 	return cs.publishToCustomer(topicData)
 }
 
 func (cs *CustomerSubscriber) checkCustomerIsValid() bool {
-	//1.检查nodeid是否在线，不在线，直接取消订阅
+	//1.检查nodeId是否在线，不在线，直接取消订阅
 	if cluster.GetCluster().IsNodeConnected(cs.fromNodeId) == false {
 		return false
 	}
@@ -213,7 +213,7 @@ func (cs *CustomerSubscriber) publishToCustomer(topicData []TopicData) bool {
 		}
 
 		//推送数据
-		err := cs.CallNodeWithTimeout(4*time.Minute,cs.fromNodeId, cs.callBackRpcMethod, &dbQueuePublishReq, &dbQueuePushRes)
+		err := cs.CallNodeWithTimeout(4*time.Minute, cs.fromNodeId, cs.callBackRpcMethod, &dbQueuePublishReq, &dbQueuePushRes)
 		if err != nil {
 			time.Sleep(time.Second * 1)
 			continue

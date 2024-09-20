@@ -8,12 +8,13 @@ import (
 	"fmt"
 	"runtime"
 
+	"context"
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/util/queue"
-	"context"
 )
 
 var idleTimeout = int64(2 * time.Second)
+
 const maxTaskQueueSessionId = 10000
 
 type dispatch struct {
@@ -33,7 +34,7 @@ type dispatch struct {
 	waitDispatch sync.WaitGroup
 
 	cancelContext context.Context
-	cancel context.CancelFunc
+	cancel        context.CancelFunc
 }
 
 func (d *dispatch) open(minGoroutineNum int32, maxGoroutineNum int32, tasks chan task, cbChannel chan func(error)) {
@@ -44,7 +45,7 @@ func (d *dispatch) open(minGoroutineNum int32, maxGoroutineNum int32, tasks chan
 	d.workerQueue = make(chan task)
 	d.cbChannel = cbChannel
 	d.queueIdChannel = make(chan int64, cap(tasks))
-	d.cancelContext,d.cancel = context.WithCancel(context.Background())
+	d.cancelContext, d.cancel = context.WithCancel(context.Background())
 	d.waitDispatch.Add(1)
 	go d.run()
 }
@@ -56,7 +57,7 @@ func (d *dispatch) run() {
 	for {
 		select {
 		case queueId := <-d.queueIdChannel:
-			d.processqueueEvent(queueId)
+			d.processQueueEvent(queueId)
 		default:
 			select {
 			case t, ok := <-d.tasks:
@@ -65,13 +66,13 @@ func (d *dispatch) run() {
 				}
 				d.processTask(&t)
 			case queueId := <-d.queueIdChannel:
-				d.processqueueEvent(queueId)
+				d.processQueueEvent(queueId)
 			case <-timeout.C:
 				d.processTimer()
-			case <- d.cancelContext.Done():
-				atomic.StoreInt64(&idleTimeout,int64(time.Millisecond * 5))
+			case <-d.cancelContext.Done():
+				atomic.StoreInt64(&idleTimeout, int64(time.Millisecond*5))
 				timeout.Reset(time.Duration(atomic.LoadInt64(&idleTimeout)))
-				for i:=int32(0);i<d.workerNum;i++{
+				for i := int32(0); i < d.workerNum; i++ {
 					d.processIdle()
 				}
 			}
@@ -93,7 +94,7 @@ func (d *dispatch) processTimer() {
 	d.idle = true
 }
 
-func (d *dispatch) processqueueEvent(queueId int64) {
+func (d *dispatch) processQueueEvent(queueId int64) {
 	d.idle = false
 
 	queueSession := d.mapTaskQueueSession[queueId]
@@ -161,19 +162,18 @@ func (d *dispatch) pushQueueTaskFinishEvent(queueId int64) {
 	d.queueIdChannel <- queueId
 }
 
-func (c *dispatch) pushAsyncDoCallbackEvent(cb func(err error)) {
+func (d *dispatch) pushAsyncDoCallbackEvent(cb func(err error)) {
 	if cb == nil {
 		//不需要回调的情况
 		return
 	}
 
-	c.cbChannel <- cb
+	d.cbChannel <- cb
 }
 
 func (d *dispatch) close() {
 	atomic.StoreInt32(&d.minConcurrentNum, -1)
 	d.cancel()
-
 
 breakFor:
 	for {
@@ -195,7 +195,7 @@ func (d *dispatch) DoCallback(cb func(err error)) {
 			buf := make([]byte, 4096)
 			l := runtime.Stack(buf, false)
 			errString := fmt.Sprint(r)
-			log.Dump(string(buf[:l]),log.String("error",errString))
+			log.Dump(string(buf[:l]), log.String("error", errString))
 		}
 	}()
 

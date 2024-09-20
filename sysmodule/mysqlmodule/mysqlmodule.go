@@ -19,8 +19,8 @@ import (
 type SyncFun func()
 
 type DBExecute struct {
-	syncExecuteFun   chan SyncFun
-	syncExecuteExit  chan bool
+	syncExecuteFun  chan SyncFun
+	syncExecuteExit chan bool
 }
 
 type PingExecute struct {
@@ -28,22 +28,21 @@ type PingExecute struct {
 	pintExit   chan bool
 }
 
-// DBModule ...
 type MySQLModule struct {
 	service.Module
-	db               *sql.DB
-	url              string
-	username         string
-	password         string
-	dbname           string
-	slowDuration        time.Duration
-	pingCoroutine 	 PingExecute
-	waitGroup    	 sync.WaitGroup
+	db            *sql.DB
+	url           string
+	username      string
+	password      string
+	dbname        string
+	slowDuration  time.Duration
+	pingCoroutine PingExecute
+	waitGroup     sync.WaitGroup
 }
 
 // Tx ...
 type Tx struct {
-	tx        *sql.Tx
+	tx           *sql.Tx
 	slowDuration time.Duration
 }
 
@@ -53,7 +52,7 @@ type DBResult struct {
 	RowsAffected int64
 
 	rowNum  int
-	RowInfo map[string][]interface{} //map[fieldname][row]sql.NullString
+	RowInfo map[string][]interface{} //map[fieldName][row]sql.NullString
 }
 
 type DataSetList struct {
@@ -63,19 +62,17 @@ type DataSetList struct {
 	blur              bool
 }
 
-
 type dbControl interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	Query(query string, args ...interface{}) (*sql.Rows, error)
 }
 
-
-func (m *MySQLModule) Init( url string, userName string, password string, dbname string,maxConn int) error {
+func (m *MySQLModule) Init(url string, userName string, password string, dbname string, maxConn int) error {
 	m.url = url
 	m.username = userName
 	m.password = password
 	m.dbname = dbname
-	m.pingCoroutine = PingExecute{tickerPing : time.NewTicker(5*time.Second), pintExit : make(chan bool, 1)}
+	m.pingCoroutine = PingExecute{tickerPing: time.NewTicker(5 * time.Second), pintExit: make(chan bool, 1)}
 
 	return m.connect(maxConn)
 }
@@ -85,12 +82,12 @@ func (m *MySQLModule) SetQuerySlowTime(slowDuration time.Duration) {
 }
 
 func (m *MySQLModule) Query(strQuery string, args ...interface{}) (*DataSetList, error) {
-	return query(m.slowDuration, m.db,strQuery,args...)
+	return query(m.slowDuration, m.db, strQuery, args...)
 }
 
 // Exec ...
 func (m *MySQLModule) Exec(strSql string, args ...interface{}) (*DBResult, error) {
-	return exec(m.slowDuration, m.db,strSql,args...)
+	return exec(m.slowDuration, m.db, strSql, args...)
 }
 
 // Begin starts a transaction.
@@ -116,14 +113,14 @@ func (slf *Tx) Commit() error {
 	return slf.tx.Commit()
 }
 
-// QueryEx executes a query that return rows.
+// Query executes a query that return rows.
 func (slf *Tx) Query(strQuery string, args ...interface{}) (*DataSetList, error) {
-	return query(slf.slowDuration,slf.tx,strQuery,args...)
+	return query(slf.slowDuration, slf.tx, strQuery, args...)
 }
 
 // Exec executes a query that doesn't return rows.
 func (slf *Tx) Exec(strSql string, args ...interface{}) (*DBResult, error) {
-	return exec(slf.slowDuration,slf.tx,strSql,args...)
+	return exec(slf.slowDuration, slf.tx, strSql, args...)
 }
 
 // Connect ...
@@ -168,7 +165,7 @@ func (m *MySQLModule) runPing() {
 	}
 }
 
-func  checkArgs(args ...interface{}) error {
+func checkArgs(args ...interface{}) error {
 	for _, val := range args {
 		if reflect.TypeOf(val).Kind() == reflect.String {
 			retVal := val.(string)
@@ -211,33 +208,33 @@ func  checkArgs(args ...interface{}) error {
 	return nil
 }
 
-func checkSlow(slowDuration time.Duration,Time time.Duration) bool {
-	if slowDuration != 0 && Time >=slowDuration {
+func checkSlow(slowDuration time.Duration, Time time.Duration) bool {
+	if slowDuration != 0 && Time >= slowDuration {
 		return true
 	}
 	return false
 }
 
-func query(slowDuration time.Duration,db dbControl,strQuery string, args ...interface{}) (*DataSetList, error) {
+func query(slowDuration time.Duration, db dbControl, strQuery string, args ...interface{}) (*DataSetList, error) {
 	datasetList := DataSetList{}
 	datasetList.tag = "json"
 	datasetList.blur = true
 
 	if checkArgs(args) != nil {
 		log.Error("CheckArgs is error :%s", strQuery)
-		return &datasetList, fmt.Errorf("CheckArgs is error!")
+		return &datasetList, fmt.Errorf("checkArgs is error")
 	}
 
 	if db == nil {
 		log.Error("cannot connect database:%s", strQuery)
-		return &datasetList, fmt.Errorf("cannot connect database!")
+		return &datasetList, fmt.Errorf("cannot connect database")
 	}
 
 	TimeFuncStart := time.Now()
 	rows, err := db.Query(strQuery, args...)
 	timeFuncPass := time.Since(TimeFuncStart)
 
-	if checkSlow(slowDuration,timeFuncPass) {
+	if checkSlow(slowDuration, timeFuncPass) {
 		log.Error("DBModule QueryEx Time %s , Query :%s , args :%+v", timeFuncPass, strQuery, args)
 	}
 	if err != nil {
@@ -256,7 +253,7 @@ func query(slowDuration time.Duration,db dbControl,strQuery string, args ...inte
 			if dbResult.RowInfo == nil {
 				dbResult.RowInfo = make(map[string][]interface{})
 			}
-			//RowInfo map[string][][]sql.NullString //map[fieldname][row][column]sql.NullString
+
 			colField, err := rows.Columns()
 			if err != nil {
 				return &datasetList, err
@@ -268,10 +265,10 @@ func query(slowDuration time.Duration,db dbControl,strQuery string, args ...inte
 			}
 			rows.Scan(valuePtrs...)
 
-			for idx, fieldname := range colField {
-				fieldRowData := dbResult.RowInfo[strings.ToLower(fieldname)]
+			for idx, fieldName := range colField {
+				fieldRowData := dbResult.RowInfo[strings.ToLower(fieldName)]
 				fieldRowData = append(fieldRowData, valuePtrs[idx])
-				dbResult.RowInfo[strings.ToLower(fieldname)] = fieldRowData
+				dbResult.RowInfo[strings.ToLower(fieldName)] = fieldRowData
 			}
 			dbResult.rowNum += 1
 		}
@@ -282,7 +279,7 @@ func query(slowDuration time.Duration,db dbControl,strQuery string, args ...inte
 
 		if hasRet == false {
 			if rows.Err() != nil {
-				log.Error( "Query:%s(%+v)", strQuery, rows)
+				log.Error("Query:%s(%+v)", strQuery, rows)
 			}
 			break
 		}
@@ -291,22 +288,22 @@ func query(slowDuration time.Duration,db dbControl,strQuery string, args ...inte
 	return &datasetList, nil
 }
 
-func exec(slowDuration time.Duration,db dbControl,strSql string, args ...interface{}) (*DBResult, error) {
+func exec(slowDuration time.Duration, db dbControl, strSql string, args ...interface{}) (*DBResult, error) {
 	ret := &DBResult{}
 	if db == nil {
 		log.Error("cannot connect database:%s", strSql)
-		return ret, fmt.Errorf("cannot connect database!")
+		return ret, fmt.Errorf("cannot connect database")
 	}
 
 	if checkArgs(args) != nil {
 		log.Error("CheckArgs is error :%s", strSql)
-		return ret, fmt.Errorf("CheckArgs is error!")
+		return ret, fmt.Errorf("checkArgs is error")
 	}
 
 	TimeFuncStart := time.Now()
 	res, err := db.Exec(strSql, args...)
 	timeFuncPass := time.Since(TimeFuncStart)
-	if checkSlow(slowDuration,timeFuncPass) {
+	if checkSlow(slowDuration, timeFuncPass) {
 		log.Error("DBModule QueryEx Time %s , Query :%s , args :%+v", timeFuncPass, strSql, args)
 	}
 	if err != nil {
@@ -361,21 +358,21 @@ func (ds *DataSetList) slice2interface(in interface{}) error {
 	}
 
 	v := reflect.ValueOf(in).Elem()
-	newv := reflect.MakeSlice(v.Type(), 0, length)
-	v.Set(newv)
+	newV := reflect.MakeSlice(v.Type(), 0, length)
+	v.Set(newV)
 	v.SetLen(length)
 
 	for i := 0; i < length; i++ {
-		idxv := v.Index(i)
-		if idxv.Kind() == reflect.Ptr {
-			newObj := reflect.New(idxv.Type().Elem())
+		idxV := v.Index(i)
+		if idxV.Kind() == reflect.Ptr {
+			newObj := reflect.New(idxV.Type().Elem())
 			v.Index(i).Set(newObj)
-			idxv = newObj
+			idxV = newObj
 		} else {
-			idxv = idxv.Addr()
+			idxV = idxV.Addr()
 		}
 
-		err := ds.rowData2interface(i, ds.dataSetList[ds.currentDataSetIdx].RowInfo, idxv)
+		err := ds.rowData2interface(i, ds.dataSetList[ds.currentDataSetIdx].RowInfo, idxV)
 		if err != nil {
 			return err
 		}
@@ -390,7 +387,7 @@ func (ds *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{},
 	typ := t.Elem()
 
 	if !val.IsValid() {
-		return errors.New("Incorrect data type!")
+		return errors.New("incorrect data type")
 	}
 
 	for i := 0; i < val.NumField(); i++ {
@@ -402,11 +399,11 @@ func (ds *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{},
 		}
 
 		if tag != "" && tag != "-" {
-			vtag := strings.ToLower(tag)
-			columnData, ok := m[vtag]
+			vTag := strings.ToLower(tag)
+			columnData, ok := m[vTag]
 			if ok == false {
 				if !ds.blur {
-					return fmt.Errorf("Cannot find filed name %s!", vtag)
+					return fmt.Errorf("cannot find filed name %s", vTag)
 				}
 				continue
 			}
@@ -416,12 +413,12 @@ func (ds *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{},
 			meta := columnData[rowIdx].(*sql.NullString)
 			if !ok {
 				if !ds.blur {
-					return fmt.Errorf("No corresponding field was found in the result set %s!", tag)
+					return fmt.Errorf("no corresponding field was found in the result set %s", tag)
 				}
 				continue
 			}
 			if !value.CanSet() {
-				return errors.New("Struct fields do not have read or write permissions!")
+				return errors.New("struct fields do not have read or write permissions")
 			}
 
 			if meta.Valid == false {
@@ -460,7 +457,7 @@ func (ds *DataSetList) rowData2interface(rowIdx int, m map[string][]interface{},
 				}
 				value.SetBool(b)
 			default:
-				return errors.New("The database map has unrecognized data types!")
+				return errors.New("the database map has unrecognized data types")
 			}
 		}
 	}

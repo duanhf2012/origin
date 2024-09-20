@@ -6,11 +6,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/duanhf2012/origin/v2/concurrent"
 	"github.com/duanhf2012/origin/v2/event"
 	"github.com/duanhf2012/origin/v2/log"
 	rpcHandle "github.com/duanhf2012/origin/v2/rpc"
 	"github.com/duanhf2012/origin/v2/util/timer"
-	"github.com/duanhf2012/origin/v2/concurrent"
 )
 
 const InitModuleId = 1e9
@@ -117,7 +117,7 @@ func (m *Module) AddModule(module IModule) (uint32, error) {
 	m.child[module.GetModuleId()] = module
 	m.ancestor.getBaseModule().(*Module).descendants[module.GetModuleId()] = module
 
-	log.Debug("Add module "+module.GetModuleName()+ " completed")
+	log.Debug("Add module " + module.GetModuleName() + " completed")
 	return module.GetModuleId(), nil
 }
 
@@ -131,7 +131,7 @@ func (m *Module) ReleaseModule(moduleId uint32) {
 
 	pModule.self.OnRelease()
 	pModule.GetEventHandler().Destroy()
-	log.Debug("Release module "+ pModule.GetModuleName())
+	log.Debug("Release module " + pModule.GetModuleName())
 	for pTimer := range pModule.mapActiveTimer {
 		pTimer.Cancel()
 	}
@@ -277,7 +277,7 @@ func (m *Module) SafeNewTicker(tickerId *uint64, d time.Duration, AdditionData i
 }
 
 func (m *Module) CancelTimerId(timerId *uint64) bool {
-	if timerId==nil || *timerId == 0 {
+	if timerId == nil || *timerId == 0 {
 		log.Warning("timerId is invalid")
 		return false
 	}
@@ -289,7 +289,7 @@ func (m *Module) CancelTimerId(timerId *uint64) bool {
 
 	t, ok := m.mapActiveIdTimer[*timerId]
 	if ok == false {
-		log.Stack("cannot find timer id ", log.Uint64("timerId",*timerId))
+		log.Stack("cannot find timer id ", log.Uint64("timerId", *timerId))
 		return false
 	}
 
