@@ -297,12 +297,12 @@ func GetRpcClient(nodeId string, serviceMethod string,filterRetire bool, clientL
 	if nodeId != rpc.NodeIdNull {
 		pClient,retire := GetCluster().GetRpcClient(nodeId)
 		if pClient == nil {
-			return fmt.Errorf("cannot find  nodeid %d!", nodeId), nil
+			return fmt.Errorf("cannot find  nodeid %s", nodeId), nil
 		}
 
 		//如果需要筛选掉退休结点
 		if filterRetire == true && retire == true {
-			return fmt.Errorf("cannot find  nodeid %d!", nodeId), nil
+			return fmt.Errorf("cannot find  nodeid %s", nodeId), nil
 		}
 
 		clientList = append(clientList,pClient)

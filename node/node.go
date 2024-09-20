@@ -328,13 +328,13 @@ func startNode(args interface{}) error {
 		myName, mErr := sysprocess.GetMyProcessName()
 		//当前进程名获取失败，不应该发生
 		if mErr != nil {
-			log.SInfo("get my process's name is error,", mErr.Error())
+			log.Info("get my process's name is error",log.ErrorAttr("err", mErr))
 			os.Exit(-1)
 		}
 
 		//进程id存在，而且进程名也相同，被认为是当前进程重复运行
 		if cErr == nil && name == myName {
-			log.SInfo(fmt.Sprintf("repeat runs are not allowed,node is %s,processid is %d",strNodeId,processId))
+			log.Info("repeat runs are not allowed",log.String("nodeId",strNodeId),log.Int("processId",processId))
 			os.Exit(-1)
 		}
 		break

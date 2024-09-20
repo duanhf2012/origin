@@ -44,7 +44,7 @@ func Logger() gin.HandlerFunc {
 		// 响应状态码
 		statusCode := c.Writer.Status()
 
-		log.SDebug(fmt.Sprintf(
+		log.Debug(fmt.Sprintf(
 			"%s | %3d | %s %10s | \033[44;37m%-6s\033[0m %s %s  | %10v | \"%s\" \"%s\"",
 			colorForStatus(statusCode),
 			statusCode,

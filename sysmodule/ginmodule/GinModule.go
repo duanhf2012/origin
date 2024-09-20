@@ -90,7 +90,7 @@ func (gm *GinModule) StartTLS(certFile, keyFile string) {
 
 func (gm *GinModule) Stop(ctx context.Context) {
 	if err := gm.srv.Shutdown(ctx); err != nil {
-		log.SError("Server Shutdown", slog.Any("error", err))
+		log.Error("Server Shutdown", slog.Any("error", err))
 	}
 }
 
