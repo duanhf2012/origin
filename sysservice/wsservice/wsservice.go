@@ -80,8 +80,7 @@ func (ws *WSService) OnInit() error {
 
 	ws.mapClient = make(map[string]*WSClient, ws.wsServer.MaxConnNum)
 	ws.wsServer.NewAgent = ws.NewWSClient
-	ws.wsServer.Start()
-	return nil
+	return ws.wsServer.Start()
 }
 
 func (ws *WSService) SetMessageType(messageType int) {

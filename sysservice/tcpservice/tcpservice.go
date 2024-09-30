@@ -95,9 +95,7 @@ func (tcpService *TcpService) OnInit() error {
 
 	tcpService.mapClient = make(map[string]*Client, tcpService.tcpServer.MaxConnNum)
 	tcpService.tcpServer.NewAgent = tcpService.NewClient
-	tcpService.tcpServer.Start()
-
-	return nil
+	return tcpService.tcpServer.Start()
 }
 
 func (tcpService *TcpService) TcpEventHandler(ev event.IEvent) {

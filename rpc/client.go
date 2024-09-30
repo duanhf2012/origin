@@ -29,7 +29,7 @@ type IWriter interface {
 }
 
 type IRealClient interface {
-	SetConn(conn *network.TCPConn)
+	SetConn(conn *network.NetConn)
 	Close(waitDone bool)
 
 	AsyncCall(NodeId string, timeout time.Duration, rpcHandler IRpcHandler, serviceMethod string, callback reflect.Value, args interface{}, replyParam interface{}, cancelable bool) (CancelRpc, error)
@@ -52,7 +52,7 @@ type Client struct {
 	IRealClient
 }
 
-func (client *Client) NewClientAgent(conn *network.TCPConn) network.Agent {
+func (client *Client) NewClientAgent(conn *network.NetConn) network.Agent {
 	client.SetConn(conn)
 
 	return client

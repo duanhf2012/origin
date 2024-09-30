@@ -382,6 +382,11 @@ func startNode(args interface{}) error {
 	return nil
 }
 
+type templateServicePoint[T any] interface {
+	*T
+	service.IService
+}
+
 func Setup(s ...service.IService) {
 	for _, sv := range s {
 		sv.OnSetup(sv)
@@ -389,10 +394,17 @@ func Setup(s ...service.IService) {
 	}
 }
 
-func SetupTemplate(fs ...func() service.IService) {
+func SetupTemplateFunc(fs ...func() service.IService) {
 	for _, f := range fs {
 		preSetupTemplateService = append(preSetupTemplateService, f)
 	}
+}
+
+func SetupTemplate[T any,P templateServicePoint[T]]() {
+	SetupTemplateFunc(func() service.IService{
+		var t T
+		return P(&t)
+	})
 }
 
 func GetService(serviceName string) service.IService {

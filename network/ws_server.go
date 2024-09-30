@@ -2,6 +2,7 @@ package network
 
 import (
 	"crypto/tls"
+	"errors"
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/gorilla/websocket"
 	"net"
@@ -47,7 +48,7 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := handler.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error("upgrade fail",log.String("error",err.Error()))
+		log.Error("upgrade fail", log.String("error", err.Error()))
 		return
 	}
 	conn.SetReadLimit(int64(handler.maxMsgLen))
@@ -73,7 +74,9 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	handler.conns[conn] = struct{}{}
 	handler.mutexConns.Unlock()
 
-	wsConn := newWSConn(conn, handler.pendingWriteNum, handler.maxMsgLen, handler.messageType)
+	conn.UnderlyingConn().(*net.TCPConn).SetLinger(0)
+	conn.UnderlyingConn().(*net.TCPConn).SetNoDelay(true)
+	wsConn := newWSConn(conn, r.Header, handler.pendingWriteNum, handler.maxMsgLen, handler.messageType)
 	agent := handler.newAgent(wsConn)
 	agent.Run()
 
@@ -92,10 +95,11 @@ func (server *WSServer) SetMessageType(messageType int) {
 	}
 }
 
-func (server *WSServer) Start() {
+func (server *WSServer) Start() error {
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		log.Fatal("WSServer Listen fail",log.String("error", err.Error()))
+		log.Error("WSServer Listen fail", log.String("error", err.Error()))
+		return err
 	}
 
 	if server.MaxConnNum <= 0 {
@@ -115,18 +119,19 @@ func (server *WSServer) Start() {
 		log.Info("invalid HTTPTimeout", log.Duration("reset", server.HTTPTimeout))
 	}
 	if server.NewAgent == nil {
-		log.Fatal("NewAgent must not be nil")
+		log.Error("NewAgent must not be nil")
+		return errors.New("NewAgent must not be nil")
 	}
 
 	if server.CertFile != "" || server.KeyFile != "" {
 		config := &tls.Config{}
 		config.NextProtos = []string{"http/1.1"}
 
-		var err error
 		config.Certificates = make([]tls.Certificate, 1)
 		config.Certificates[0], err = tls.LoadX509KeyPair(server.CertFile, server.KeyFile)
 		if err != nil {
-			log.Fatal("LoadX509KeyPair fail",log.String("error", err.Error()))
+			log.Error("LoadX509KeyPair fail", log.String("error", err.Error()))
+			return err
 		}
 
 		ln = tls.NewListener(ln, config)
@@ -139,7 +144,7 @@ func (server *WSServer) Start() {
 		maxMsgLen:       server.MaxMsgLen,
 		newAgent:        server.NewAgent,
 		conns:           make(WebsocketConnSet),
-		messageType:server.messageType,
+		messageType:     server.messageType,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: server.HTTPTimeout,
 			CheckOrigin:      func(_ *http.Request) bool { return true },
@@ -155,6 +160,7 @@ func (server *WSServer) Start() {
 	}
 
 	go httpServer.Serve(ln)
+	return nil
 }
 
 func (server *WSServer) Close() {

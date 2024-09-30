@@ -27,7 +27,7 @@ type TCPServer struct {
 	ReadDeadline    time.Duration
 	WriteDeadline   time.Duration
 
-	NewAgent   func(*TCPConn) Agent
+	NewAgent   func(conn Conn) Agent
 	ln         net.Listener
 	conns      ConnSet
 	mutexConns sync.Mutex
@@ -42,6 +42,8 @@ func (server *TCPServer) Start() error {
 	if err != nil {
 		return err
 	}
+
+	server.wgLn.Add(1)
 	go server.run()
 
 	return nil
@@ -99,8 +101,8 @@ func (server *TCPServer) init() error {
 	}
 
 	server.ln = ln
-	server.conns = make(ConnSet)
-	server.MsgParser.init()
+	server.conns = make(ConnSet, 2048)
+	server.MsgParser.Init()
 
 	return nil
 }
@@ -114,7 +116,6 @@ func (server *TCPServer) GetNetMemPool() bytespool.IBytesMemPool {
 }
 
 func (server *TCPServer) run() {
-	server.wgLn.Add(1)
 	defer server.wgLn.Done()
 
 	var tempDelay time.Duration
@@ -137,6 +138,7 @@ func (server *TCPServer) run() {
 			return
 		}
 
+		conn.(*net.TCPConn).SetLinger(0)
 		conn.(*net.TCPConn).SetNoDelay(true)
 		tempDelay = 0
 
@@ -152,7 +154,7 @@ func (server *TCPServer) run() {
 		server.mutexConns.Unlock()
 		server.wgConns.Add(1)
 
-		tcpConn := newTCPConn(conn, server.PendingWriteNum, &server.MsgParser, server.WriteDeadline)
+		tcpConn := newNetConn(conn, server.PendingWriteNum, &server.MsgParser, server.WriteDeadline)
 		agent := server.NewAgent(tcpConn)
 
 		go func() {

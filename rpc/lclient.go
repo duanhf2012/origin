@@ -31,7 +31,7 @@ func (lc *LClient) IsConnected() bool {
 	return true
 }
 
-func (lc *LClient) SetConn(conn *network.TCPConn) {
+func (lc *LClient) SetConn(conn *network.NetConn) {
 }
 
 func (lc *LClient) Close(waitDone bool) {

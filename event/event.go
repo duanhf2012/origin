@@ -17,6 +17,9 @@ type IEvent interface {
 type Event struct {
 	Type EventType
 	Data interface{}
+	IntExt [2]int64
+	StringExt [2]string
+	AnyExt [2]any
 	ref  bool
 }
 

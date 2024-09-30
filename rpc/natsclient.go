@@ -29,7 +29,7 @@ func (nc *NatsClient) onSubscribe(msg *nats.Msg) {
 	nc.client.processRpcResponse(msg.Data)
 }
 
-func (nc *NatsClient) SetConn(conn *network.TCPConn) {
+func (nc *NatsClient) SetConn(conn *network.NetConn) {
 }
 
 func (nc *NatsClient) Close(waitDone bool) {

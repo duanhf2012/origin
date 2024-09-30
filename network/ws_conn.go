@@ -5,6 +5,7 @@ import (
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/gorilla/websocket"
 	"net"
+	"net/http"
 	"sync"
 )
 
@@ -16,13 +17,15 @@ type WSConn struct {
 	writeChan chan []byte
 	maxMsgLen uint32
 	closeFlag bool
+	header    http.Header
 }
 
-func newWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32, messageType int) *WSConn {
+func newWSConn(conn *websocket.Conn, header http.Header, pendingWriteNum int, maxMsgLen uint32, messageType int) *WSConn {
 	wsConn := new(WSConn)
 	wsConn.conn = conn
 	wsConn.writeChan = make(chan []byte, pendingWriteNum)
 	wsConn.maxMsgLen = maxMsgLen
+	wsConn.header = header
 
 	go func() {
 		for b := range wsConn.writeChan {
@@ -46,7 +49,6 @@ func newWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32, mess
 }
 
 func (wsConn *WSConn) doDestroy() {
-	wsConn.conn.UnderlyingConn().(*net.TCPConn).SetLinger(0)
 	wsConn.conn.Close()
 
 	if !wsConn.closeFlag {
@@ -81,6 +83,10 @@ func (wsConn *WSConn) doWrite(b []byte) {
 	}
 
 	wsConn.writeChan <- b
+}
+
+func (wsConn *WSConn) GetHeader() http.Header {
+	return wsConn.header
 }
 
 func (wsConn *WSConn) LocalAddr() net.Addr {

@@ -1,20 +1,21 @@
-
 package network
+
 import (
 	"github.com/duanhf2012/origin/v2/log"
+	kcp "github.com/xtaci/kcp-go/v5"
 	"net"
 	"sync"
 	"time"
 )
 
-type TCPClient struct {
+type KCPClient struct {
 	sync.Mutex
 	Addr            string
 	ConnNum         int
 	ConnectInterval time.Duration
 	PendingWriteNum int
 	ReadDeadline    time.Duration
-	WriteDeadline 	time.Duration
+	WriteDeadline   time.Duration
 	AutoReconnect   bool
 	NewAgent        func(conn *NetConn) Agent
 	cons            ConnSet
@@ -25,7 +26,7 @@ type TCPClient struct {
 	MsgParser
 }
 
-func (client *TCPClient) Start() {
+func (client *KCPClient) Start() {
 	client.init()
 
 	for i := 0; i < client.ConnNum; i++ {
@@ -34,29 +35,29 @@ func (client *TCPClient) Start() {
 	}
 }
 
-func (client *TCPClient) init() {
+func (client *KCPClient) init() {
 	client.Lock()
 	defer client.Unlock()
 
 	if client.ConnNum <= 0 {
 		client.ConnNum = 1
-		log.Info("invalid ConnNum",log.Int("reset", client.ConnNum))
+		log.Info("invalid ConnNum", log.Int("reset", client.ConnNum))
 	}
 	if client.ConnectInterval <= 0 {
 		client.ConnectInterval = 3 * time.Second
-		log.Info("invalid ConnectInterval",log.Duration("reset", client.ConnectInterval))
+		log.Info("invalid ConnectInterval", log.Duration("reset", client.ConnectInterval))
 	}
 	if client.PendingWriteNum <= 0 {
 		client.PendingWriteNum = 1000
-		log.Info("invalid PendingWriteNum",log.Int("reset",client.PendingWriteNum))
+		log.Info("invalid PendingWriteNum", log.Int("reset", client.PendingWriteNum))
 	}
 	if client.ReadDeadline == 0 {
-		client.ReadDeadline = 15*time.Second
-		log.Info("invalid ReadDeadline",log.Int64("reset", int64(client.ReadDeadline.Seconds())))
+		client.ReadDeadline = 15 * time.Second
+		log.Info("invalid ReadDeadline", log.Int64("reset", int64(client.ReadDeadline.Seconds())))
 	}
 	if client.WriteDeadline == 0 {
-		client.WriteDeadline = 15*time.Second
-		log.Info("invalid WriteDeadline",log.Int64("reset", int64(client.WriteDeadline.Seconds())))
+		client.WriteDeadline = 15 * time.Second
+		log.Info("invalid WriteDeadline", log.Int64("reset", int64(client.WriteDeadline.Seconds())))
 	}
 	if client.NewAgent == nil {
 		log.Fatal("NewAgent must not be nil")
@@ -71,13 +72,13 @@ func (client *TCPClient) init() {
 	if client.MaxMsgLen == 0 {
 		client.MaxMsgLen = Default_MaxMsgLen
 	}
-	if client.LenMsgLen ==0 {
+	if client.LenMsgLen == 0 {
 		client.LenMsgLen = Default_LenMsgLen
 	}
 	maxMsgLen := client.MsgParser.getMaxMsgLen(client.LenMsgLen)
 	if client.MaxMsgLen > maxMsgLen {
 		client.MaxMsgLen = maxMsgLen
-		log.Info("invalid MaxMsgLen",log.Uint32("reset", maxMsgLen))
+		log.Info("invalid MaxMsgLen", log.Uint32("reset", maxMsgLen))
 	}
 
 	client.cons = make(ConnSet)
@@ -85,38 +86,40 @@ func (client *TCPClient) init() {
 	client.MsgParser.Init()
 }
 
-func (client *TCPClient) GetCloseFlag() bool{
+func (client *KCPClient) GetCloseFlag() bool {
 	client.Lock()
 	defer client.Unlock()
 
 	return client.closeFlag
 }
 
-func (client *TCPClient) dial() net.Conn {
+func (client *KCPClient) dial() net.Conn {
 	for {
-		conn, err := net.Dial("tcp", client.Addr)
+		conn, err := kcp.DialWithOptions(client.Addr, nil, 10, 3)
 		if client.closeFlag {
 			return conn
 		} else if err == nil && conn != nil {
-			conn.(*net.TCPConn).SetNoDelay(true)
+			conn.SetNoDelay(1, 10, 2, 1)
+			conn.SetDSCP(46)
+			conn.SetStreamMode(true)
+			conn.SetWindowSize(1024, 1024)
 			return conn
 		}
 
-		log.Warning("connect error ",log.String("error",err.Error()), log.String("Addr",client.Addr))
+		log.Warning("connect error ", log.String("error", err.Error()), log.String("Addr", client.Addr))
 		time.Sleep(client.ConnectInterval)
 		continue
 	}
 }
 
-func (client *TCPClient) connect() {
+func (client *KCPClient) connect() {
 	defer client.wg.Done()
-
 reconnect:
 	conn := client.dial()
 	if conn == nil {
 		return
 	}
-	
+
 	client.Lock()
 	if client.closeFlag {
 		client.Unlock()
@@ -126,12 +129,12 @@ reconnect:
 	client.cons[conn] = struct{}{}
 	client.Unlock()
 
-	tcpConn := newNetConn(conn, client.PendingWriteNum, &client.MsgParser,client.WriteDeadline)
-	agent := client.NewAgent(tcpConn)
+	netConn := newNetConn(conn, client.PendingWriteNum, &client.MsgParser, client.WriteDeadline)
+	agent := client.NewAgent(netConn)
 	agent.Run()
 
 	// cleanup
-	tcpConn.Close()
+	netConn.Close()
 	client.Lock()
 	delete(client.cons, conn)
 	client.Unlock()
@@ -143,7 +146,7 @@ reconnect:
 	}
 }
 
-func (client *TCPClient) Close(waitDone bool) {
+func (client *KCPClient) Close(waitDone bool) {
 	client.Lock()
 	client.closeFlag = true
 	for conn := range client.cons {
@@ -152,8 +155,7 @@ func (client *TCPClient) Close(waitDone bool) {
 	client.cons = nil
 	client.Unlock()
 
-	if waitDone == true{
+	if waitDone == true {
 		client.wg.Wait()
 	}
 }
-

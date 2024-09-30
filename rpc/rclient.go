@@ -15,7 +15,7 @@ import (
 type RClient struct {
 	selfClient *Client
 	network.TCPClient
-	conn *network.TCPConn
+	conn *network.NetConn
 
 	notifyEventFun NotifyEventFun
 }
@@ -27,7 +27,7 @@ func (rc *RClient) IsConnected() bool {
 	return rc.conn != nil && rc.conn.IsConnected() == true
 }
 
-func (rc *RClient) GetConn() *network.TCPConn {
+func (rc *RClient) GetConn() *network.NetConn {
 	rc.Lock()
 	conn := rc.conn
 	rc.Unlock()
@@ -35,7 +35,7 @@ func (rc *RClient) GetConn() *network.TCPConn {
 	return conn
 }
 
-func (rc *RClient) SetConn(conn *network.TCPConn) {
+func (rc *RClient) SetConn(conn *network.NetConn) {
 	rc.Lock()
 	rc.conn = conn
 	rc.Unlock()

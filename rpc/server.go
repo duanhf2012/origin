@@ -211,7 +211,7 @@ func (agent *RpcAgent) Destroy() {
 	agent.conn.Destroy()
 }
 
-func (server *Server) NewAgent(c *network.TCPConn) network.Agent {
+func (server *Server) NewAgent(c network.Conn) network.Agent {
 	agent := &RpcAgent{conn: c, rpcServer: server}
 
 	return agent
