@@ -8,7 +8,7 @@ import (
 	"math"
 )
 
-// --------------
+// MsgParser --------------
 // | len | data |
 // --------------
 type MsgParser struct {
@@ -20,7 +20,7 @@ type MsgParser struct {
 	bytespool.IBytesMemPool
 }
 
-func (p *MsgParser) getMaxMsgLen(lenMsgLen int) uint32 {
+func (p *MsgParser) getMaxMsgLen() uint32 {
 	switch p.LenMsgLen {
 	case 1:
 		return math.MaxUint8

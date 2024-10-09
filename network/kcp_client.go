@@ -2,7 +2,7 @@ package network
 
 import (
 	"github.com/duanhf2012/origin/v2/log"
-	kcp "github.com/xtaci/kcp-go/v5"
+	"github.com/xtaci/kcp-go/v5"
 	"net"
 	"sync"
 	"time"
@@ -75,7 +75,7 @@ func (client *KCPClient) init() {
 	if client.LenMsgLen == 0 {
 		client.LenMsgLen = Default_LenMsgLen
 	}
-	maxMsgLen := client.MsgParser.getMaxMsgLen(client.LenMsgLen)
+	maxMsgLen := client.MsgParser.getMaxMsgLen()
 	if client.MaxMsgLen > maxMsgLen {
 		client.MaxMsgLen = maxMsgLen
 		log.Info("invalid MaxMsgLen", log.Uint32("reset", maxMsgLen))

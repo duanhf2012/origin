@@ -6,6 +6,7 @@ import (
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/rpc"
 	jsoniter "github.com/json-iterator/go"
+	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,14 @@ type NodeInfoList struct {
 	RpcMode   RpcMode
 	Discovery DiscoveryInfo
 	NodeList  []NodeInfo
+}
+
+func UnmarshalConfig(data []byte, v interface{}) error {
+	if json.Valid(data) == true {
+		return json.Unmarshal(data, v)
+	} else {
+		return yaml.Unmarshal(data, v)
+	}
 }
 
 func (d *DiscoveryInfo) getDiscoveryType() DiscoveryType {
@@ -160,7 +169,7 @@ func (cls *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = json.Unmarshal(d, c)
+	err = UnmarshalConfig(d, c)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +184,7 @@ func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	err = json.Unmarshal(d, &c)
+	err = UnmarshalConfig(d, &c)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -242,27 +251,29 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []Node
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
 	for _, f := range fileInfoList {
-		if f.IsDir() == false {
-			filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath, "/"), "\\") + "/" + f.Name()
-			fileNodeInfoList, rErr := cls.ReadClusterConfig(filePath)
-			if rErr != nil {
-				return discoveryInfo, nil, rpcMode, fmt.Errorf("read file path %s is error:%+v", filePath, rErr)
-			}
+		if f.IsDir() == true || (filepath.Ext(f.Name()) != ".json" && filepath.Ext(f.Name()) != ".yml") {
+			continue
+		}
 
-			err = cls.SetRpcMode(&fileNodeInfoList.RpcMode, &rpcMode)
-			if err != nil {
-				return discoveryInfo, nil, rpcMode, err
-			}
+		filePath := strings.TrimRight(strings.TrimRight(clusterCfgPath, "/"), "\\") + "/" + f.Name()
+		fileNodeInfoList, rErr := cls.ReadClusterConfig(filePath)
+		if rErr != nil {
+			return discoveryInfo, nil, rpcMode, fmt.Errorf("read file path %s is error:%+v", filePath, rErr)
+		}
 
-			err = discoveryInfo.setDiscovery(&fileNodeInfoList.Discovery)
-			if err != nil {
-				return discoveryInfo, nil, rpcMode, err
-			}
+		err = cls.SetRpcMode(&fileNodeInfoList.RpcMode, &rpcMode)
+		if err != nil {
+			return discoveryInfo, nil, rpcMode, err
+		}
 
-			for _, nodeInfo := range fileNodeInfoList.NodeList {
-				if nodeInfo.NodeId == nodeId || nodeId == rpc.NodeIdNull {
-					nodeInfoList = append(nodeInfoList, nodeInfo)
-				}
+		err = discoveryInfo.setDiscovery(&fileNodeInfoList.Discovery)
+		if err != nil {
+			return discoveryInfo, nil, rpcMode, err
+		}
+
+		for _, nodeInfo := range fileNodeInfoList.NodeList {
+			if nodeInfo.NodeId == nodeId || nodeId == rpc.NodeIdNull {
+				nodeInfoList = append(nodeInfoList, nodeInfo)
 			}
 		}
 	}
@@ -298,11 +309,7 @@ func (cls *Cluster) readLocalService(localNodeId string) error {
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
 	for _, f := range fileInfoList {
-		if f.IsDir() == true {
-			continue
-		}
-
-		if filepath.Ext(f.Name()) != ".json" {
+		if f.IsDir() == true || (filepath.Ext(f.Name()) != ".json" && filepath.Ext(f.Name()) != ".yml") {
 			continue
 		}
 

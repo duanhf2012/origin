@@ -1,5 +1,5 @@
-
 package network
+
 import (
 	"github.com/duanhf2012/origin/v2/log"
 	"net"
@@ -14,7 +14,7 @@ type TCPClient struct {
 	ConnectInterval time.Duration
 	PendingWriteNum int
 	ReadDeadline    time.Duration
-	WriteDeadline 	time.Duration
+	WriteDeadline   time.Duration
 	AutoReconnect   bool
 	NewAgent        func(conn *NetConn) Agent
 	cons            ConnSet
@@ -40,23 +40,23 @@ func (client *TCPClient) init() {
 
 	if client.ConnNum <= 0 {
 		client.ConnNum = 1
-		log.Info("invalid ConnNum",log.Int("reset", client.ConnNum))
+		log.Info("invalid ConnNum", log.Int("reset", client.ConnNum))
 	}
 	if client.ConnectInterval <= 0 {
 		client.ConnectInterval = 3 * time.Second
-		log.Info("invalid ConnectInterval",log.Duration("reset", client.ConnectInterval))
+		log.Info("invalid ConnectInterval", log.Duration("reset", client.ConnectInterval))
 	}
 	if client.PendingWriteNum <= 0 {
 		client.PendingWriteNum = 1000
-		log.Info("invalid PendingWriteNum",log.Int("reset",client.PendingWriteNum))
+		log.Info("invalid PendingWriteNum", log.Int("reset", client.PendingWriteNum))
 	}
 	if client.ReadDeadline == 0 {
-		client.ReadDeadline = 15*time.Second
-		log.Info("invalid ReadDeadline",log.Int64("reset", int64(client.ReadDeadline.Seconds())))
+		client.ReadDeadline = 15 * time.Second
+		log.Info("invalid ReadDeadline", log.Int64("reset", int64(client.ReadDeadline.Seconds())))
 	}
 	if client.WriteDeadline == 0 {
-		client.WriteDeadline = 15*time.Second
-		log.Info("invalid WriteDeadline",log.Int64("reset", int64(client.WriteDeadline.Seconds())))
+		client.WriteDeadline = 15 * time.Second
+		log.Info("invalid WriteDeadline", log.Int64("reset", int64(client.WriteDeadline.Seconds())))
 	}
 	if client.NewAgent == nil {
 		log.Fatal("NewAgent must not be nil")
@@ -71,13 +71,13 @@ func (client *TCPClient) init() {
 	if client.MaxMsgLen == 0 {
 		client.MaxMsgLen = Default_MaxMsgLen
 	}
-	if client.LenMsgLen ==0 {
+	if client.LenMsgLen == 0 {
 		client.LenMsgLen = Default_LenMsgLen
 	}
-	maxMsgLen := client.MsgParser.getMaxMsgLen(client.LenMsgLen)
+	maxMsgLen := client.MsgParser.getMaxMsgLen()
 	if client.MaxMsgLen > maxMsgLen {
 		client.MaxMsgLen = maxMsgLen
-		log.Info("invalid MaxMsgLen",log.Uint32("reset", maxMsgLen))
+		log.Info("invalid MaxMsgLen", log.Uint32("reset", maxMsgLen))
 	}
 
 	client.cons = make(ConnSet)
@@ -85,7 +85,7 @@ func (client *TCPClient) init() {
 	client.MsgParser.Init()
 }
 
-func (client *TCPClient) GetCloseFlag() bool{
+func (client *TCPClient) GetCloseFlag() bool {
 	client.Lock()
 	defer client.Unlock()
 
@@ -102,7 +102,7 @@ func (client *TCPClient) dial() net.Conn {
 			return conn
 		}
 
-		log.Warning("connect error ",log.String("error",err.Error()), log.String("Addr",client.Addr))
+		log.Warning("connect error ", log.String("error", err.Error()), log.String("Addr", client.Addr))
 		time.Sleep(client.ConnectInterval)
 		continue
 	}
@@ -116,7 +116,7 @@ reconnect:
 	if conn == nil {
 		return
 	}
-	
+
 	client.Lock()
 	if client.closeFlag {
 		client.Unlock()
@@ -126,7 +126,7 @@ reconnect:
 	client.cons[conn] = struct{}{}
 	client.Unlock()
 
-	tcpConn := newNetConn(conn, client.PendingWriteNum, &client.MsgParser,client.WriteDeadline)
+	tcpConn := newNetConn(conn, client.PendingWriteNum, &client.MsgParser, client.WriteDeadline)
 	agent := client.NewAgent(tcpConn)
 	agent.Run()
 
@@ -152,8 +152,7 @@ func (client *TCPClient) Close(waitDone bool) {
 	client.cons = nil
 	client.Unlock()
 
-	if waitDone == true{
+	if waitDone == true {
 		client.wg.Wait()
 	}
 }
-

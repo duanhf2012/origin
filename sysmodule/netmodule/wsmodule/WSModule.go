@@ -80,8 +80,7 @@ func (ws *WSModule) Init(wsCfg *WSCfg, process processor.IRawProcessor) {
 }
 
 func (ws *WSModule) Start() error {
-	ws.wsServer.Start()
-	return nil
+	return ws.wsServer.Start()
 }
 
 func (ws *WSModule) wsEventHandler(ev event.IEvent) {
@@ -98,7 +97,7 @@ func (ws *WSModule) wsEventHandler(ev event.IEvent) {
 	}
 }
 
-func (ws *WSModule) recyclerReaderBytes(data []byte) {
+func (ws *WSModule) recyclerReaderBytes([]byte) {
 }
 
 func (ws *WSModule) NewWSClient(conn *network.WSConn) network.Agent {
@@ -177,7 +176,7 @@ func (ws *WSModule) SendMsg(clientId string, msg interface{}) error {
 	client, ok := ws.mapClient[clientId]
 	if ok == false {
 		ws.mapClientLocker.Unlock()
-		return fmt.Errorf("client %s is disconnect!", clientId)
+		return fmt.Errorf("client %s is disconnect", clientId)
 	}
 
 	ws.mapClientLocker.Unlock()

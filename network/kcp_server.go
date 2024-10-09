@@ -3,7 +3,7 @@ package network
 import (
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/network/processor"
-	kcp "github.com/xtaci/kcp-go/v5"
+	"github.com/xtaci/kcp-go/v5"
 	"sync"
 	"time"
 )

@@ -75,7 +75,7 @@ func (server *TCPServer) init() error {
 		log.Info("invalid MaxMsgLen", log.Uint32("reset to", server.MaxMsgLen))
 	}
 
-	maxMsgLen := server.MsgParser.getMaxMsgLen(server.LenMsgLen)
+	maxMsgLen := server.MsgParser.getMaxMsgLen()
 	if server.MaxMsgLen > maxMsgLen {
 		server.MaxMsgLen = maxMsgLen
 		log.Info("invalid MaxMsgLen", log.Uint32("reset", maxMsgLen))
@@ -122,16 +122,16 @@ func (server *TCPServer) run() {
 	for {
 		conn, err := server.ln.Accept()
 		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
 				if tempDelay == 0 {
 					tempDelay = 5 * time.Millisecond
 				} else {
 					tempDelay *= 2
 				}
-				if max := 1 * time.Second; tempDelay > max {
-					tempDelay = max
-				}
+
 				log.Info("accept fail", log.String("error", err.Error()), log.Duration("sleep time", tempDelay))
+				tempDelay = min(1*time.Second, tempDelay)
 				time.Sleep(tempDelay)
 				continue
 			}

@@ -161,7 +161,7 @@ func (tm *TcpModule) SendMsg(clientId string, msg interface{}) error {
 	client, ok := tm.mapClient[clientId]
 	if ok == false {
 		tm.mapClientLocker.Unlock()
-		return fmt.Errorf("client %d is disconnect!", clientId)
+		return fmt.Errorf("client %s is disconnect", clientId)
 	}
 
 	tm.mapClientLocker.Unlock()

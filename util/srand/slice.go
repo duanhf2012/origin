@@ -1,12 +1,12 @@
 package srand
 
 import (
-	"github.com/duanhf2012/origin/v2/util/typedef"
+	"github.com/duanhf2012/origin/v2/util/typ"
 	"math/rand"
 	"slices"
 )
 
-func Sum[E ~[]T, T typedef.Number](arr E) T {
+func Sum[E ~[]T, T typ.Number](arr E) T {
 	var sum T
 	for i := range arr {
 		sum += arr[i]
@@ -14,7 +14,7 @@ func Sum[E ~[]T, T typedef.Number](arr E) T {
 	return sum
 }
 
-func SumFunc[E ~[]V, V any, T typedef.Number](arr E, getValue func(i int) T) T {
+func SumFunc[E ~[]V, V any, T typ.Number](arr E, getValue func(i int) T) T {
 	var sum T
 	for i := range arr {
 		sum += getValue(i)
@@ -45,11 +45,11 @@ func RandN[E ~[]T, T any](arr E, num int) []T {
 	for i := range index {
 		ret = append(ret, arr[index[i]])
 	}
-	
+
 	return ret
 }
 
-func RandWeight[E ~[]T, T typedef.Integer](weights E) int {
+func RandWeight[E ~[]T, T typ.Integer](weights E) int {
 	totalWeight := Sum(weights)
 	if totalWeight <= 0 {
 		return -1
@@ -65,7 +65,7 @@ func RandWeight[E ~[]T, T typedef.Integer](weights E) int {
 	return -1
 }
 
-func RandWeightFunc[E ~[]U, U any, T typedef.Integer](arr E, getWeight func(i int) T) int {
+func RandWeightFunc[E ~[]U, U any, T typ.Integer](arr E, getWeight func(i int) T) int {
 	weights := make([]T, 0, len(arr))
 	for i := range arr {
 		weights = append(weights, getWeight(i))
@@ -73,7 +73,7 @@ func RandWeightFunc[E ~[]U, U any, T typedef.Integer](arr E, getWeight func(i in
 	return RandWeight(weights)
 }
 
-func Get[E ~[]T, T any, U typedef.Integer](arr E, index U) (ret T, ok bool) {
+func Get[E ~[]T, T any, U typ.Integer](arr E, index U) (ret T, ok bool) {
 	if index < 0 || int(index) >= len(arr) {
 		return
 	}
@@ -82,7 +82,7 @@ func Get[E ~[]T, T any, U typedef.Integer](arr E, index U) (ret T, ok bool) {
 	return
 }
 
-func GetPointer[E ~[]T, T any, U typedef.Integer](arr E, index U) *T {
+func GetPointer[E ~[]T, T any, U typ.Integer](arr E, index U) *T {
 	if index < 0 || int(index) >= len(arr) {
 		return nil
 	}
