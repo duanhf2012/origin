@@ -41,7 +41,7 @@ type TcpPack struct {
 
 type Client struct {
 	id         string
-	tcpConn    *network.TCPConn
+	tcpConn    *network.NetConn
 	tcpService *TcpService
 }
 
@@ -120,13 +120,13 @@ func (tcpService *TcpService) SetProcessor(process processor.IProcessor, handler
 	tcpService.RegEventReceiverFunc(event.Sys_Event_Tcp, handler, tcpService.TcpEventHandler)
 }
 
-func (tcpService *TcpService) NewClient(conn *network.TCPConn) network.Agent {
+func (tcpService *TcpService) NewClient(conn network.Conn) network.Agent {
 	tcpService.mapClientLocker.Lock()
 	defer tcpService.mapClientLocker.Unlock()
 
 	uuId, _ := uuid.NewUUID()
 	clientId := strings.ReplaceAll(uuId.String(), "-", "")
-	pClient := &Client{tcpConn: conn, id: clientId}
+	pClient := &Client{tcpConn: conn.(*network.NetConn), id: clientId}
 	pClient.tcpService = tcpService
 	tcpService.mapClient[clientId] = pClient
 
