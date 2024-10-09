@@ -251,7 +251,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []Node
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
 	for _, f := range fileInfoList {
-		if f.IsDir() == true || (filepath.Ext(f.Name()) != ".json" && filepath.Ext(f.Name()) != ".yml") {
+		if f.IsDir() == true || (filepath.Ext(f.Name()) != ".json" && filepath.Ext(f.Name()) != ".yml" && filepath.Ext(f.Name()) != ".yaml") {
 			continue
 		}
 
@@ -309,7 +309,7 @@ func (cls *Cluster) readLocalService(localNodeId string) error {
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
 	for _, f := range fileInfoList {
-		if f.IsDir() == true || (filepath.Ext(f.Name()) != ".json" && filepath.Ext(f.Name()) != ".yml") {
+		if f.IsDir() == true || (filepath.Ext(f.Name()) != ".json" && filepath.Ext(f.Name()) != ".yml" && filepath.Ext(f.Name()) != ".yaml") {
 			continue
 		}
 
