@@ -64,12 +64,39 @@ type NodeInfoList struct {
 	NodeList  []NodeInfo
 }
 
-func UnmarshalConfig(data []byte, v interface{}) error {
-	if json.Valid(data) == true {
-		return json.Unmarshal(data, v)
-	} else {
-		return yaml.Unmarshal(data, v)
+func validConfigFile(f os.DirEntry) bool {
+	if f.IsDir() == true || (filepath.Ext(f.Name()) != ".json" && filepath.Ext(f.Name()) != ".yml" && filepath.Ext(f.Name()) != ".yaml") {
+		return false
 	}
+
+	return true
+}
+
+func yamlToJson(data []byte, v interface{}) ([]byte, error) {
+	mapKeyData := map[string]interface{}{}
+	err := yaml.Unmarshal(data, &mapKeyData)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err = json.Marshal(mapKeyData)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
+func unmarshalConfig(data []byte, v interface{}) error {
+	if !json.Valid(data) {
+		var err error
+		data, err = yamlToJson(data, v)
+		if err != nil {
+			return err
+		}
+	}
+
+	return json.Unmarshal(data, v)
 }
 
 func (d *DiscoveryInfo) getDiscoveryType() DiscoveryType {
@@ -169,7 +196,7 @@ func (cls *Cluster) ReadClusterConfig(filepath string) (*NodeInfoList, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = UnmarshalConfig(d, c)
+	err = unmarshalConfig(d, c)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +211,7 @@ func (cls *Cluster) readServiceConfig(filepath string) (interface{}, map[string]
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	err = UnmarshalConfig(d, &c)
+	err = unmarshalConfig(d, &c)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -251,7 +278,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []Node
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
 	for _, f := range fileInfoList {
-		if f.IsDir() == true || (filepath.Ext(f.Name()) != ".json" && filepath.Ext(f.Name()) != ".yml" && filepath.Ext(f.Name()) != ".yaml") {
+		if !validConfigFile(f) {
 			continue
 		}
 
@@ -309,7 +336,7 @@ func (cls *Cluster) readLocalService(localNodeId string) error {
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
 	for _, f := range fileInfoList {
-		if f.IsDir() == true || (filepath.Ext(f.Name()) != ".json" && filepath.Ext(f.Name()) != ".yml" && filepath.Ext(f.Name()) != ".yaml") {
+		if !validConfigFile(f) {
 			continue
 		}
 
