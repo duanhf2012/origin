@@ -35,9 +35,9 @@ type IModule interface {
 }
 
 type IModuleTimer interface {
-	AfterFunc(d time.Duration, cb func(*timer.Timer)) *timer.Timer
-	CronFunc(cronExpr *timer.CronExpr, cb func(*timer.Cron)) *timer.Cron
-	NewTicker(d time.Duration, cb func(*timer.Ticker)) *timer.Ticker
+	SafeAfterFunc(d time.Duration, cb func(*timer.Timer)) *timer.Timer
+	SafeCronFunc(cronExpr *timer.CronExpr, cb func(*timer.Cron)) *timer.Cron
+	SafeNewTicker(d time.Duration, cb func(*timer.Ticker)) *timer.Ticker
 }
 
 type Module struct {
@@ -208,6 +208,7 @@ func (m *Module) OnAddTimer(t timer.ITimer) {
 	}
 }
 
+// Deprecated: this function simply calls SafeAfterFunc
 func (m *Module) AfterFunc(d time.Duration, cb func(*timer.Timer)) *timer.Timer {
 	if m.mapActiveTimer == nil {
 		m.mapActiveTimer = map[timer.ITimer]struct{}{}
@@ -216,6 +217,7 @@ func (m *Module) AfterFunc(d time.Duration, cb func(*timer.Timer)) *timer.Timer 
 	return m.dispatcher.AfterFunc(d, nil, cb, m.OnCloseTimer, m.OnAddTimer)
 }
 
+// Deprecated: this function simply calls SafeCronFunc
 func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func(*timer.Cron)) *timer.Cron {
 	if m.mapActiveTimer == nil {
 		m.mapActiveTimer = map[timer.ITimer]struct{}{}
@@ -224,6 +226,7 @@ func (m *Module) CronFunc(cronExpr *timer.CronExpr, cb func(*timer.Cron)) *timer
 	return m.dispatcher.CronFunc(cronExpr, nil, cb, m.OnCloseTimer, m.OnAddTimer)
 }
 
+// Deprecated: this function simply calls SafeNewTicker
 func (m *Module) NewTicker(d time.Duration, cb func(*timer.Ticker)) *timer.Ticker {
 	if m.mapActiveTimer == nil {
 		m.mapActiveTimer = map[timer.ITimer]struct{}{}
