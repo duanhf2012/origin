@@ -119,7 +119,6 @@ func (ws *WSModule) recyclerReaderBytes([]byte) {
 func (ws *WSModule) NewWSClient(conn *network.WSConn) network.Agent {
 	ws.mapClientLocker.Lock()
 	defer ws.mapClientLocker.Unlock()
-
 	pClient := &WSClient{wsConn: conn, id: primitive.NewObjectID().Hex()}
 	pClient.wsModule = ws
 	ws.mapClient[pClient.id] = pClient
@@ -157,6 +156,22 @@ func (wc *WSClient) OnClose() {
 
 func (ws *WSModule) GetProcessor() processor.IRawProcessor {
 	return ws.process
+}
+
+func (ws *WSModule) GetClientHeader(clientId string,key string) string {
+	ws.mapClientLocker.Lock()
+	defer ws.mapClientLocker.Unlock()
+
+	pClient, ok := ws.mapClient[clientId]
+	if ok == false || pClient.wsConn == nil {
+		return ""
+	}
+	
+	if pClient.wsConn.GetHeader() == nil {
+		log.Warn("clientId header is nil", log.String("clientId", clientId))
+	}
+
+	return pClient.wsConn.GetHeader().Get(key)
 }
 
 func (ws *WSModule) GetClientIp(clientId string) string {

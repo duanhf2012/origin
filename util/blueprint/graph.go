@@ -144,7 +144,7 @@ func (gc *graphConfig) GetNodeByID(nodeID string) *nodeConfig {
 
 func (gr *Graph) GetAndCreateReturnPort() IPort {
 	p, ok := gr.globalVariables[ReturnVarial]
-	if ok {
+	if ok && p != nil {
 		return p
 	}
 
@@ -168,6 +168,8 @@ func (gr *Graph) Do(entranceID int64, args ...any) (Port_Array, error) {
 
 	if gr.globalVariables == nil {
 		gr.globalVariables = map[string]IPort{}
+	}else {
+		gr.globalVariables[ReturnVarial] = nil
 	}
 
 	err := entranceNode.Do(gr, args...)
