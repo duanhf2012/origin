@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"regexp"
+
 	"github.com/duanhf2012/origin/v2/event"
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/rpc"
@@ -24,10 +26,14 @@ const (
 	Discard NodeStatus = 1 //丢弃
 )
 
-type DiscoveryService struct {
-	MasterNodeId string   //要筛选的主结点Id，如果不配置或者配置成0，表示针对所有的主结点
-	NetworkName  string   //如果是etcd，指定要筛选的网络名中的服务，不配置，表示所有的网络
-	ServiceList  []string //只发现的服务列表
+
+
+// AllowDiscovery 允许发现的网络服务
+type AllowDiscovery struct {
+	MasterNodeId string // 支持正则表达式
+	NetworkName string // 支持正则表达式
+	NodeIdList []string // 支持正则表达式
+	ServiceList []string
 }
 
 type NodeInfo struct {
@@ -38,7 +44,7 @@ type NodeInfo struct {
 	CompressBytesLen  int                //超过字节进行压缩的长度
 	ServiceList       []string           //所有的有序服务列表
 	PublicServiceList []string           //对外公开的服务列表
-	DiscoveryService  []DiscoveryService //筛选发现的服务，如果不配置，不进行筛选
+	AllowDiscovery []AllowDiscovery //允许发现的网络服务
 	status            NodeStatus
 	Retire            bool
 }
@@ -462,30 +468,80 @@ func (cls *Cluster) GetNodeInfo(nodeId string) (NodeInfo, bool) {
 	return nodeInfo.nodeInfo, true
 }
 
-func (cls *Cluster) CanDiscoveryService(fromMasterNodeId string, serviceName string) bool {
+func (cls *Cluster) CanDiscoveryService(fromNetworkName string,fromMasterNodeId string,fromNodeId string, serviceName string) bool {
 	canDiscovery := true
-
+	// 筛选允许的服务
 	splitServiceName := strings.Split(serviceName, ":")
 	if len(splitServiceName) == 2 {
 		serviceName = splitServiceName[0]
 	}
 
-	for i := 0; i < len(cls.GetLocalNodeInfo().DiscoveryService); i++ {
-		masterNodeId := cls.GetLocalNodeInfo().DiscoveryService[i].MasterNodeId
-		//无效的配置，则跳过
-		if masterNodeId == rpc.NodeIdNull && len(cls.GetLocalNodeInfo().DiscoveryService[i].ServiceList) == 0 {
-			continue
-		}
+	// 先筛选允许的网络,有配置才会检测
+	if len(cls.GetLocalNodeInfo().AllowDiscovery) > 0 {
+		allowNetwork := false
+		for i := 0; i < len(cls.GetLocalNodeInfo().AllowDiscovery); i++ {
+			masterNodeId := cls.GetLocalNodeInfo().AllowDiscovery[i].MasterNodeId
+			networkName := cls.GetLocalNodeInfo().AllowDiscovery[i].NetworkName
+			nodeIdList := cls.GetLocalNodeInfo().AllowDiscovery[i].NodeIdList
+			serviceList := cls.GetLocalNodeInfo().AllowDiscovery[i].ServiceList
 
-		canDiscovery = false
-		if masterNodeId == fromMasterNodeId || masterNodeId == rpc.NodeIdNull {
-			for _, discoveryService := range cls.GetLocalNodeInfo().DiscoveryService[i].ServiceList {
-				if discoveryService == serviceName {
-					return true
+			// 如果配置了网络及Master结点，则匹配之
+			if fromNetworkName!="" {
+				matchNetWork, _ := regexp.MatchString(networkName, fromNetworkName)
+				if !matchNetWork {
+					continue
+				}
+			}else if fromMasterNodeId!="" {
+				matchMasterNode, _ := regexp.MatchString(masterNodeId, fromMasterNodeId)
+				if !matchMasterNode {
+					continue
 				}
 			}
+
+			// 如果配置了
+			if len(nodeIdList)>0 {
+				hasNode := false
+				for _, nodeId := range nodeIdList {
+					matchNodeId, _ := regexp.MatchString(nodeId, fromNodeId)
+					if !matchNodeId {
+						continue
+					}
+					hasNode = true
+					break
+				}
+
+				if !hasNode {
+					continue
+				}
+			}
+
+
+			// 如果配置了服务，则匹配之
+			if len(serviceList)>0 {
+				hasService := false
+				for _, service := range serviceList {
+					// service按正则表达式匹配serviceName
+					matched, _ := regexp.MatchString(service, serviceName)
+					if matched {
+						hasService = true
+						break
+					}
+				}
+
+				if !hasService {
+					continue
+				}
+			}
+
+			allowNetwork = true
+			break
+		}
+
+		if !allowNetwork {
+			return false
 		}
 	}
+
 
 	return canDiscovery
 }

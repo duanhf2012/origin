@@ -292,7 +292,7 @@ func (ed *EtcdDiscoveryService) setNodeInfo(networkName string, nodeInfo *rpc.No
 	//筛选关注的服务
 	var discoverServiceSlice = make([]string, 0, 24)
 	for _, pubService := range nodeInfo.PublicServiceList {
-		if cluster.CanDiscoveryService(networkName, pubService) == true {
+		if cluster.CanDiscoveryService(networkName, "",nodeInfo.NodeId,pubService) == true {
 			discoverServiceSlice = append(discoverServiceSlice, pubService)
 		}
 	}

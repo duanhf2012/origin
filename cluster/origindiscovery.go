@@ -548,7 +548,7 @@ func (dc *OriginDiscoveryClient) setNodeInfo(masterNodeId string, nodeInfo *rpc.
 	//筛选关注的服务
 	var discoverServiceSlice = make([]string, 0, 24)
 	for _, pubService := range nodeInfo.PublicServiceList {
-		if cluster.CanDiscoveryService(masterNodeId, pubService) == true {
+		if cluster.CanDiscoveryService("",masterNodeId, nodeInfo.NodeId,pubService) == true {
 			discoverServiceSlice = append(discoverServiceSlice, pubService)
 		}
 	}

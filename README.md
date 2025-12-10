@@ -947,20 +947,45 @@ origin引擎默认使用读取所有结点配置的进行确认结点有哪些Se
         "Private": false,
         "remark": "//以_打头的，表示只在本机进程，不对整个子网开发",
         "ServiceList": ["_TestService1", "TestService9", "TestService10"],
-        "DiscoveryService": [
+        "AllowDiscovery": [
             {
                 "MasterNodeId": "nodeid_1",
-                "NetworkName":"networkname1"
-                "DiscoveryService": ["TestService8"]
+                "NetworkName":"networkname1",
+                "NodeIdList":[".*server"],
+                "ServiceList": ["TestService8"]
             }
         ]
     }]
 }
 ```
 
-DiscoveryService：在当前nodeid为nodeid_test的结点中，只发现 MasterNodeId为nodeid_1或NetworkName为networkname1网络中的TestService8服务。
+以上，如果是使用Etcd发现模式，则表示可以发现网络名networkname1，NodeId为server结尾，服务名为TestService8的服务。
 
-**注意**：MasterNodeId与NetworkName只配置一个，分别在模式为origin或者etcd服务发现类型时。
+AllowDiscovery：可以配置发现的规则，如果只配置MasterNodeId或NetworkName时(如果使用Etcd则只配置NetworkName,Origin则只配置MasterNodeId)，则会筛选指定网络的所有服务，如下：
+
+```
+"AllowDiscovery": [
+            {
+                "NetworkName":"networkname1",
+            }
+        ]
+```
+
+则以上，只匹配networkname1网络名的所有服务，支持正则表达式，例如可以配置为"NetworkName":".*name1",则可以发现网络名为name1结尾的所有服务。
+
+如果只发现NodeId为server结尾的所有服务，可以使用以下配置方式：
+
+```
+"AllowDiscovery": [
+            {
+                "NodeIdList":[".*server"]
+            }
+        ]
+```
+
+筛选服务也是同上。也可以组合配置NetworkName和NodeIdList配置。
+
+
 
 第八章：HttpService使用
 -----------------------
