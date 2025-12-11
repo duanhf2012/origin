@@ -80,8 +80,22 @@ Etcd方式示例：
       "DialTimeoutMillisecond": 3000,
       "EtcdList": [
         {
-          "NetworkName": ["network1"],
-          "Endpoints": ["http://192.168.13.24:12379"]
+          "LocalNetworkName": "network_Area1",
+          "Endpoints": ["http://127.0.0.1:12379"],
+          "UserName": "",
+          "Password": "",
+          "Cert": "",
+          "CertKey": "",
+          "Ca": ""
+        },
+        {
+          "NeighborNetworkName": ["network_Area2"],
+          "Endpoints": ["http://127.0.0.1:12379"],
+          "UserName": "",
+          "Password": "",
+          "Cert": "",
+          "CertKey": "",
+          "Ca": ""
         }
       ]
     }
@@ -92,11 +106,15 @@ TTLSecond：表示健康检查TTL失效时间10秒
 
 DialTimeoutMillisecond: 与etcd连接超时时间
 
-EtcdList：Etcd列表，可以多个Etcd服务器连接
+EtcdList：Etcd列表，可以多个Etcd服务器连接（注意：列表中必需有一个LocalNetworkName项，表示当前所有的Node归属当前网络名为network_Area1）Node下所有的服务会往network_Area1中注册。监听该网络的结点可以发现该网络中的Service。本地网络会默认监听本地网络中所有的服务。
 
-NetworkName：所在的网络名称，可以配置多个。node会往对应的网络名称中注册、监听发现Service。NetworkName也起到发现隔离的作用。
+NeighborNetworkName：表示监听的邻居网络名，可以发现该网络中所有Service
 
 Endpoints：Etcd服务器地址
+
+
+
+
 
 Origin方式示例：
 
@@ -105,10 +123,15 @@ Origin方式示例：
   "Discovery": {
     "Origin":{
       "TTLSecond": 10,
+     "LocalMasterNodeId": "bot",
       "MasterNodeList": [
         {
-          "NodeId": "test_1",
-          "ListenAddr": "127.0.0.1:8801"
+          "NodeId": "bot",
+          "ListenAddr": "127.0.0.1:11001"
+        },
+        {
+          "NodeId": "mp1server",
+          "ListenAddr": "127.0.0.1:11000"
         }
       ]
     }
@@ -118,7 +141,11 @@ Origin方式示例：
 
 TTLSecond：表示健康检查TTL失效时间10秒
 
+LocalMasterNodeId：本地所有的Node归属当前Master NodeId。归属当前的所有的Node会往该Master Node中注册服务。MasterNode会自动同步给所有的监听结点。本地Node会默认监听本地Master Node中所有的服务。注意LocalMasterNodeId配置的NodeId要在MasterNodeList列表中。
+
 MasterNodeList：指定哪些Node为服务发现Master结点，需要配置NodeId与ListenAddr，注意它们要与实际的Node配置一致。
+
+
 
 ### RpcMode部分
 
