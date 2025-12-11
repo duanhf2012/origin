@@ -6,6 +6,12 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"os"
+	"path"
+	"strings"
+	"sync/atomic"
+	"time"
+
 	"github.com/duanhf2012/origin/v2/event"
 	"github.com/duanhf2012/origin/v2/log"
 	"github.com/duanhf2012/origin/v2/rpc"
@@ -14,19 +20,15 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
-	"os"
-	"path"
-	"strings"
-	"sync/atomic"
-	"time"
 )
 
 const originDir = "/origin"
 
 type etcdClientInfo struct {
-	watchKeys     []string
-	leaseID       clientv3.LeaseID
-	keepAliveChan <-chan *clientv3.LeaseKeepAliveResponse
+	isLocalNetwork bool
+	watchKeys      []string
+	leaseID        clientv3.LeaseID
+	keepAliveChan  <-chan *clientv3.LeaseKeepAliveResponse
 }
 
 type EtcdDiscoveryService struct {
@@ -93,6 +95,7 @@ func (ed *EtcdDiscoveryService) OnInit() error {
 		return errors.New("etcd discovery config is nil.")
 	}
 
+	var hasLocalNetwork bool
 	for i := 0; i < len(etcdDiscoveryCfg.EtcdList); i++ {
 		var client *clientv3.Client
 		var tlsConfig *tls.Config
@@ -141,11 +144,23 @@ func (ed *EtcdDiscoveryService) OnInit() error {
 		}
 
 		ec := &etcdClientInfo{}
-		for _, networkName := range etcdDiscoveryCfg.EtcdList[i].NetworkName {
-			ec.watchKeys = append(ec.watchKeys, fmt.Sprintf("%s/%s", originDir, networkName))
+
+		if etcdDiscoveryCfg.EtcdList[i].LocalNetworkName != "" {
+			hasLocalNetwork = true
+			ec.isLocalNetwork = true
+			ec.watchKeys = append(ec.watchKeys, fmt.Sprintf("%s/%s", originDir, etcdDiscoveryCfg.EtcdList[i].LocalNetworkName))
+		} else {
+			ec.isLocalNetwork = false
+			for _, networkName := range etcdDiscoveryCfg.EtcdList[i].NeighborNetworkName {
+				ec.watchKeys = append(ec.watchKeys, fmt.Sprintf("%s/%s", originDir, networkName))
+			}
 		}
 
 		ed.mapClient[client] = ec
+	}
+
+	if !hasLocalNetwork {
+		return errors.New("etcd discovery init fail,cannot find local network")
 	}
 
 	return nil
@@ -167,14 +182,18 @@ func (ed *EtcdDiscoveryService) registerServiceByClient(client *clientv3.Client,
 	}
 
 	etcdClient.leaseID = resp.ID
-	for _, watchKey := range etcdClient.watchKeys {
-		// 注册服务节点到 etcd
-		_, err = client.Put(context.Background(), ed.getRegisterKey(watchKey), ed.byteLocalNodeInfo, clientv3.WithLease(resp.ID))
-		if err != nil {
-			log.Error("etcd Put fail", log.ErrorField("err", err))
-			ed.tryRegisterService(client, etcdClient)
-			return
-		}
+
+	// 注册服务节点到 etcd,LocalNetwork时才会注册，且etcdClient.watchKeys必然>0
+	if len(etcdClient.watchKeys) != 1 {
+		log.Error("LocalNetwork watchkey is error")
+		return
+	}
+
+	_, err = client.Put(context.Background(), ed.getRegisterKey(etcdClient.watchKeys[0]), ed.byteLocalNodeInfo, clientv3.WithLease(resp.ID))
+	if err != nil {
+		log.Error("etcd Put fail", log.ErrorField("err", err))
+		ed.tryRegisterService(client, etcdClient)
+		return
 	}
 
 	etcdClient.keepAliveChan, err = client.KeepAlive(context.Background(), etcdClient.leaseID)
@@ -204,6 +223,10 @@ func (ed *EtcdDiscoveryService) tryRegisterService(client *clientv3.Client, etcd
 		return
 	}
 
+	if !etcdClient.isLocalNetwork {
+		return
+	}
+
 	ed.AfterFunc(time.Second*3, func(t *timer.Timer) {
 		ed.registerServiceByClient(client, etcdClient)
 	})
@@ -229,13 +252,18 @@ func (ed *EtcdDiscoveryService) tryLaterRetire() {
 func (ed *EtcdDiscoveryService) retire() error {
 	//从etcd中更新
 	for c, ec := range ed.mapClient {
-		for _, watchKey := range ec.watchKeys {
-			// 注册服务节点到 etcd
-			_, err := c.Put(context.Background(), ed.getRegisterKey(watchKey), ed.byteLocalNodeInfo, clientv3.WithLease(ec.leaseID))
-			if err != nil {
-				log.Error("etcd Put fail", log.ErrorField("err", err))
-				return err
-			}
+		if !ec.isLocalNetwork {
+			continue
+		}
+
+		if len(ec.watchKeys)!=1 {
+			log.Error("LocalNetwork watchkey is error")
+			continue
+		}
+		_, err := c.Put(context.Background(), ed.getRegisterKey(ec.watchKeys[0]), ed.byteLocalNodeInfo, clientv3.WithLease(ec.leaseID))
+		if err != nil {
+			log.Error("etcd Put fail", log.ErrorField("err", err))
+			return err
 		}
 	}
 
@@ -292,7 +320,7 @@ func (ed *EtcdDiscoveryService) setNodeInfo(networkName string, nodeInfo *rpc.No
 	//筛选关注的服务
 	var discoverServiceSlice = make([]string, 0, 24)
 	for _, pubService := range nodeInfo.PublicServiceList {
-		if cluster.CanDiscoveryService(networkName, "",nodeInfo.NodeId,pubService) == true {
+		if cluster.CanDiscoveryService(networkName, "", nodeInfo.NodeId, pubService) == true {
 			discoverServiceSlice = append(discoverServiceSlice, pubService)
 		}
 	}
@@ -503,11 +531,16 @@ func (ed *EtcdDiscoveryService) RPC_ServiceRecord(etcdServiceRecord *service.Etc
 
 	//写入到etcd中
 	for c, info := range ed.mapClient {
-		for _, watchKey := range info.watchKeys {
-			if ed.getNetworkNameByWatchKey(watchKey) == etcdServiceRecord.NetworkName {
-				client = c
-				break
-			}
+		if !info.isLocalNetwork {
+			continue
+		}
+
+		if len(info.watchKeys)!=1 {
+					log.Error("")
+		}
+		if ed.getNetworkNameByWatchKey(info.watchKeys[0]) == etcdServiceRecord.NetworkName {
+			client = c
+			break
 		}
 	}
 

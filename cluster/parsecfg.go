@@ -16,27 +16,27 @@ import (
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-
 type EtcdList struct {
-	NetworkName []string
-	Endpoints   []string
-	UserName string
-	Password string
-	Cert string
-	CertKey string
-	Ca string
+	LocalNetworkName    string // 如果配置，则为本地网络,必需配置一个本地网络
+	NeighborNetworkName []string
+	Endpoints           []string
+	UserName            string
+	Password            string
+	Cert                string
+	CertKey             string
+	Ca                  string
 }
 
 type EtcdDiscovery struct {
 	DialTimeoutMillisecond time.Duration
 	TTLSecond              int64
-
-	EtcdList []EtcdList
+	EtcdList               []EtcdList
 }
 
 type OriginDiscovery struct {
-	TTLSecond      int64
-	MasterNodeList []NodeInfo
+	TTLSecond         int64
+	LocalMasterNodeId string
+	MasterNodeList    []NodeInfo
 }
 
 type DiscoveryType int
@@ -72,7 +72,7 @@ type NodeInfoList struct {
 }
 
 func validConfigFile(f string) bool {
-	return strings.HasSuffix(f, ".json")|| strings.HasSuffix(f, ".yml") || strings.HasSuffix(f, ".yaml")
+	return strings.HasSuffix(f, ".json") || strings.HasSuffix(f, ".yml") || strings.HasSuffix(f, ".yaml")
 }
 
 func yamlToJson(data []byte, v interface{}) ([]byte, error) {
@@ -131,21 +131,20 @@ func (d *DiscoveryInfo) setEtcd(etcd *EtcdDiscovery) error {
 		return fmt.Errorf("repeat configuration of Discovery")
 	}
 
-	//Endpoints不允许重复
-	mapAddr := make(map[string]struct{})
 	for _, n := range etcd.EtcdList {
-		for _, endPoint := range n.Endpoints {
-			if _, ok := mapAddr[endPoint]; ok == true {
-				return fmt.Errorf("etcd discovery config Etcd.EtcdList.Endpoints %+v is repeat", endPoint)
-			}
-			mapAddr[endPoint] = struct{}{}
-		}
-
 		//networkName不允许重复
 		mapNetworkName := make(map[string]struct{})
-		for _, netName := range n.NetworkName {
+		if n.LocalNetworkName != "" {
+			if _, ok := mapNetworkName[n.LocalNetworkName]; ok == true {
+				return fmt.Errorf("etcd discovery config Etcd.EtcdList.LocalNetworkName %+v is repeat", n.LocalNetworkName)
+			}
+			mapNetworkName[n.LocalNetworkName] = struct{}{}
+			continue
+		}
+
+		for _, netName := range n.NeighborNetworkName {
 			if _, ok := mapNetworkName[netName]; ok == true {
-				return fmt.Errorf("etcd discovery config Etcd.EtcdList.NetworkName %+v is repeat", n.NetworkName)
+				return fmt.Errorf("etcd discovery config Etcd.EtcdList.NetworkName %+v is repeat", netName)
 			}
 
 			mapNetworkName[netName] = struct{}{}
@@ -275,7 +274,7 @@ func (cls *Cluster) readLocalClusterConfig(nodeId string) (DiscoveryInfo, []Node
 	var rpcMode RpcMode
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
-	err := filepath.Walk(configDir, func(path string, info fs.FileInfo, err error)error {
+	err := filepath.Walk(configDir, func(path string, info fs.FileInfo, err error) error {
 		if info.IsDir() {
 			return nil
 		}
@@ -340,7 +339,7 @@ func (cls *Cluster) readLocalService(localNodeId string) error {
 	nodeService := map[string]interface{}{}
 
 	//读取任何文件,只读符合格式的配置,目录下的文件可以自定义分文件
-	err := filepath.Walk(configDir, func(path string, info fs.FileInfo, err error)error{
+	err := filepath.Walk(configDir, func(path string, info fs.FileInfo, err error) error {
 		if info.IsDir() {
 			return nil
 		}
@@ -432,7 +431,7 @@ func (cls *Cluster) readLocalService(localNodeId string) error {
 	return nil
 }
 
-func (cls *Cluster) parseLocalCfg() error{
+func (cls *Cluster) parseLocalCfg() error {
 	rpcInfo := NodeRpcInfo{}
 	rpcInfo.nodeInfo = cls.localNodeInfo
 	rpcInfo.client = rpc.NewLClient(rpcInfo.nodeInfo.NodeId, &cls.callSet)
@@ -454,7 +453,7 @@ func (cls *Cluster) parseLocalCfg() error{
 			cls.mapServiceNode[serviceName] = make(map[string]struct{})
 		}
 
-		if _,ok:=cls.mapServiceNode[serviceName][cls.localNodeInfo.NodeId];ok {
+		if _, ok := cls.mapServiceNode[serviceName][cls.localNodeInfo.NodeId]; ok {
 			return fmt.Errorf("duplicate service %s is configured in node %s", serviceName, cls.localNodeInfo.NodeId)
 		}
 		cls.mapServiceNode[serviceName][cls.localNodeInfo.NodeId] = struct{}{}

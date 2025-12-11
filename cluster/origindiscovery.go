@@ -508,8 +508,14 @@ func (dc *OriginDiscoveryClient) regServiceDiscover(nodeId string) {
 	if nodeId == cluster.GetLocalNodeInfo().NodeId {
 		return
 	}
+
 	nodeInfo := cluster.getOriginMasterDiscoveryNodeInfo(nodeId)
 	if nodeInfo == nil {
+		return
+	}
+
+	// 只能往本地Master结点上注册
+	if !cluster.IsLocalMasterNodeId(nodeId) {
 		return
 	}
 
@@ -617,13 +623,22 @@ func (cls *Cluster) IsOriginMasterDiscoveryNode(nodeId string) bool {
 	return cls.getOriginMasterDiscoveryNodeInfo(nodeId) != nil
 }
 
+func (cls *Cluster) IsLocalMasterNodeId(nodeId string) bool {
+	if cls.discoveryInfo.Origin == nil {
+		return false
+	}
+
+	return cls.discoveryInfo.Origin.LocalMasterNodeId == nodeId
+}
 func (cls *Cluster) getOriginMasterDiscoveryNodeInfo(nodeId string) *NodeInfo {
 	if cls.discoveryInfo.Origin == nil {
 		return nil
 	}
 
 	for i := 0; i < len(cls.discoveryInfo.Origin.MasterNodeList); i++ {
-		if cls.discoveryInfo.Origin.MasterNodeList[i].NodeId == nodeId {
+
+
+		if cls.discoveryInfo.Origin.MasterNodeList[i].NodeId == nodeId  {
 			return &cls.discoveryInfo.Origin.MasterNodeList[i]
 		}
 	}
