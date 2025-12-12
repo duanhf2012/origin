@@ -26,25 +26,23 @@ const (
 	Discard NodeStatus = 1 //丢弃
 )
 
-
-
 // AllowDiscovery 允许发现的网络服务
 type AllowDiscovery struct {
-	MasterNodeId string // 支持正则表达式
-	NetworkName string // 支持正则表达式
-	NodeIdList []string // 支持正则表达式
-	ServiceList []string
+	MasterNodeId string   // 支持正则表达式
+	NetworkName  string   // 支持正则表达式
+	NodeIdList   []string // 支持正则表达式
+	ServiceList  []string
 }
 
 type NodeInfo struct {
 	NodeId            string
 	Private           bool
 	ListenAddr        string
-	MaxRpcParamLen    uint32             //最大Rpc参数长度
-	CompressBytesLen  int                //超过字节进行压缩的长度
-	ServiceList       []string           //所有的有序服务列表
-	PublicServiceList []string           //对外公开的服务列表
-	AllowDiscovery []AllowDiscovery //允许发现的网络服务
+	MaxRpcParamLen    uint32           //最大Rpc参数长度
+	CompressBytesLen  int              //超过字节进行压缩的长度
+	ServiceList       []string         //所有的有序服务列表
+	PublicServiceList []string         //对外公开的服务列表
+	AllowDiscovery    []AllowDiscovery //允许发现的网络服务
 	status            NodeStatus
 	Retire            bool
 }
@@ -229,9 +227,9 @@ func (cls *Cluster) serviceDiscoverySetNodeInfo(nodeInfo *NodeInfo) {
 	}
 	cls.mapRpc[nodeInfo.NodeId] = &rpcInfo
 	if cls.IsNatsMode() == true || cls.discoveryInfo.discoveryType != OriginType {
-		log.Info("Discovery nodeId and new rpc client", log.String("NodeId", nodeInfo.NodeId), log.Any("services:", nodeInfo.PublicServiceList), log.Bool("Retire", nodeInfo.Retire))
+		log.Info("Discovery node and new rpc client", log.String("NodeId", nodeInfo.NodeId), log.Any("services:", nodeInfo.PublicServiceList), log.Bool("Retire", nodeInfo.Retire))
 	} else {
-		log.Info("Discovery nodeId and new rpc client", log.String("NodeId", nodeInfo.NodeId), log.Any("services:", nodeInfo.PublicServiceList), log.Bool("Retire", nodeInfo.Retire), log.String("nodeListenAddr", nodeInfo.ListenAddr))
+		log.Info("Discovery node and new rpc client", log.String("NodeId", nodeInfo.NodeId), log.Any("services:", nodeInfo.PublicServiceList), log.Bool("Retire", nodeInfo.Retire), log.String("nodeListenAddr", nodeInfo.ListenAddr))
 	}
 }
 
@@ -468,7 +466,7 @@ func (cls *Cluster) GetNodeInfo(nodeId string) (NodeInfo, bool) {
 	return nodeInfo.nodeInfo, true
 }
 
-func (cls *Cluster) CanDiscoveryService(fromNetworkName string,fromMasterNodeId string,fromNodeId string, serviceName string) bool {
+func (cls *Cluster) CanDiscoveryService(fromNetworkName string, fromMasterNodeId string, fromNodeId string, serviceName string) bool {
 	canDiscovery := true
 	// 筛选允许的服务
 	splitServiceName := strings.Split(serviceName, ":")
@@ -486,12 +484,12 @@ func (cls *Cluster) CanDiscoveryService(fromNetworkName string,fromMasterNodeId 
 			serviceList := cls.GetLocalNodeInfo().AllowDiscovery[i].ServiceList
 
 			// 如果配置了网络及Master结点，则匹配之
-			if fromNetworkName!="" {
+			if fromNetworkName != "" {
 				matchNetWork, _ := regexp.MatchString(networkName, fromNetworkName)
 				if !matchNetWork {
 					continue
 				}
-			}else if fromMasterNodeId!="" {
+			} else if fromMasterNodeId != "" {
 				matchMasterNode, _ := regexp.MatchString(masterNodeId, fromMasterNodeId)
 				if !matchMasterNode {
 					continue
@@ -499,7 +497,7 @@ func (cls *Cluster) CanDiscoveryService(fromNetworkName string,fromMasterNodeId 
 			}
 
 			// 如果配置了
-			if len(nodeIdList)>0 {
+			if len(nodeIdList) > 0 {
 				hasNode := false
 				for _, nodeId := range nodeIdList {
 					matchNodeId, _ := regexp.MatchString(nodeId, fromNodeId)
@@ -515,9 +513,8 @@ func (cls *Cluster) CanDiscoveryService(fromNetworkName string,fromMasterNodeId 
 				}
 			}
 
-
 			// 如果配置了服务，则匹配之
-			if len(serviceList)>0 {
+			if len(serviceList) > 0 {
 				hasService := false
 				for _, service := range serviceList {
 					// service按正则表达式匹配serviceName
@@ -541,7 +538,6 @@ func (cls *Cluster) CanDiscoveryService(fromNetworkName string,fromMasterNodeId 
 			return false
 		}
 	}
-
 
 	return canDiscovery
 }
