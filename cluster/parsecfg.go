@@ -507,6 +507,30 @@ func (cls *Cluster) IsConfigService(serviceName string) bool {
 	return ok
 }
 
+// GetServiceInfoByTemplateService 通过模板服务名，获取map[服务名]map[NodeId]struct{}
+func (cls *Cluster) GetServiceInfoByTemplateService(templateServiceName string) map[string]map[string]struct{} {
+	mapService := map[string]map[string]struct{}{}
+	cls.locker.RLock()
+	defer cls.locker.RUnlock()
+
+	mapServiceName := cls.mapTemplateServiceNode[templateServiceName]
+	for serviceName := range mapServiceName {
+		mapNodeId, ok := cls.mapServiceNode[serviceName]
+		if ok == true {
+			for nodeId := range mapNodeId{
+				mapNodeIds:=mapService[serviceName]
+				if mapNodeIds==nil {
+					mapNodeIds = map[string]struct{}{}
+					mapService[serviceName] = mapNodeIds
+				}
+				mapNodeIds[nodeId] = struct{}{}
+			}
+		}
+	}
+
+	return mapService
+}
+
 func (cls *Cluster) GetNodeIdByTemplateService(templateServiceName string, rpcClientList []*rpc.Client, filterRetire bool) (error, []*rpc.Client) {
 	cls.locker.RLock()
 	defer cls.locker.RUnlock()
