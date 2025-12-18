@@ -142,7 +142,7 @@ func (logger *Logger) NewRotatelogsWriter() zapcore.WriteSyncer {
 	options = append(options, rotatelogs.WithRotationTime(time.Hour*24))
 
 	fileName := strings.TrimRight(logger.FileName, filepath.Ext(logger.FileName))
-	rotateLogs, err := rotatelogs.NewRotateLogs(LogPath, "20060102/"+fileName+"_20060102_150405", options...)
+	rotateLogs, err := rotatelogs.NewRotateLogs(LogPath, "20060102/"+fileName,"_20060102_150405", options...)
 	if err != nil {
 		panic(err)
 	}
