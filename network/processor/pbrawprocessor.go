@@ -10,7 +10,7 @@ type RawMessageInfo struct {
 	msgHandler RawMessageHandler
 }
 
-type RawMessageHandler func(clientId string, packType uint16, msg []byte)
+type RawMessageHandler func(clientId string, packType uint16,additionData any, msg []byte)
 type RawConnectHandler func(clientId string)
 type UnknownRawMessageHandler func(clientId string, msg []byte)
 
@@ -41,7 +41,7 @@ func (pbRawProcessor *PBRawProcessor) SetByteOrder(littleEndian bool) {
 // MsgRoute must goroutine safe
 func (pbRawProcessor *PBRawProcessor) MsgRoute(clientId string, msg interface{}, recyclerReaderBytes func(data []byte)) error {
 	pPackInfo := msg.(*PBRawPackInfo)
-	pbRawProcessor.msgHandler(clientId, pPackInfo.typ, pPackInfo.rawMsg)
+	pbRawProcessor.msgHandler(clientId, pPackInfo.typ, nil, pPackInfo.rawMsg)
 	recyclerReaderBytes(pPackInfo.rawMsg)
 
 	return nil

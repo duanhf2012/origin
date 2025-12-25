@@ -20,7 +20,6 @@ type IRawProcessor interface {
 
 	SetByteOrder(littleEndian bool)
 	SetRawMsgHandler(handle RawMessageHandler)
-	MakeRawMsg(msgType uint16, msg []byte, pbRawPackInfo *PBRawPackInfo)
 	SetUnknownMsgHandler(unknownMessageHandler UnknownRawMessageHandler)
 	SetConnectedHandler(connectHandler RawConnectHandler)
 	SetDisConnectedHandler(disconnectHandler RawConnectHandler)

@@ -411,13 +411,13 @@ func GetNodeByServiceName(serviceName string) map[string]struct{} {
 	return mapNodeId
 }
 
-// GetNodeByTemplateServiceName 通过模板服务名获取服务名,返回 map[serviceName真实服务名]NodeId
-func GetNodeByTemplateServiceName(templateServiceName string) map[string]string {
+// GetNodeByTemplateServiceName 通过模板服务名获取服务名,返回 map[serviceName真实服务名][]NodeId
+func GetNodeByTemplateServiceName(templateServiceName string) map[string][]string {
 	cluster.locker.RLock()
 	defer cluster.locker.RUnlock()
 
 	mapServiceName := cluster.mapTemplateServiceNode[templateServiceName]
-	mapNodeId := make(map[string]string, 9)
+	mapNodeId := make(map[string][]string, 9)
 	for serviceName := range mapServiceName {
 		mapNode, ok := cluster.mapServiceNode[serviceName]
 		if ok == false {
@@ -425,7 +425,9 @@ func GetNodeByTemplateServiceName(templateServiceName string) map[string]string 
 		}
 
 		for nodeId := range mapNode {
-			mapNodeId[serviceName] = nodeId
+			nodes := mapNodeId[serviceName]
+			nodes = append(nodes, nodeId)
+			mapNodeId[serviceName] = nodes
 		}
 	}
 
