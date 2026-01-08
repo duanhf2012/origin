@@ -16,7 +16,8 @@ type WSServer struct {
 	Addr            string
 	MaxConnNum      int
 	PendingWriteNum int
-	MaxMsgLen       uint32
+	MaxReadMsgLen       uint32
+	MaxWriteMsgLen      uint32
 	CertFile        string
 	KeyFile         string
 	NewAgent        func(*WSConn) Agent
@@ -32,7 +33,8 @@ type WSServer struct {
 type WSHandler struct {
 	maxConnNum      int
 	pendingWriteNum int
-	maxMsgLen       uint32
+	maxReadMsgLen   uint32
+	maxWriteMsgLen  uint32
 	newAgent        func(*WSConn) Agent
 	upgrader        websocket.Upgrader
 	conns           WebsocketConnSet
@@ -55,7 +57,7 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Error("upgrade fail", log.String("error", err.Error()))
 		return
 	}
-	conn.SetReadLimit(int64(handler.maxMsgLen))
+	conn.SetReadLimit(int64(handler.maxReadMsgLen))
 	if handler.messageType == 0 {
 		handler.messageType = websocket.TextMessage
 	}
@@ -93,7 +95,7 @@ func (handler *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	c.SetLinger(0)
 	c.SetNoDelay(true)
-	wsConn := newWSConn(conn, r.Header, handler.pendingWriteNum, handler.maxMsgLen, handler.messageType)
+	wsConn := newWSConn(conn, r.Header, handler.pendingWriteNum, handler.maxWriteMsgLen, handler.messageType)
 	agent := handler.newAgent(wsConn)
 	agent.Run()
 
@@ -118,7 +120,6 @@ func (server *WSServer) Start() error {
 		log.Error("WSServer Listen fail", log.String("error", err.Error()))
 		return err
 	}
-
 	if server.MaxConnNum <= 0 {
 		server.MaxConnNum = 100
 		log.Info("invalid MaxConnNum", log.Int("reset", server.MaxConnNum))
@@ -127,9 +128,9 @@ func (server *WSServer) Start() error {
 		server.PendingWriteNum = 100
 		log.Info("invalid PendingWriteNum", log.Int("reset", server.PendingWriteNum))
 	}
-	if server.MaxMsgLen <= 0 {
-		server.MaxMsgLen = 4096
-		log.Info("invalid MaxMsgLen", log.Uint32("reset", server.MaxMsgLen))
+	if server.MaxReadMsgLen <= 0 {
+		server.MaxReadMsgLen = 4096
+		log.Info("invalid MaxReadMsgLen", log.Uint32("reset", server.MaxReadMsgLen))
 	}
 	if server.HandshakeTimeout <= 0 {
 		server.HandshakeTimeout = 15 * time.Second
@@ -167,7 +168,8 @@ func (server *WSServer) Start() error {
 	server.handler = &WSHandler{
 		maxConnNum:      server.MaxConnNum,
 		pendingWriteNum: server.PendingWriteNum,
-		maxMsgLen:       server.MaxMsgLen,
+		maxReadMsgLen:   server.MaxReadMsgLen,
+		maxWriteMsgLen:  server.MaxWriteMsgLen,
 		newAgent:        server.NewAgent,
 		conns:           make(WebsocketConnSet),
 		messageType:     server.messageType,

@@ -15,16 +15,16 @@ type WSConn struct {
 	sync.Mutex
 	conn      *websocket.Conn
 	writeChan chan []byte
-	maxMsgLen uint32
+	maxWriteMsgLen uint32
 	closeFlag bool
 	header    http.Header
 }
 
-func newWSConn(conn *websocket.Conn, header http.Header, pendingWriteNum int, maxMsgLen uint32, messageType int) *WSConn {
+func newWSConn(conn *websocket.Conn, header http.Header, pendingWriteNum int, maxWriteMsgLen uint32, messageType int) *WSConn {
 	wsConn := new(WSConn)
 	wsConn.conn = conn
 	wsConn.writeChan = make(chan []byte, pendingWriteNum)
-	wsConn.maxMsgLen = maxMsgLen
+	wsConn.maxWriteMsgLen = maxWriteMsgLen
 	wsConn.header = header
 
 	go func() {
@@ -118,7 +118,7 @@ func (wsConn *WSConn) WriteMsg(args ...[]byte) error {
 	}
 
 	// check len
-	if msgLen > wsConn.maxMsgLen {
+	if  wsConn.maxWriteMsgLen > 0 && msgLen > wsConn.maxWriteMsgLen {
 		return errors.New("message too long")
 	} else if msgLen < 1 {
 		return errors.New("message too short")

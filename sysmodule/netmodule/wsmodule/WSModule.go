@@ -34,7 +34,8 @@ type WSCfg struct {
 	ListenAddr      string
 	MaxConnNum      int
 	PendingWriteNum int
-	MaxMsgLen       uint32
+	MaxReadMsgLen       uint32
+	MaxWriteMsgLen      uint32
 	LittleEndian    bool //是否小端序
 	KeyFile 		string
 	CertFile 		string
@@ -67,7 +68,8 @@ func (ws *WSModule) OnInit() error {
 
 	ws.WSServer.MaxConnNum = ws.wsCfg.MaxConnNum
 	ws.WSServer.PendingWriteNum = ws.wsCfg.PendingWriteNum
-	ws.WSServer.MaxMsgLen = ws.wsCfg.MaxMsgLen
+	ws.WSServer.MaxReadMsgLen = ws.wsCfg.MaxReadMsgLen
+	ws.WSServer.MaxWriteMsgLen = ws.wsCfg.MaxWriteMsgLen
 	ws.WSServer.Addr = ws.wsCfg.ListenAddr
 	ws.WSServer.HandshakeTimeout = ws.wsCfg.HandshakeTimeoutSecond*time.Second
 	ws.WSServer.ReadTimeout = ws.wsCfg.ReadTimeoutSecond*time.Second
