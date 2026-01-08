@@ -91,9 +91,11 @@ func (server *Server) Start() error {
 	server.rpcServer.Addr = ":" + splitAddr[1]
 	server.rpcServer.MinMsgLen = 2
 	if server.maxRpcParamLen > 0 {
-		server.rpcServer.MaxMsgLen = server.maxRpcParamLen
+		server.rpcServer.MaxReadMsgLen = server.maxRpcParamLen
+		server.rpcServer.MaxWriteMsgLen = server.maxRpcParamLen
 	} else {
-		server.rpcServer.MaxMsgLen = math.MaxUint32
+		server.rpcServer.MaxReadMsgLen = math.MaxUint32
+		server.rpcServer.MaxWriteMsgLen = math.MaxUint32
 	}
 
 	server.rpcServer.MaxConnNum = 100000

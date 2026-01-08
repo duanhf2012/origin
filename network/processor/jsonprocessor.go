@@ -45,9 +45,8 @@ func (jsonProcessor *JsonProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // MsgRoute must goroutine safe
-func (jsonProcessor *JsonProcessor) MsgRoute(clientId string, msg interface{}, recyclerReaderBytes func(data []byte)) error {
+func (jsonProcessor *JsonProcessor) MsgRoute(clientId string, msg interface{}) error {
 	pPackInfo := msg.(*JsonPackInfo)
-	defer recyclerReaderBytes(pPackInfo.rawMsg)
 
 	v, ok := jsonProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
@@ -107,8 +106,7 @@ func (jsonProcessor *JsonProcessor) MakeRawMsg(msgType uint16, msg []byte) *Json
 	return &JsonPackInfo{typ: msgType, rawMsg: msg}
 }
 
-func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId string, msg interface{}, recyclerReaderBytes func(data []byte)) {
-	defer recyclerReaderBytes(msg.([]byte))
+func (jsonProcessor *JsonProcessor) UnknownMsgRoute(clientId string, msg interface{}) {
 	if jsonProcessor.unknownMessageHandler == nil {
 		log.Debug("Unknown message", log.String("clientId", clientId))
 		return

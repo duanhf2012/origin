@@ -39,10 +39,9 @@ func (pbRawProcessor *PBRawProcessor) SetByteOrder(littleEndian bool) {
 }
 
 // MsgRoute must goroutine safe
-func (pbRawProcessor *PBRawProcessor) MsgRoute(clientId string, msg interface{}, recyclerReaderBytes func(data []byte)) error {
+func (pbRawProcessor *PBRawProcessor) MsgRoute(clientId string, msg interface{}) error {
 	pPackInfo := msg.(*PBRawPackInfo)
 	pbRawProcessor.msgHandler(clientId, pPackInfo.typ, nil, pPackInfo.rawMsg)
-	recyclerReaderBytes(pPackInfo.rawMsg)
 
 	return nil
 }
@@ -83,8 +82,7 @@ func (pbRawProcessor *PBRawProcessor) MakeRawMsg(msgType uint16, msg []byte, pbR
 	pbRawPackInfo.rawMsg = msg
 }
 
-func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(clientId string, msg interface{}, recyclerReaderBytes func(data []byte)) {
-	defer recyclerReaderBytes(msg.([]byte))
+func (pbRawProcessor *PBRawProcessor) UnknownMsgRoute(clientId string, msg interface{}) {
 	if pbRawProcessor.unknownMessageHandler == nil {
 		return
 	}

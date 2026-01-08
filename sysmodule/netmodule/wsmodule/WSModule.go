@@ -22,6 +22,7 @@ type WSModule struct {
 	mapClient       map[string]*WSClient
 	process         processor.IRawProcessor
 	wsCfg           *WSCfg
+	newClientIdHandler func() string
 }
 
 type WSClient struct {
@@ -74,7 +75,11 @@ func (ws *WSModule) OnInit() error {
 	ws.WSServer.HandshakeTimeout = ws.wsCfg.HandshakeTimeoutSecond*time.Second
 	ws.WSServer.ReadTimeout = ws.wsCfg.ReadTimeoutSecond*time.Second
 	ws.WSServer.WriteTimeout = ws.wsCfg.WriteTimeoutSecond*time.Second
-
+	if ws.newClientIdHandler == nil {
+		ws.newClientIdHandler = func()string{
+			return primitive.NewObjectID().Hex()
+		}
+	}
 	if ws.wsCfg.KeyFile != "" && ws.wsCfg.CertFile != "" {
 		ws.WSServer.KeyFile = ws.wsCfg.KeyFile
 		ws.WSServer.CertFile = ws.wsCfg.CertFile
@@ -97,6 +102,10 @@ func (ws *WSModule) Init(wsCfg *WSCfg, process processor.IRawProcessor) {
 	ws.process = process
 }
 
+func (ws *WSModule) SetNewClientIdHandler(newClientIdHandler func() string){
+	ws.newClientIdHandler = newClientIdHandler
+}
+
 func (ws *WSModule) Start() error {
 	return ws.WSServer.Start()
 }
@@ -109,9 +118,9 @@ func (ws *WSModule) wsEventHandler(ev event.IEvent) {
 	case WPTDisConnected:
 		ws.process.DisConnectedRoute(pack.ClientId)
 	case WPTUnknownPack:
-		ws.process.UnknownMsgRoute(pack.ClientId, pack.Data, ws.recyclerReaderBytes)
+		ws.process.UnknownMsgRoute(pack.ClientId, pack.Data)
 	case WPTPack:
-		ws.process.MsgRoute(pack.ClientId, pack.Data, ws.recyclerReaderBytes)
+		ws.process.MsgRoute(pack.ClientId, pack.Data)
 	}
 }
 
@@ -121,7 +130,7 @@ func (ws *WSModule) recyclerReaderBytes([]byte) {
 func (ws *WSModule) NewWSClient(conn *network.WSConn) network.Agent {
 	ws.mapClientLocker.Lock()
 	defer ws.mapClientLocker.Unlock()
-	pClient := &WSClient{wsConn: conn, id: primitive.NewObjectID().Hex()}
+	pClient := &WSClient{wsConn: conn, id: ws.newClientIdHandler()}
 	pClient.wsModule = ws
 	ws.mapClient[pClient.id] = pClient
 
@@ -142,7 +151,7 @@ func (wc *WSClient) Run() {
 		}
 		data, err := wc.wsModule.process.Unmarshal(wc.id, bytes)
 		if err != nil {
-			wc.wsModule.NotifyEvent(&event.Event{Type: event.Sys_Event_WebSocket, Data: &WSPack{ClientId: wc.id, Type: WPTUnknownPack, Data: bytes}})
+			wc.wsModule.NotifyEvent(&event.Event{Type: event.Sys_Event_WebSocket, Data: &WSPack{ClientId: wc.id, Type: WPTUnknownPack, Data: data}})
 			continue
 		}
 		wc.wsModule.NotifyEvent(&event.Event{Type: event.Sys_Event_WebSocket, Data: &WSPack{ClientId: wc.id, Type: WPTPack, Data: data}})

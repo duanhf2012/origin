@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	Default_ReadDeadline    = time.Second * 30 //默认读超时30s
-	Default_WriteDeadline   = time.Second * 30 //默认写超时30s
-	Default_MaxConnNum      = 1000000          //默认最大连接数
-	Default_PendingWriteNum = 100000           //单连接写消息Channel容量
-	Default_MinMsgLen       = 2                //最小消息长度2byte
-	Default_LenMsgLen       = 2                //包头字段长度占用2byte
-	Default_MaxMsgLen       = 65535            //最大消息长度
+	Default_ReadDeadline    = time.Second * 30 // 默认读超时30s
+	Default_WriteDeadline   = time.Second * 30 // 默认写超时30s
+	Default_MaxConnNum      = 1000000          // 默认最大连接数
+	Default_PendingWriteNum = 100000           // 单连接写消息Channel容量
+	Default_MinMsgLen       = 2                // 最小消息长度2byte
+	Default_LenMsgLen       = 2                // 包头字段长度占用2byte
+	Default_MaxReadMsgLen       = 65535        // 最大读消息长度
 )
 
 type TCPServer struct {
@@ -70,14 +70,14 @@ func (server *TCPServer) init() error {
 		log.Info("invalid LenMsgLen", log.Int("reset", server.LenMsgLen))
 	}
 
-	if server.MaxMsgLen <= 0 {
-		server.MaxMsgLen = Default_MaxMsgLen
-		log.Info("invalid MaxMsgLen", log.Uint32("reset to", server.MaxMsgLen))
+	if server.MaxReadMsgLen <= 0 {
+		server.MaxReadMsgLen = Default_MaxReadMsgLen
+		log.Info("invalid MaxMsgLen", log.Uint32("reset to", server.MaxReadMsgLen))
 	}
 
 	maxMsgLen := server.MsgParser.getMaxMsgLen()
-	if server.MaxMsgLen > maxMsgLen {
-		server.MaxMsgLen = maxMsgLen
+	if server.MaxReadMsgLen > maxMsgLen {
+		server.MaxReadMsgLen = maxMsgLen
 		log.Info("invalid MaxMsgLen", log.Uint32("reset", maxMsgLen))
 	}
 

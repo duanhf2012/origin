@@ -81,7 +81,8 @@ type KcpCfg struct {
 	LittleEndian    bool   //是否小端序
 	LenMsgLen       int    //消息头占用byte数量，只能是1byte,2byte,4byte。如果是4byte，意味着消息最大可以是math.MaxUint32(4GB)
 	MinMsgLen       uint32 //最小消息长度
-	MaxMsgLen       uint32 //最大消息长度,超过判定不合法,断开连接
+	MaxReadMsgLen       uint32 //最大读消息长度,超过判定不合法,断开连接
+	MaxWriteMsgLen      uint32 // 最大写消息长度
 	PendingWriteNum int    //写channel最大消息数量
 }
 
@@ -89,7 +90,8 @@ func (kp *KCPServer) Init(kcpCfg *KcpCfg) {
 	kp.kcpCfg = kcpCfg
 	kp.msgParser.Init()
 	kp.msgParser.LenMsgLen = kp.kcpCfg.LenMsgLen
-	kp.msgParser.MaxMsgLen = kp.kcpCfg.MaxMsgLen
+	kp.msgParser.MaxReadMsgLen = kp.kcpCfg.MaxReadMsgLen
+	kp.msgParser.MaxWriteMsgLen = kp.kcpCfg.MaxWriteMsgLen
 	kp.msgParser.MinMsgLen = kp.kcpCfg.MinMsgLen
 	kp.msgParser.LittleEndian = kp.kcpCfg.LittleEndian
 

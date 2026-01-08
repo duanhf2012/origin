@@ -14,7 +14,8 @@ import (
 type MsgParser struct {
 	LenMsgLen    int
 	MinMsgLen    uint32
-	MaxMsgLen    uint32
+	MaxReadMsgLen    uint32
+	MaxWriteMsgLen   uint32
 	LittleEndian bool
 
 	bytespool.IBytesMemPool
@@ -67,7 +68,7 @@ func (p *MsgParser) Read(r io.Reader) ([]byte, error) {
 	}
 
 	// check len
-	if msgLen > p.MaxMsgLen {
+	if msgLen > p.MaxReadMsgLen {
 		return nil, errors.New("message too long")
 	} else if msgLen < p.MinMsgLen {
 		return nil, errors.New("message too short")
@@ -92,7 +93,7 @@ func (p *MsgParser) Write(conn io.Writer, args ...[]byte) error {
 	}
 
 	// check len
-	if msgLen > p.MaxMsgLen {
+	if p.MaxWriteMsgLen > 0 && msgLen > p.MaxWriteMsgLen {
 		return errors.New("message too long")
 	} else if msgLen < p.MinMsgLen {
 		return errors.New("message too short")

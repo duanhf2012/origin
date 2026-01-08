@@ -19,6 +19,7 @@ type KcpModule struct {
 	mapClientLocker sync.RWMutex
 	mapClient       map[string]*Client
 	process         processor.IRawProcessor
+	newClientIdHandler func() string
 
 	kcpServer network.KCPServer
 	kcpCfg    *network.KcpCfg
@@ -56,13 +57,21 @@ func (km *KcpModule) OnInit() error {
 	km.process.SetByteOrder(km.kcpCfg.LittleEndian)
 	km.kcpServer.Init(km.kcpCfg)
 	km.kcpServer.NewAgent = km.NewAgent
-
+	if km.newClientIdHandler == nil {
+		km.newClientIdHandler = func()string{
+			return primitive.NewObjectID().Hex()
+		}
+	}
 	return nil
 }
 
 func (km *KcpModule) Init(kcpCfg *network.KcpCfg, process processor.IRawProcessor) {
 	km.kcpCfg = kcpCfg
 	km.process = process
+}
+
+func (km *KcpModule) SetNewClientIdHandler(newClientIdHandler func() string){
+	km.newClientIdHandler = newClientIdHandler
 }
 
 func (km *KcpModule) Start() error {
@@ -77,9 +86,9 @@ func (km *KcpModule) kcpEventHandler(ev event.IEvent) {
 	case KPTDisConnected:
 		km.process.DisConnectedRoute(e.StringExt[0])
 	case KPTUnknownPack:
-		km.process.UnknownMsgRoute(e.StringExt[0], e.Data, e.AnyExt[0].(func(data []byte)))
+		km.process.UnknownMsgRoute(e.StringExt[0], e.Data)
 	case KPTPack:
-		km.process.MsgRoute(e.StringExt[0], e.Data, e.AnyExt[0].(func(data []byte)))
+		km.process.MsgRoute(e.StringExt[0], e.Data)
 	}
 
 	event.DeleteEvent(ev)
@@ -111,7 +120,7 @@ func (km *KcpModule) newClient(conn network.Conn) *Client {
 	km.mapClientLocker.Lock()
 	defer km.mapClientLocker.Unlock()
 
-	pClient := &Client{kcpConn: conn.(*network.NetConn), id: primitive.NewObjectID().Hex()}
+	pClient := &Client{kcpConn: conn.(*network.NetConn), id: km.newClientIdHandler()}
 	pClient.kcpModule = km
 	km.mapClient[pClient.id] = pClient
 

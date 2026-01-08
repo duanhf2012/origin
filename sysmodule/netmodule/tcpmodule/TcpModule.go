@@ -20,6 +20,7 @@ type TcpModule struct {
 	mapClient       map[string]*Client
 	process         processor.IRawProcessor
 	tcpCfg          *TcpCfg
+	newClientIdHandler func() string
 }
 
 type TcpPackType int8
@@ -35,6 +36,7 @@ type TcpPack struct {
 	Type                TcpPackType //0表示连接 1表示断开 2表示数据
 	ClientId            string
 	Data                interface{}
+	rawData 			[]byte
 	RecyclerReaderBytes func(data []byte)
 }
 
@@ -51,7 +53,8 @@ type TcpCfg struct {
 	LittleEndian        bool          //是否小端序
 	LenMsgLen           int           //消息头占用byte数量，只能是1byte,2byte,4byte。如果是4byte，意味着消息最大可以是math.MaxUint32(4GB)
 	MinMsgLen           uint32        //最小消息长度
-	MaxMsgLen           uint32        //最大消息长度,超过判定不合法,断开连接
+	MaxReadMsgLen           uint32        //最大消息长度,超过判定不合法,断开连接
+	MaxWriteMsgLen          uint32        // 最大写消息长度
 	ReadDeadlineSecond  time.Duration //读超时
 	WriteDeadlineSecond time.Duration //写超时
 }
@@ -68,11 +71,17 @@ func (tm *TcpModule) OnInit() error {
 	tm.tcpServer.LittleEndian = tm.tcpCfg.LittleEndian
 	tm.tcpServer.LenMsgLen = tm.tcpCfg.LenMsgLen
 	tm.tcpServer.MinMsgLen = tm.tcpCfg.MinMsgLen
-	tm.tcpServer.MaxMsgLen = tm.tcpCfg.MaxMsgLen
+	tm.tcpServer.MaxReadMsgLen = tm.tcpCfg.MaxReadMsgLen
+	tm.tcpServer.MaxWriteMsgLen = tm.tcpCfg.MaxWriteMsgLen
 	tm.tcpServer.ReadDeadline = tm.tcpCfg.ReadDeadlineSecond * time.Second
 	tm.tcpServer.WriteDeadline = tm.tcpCfg.WriteDeadlineSecond * time.Second
 	tm.mapClient = make(map[string]*Client, tm.tcpServer.MaxConnNum)
 	tm.tcpServer.NewAgent = tm.NewClient
+	if tm.newClientIdHandler == nil {
+		tm.newClientIdHandler = func()string{
+			return primitive.NewObjectID().Hex()
+		}
+	}
 
 	//3.设置解析处理器
 	tm.process.SetByteOrder(tm.tcpCfg.LittleEndian)
@@ -87,6 +96,10 @@ func (tm *TcpModule) Init(tcpCfg *TcpCfg, process processor.IRawProcessor) {
 	tm.process = process
 }
 
+func (tm *TcpModule) SetNewClientIdHandler(newClientIdHandler func() string){
+	tm.newClientIdHandler = newClientIdHandler
+}
+
 func (tm *TcpModule) Start() error {
 	return tm.tcpServer.Start()
 }
@@ -99,9 +112,11 @@ func (tm *TcpModule) tcpEventHandler(ev event.IEvent) {
 	case TPTDisConnected:
 		tm.process.DisConnectedRoute(pack.ClientId)
 	case TPTUnknownPack:
-		tm.process.UnknownMsgRoute(pack.ClientId, pack.Data, pack.RecyclerReaderBytes)
+		tm.process.UnknownMsgRoute(pack.ClientId, pack.Data)
+		pack.RecyclerReaderBytes(pack.rawData)
 	case TPTPack:
-		tm.process.MsgRoute(pack.ClientId, pack.Data, pack.RecyclerReaderBytes)
+		tm.process.MsgRoute(pack.ClientId, pack.Data)
+		pack.RecyclerReaderBytes(pack.rawData)
 	}
 }
 
@@ -109,7 +124,7 @@ func (tm *TcpModule) NewClient(conn network.Conn) network.Agent {
 	tm.mapClientLocker.Lock()
 	defer tm.mapClientLocker.Unlock()
 
-	clientId := primitive.NewObjectID().Hex()
+	clientId := tm.newClientIdHandler()
 	pClient := &Client{tcpConn: conn.(*network.NetConn), id: clientId}
 	pClient.tcpModule = tm
 	tm.mapClient[clientId] = pClient
@@ -138,10 +153,10 @@ func (slf *Client) Run() {
 		}
 		data, err := slf.tcpModule.process.Unmarshal(slf.id, bytes)
 		if err != nil {
-			slf.tcpModule.NotifyEvent(&event.Event{Type: event.Sys_Event_Tcp, Data: TcpPack{ClientId: slf.id, Type: TPTUnknownPack, Data: bytes, RecyclerReaderBytes: slf.tcpConn.GetRecyclerReaderBytes()}})
+			slf.tcpModule.NotifyEvent(&event.Event{Type: event.Sys_Event_Tcp, Data: TcpPack{ClientId: slf.id, Type: TPTUnknownPack, Data: data,rawData: bytes,RecyclerReaderBytes: slf.tcpConn.GetRecyclerReaderBytes()}})
 			continue
 		}
-		slf.tcpModule.NotifyEvent(&event.Event{Type: event.Sys_Event_Tcp, Data: TcpPack{ClientId: slf.id, Type: TPTPack, Data: data, RecyclerReaderBytes: slf.tcpConn.GetRecyclerReaderBytes()}})
+		slf.tcpModule.NotifyEvent(&event.Event{Type: event.Sys_Event_Tcp, Data: TcpPack{ClientId: slf.id, Type: TPTPack, Data: data,rawData: bytes, RecyclerReaderBytes: slf.tcpConn.GetRecyclerReaderBytes()}})
 	}
 }
 

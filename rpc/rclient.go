@@ -127,9 +127,11 @@ func NewRClient(targetNodeId string, addr string, maxRpcParamLen uint32, compres
 	c.NewAgent = client.NewClientAgent
 
 	if maxRpcParamLen > 0 {
-		c.MaxMsgLen = maxRpcParamLen
+		c.MaxReadMsgLen = maxRpcParamLen
+		c.MaxWriteMsgLen = maxRpcParamLen
 	} else {
-		c.MaxMsgLen = math.MaxUint32
+		c.MaxReadMsgLen = math.MaxUint32
+		c.MaxWriteMsgLen = math.MaxUint32
 	}
 	client.IRealClient = c
 	client.CallSet = callSet

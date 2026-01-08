@@ -54,10 +54,8 @@ func (slf *PBPackInfo) GetMsg() proto.Message {
 }
 
 // MsgRoute must goroutine safe
-func (pbProcessor *PBProcessor) MsgRoute(clientId string, msg interface{}, recyclerReaderBytes func(data []byte)) error {
+func (pbProcessor *PBProcessor) MsgRoute(clientId string, msg interface{}) error {
 	pPackInfo := msg.(*PBPackInfo)
-	defer recyclerReaderBytes(pPackInfo.rawMsg)
-
 	v, ok := pbProcessor.mapMsg[pPackInfo.typ]
 	if ok == false {
 		return fmt.Errorf("cannot find msgtype %d is register", pPackInfo.typ)
@@ -134,9 +132,8 @@ func (pbProcessor *PBProcessor) MakeRawMsg(msgType uint16, msg []byte) *PBPackIn
 	return &PBPackInfo{typ: msgType, rawMsg: msg}
 }
 
-func (pbProcessor *PBProcessor) UnknownMsgRoute(clientId string, msg interface{}, recyclerReaderBytes func(data []byte)) {
+func (pbProcessor *PBProcessor) UnknownMsgRoute(clientId string, msg interface{}) {
 	pbProcessor.unknownMessageHandler(clientId, msg.([]byte))
-	recyclerReaderBytes(msg.([]byte))
 }
 
 func (pbProcessor *PBProcessor) ConnectedRoute(clientId string) {
