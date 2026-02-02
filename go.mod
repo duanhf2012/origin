@@ -6,7 +6,7 @@ toolchain go1.22.7
 
 require (
 	github.com/IBM/sarama v1.43.3
-	github.com/duanhf2012/rotatelogs v0.0.0-20251218013258-dba78b7ce77a
+	github.com/duanhf2012/rotatelogs v0.0.0-20260202065658-f38ef69c6a39
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-sql-driver/mysql v1.6.0
 	github.com/goccy/go-json v0.10.2
