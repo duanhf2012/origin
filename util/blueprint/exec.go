@@ -579,3 +579,11 @@ func (en *BaseExecNode) GetBlueprintModule() IBlueprintModule {
 
 	return en.gr.IBlueprintModule
 }
+
+func (en *BaseExecNode)  GetAndCreateReturnPort() IPort{
+	if en.gr == nil {
+		return nil
+	}
+	
+	return en.gr.GetAndCreateReturnPort()
+}
