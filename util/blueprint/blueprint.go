@@ -187,8 +187,11 @@ func (bm *Blueprint) Do(graphID int64, entranceID int64, args ...any) (Port_Arra
 		return nil, fmt.Errorf("can not find graph:%d", graphID)
 	}
 
-	return graph.Do(entranceID, args...)
+	clone := graph.Clone()
+	return clone.Do(entranceID, args...)
 }
+
+
 
 func (bm *Blueprint) ReleaseGraph(graphID int64) {
 	if graphID == 0 {

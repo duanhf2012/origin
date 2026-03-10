@@ -18,6 +18,7 @@ type IGraph interface {
 	Release()
 	GetGraphFileName() string
 	HotReload(newBaseGraph *baseGraph)
+	Clone() IGraph
 }
 
 type IBlueprintModule interface {
@@ -168,7 +169,7 @@ func (gr *Graph) Do(entranceID int64, args ...any) (Port_Array, error) {
 
 	if gr.globalVariables == nil {
 		gr.globalVariables = map[string]IPort{}
-	}else {
+	} else {
 		gr.globalVariables[ReturnVarial] = nil
 	}
 
@@ -226,6 +227,11 @@ func (gr *Graph) HotReload(newBaseGraph *baseGraph) {
 	gr.baseGraph = newBaseGraph
 }
 
-func (gr *Graph) GetGraphFileName() string{
+func (gr *Graph) GetGraphFileName() string {
 	return gr.graphFileName
+}
+
+func (gr *Graph) Clone() IGraph {
+	cloneGr := *gr
+	return &cloneGr
 }
