@@ -71,6 +71,7 @@ func (bm *Blueprint) regSysNodes() {
 	bm.RegisterExecNode(NewExecNode[CreateTimer]())
 	bm.RegisterExecNode(NewExecNode[AppendIntReturn]())
 	bm.RegisterExecNode(NewExecNode[AppendStringReturn]())
+	bm.RegisterExecNode(NewExecNode[IntInArray]())
 }
 
 

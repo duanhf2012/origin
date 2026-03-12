@@ -782,3 +782,35 @@ func (em *AppendStringReturn) Exec() (int, error) {
 
 	return -0, nil
 }
+
+// IntInArray 判断整型值是否在整型数组中
+type IntInArray struct {
+	BaseExecNode
+}
+
+func (em *IntInArray) GetName() string {
+	return "IntInArray"
+}
+
+func (em *IntInArray) Exec() (int, error) {
+	val, ok := em.GetInPortInt(1)
+	if !ok {
+		return -1, fmt.Errorf("IntInArray inParam 1 not found")
+	}
+
+	array, ok := em.GetInPortArray(2)
+	if !ok {
+		return -1, fmt.Errorf("IntInArray inParam 0 not found")
+	}
+
+	bFind := false
+	for i := range array {
+		if array[i].IntVal == val {
+			bFind = true
+			break
+		}
+	}
+
+	em.SetOutPortBool(1,bFind)
+	return -0, nil
+}
