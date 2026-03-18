@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v2/log"
-	"github.com/duanhf2012/origin/v2/service"
+
 	"github.com/goccy/go-json"
 )
 
@@ -25,8 +25,6 @@ type IBlueprintModule interface {
 	SafeAfterFunc(timerId *uint64, d time.Duration, AdditionData interface{}, cb func(uint64, interface{}))
 	TriggerEvent(graphID int64, eventID int64, args ...any) error
 	CancelTimerId(graphID int64, timerId *uint64) bool
-	GetGameService() service.IService
-	GetBattleService() service.IService
 }
 
 type baseGraph struct {
