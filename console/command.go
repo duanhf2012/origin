@@ -47,8 +47,17 @@ func Run(args []string) error {
 		return fmt.Errorf("Command input parameter error,try `%s -help` for help", args[0])
 	}
 
+	// 只收集命令行中实际传入的 flag
+	setFlags := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		setFlags[f.Name] = true
+	})
+
 	var startCmd *command
 	for _, val := range commandList {
+		if !setFlags[val.name] {
+			continue // 未传入的命令跳过
+		}
 		if val.name == "start" {
 			startCmd = val
 			continue
