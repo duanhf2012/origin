@@ -38,6 +38,7 @@ type Graph struct {
 	graphContext
 	IBlueprintModule
 	mapTimerID map[uint64]struct{}
+	logger     IBlueprintLogger
 }
 
 type graphContext struct {

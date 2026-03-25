@@ -143,7 +143,7 @@ func (en *execNode) doSetInPort(gr *Graph, index int, inPort IPort) error {
 
 func (en *execNode) Do(gr *Graph, outPortArgs ...any) error {
 	if IsDebug {
-		log.Debug("Start ExecNode", log.String("Name",en.execNode.GetName()))
+		log.Debug("Start ExecNode", log.String("Name", en.execNode.GetName()))
 	}
 
 	// 重新初始化上下文
@@ -180,13 +180,19 @@ func (en *execNode) Do(gr *Graph, outPortArgs ...any) error {
 	// 设置执行器相关的上下文信息
 	// 如果是变量设置变量名
 	// 执行本结点
-	nextIndex, err := en.exec(gr)
-	if err != nil {
-		return err
+	nextIndex, execErr := en.exec(gr)
+
+	// 调用logger记录执行日志
+	if gr.logger != nil {
+		gr.logger.LogNodeExec(en.execNode.GetName(), en.Id, inPorts, outPorts, nextIndex, execErr)
+	}
+
+	if execErr != nil {
+		return execErr
 	}
 
 	if IsDebug {
-		log.Debug("End ExecNode", log.String("Name",en.execNode.GetName()),log.Any("InPort",inPorts ),log.Any("OutPort",outPorts))
+		log.Debug("End ExecNode", log.String("Name", en.execNode.GetName()), log.Any("InPort", inPorts), log.Any("OutPort", outPorts))
 	}
 
 	if nextIndex == -1 || en.nextNode == nil {
