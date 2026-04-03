@@ -203,7 +203,7 @@ func (bm *Blueprint) TriggerEvent(graphID int64, eventID int64, args ...any) err
 func (bm *Blueprint) Do(graphID int64, entranceID int64, args ...any) (Port_Array, error) {
 	graph := bm.mapGraph[graphID]
 	if graph == nil {
-		return nil, fmt.Errorf("can not find graph:%d", graphID)
+		return nil, nil
 	}
 
 	clone := graph.Clone()

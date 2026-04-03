@@ -160,7 +160,7 @@ func (gr *Graph) Do(entranceID int64, args ...any) (Port_Array, error) {
 
 	entranceNode := gr.entrance[entranceID]
 	if entranceNode == nil {
-		return nil, fmt.Errorf("entranceID:%d not found", entranceID)
+		return nil, nil
 	}
 
 	gr.variables = map[string]IPort{}
