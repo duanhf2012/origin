@@ -167,6 +167,7 @@ func (em *innerExecNode) CloneInOutPort() ([]IPort, []IPort) {
 	for _, port := range em.inPort {
 		if port == nil {
 			inPorts = append(inPorts, nil)
+			continue
 		}
 
 		if port.IsPortExec() {
@@ -182,6 +183,7 @@ func (em *innerExecNode) CloneInOutPort() ([]IPort, []IPort) {
 	for _, port := range em.outPort {
 		if port == nil {
 			outPorts = append(outPorts, nil)
+			continue
 		}
 
 		if port.IsPortExec() {
@@ -396,7 +398,7 @@ func (en *BaseExecNode) GetOutPortArrayValStr(index int, idx int) (Port_Str, boo
 }
 
 func (en *BaseExecNode) GetOutPortBool(index int) (Port_Bool, bool) {
-	port := en.GetInPort(index)
+	port := en.GetOutPort(index)
 	if port == nil {
 		return false, false
 	}

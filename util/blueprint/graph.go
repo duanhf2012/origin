@@ -47,6 +47,24 @@ type graphContext struct {
 	globalVariables map[string]IPort        // 全局变量,g_Return,为执行返回值
 }
 
+func clonePortMap(source map[string]IPort) map[string]IPort {
+	if source == nil {
+		return nil
+	}
+
+	target := make(map[string]IPort, len(source))
+	for key, port := range source {
+		if port == nil {
+			target[key] = nil
+			continue
+		}
+
+		target[key] = port.Clone()
+	}
+
+	return target
+}
+
 type nodeConfig struct {
 	Id     string `json:"id"`
 	Class  string `json:"class"`
@@ -153,7 +171,7 @@ func (gr *Graph) GetAndCreateReturnPort() IPort {
 	return p
 }
 
-func (gr *Graph) Do(entranceID int64, args ...any) (Port_Array, error) {
+func (gr *Graph) Do(entranceID int64, args ...any) (ret Port_Array, err error) {
 	if IsDebug {
 		log.Debug("Graph Do", log.String("graphName", gr.graphFileName), log.Int64("graphID", gr.graphID), log.Int64("entranceID", entranceID))
 	}
@@ -166,13 +184,29 @@ func (gr *Graph) Do(entranceID int64, args ...any) (Port_Array, error) {
 	gr.variables = map[string]IPort{}
 	gr.context = map[string]*ExecContext{}
 
+	prevGlobalVariables := clonePortMap(gr.globalVariables)
+	gr.globalVariables = clonePortMap(gr.globalVariables)
 	if gr.globalVariables == nil {
 		gr.globalVariables = map[string]IPort{}
-	} else {
-		gr.globalVariables[ReturnVarial] = nil
 	}
+	gr.globalVariables[ReturnVarial] = nil
 
-	err := entranceNode.Do(gr, args...)
+	defer func() {
+		if r := recover(); r != nil {
+			gr.globalVariables = prevGlobalVariables
+			ret = nil
+			err = fmt.Errorf("blueprint graph %s entrance %d panic: %v", gr.graphFileName, entranceID, r)
+			log.StackError(
+				"blueprint execute panic",
+				log.String("graphName", gr.graphFileName),
+				log.Int64("graphID", gr.graphID),
+				log.Int64("entranceID", entranceID),
+				log.Any("panic", r),
+			)
+		}
+	}()
+
+	err = entranceNode.Do(gr, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,5 +266,6 @@ func (gr *Graph) GetGraphFileName() string {
 
 func (gr *Graph) Clone() IGraph {
 	cloneGr := *gr
+	cloneGr.globalVariables = clonePortMap(gr.globalVariables)
 	return &cloneGr
 }
