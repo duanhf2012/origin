@@ -410,24 +410,45 @@ BroadcastPlayerOnline(
 
 ### 10.2 广播目标
 
-`BroadcastXxx` 面向调用时服务发现快照中所有匹配的 Service 实例。具体实例筛选、关注服务、退休节点和路由过滤规则由独立的服务发现与路由设计确定。
+`BroadcastXxx` 在语义上面向调用时服务发现快照中所有匹配的 Service。匹配依据是生成阶段确定的稳定 RPC 契约 ID 和方法 ID，不按 Go 接口名或方法名字符串临时匹配，避免无关接口因同名而误收。
+
+生成的 `rpcClient` 是绑定 RPC 契约和当前 Node RPC Runtime 的强类型逻辑代理，不是一条 TCP 或 NATS 连接，也不拥有连接生命周期。连接建立、复用、重连和关闭统一由当前 Node 的连接管理器和 Transport 管理。同一个 `rpcClient` 可以经过多个目标 Node 的 TCP 连接发送，也可以经过当前 Node 到 NATS 的连接发送。
+
+具体服务筛选、关注服务、退休节点和路由过滤规则由独立的服务发现与路由设计确定。
+
+### 10.3 按 Node 合并投递
+
+广播采用“语义按 Service 广播，传输按目标 Node 合并”的规则：
+
+1. 服务发现给出所有提供目标 RPC 契约和方法的 Node；
+2. 发送端按 Node 去重，每个目标 Node 只提交一份广播消息；
+3. 目标 Node 收到消息后，由本地 RPC Runtime 投递给全部匹配的 Service；
+4. 同一个 Node 内有多个匹配 Service 时，每个 Service 各收到一次；
+5. 调用方 Node 内存在匹配 Service 时，直接走相同的本地分发，不经过网络；
+6. 同一个 Service 重复注册同一 RPC 契约和方法属于配置错误，在注册阶段拒绝。
+
+该规则避免发送端维护 `Node + Service 实例` 的复杂目标列表，也减少同一 Node 上存在多个匹配 Service 时的网络消息数量。
 
 TCP 和 NATS 必须保持相同的上层语义：
 
-- TCP 可以向每个目标连接分别发送；
-- NATS 可以通过目标 Subject 或广播 Subject 发布；
+- TCP 对每个目标 Node 复用其连接并发送一次，目标 Node 再执行本地分发；
+- NATS 由每个 Node 的 RPC Runtime 对相应广播 Subject 建立一份订阅，收到消息后再执行本地分发；同一 Node 内的 Service 不各自订阅 NATS；
 - 业务代码不因传输方式改变。
 
-### 10.3 错误与投递语义
+这里的“一份订阅”表示一个 Node 对某个广播路由只有一个逻辑接收入口；具体如何合并底层 NATS 订阅，由 Transport 实现决定，但不得使一个 Node 因本地存在多个匹配 Service 而重复接收同一广播。
+
+### 10.4 错误与投递语义
 
 广播不等待任意远端业务结果。返回的 `error` 只表示本地发现、编码和向各目标提交发送时的错误。
 
-出现部分成功、部分失败时，返回实现 `error` 的聚合广播错误，至少包含：
+TCP 出现部分目标 Node 提交成功、部分失败时，返回实现 `error` 的聚合广播错误，至少包含：
 
-- 目标数量；
+- 目标 Node 数量；
 - 成功提交数量；
 - 失败数量；
-- 失败目标及原因。
+- 失败 Node 及原因。
+
+NATS 广播只报告本地编码、发布排队和 NATS 接受阶段的错误，不承诺获知每个目标 Node 是否已经收到或完成本地分发。
 
 正常成功路径不为每个目标创建公开结果对象；逐目标详情只在失败路径构建。
 
@@ -562,12 +583,17 @@ Response:
 12. Await 与 RPC 共用有效 Deadline，不重复应用 `15s`；
 13. Notify 不创建 pending、Future 或响应；
 14. Notify 只报告本地发送阶段错误；
-15. Broadcast 覆盖零目标、单目标、多目标、全部成功和部分失败；
-16. TCP 与 NATS 的 Notify、Broadcast 语义一致；
-17. 服务端未声明 error 时，框架错误仍能返回；
-18. 请求处理 panic 返回远端执行错误，通知处理 panic 只产生接收端诊断；
-19. 参数顺序和中间插入的兼容性检查；
-20. Async、Await、Notify 和 Broadcast 的低延迟基准。
+15. Broadcast 按 RPC 契约 ID 和方法 ID 匹配，不因接口或方法同名而误投；
+16. Broadcast 在发送端按目标 Node 去重，每个目标 Node 只提交一次；
+17. 同一 Node 内有一个或多个匹配 Service 时，每个 Service 各收到一次；
+18. 同一 Service 重复注册相同 RPC 契约和方法时注册失败；
+19. TCP Broadcast 覆盖零目标、单目标、多目标、全部成功和部分失败；
+20. NATS 的单 Node 单逻辑订阅入口不会因本地 Service 数量产生重复消息；
+21. TCP 与 NATS 的 Notify、Broadcast 业务语义一致；
+22. 服务端未声明 error 时，框架错误仍能返回；
+23. 请求处理 panic 返回远端执行错误，通知处理 panic 只产生接收端诊断；
+24. 参数顺序和中间插入的兼容性检查；
+25. Async、Await、Notify 和 Broadcast 的低延迟基准。
 
 ## 16. 已确认结论
 
@@ -585,6 +611,9 @@ Origin v3 RPC 接口与调用语义最终采用：
 - `AwaitXxx` 内部自动使用 Service Await 规则，用户不手工操作 Future；
 - Notify 面向一个路由目标，不等待远端响应；
 - Broadcast 保留 v2 `CastGo` 的全目标广播能力，公共名称改为 `BroadcastXxx`；
+- `rpcClient` 是逻辑代理，不拥有 TCP 或 NATS 连接；
+- Broadcast 按 RPC 契约 ID 和方法 ID 匹配，语义上覆盖全部匹配 Service；
+- Broadcast 在传输层按目标 Node 合并为一次投递，由目标 Node 再向本地全部匹配 Service 分发；
 - 请求—响应 RPC 首版不支持广播收集多响应；
 - Async、Await、Notify 和 Broadcast 共用同一个底层调用核心；
 - Future 可以内部使用，但不是普通业务用户必须接触的 API。
