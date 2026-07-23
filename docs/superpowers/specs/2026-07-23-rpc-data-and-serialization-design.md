@@ -2,7 +2,7 @@
 
 ## 1. 文档范围
 
-本文记录 Origin v3 RPC 在接口定义、数据类型、序列化、传输边界和低延迟方面已经确认的设计。服务发现、服务调度模型和流式 RPC 不属于本文范围。
+本文记录 Origin v3 RPC 在接口定义、数据类型、序列化、传输边界和低延迟方面已经确认的设计。服务发现、服务调度模型和流式 RPC 不属于本文范围。`Await` 与任务恢复规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)，Deadline 的统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。
 
 ## 2. 设计目标
 
@@ -30,6 +30,24 @@ Origin Native RPC 使用 Go 接口作为契约，由 `origin-gen` 在编译前�
 - 单向通知。
 
 第一版不支持流式 RPC。
+
+### 3.1 Context、Deadline 与默认超时
+
+所有由 `origin-gen` 生成的 RPC 调用函数都接受 `context.Context`，并统一遵循以下规则：
+
+1. 调用方传入的 Context 已有 Deadline 时，原样继承该 Deadline，不再附加默认超时；
+2. Context 没有 Deadline 时，依次查找当前 Service 默认值、当前 Node 默认值；
+3. 前两级均未配置时，使用 Origin 内置默认超时 `15s`；
+4. 调用方可以通过显式 Deadline 设置比默认值更短或更长的超时，默认值不能反向截断显式 Deadline；
+5. 优先级固定为：`调用方显式 Deadline > Service 默认值 > Node 默认值 > Origin 内置 15s`。
+
+`15s` 是防止请求无限等待的最终兜底值，不是业务目标延迟。Redis、数据库、战斗服内部 RPC 等延迟敏感路径应根据业务要求显式设置更短的 Deadline。
+
+一次请求与响应 RPC 的超时范围从调用进入 RPC 客户端开始，覆盖本地排队、路由、传输、服务端处理、响应传输和客户端完成 Future 的全过程。异步 RPC 同样适用：调用函数可以立即返回 Future，但 Future 最迟在有效 Deadline 到达时完成为超时。
+
+单向通知没有远端响应，但生成的调用函数仍使用相同的有效 Deadline，约束本地路由、排队和发送过程；发送完成后不等待远端业务执行结果。
+
+如果 RPC 在 `Await` 内执行，`Await` 传入的 Context 已包含有效 Deadline，RPC 直接继承，不重复创建另一套默认超时。RPC 本地超时后的远端取消协议属于后续 RPC 调用语义设计，不能影响客户端按时完成。
 
 ## 4. 传输边界
 
@@ -157,6 +175,7 @@ solutions:
 - 小消息默认不压缩；
 - 不自动合并请求，避免批处理增加等待时间；
 - 使用有界队列、超时和背压，避免负载升高时延迟无限累积；
+- 未显式设置 Deadline 的 RPC 使用可配置的分级默认值，并以 Origin 内置 `15s` 作为最终兜底；
 - TCP 和 NATS 分别进行基准测试，不能假定两者延迟相同。
 
 性能验证至少记录：
@@ -165,6 +184,7 @@ solutions:
 - 每次操作的内存分配次数和字节数；
 - 请求排队时间；
 - RPC 往返时间；
+- RPC 超时数量，并区分显式 Deadline、Service 默认值、Node 默认值和内置 `15s` 的来源；
 - P50、P95 和 P99 延迟；
 - 不同消息大小下的吞吐量。
 

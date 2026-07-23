@@ -123,6 +123,7 @@ TimerEngine 使用分层时间轮，不使用 v2 的全局最小堆轮询。
 - `AfterFunc`；
 - `TickerFunc`；
 - RPC deadline；
+- `Await` deadline；
 - 心跳、重连、空闲检测和服务发现刷新等相对时间任务。
 
 单调时间任务不受系统时间、时区和 NTP 校时影响。
@@ -319,18 +320,25 @@ TimerEngine 面向 Service 执行器投递，不依赖某一种具体执行模�
 
 Timer 是否能够与其他 Service 任务交错、哪些操作会形成挂起点以及恢复顺序，由独立的 Service 执行模型设计确定。
 
+相关规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)。
+
 ## 11. RPC 与系统组件接入边界
 
 ### 11.1 RPC
 
 RPC deadline 使用同一个 Node TimerEngine，但使用内部紧凑条目：
 
+- 所有生成的 RPC 调用在没有显式 Deadline、Service 默认值和 Node 默认值时，使用 Origin 内置 `15s` 超时；
 - 不为每个 RPC timeout 保存业务回调闭包；
 - pending call 完成、取消或断开连接时，立即取消对应定时项；
 - 到期项进入 RPC 所有者自己的 Ready 列表；
 - RPC pending 管理器完成超时状态和 Future；
 - RPC 超时不经过某个业务 Service 的 Timer Ready 列表；
 - RPC 是否发送远端取消、如何恢复等待任务，属于 RPC 和 Service 调度设计。
+
+`Await` 的有效 Deadline 同样注册到当前 Node 的 TimerEngine。没有显式 Deadline、Service 默认值和 Node 默认值时，使用 Origin 内置 `15s` 超时。TimerEngine 只负责到期通知，不直接恢复任务或执行用户函数；任务恢复、Context 错误和 Service 执行权由独立的 Service 执行模型负责。
+
+RPC 的 Context、Deadline 优先级和调用范围见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)。
 
 ### 11.2 连接管理与服务发现
 
@@ -366,6 +374,7 @@ Service 停止时：
 - 回调执行时间；
 - P50、P95 和 P99 到期延迟；
 - RPC deadline 数量和超时数量；
+- `Await` deadline 数量和超时数量；
 - Service 或 Node 停止时批量清理数量。
 
 日志必须限频，不能在超时风暴中为每个 Timer 同步写日志并放大故障。
@@ -403,8 +412,9 @@ Service 停止时：
 11. Cron 本地时区、显式时区和非法时区；
 12. 墙上时钟向前、向后调整；
 13. RPC pending 正常完成、取消、超时和断线清理；
-14. Node 停止期间拒绝新增并完整释放；
-15. TimerEngine goroutine不执行任何用户回调。
+14. RPC 与 `Await` 在没有上层 Deadline 时正确使用内置 `15s` 兜底；
+15. Node 停止期间拒绝新增并完整释放；
+16. TimerEngine goroutine不执行任何用户回调。
 
 ## 16. 已确认的取舍
 
