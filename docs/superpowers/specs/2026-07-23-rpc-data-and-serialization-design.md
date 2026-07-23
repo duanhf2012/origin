@@ -8,7 +8,7 @@
 
 1. 业务开发者使用 Go 接口定义 RPC，不要求使用 `.proto` 定义 Origin Native RPC。
 2. RPC 调用外观保持统一，不区分“普通 RPC”和“低延迟 RPC”。所有 RPC 底层都按低延迟目标实现。
-3. 允许基础类型、普通 Go 结构体、Protobuf 生成的 Go 结构体以及它们的合法组合。
+3. RPC 入参和出参允许使用 Go 原生类型、普通 Go 结构体或 Protobuf 生成的消息类型，并允许在普通 Go 结构体和容器中组合这些类型。
 4. 不使用 msgp，不为业务项目增加额外的序列化生成器。业务侧只使用 `origin-gen`。
 5. TCP 与 NATS 使用同一套 Origin Native RPC 语义；外部 gRPC 通过可选插件提供。
 6. 优先保持代码精简、清晰和可维护。性能与可维护性发生冲突时，先提供方案和基准依据，再由开发者确认取舍。
@@ -63,9 +63,40 @@ gRPC 作为可选适配插件，可以与 Origin Native TCP 或 NATS 同时启�
 
 ## 5. 统一类型处理原则
 
-`origin-gen` 根据 Go 静态类型生成代码，热路径不使用运行时反射，也不静默回退到 JSON。
+`origin-gen` 根据 RPC 每个顶层入参和出参的声明类型，在生成阶段静态选择编解码路径。类型选择只发生在 RPC 参数边界，不在递归处理结构体字段或容器元素时动态切换。
 
-基础规则如下：
+顶层参数分为两类：
+
+1. 顶层类型是 Protobuf 生成的消息类型时，使用标准 Protobuf 线协议；
+2. 其他 Go 类型使用 Origin 静态编解码协议。
+
+每个入参和出参独立判定，因此同一个 RPC 方法可以同时使用 `int64`、`string`、`*int`、普通 Go 结构体和顶层 Protobuf 消息，不要求为了统一序列化而包装成同一种请求结构。
+
+生成器通过类型是否为 Protobuf 消息静态识别第一类。Protobuf 生成类型通常以指针形式实现 `proto.Message`；如果值类型或其指针能够被静态识别为 Protobuf 消息，`origin-gen` 应生成对应的取址、空值检查和编解码代码，不在热路径使用反射判断。
+
+### 5.1 顶层 Protobuf 消息
+
+当 RPC 的某个顶层入参或出参本身是 Protobuf 消息时：
+
+- 编码使用 `proto.Marshal` 或等价的 Protobuf 高性能 API；
+- 解码使用 `proto.Unmarshal` 或等价的 Protobuf 高性能 API；
+- TCP 与 NATS 中承载的是标准 Protobuf 消息字节；
+- 保留 Protobuf 字段编号、unknown fields、`optional`、`oneof` 和 Opaque API 语义；
+- Protobuf 消息外部仍由 Origin RPC 帧负责方法、请求序号、路由和错误等元数据，因此不能仅凭消息字节直接充当完整 gRPC 请求。
+
+例如：
+
+```go
+type PlayerRPC interface {
+    Load(ctx context.Context, req *pb.LoadRequest) (*pb.LoadResponse, error)
+}
+```
+
+`req` 和返回的 `*pb.LoadResponse` 都是顶层 Protobuf 消息，使用标准 Protobuf 序列化。
+
+### 5.2 顶层 Go 类型
+
+顶层参数不是 Protobuf 消息时，使用 Origin 静态编解码。基础规则如下：
 
 - 基础整数、浮点数、布尔值和字符串使用 Origin 内置二进制编码；
 - `[]byte` 使用原始字节快速路径；
@@ -78,85 +109,102 @@ gRPC 作为可选适配插件，可以与 Origin Native TCP 或 NATS 同时启�
 
 Go 结构体字段编号由 Origin 的协议描述信息稳定维护。调整字段声明顺序不改变字段编号；删除字段后编号不得复用；不兼容类型修改在生成阶段失败。
 
-## 6. Protobuf 生成结构体按普通 Go 结构体处理
+### 5.3 顶层容器的判定
 
-在 Origin Native RPC 中，Protobuf 生成的 Go 结构体不调用 `proto.Marshal`，也不解析 Protobuf 线协议。它与普通 Go 结构体使用相同规则：只序列化首字母大写的导出字段，忽略小写非导出字段。
+Slice、数组、Map 或其他容器本身不是 Protobuf 消息，所以顶层容器使用 Origin 静态编解码。即使其元素是 Protobuf 生成类型，也按容器元素的普通 Go 结构递归处理。
+
+例如：
+
+```go
+type PlayerRPC interface {
+    BatchSave(
+        ctx context.Context,
+        profiles map[int64]*pb.PlayerProfile,
+    ) error
+}
+```
+
+顶层参数是 Map，不是 Protobuf 消息，因此整个参数走 Origin 静态编解码；其中的 `*pb.PlayerProfile` 按普通 Go 结构体字段处理，不为每个元素调用 `proto.Marshal`。
+
+## 6. Go 结构体内的 Protobuf 字段
+
+当顶层参数是普通 Go 结构体时，整个对象图都使用 Origin 静态编解码。结构体字段中出现的 Protobuf 生成类型只被视为普通 Go 结构体，不调用 `proto.Marshal`，也不在字段中嵌入一段 Protobuf 线协议。
 
 例如：
 
 ```go
 type Request struct {
-    ID       int64
-    Profile  pb.PlayerProfile
-    Profiles map[int64]pb.PlayerProfile
+    ID         int64
+    Profile    pb.PlayerProfile
+    ProfilePtr *pb.PlayerProfile
+    Profiles   map[int64]pb.PlayerProfile
 }
 ```
 
-以上字段均由 Origin 静态结构体编解码器处理。`map[int64]pb.PlayerProfile` 按普通 Map 编码，不要求改为 `map[int64]*pb.PlayerProfile`，也不调用 Protobuf 指针消息接口。
+如果 `Request` 是 RPC 顶层参数，以上字段均由 Origin 静态结构体编解码器处理：
+
+- `Profile` 按普通 Go 结构体处理；
+- `ProfilePtr` 先编码 `nil` 状态，再按普通 Go 结构体处理非空值；
+- `map[int64]pb.PlayerProfile` 按普通 Map 编码，不要求改为 `map[int64]*pb.PlayerProfile`；
+- 递归过程中不调用任何 Protobuf 消息编解码接口。
 
 现代 Protobuf 生成代码中的 `state`、`sizeCache` 和 `unknownFields` 等小写内部字段不会进入 Origin 线协议。由此也带来明确边界：Protobuf 未知字段不会经过一次 Origin Native RPC 往返得到保留。
 
-同一个 Protobuf 生成类型可以有两种传输表示：
+同一个 Protobuf 生成类型因此可能有两种传输表示，具体只由它在 RPC 边界的位置决定：
 
-- 用于 Origin Native TCP/NATS 时，使用 Origin 结构体二进制协议；
-- 用于外部 gRPC 时，使用标准 Protobuf 线协议。
+- 它自身是顶层 RPC 参数时，使用标准 Protobuf 线协议；
+- 它位于普通 Go 结构体或容器内部时，使用 Origin 静态结构体协议。
+
+生成器必须完全根据声明类型和位置静态确定表示，禁止根据运行时值、接口实现或实际对象类型改变线协议。
 
 ## 7. optional、oneof 与 Opaque API
 
-### 7.1 optional
+这些 Protobuf 能力是否可用，取决于消息使用顶层 Protobuf 路径还是嵌套的普通 Go 结构体路径。
 
-在 Open Struct API 中，带存在语义的 optional 字段通常表现为 Go 指针。Origin 按普通指针处理，因此可以区分“没有赋值”和“明确赋值为零”，不需要增加 Protobuf 专用逻辑。
+### 7.1 顶层 Protobuf 路径
 
-### 7.2 oneof
+顶层 Protobuf 消息直接使用标准 Protobuf 编解码，因此：
 
-Protobuf Open Struct API 的 oneof 通常生成接口字段和包装类型。第一版 Origin 静态结构体编码不支持接口动态类型，因此不支持 oneof。
+- 支持 `optional`；
+- 支持 `oneof`；
+- 支持 Open、Hybrid 和 Opaque API；
+- 保留 unknown fields；
+- 兼容 Protobuf 自身的字段演进规则。
 
-`origin-gen` 发现 oneof 对应的接口字段时必须生成失败并报告字段路径，不能静默忽略该字段。
+顶层 Protobuf 消息不要求为了 Origin Native RPC 改成 Open 或 Hybrid API。
 
-### 7.3 Opaque API
+### 7.2 嵌套普通结构体路径
 
-Opaque API 会隐藏 Protobuf 消息的逻辑字段，并通过 Getter、Setter、Has 和 Builder 操作。Origin Native RPC 的普通结构体模式只处理导出字段，因此第一版不支持 Opaque API。用于 Origin Native RPC 的 Protobuf Go 代码必须生成成 Open API 或 Hybrid API。
+Protobuf 生成类型位于普通 Go 结构体或容器内部时，按导出字段递归处理：
 
-使用 Edition 2024 时，可以在 `.proto` 文件中显式选择 Open API：
+- Open Struct API 中由指针表达的 `optional` 字段按普通 Go 指针处理，可以保留“未设置”和“设置为零值”的区别；
+- `oneof` 通常表现为接口字段和包装类型，首版 Origin 静态结构体编码不支持该动态接口字段；
+- Opaque API 隐藏逻辑字段，首版 Origin 静态结构体编码无法按普通字段读取。
 
-```proto
-edition = "2024";
+因此，包含 `oneof` 或使用 Opaque API 的 Protobuf 类型可以直接作为顶层 Protobuf 参数，但首版不能嵌套在走 Origin 静态编解码的普通 Go 结构体或容器中。
 
-package player;
+如果需要嵌套使用，应选择以下一种方式：
 
-import "google/protobuf/go_features.proto";
+- 将该 Protobuf 消息改为 RPC 顶层参数，使其走标准 Protobuf 编解码；
+- 对嵌套消息使用 Open 或 Hybrid API，并且不使用 `oneof`；
+- 为包含它的 Go 类型提供显式的 Origin 自定义静态编解码器。
 
-option go_package = "game/pb";
-option features.(pb.go).api_level = API_OPEN;
-
-message PlayerProfile {
-  string name = 1;
-  int32 level = 2;
-}
-```
-
-也可以在生成命令中统一指定：
-
-```shell
-protoc --go_out=. --go_opt=default_api_level=API_OPEN player.proto
-```
-
-如果 `origin-gen` 发现某个类型的指针实现现代 `proto.Message`，其 Protobuf 描述信息包含逻辑字段，但对应 Go 结构体没有可序列化的导出逻辑字段，应判定为 Opaque API 并在生成阶段报错。描述信息本身不包含字段的空消息仍是合法的空结构体，不能误报。例如：
+`origin-gen` 发现不支持的嵌套 `oneof` 或 Opaque 消息时，必须在生成阶段报出从 RPC 方法、顶层参数、容器到具体字段的完整路径。例如：
 
 ```text
-cannot generate Origin codec for pb.PlayerProfile
+cannot generate Origin codec for game.SaveRequest.Profile
 
 reason:
-  the type is a Protobuf message using Opaque API
-  no exported logical fields are available
+  pb.PlayerProfile is nested in an Origin-encoded Go struct
+  the message uses Protobuf Opaque API
 
 solutions:
-  1. generate this message with API_OPEN or API_HYBRID
-  2. provide a custom Origin codec
-  3. do not use this type in Origin Native RPC
+  1. use pb.PlayerProfile as a top-level RPC parameter
+  2. generate it with API_OPEN or API_HYBRID
+  3. provide a custom Origin codec for game.SaveRequest
 ```
 
-禁止把 Opaque 消息静默编码为空结构体，也禁止延迟到运行时才失败。
+禁止把嵌套 Opaque 消息静默编码为空结构体，也禁止延迟到运行时才失败。
 
 官方参考：
 
@@ -168,7 +216,8 @@ solutions:
 所有 RPC 共用以下底层要求：
 
 - 客户端、服务端路由和编解码代码均在编译前生成；
-- 热路径不使用反射、JSON 和字符串方法查找；
+- 普通 Go 类型热路径不使用反射、JSON 和字符串方法查找；
+- 顶层 Protobuf 消息直接使用 Protobuf 生成代码和标准线协议，不重复生成一套消息字段编解码；
 - 基础类型使用专用快速编码；
 - 尽可能预估消息大小并向已有缓冲区追加；
 - 控制内存分配和数据复制；
@@ -180,7 +229,7 @@ solutions:
 
 性能验证至少记录：
 
-- 编码与解码耗时；
+- 顶层 Protobuf 和普通 Go 结构体两条路径各自的编解码耗时；
 - 每次操作的内存分配次数和字节数；
 - 请求排队时间；
 - RPC 往返时间；
@@ -190,7 +239,7 @@ solutions:
 
 ## 9. 生成期失败原则
 
-对于 oneof、Opaque API、未支持的接口类型或其他无法静态编码的类型，`origin-gen` 必须：
+对于嵌套结构体路径中的 oneof、Opaque API、未支持的接口类型或其他无法静态编码的类型，`origin-gen` 必须：
 
 1. 在生成阶段终止；
 2. 输出 RPC 方法、参数、结构体和字段的完整路径；
@@ -198,8 +247,32 @@ solutions:
 4. 给出可执行的修改建议；
 5. 不使用反射、JSON 或空对象作为隐式回退方案。
 
-## 10. 本设计的取舍
+## 10. 测试要求
 
-本设计优先获得一致的 Go 开发体验和低延迟静态代码。代价是 Origin Native RPC 不保留 Protobuf 未知字段，不支持 oneof 和 Opaque API，也不产生可供其他语言直接解析的 Protobuf 字节。跨语言调用由显式的 gRPC 适配插件负责。
+至少覆盖：
 
-该边界保持 Origin Native RPC 实现精简，避免同时维护普通结构体编码、Protobuf 嵌套编码和容器特殊规则三套逻辑。
+1. 顶层 `int64`、`string`、`*int` 和普通 Go 结构体使用 Origin 静态编解码；
+2. 顶层 Protobuf 消息的字节能够被标准 `proto.Unmarshal` 解析；
+3. 顶层 Protobuf 消息往返后保留 unknown fields、`optional`、`oneof` 和 Opaque API 语义；
+4. 同一 RPC 方法混合 Go 原生参数和 Protobuf 参数时，每个参数独立选择正确编解码路径；
+5. 普通 Go 结构体中的 Protobuf 值、指针、Slice 和 Map 元素均按普通 Go 结构递归处理；
+6. 顶层 `map[int64]*pb.PlayerProfile` 使用 Origin 容器协议，不对元素调用 Protobuf 消息编解码；
+7. 同一个 Protobuf 类型在顶层路径和嵌套路径下分别得到已定义的两种线协议表示；
+8. 嵌套 `oneof` 和 Opaque API 在生成阶段失败，并输出完整字段路径；
+9. TCP 与 NATS 对同一 RPC 声明采用完全相同的参数分流和数据语义；
+10. gRPC 插件复用顶层 Protobuf 请求与响应时不进行字段级二次转换；
+11. 空指针、空消息、零值、空 Slice、空 Map 和 `nil` 容器的边界语义；
+12. 两条编解码路径的耗时、内存分配、消息大小和并发压力基准。
+
+## 11. 本设计的取舍
+
+本设计在 RPC 顶层参数边界静态选择两条路径：
+
+- 顶层 Protobuf 消息使用标准 Protobuf 序列化，保留 unknown fields、`optional`、`oneof` 和 Opaque API，并可以复用到外部 gRPC 适配；
+- Go 原生类型、普通 Go 结构体和容器使用 Origin 静态编解码，允许自由组合 Go 类型。
+
+普通 Go 结构体或容器内部的 Protobuf 生成类型继续按普通 Go 结构递归处理，不切换成嵌套 Protobuf 字节。这样避免在一个对象图中混合两套字段编号、长度和空值规则，也避免为 Map、Slice 和指针增加 Protobuf 特殊分支。
+
+代价是同一个 Protobuf 类型作为顶层消息和作为 Go 结构体字段时具有不同线协议表示；包含 `oneof` 或使用 Opaque API 的消息首版不能走嵌套结构体路径。该差异必须由 `origin-gen` 静态确定、在生成文档中展示，并通过兼容性测试锁定。
+
+标准 Protobuf 消息字节只解决数据载荷的跨语言表示。完整跨语言 RPC 仍由显式的 gRPC 适配插件提供，因为 Origin Native TCP/NATS 还包含自己的帧、路由、服务发现和调用语义。
