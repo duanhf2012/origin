@@ -338,7 +338,7 @@ RPC deadline 使用同一个 Node TimerEngine，但使用内部紧凑条目：
 
 `Await` 的有效 Deadline 同样注册到当前 Node 的 TimerEngine。没有显式 Deadline、Service 默认值和 Node 默认值时，使用 Origin 内置 `15s` 超时。TimerEngine 只负责到期通知，不直接恢复任务或执行用户函数；任务恢复、Context 错误和 Service 执行权由独立的 Service 执行模型负责。
 
-RPC 的 Context、Deadline 优先级和调用范围见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)。
+RPC 的 Context、Deadline 优先级和调用范围见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，生成调用外观见 [Origin v3 RPC 接口与调用语义设计](./2026-07-23-rpc-interface-and-call-semantics-design.md)。
 
 ### 11.2 连接管理与服务发现
 

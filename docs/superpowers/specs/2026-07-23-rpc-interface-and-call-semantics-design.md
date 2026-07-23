@@ -1,0 +1,590 @@
+# Origin v3 RPC 接口与调用语义设计
+
+## 1. 文档状态与范围
+
+- 状态：已确认
+- 确认日期：2026-07-23
+- 适用版本：Origin v3
+
+本文记录 Origin v3 RPC 的 Go 接口签名、生成代码外观、异步调用、调度式等待、通知、广播和错误返回方面已经确认的设计。
+
+本文不展开以下独立系统：
+
+- 普通 Go 类型与 Protobuf 的具体线协议；
+- Service Dispatcher 和 TimerEngine 的内部实现；
+- 服务发现、实例选择和关注服务筛选算法；
+- gRPC 插件的协议映射实现；
+- 客户端超时后的远端取消协议；
+- RPC 错误码和错误详情的完整线协议。
+
+数据类型和编解码规则见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，任务挂起与恢复规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)，Deadline 的统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。
+
+## 2. 设计目标
+
+1. 开发者只定义一份符合 Go 习惯的服务端 RPC 接口。
+2. `origin-gen` 根据接口签名生成明确的 `Async`、`Await`、`Notify` 和 `Broadcast` 客户端方法。
+3. 用户在普通场景中不需要直接操作 Future，也不需要手工组合 `service.Await`。
+4. 方法名称必须显式表达“立即返回”“挂起当前 Service 任务”或“不等待远端响应”。
+5. 允许多个输入和多个输出，不强制所有内部 RPC 包装成单一 Request/Response。
+6. 客户端始终获得统一的最终 `error`，不能丢失路由、传输、超时、取消和编解码错误。
+7. 保留 v2 `Go` 和 `CastGo` 的通知、广播能力，但使用强类型生成接口和更明确的名称。
+8. 所有生成外观共用同一个底层调用实现，不复制路由、序列化、pending 和超时逻辑。
+
+## 3. RPC 接口声明
+
+业务开发者使用 Go 接口声明服务端契约。例如：
+
+```go
+type PlayerRPC interface {
+    GetPlayer(
+        ctx context.Context,
+        playerID int64,
+    ) (*pb.Player, error)
+
+    SavePlayer(
+        ctx context.Context,
+        player *pb.Player,
+    ) error
+
+    PlayerOnline(
+        ctx context.Context,
+        playerID int64,
+    )
+}
+```
+
+服务端实现原始方法名：
+
+```go
+func (s *PlayerService) GetPlayer(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error) {
+    return s.repository.Load(ctx, playerID)
+}
+```
+
+服务端不实现 `AsyncGetPlayer`、`AwaitGetPlayer`、`NotifyPlayerOnline` 或 `BroadcastPlayerOnline`。这些名称只属于生成的客户端。
+
+## 4. 输入参数规则
+
+### 4.1 Context
+
+- `context.Context` 必须是第一个参数；
+- 每个 RPC 只允许一个 Context；
+- Context 不进入 RPC 数据载荷；
+- 生成客户端使用该 Context 传播 Deadline 和取消信号。
+
+### 4.2 多输入参数
+
+Context 之后允许零个或多个输入参数，不设置人为数量上限。例如：
+
+```go
+TransferItem(
+    ctx context.Context,
+    fromPlayerID int64,
+    toPlayerID int64,
+    item *pb.Item,
+    count int32,
+) error
+```
+
+每个参数独立应用 RPC 数据与序列化设计中的类型规则。多个参数由生成的内部请求布局编码到同一个 RPC 帧，不要求开发者创建公开包装结构体。
+
+### 4.3 禁止可变参数
+
+RPC 接口不支持 `...T`：
+
+```go
+Bad(ctx context.Context, playerIDs ...int64)
+```
+
+应改为明确的 Slice：
+
+```go
+Good(ctx context.Context, playerIDs []int64)
+```
+
+这样可以保持线协议只有一种表达，也避免函数调用语法影响远端契约。
+
+## 5. 输出参数与 error 规则
+
+### 5.1 多业务输出
+
+RPC 允许零个或多个业务输出。例如：
+
+```go
+GetPosition(
+    ctx context.Context,
+    entityID int64,
+) (
+    x float32,
+    y float32,
+    z float32,
+)
+```
+
+### 5.2 error 可以声明，也可以省略
+
+请求—响应 RPC 的服务端声明可以包含 `error`，也可以省略：
+
+```go
+GetPlayer(ctx context.Context, playerID int64) *pb.Player
+
+GetPlayerWithError(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error)
+```
+
+服务端声明没有 `error` 时，服务端无法主动向调用方返回业务错误；生成客户端仍会追加一个最终 `error`，用于报告 RPC 框架错误。
+
+服务端声明已经包含 `error` 时，生成客户端复用该位置，不再追加第二个错误。唯一的最终 `error` 同时承载服务端业务错误和 RPC 框架错误。
+
+### 5.3 error 必须位于最后
+
+只要返回列表中存在可赋值给 Go `error` 接口的类型，就必须满足：
+
+- 最多出现一次；
+- 必须是最后一个返回值。
+
+合法：
+
+```go
+Xxx(ctx context.Context)
+Xxx(ctx context.Context) error
+Xxx(ctx context.Context) T1
+Xxx(ctx context.Context) (T1, T2, T3)
+Xxx(ctx context.Context) (T1, error)
+Xxx(ctx context.Context) (T1, T2, T3, error)
+```
+
+非法：
+
+```go
+Xxx(ctx context.Context) (error, T1)
+Xxx(ctx context.Context) (T1, error, T2)
+Xxx(ctx context.Context) (T1, error, error)
+Xxx(ctx context.Context) (error, error)
+```
+
+`origin-gen` 不得自动重排返回值。发现错误位置非法时，必须在生成阶段终止并给出修改建议。例如：
+
+```text
+cannot generate RPC method PlayerRPC.Xxxx
+
+reason:
+  error return must be the final result
+
+got:
+  (T1, error, T2, T3)
+
+expected:
+  (T1, T2, T3, error)
+```
+
+需要把错误详情作为普通业务数据传输时，应定义 `ErrorInfo` 等可序列化结构体，不应使用实现 `error` 的类型占据业务返回位置。
+
+## 6. 方法分类与生成规则
+
+`origin-gen` 根据服务端返回签名自动分类：
+
+| 服务端返回签名 | 调用类型 | 生成方法 |
+|---|---|---|
+| 一个或多个业务返回值，无 `error` | 请求—响应 | `AsyncXxx`、`AwaitXxx`，客户端补最终 `error` |
+| 一个或多个业务返回值，末尾为 `error` | 请求—响应 | `AsyncXxx`、`AwaitXxx`，复用该 `error` |
+| 只返回 `error` | 需要远端确认的请求 | `AsyncXxx`、`AwaitXxx` |
+| 完全没有返回值 | 不等待远端确认的通知 | `NotifyXxx`、`BroadcastXxx` |
+
+只有完全没有返回值的方法才是通知。返回 `error` 的方法即使没有业务数据，也必须等待远端确认，不能生成成通知。
+
+## 7. Async 生成接口
+
+### 7.1 外观
+
+原始定义：
+
+```go
+GetPlayer(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error)
+```
+
+生成：
+
+```go
+AsyncGetPlayer(
+    ctx context.Context,
+    playerID int64,
+    callback func(
+        context.Context,
+        *pb.Player,
+        error,
+    ),
+)
+```
+
+多返回值按原业务顺序进入回调，并始终以最终 `error` 结尾：
+
+```go
+AsyncGetPosition(
+    ctx context.Context,
+    entityID int64,
+    callback func(
+        context.Context,
+        float32,
+        float32,
+        float32,
+        error,
+    ),
+)
+```
+
+### 7.2 Service 执行语义
+
+`AsyncXxx`：
+
+1. 立即发起底层 RPC；
+2. 注册完成回调；
+3. 不释放当前 Service 执行槽；
+4. 调用函数立即返回，当前 Service 任务继续运行；
+5. RPC 完成、失败、取消或超时后，把回调作为新任务追加到调用方 Service 的 FIFO Ready 队列；
+6. 回调重新取得 Service 执行槽后才能访问 Service 状态；
+7. 回调不能在网络、NATS 或 TimerEngine goroutine 中直接执行；
+8. 即使 RPC 在注册后立即完成，也不能抢占当前 Running 任务。
+
+`AsyncXxx` 不单独返回提交错误。路由失败、编码失败、队列拒绝等立即失败也通过同一个强类型回调异步返回，避免同时维护“函数返回 error”和“回调 error”两条错误路径。调用方 Service 仍处于运行状态时，每次调用的回调最多投递一次。
+
+示例：
+
+```go
+s.playerRPC.AsyncGetPlayer(
+    ctx,
+    playerID,
+    func(
+        callbackCtx context.Context,
+        player *pb.Player,
+        err error,
+    ) {
+        if err != nil {
+            s.onLoadFailed(playerID, err)
+            return
+        }
+
+        s.players[playerID] = player
+    },
+)
+
+s.loadingPlayers[playerID] = true
+```
+
+普通业务用户不需要直接取得或保存 Future。生成的 `AsyncXxx` 内部仍可以使用 Future 统一管理 pending、完成、超时和取消。
+
+## 8. Await 生成接口
+
+### 8.1 外观
+
+原始定义：
+
+```go
+GetPlayer(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error)
+```
+
+生成：
+
+```go
+AwaitGetPlayer(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error)
+```
+
+调用：
+
+```go
+player, err := s.playerRPC.AwaitGetPlayer(ctx, playerID)
+if err != nil {
+    return err
+}
+
+s.players[playerID] = player
+```
+
+### 8.2 内部语义
+
+`AwaitXxx` 内部：
+
+1. 使用与 `AsyncXxx` 相同的底层调用核心创建 Future；
+2. 调用 Service 执行系统的内部 Await 原语；
+3. 原子释放当前 Service 执行槽；
+4. 等待 Future 完成；
+5. 将原任务追加到 FIFO Ready 队列；
+6. 原任务重新取得执行槽后，向业务代码返回结果。
+
+概念上等价于：
+
+```go
+func (c *playerRPCClient) AwaitGetPlayer(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error) {
+    future := c.callGetPlayer(ctx, playerID)
+    return c.awaitFuture(ctx, future)
+}
+```
+
+该代码只描述语义。`awaitFuture` 是 Service Dispatcher 的未导出低开销原语，不是另一套业务 API。生成实现不要求公开 Future 或产生额外包装分配。
+
+`Await` 前缀是显式挂起标记。普通用户不需要再手工写：
+
+```go
+service.Await(ctx, client.GetPlayer(ctx, playerID))
+```
+
+## 9. Notify 通知
+
+### 9.1 识别与生成
+
+完全没有返回值的方法被识别为通知：
+
+```go
+PlayerOnline(
+    ctx context.Context,
+    playerID int64,
+)
+```
+
+生成：
+
+```go
+NotifyPlayerOnline(
+    ctx context.Context,
+    playerID int64,
+) error
+```
+
+### 9.2 语义
+
+`NotifyXxx`：
+
+- 根据路由规则选择一个目标 Service 实例；
+- 不创建等待远端响应的 Future；
+- 不进入 RPC pending 表；
+- 不等待远端开始或完成业务处理；
+- 返回的 `error` 只报告本地参数编码、服务路由、连接状态、发送排队或发送接受错误；
+- 消息已经被底层接受后，Context 取消不能撤回消息；
+- 服务端业务失败或 panic 不能返回给调用方，只能通过服务端日志、指标和追踪暴露；
+- 默认不自动重试，避免产生重复通知。
+
+如果调用方必须确认远端是否执行成功，服务端方法必须至少返回 `error`，使生成器生成 `AsyncXxx` 和 `AwaitXxx`。
+
+通知仍遵循 RPC 默认 Deadline 规则。没有显式 Deadline、Service 默认值和 Node 默认值时，内置 `15s` 只约束本地路由、排队和发送阶段，不约束远端业务执行。
+
+## 10. Broadcast 广播
+
+### 10.1 保留 v2 CastGo 能力
+
+v2 `CastGo` 会把无响应 RPC 发送给当前网络中所有匹配服务所在的 Node。v3 保留该能力，但把公共名称规范为 `BroadcastXxx`，并由 `origin-gen` 生成强类型接口。
+
+对通知定义：
+
+```go
+PlayerOnline(
+    ctx context.Context,
+    playerID int64,
+)
+```
+
+同时生成：
+
+```go
+BroadcastPlayerOnline(
+    ctx context.Context,
+    playerID int64,
+) error
+```
+
+### 10.2 广播目标
+
+`BroadcastXxx` 面向调用时服务发现快照中所有匹配的 Service 实例。具体实例筛选、关注服务、退休节点和路由过滤规则由独立的服务发现与路由设计确定。
+
+TCP 和 NATS 必须保持相同的上层语义：
+
+- TCP 可以向每个目标连接分别发送；
+- NATS 可以通过目标 Subject 或广播 Subject 发布；
+- 业务代码不因传输方式改变。
+
+### 10.3 错误与投递语义
+
+广播不等待任意远端业务结果。返回的 `error` 只表示本地发现、编码和向各目标提交发送时的错误。
+
+出现部分成功、部分失败时，返回实现 `error` 的聚合广播错误，至少包含：
+
+- 目标数量；
+- 成功提交数量；
+- 失败数量；
+- 失败目标及原因。
+
+正常成功路径不为每个目标创建公开结果对象；逐目标详情只在失败路径构建。
+
+第一版不为请求—响应 RPC 生成广播和多响应聚合接口。需要收集多个服务响应的功能属于独立设计，不复用通知广播语义。
+
+## 11. 统一 error 语义
+
+### 11.1 生成客户端始终暴露 error
+
+所有生成的客户端调用都暴露一个最终 `error`：
+
+- `AwaitXxx` 的最后一个返回值是 `error`；
+- `AsyncXxx` 回调的最后一个参数是 `error`；
+- `NotifyXxx` 和 `BroadcastXxx` 直接返回本地发送阶段的 `error`。
+
+如果服务端声明没有 `error`，生成器追加框架错误位置；如果已经有末尾 `error`，生成器复用该位置。
+
+### 11.2 服务端未声明 error
+
+例如：
+
+```go
+GetPlayer(
+    ctx context.Context,
+    playerID int64,
+) *pb.Player
+```
+
+生成：
+
+```go
+AwaitGetPlayer(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error)
+```
+
+该 `error` 可以报告路由、编解码、传输、超时、取消和远端 panic 等框架错误，但服务端无法主动报告业务错误。
+
+如果服务端内部访问数据库失败后返回 `nil`，调用方可能得到 `player == nil && err == nil`。框架不能猜测 `nil` 的业务含义。需要传播失败时，服务端声明必须改成：
+
+```go
+GetPlayer(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error)
+```
+
+### 11.3 panic
+
+请求—响应处理发生 panic 时，框架必须恢复任务、记录服务端诊断信息，并通过最终 `error` 向调用方报告远端执行失败。
+
+通知和广播没有响应通道，远端 panic 不能返回调用方，只在接收端记录日志、指标和追踪。
+
+具体错误码、错误详情、堆栈暴露和 gRPC 状态映射由独立错误模型设计确定。
+
+## 12. 多输入多输出的内部布局
+
+多个输入和输出使用生成的内部位置编号：
+
+```text
+Request:
+  field 1 = input 1
+  field 2 = input 2
+  field 3 = input 3
+
+Response:
+  field 1 = output 1
+  field 2 = output 2
+  field 3 = output 3
+```
+
+规则如下：
+
+- 编号按原始参数位置稳定维护；
+- 调换参数顺序属于不兼容修改；
+- 在中间插入参数属于不兼容修改；
+- 删除参数后编号不能复用；
+- 经常演进或参数很多的方法建议主动使用 Request/Response 结构体；
+- 参数总量不设置人为上限，但仍受 Node 的最大 RPC 消息大小和内存保护限制。
+
+每个位置独立使用 RPC 数据与序列化设计规定的编码路径。顶层 Protobuf 参数使用标准 Protobuf 消息字节，其他 Go 类型使用 Origin 静态编码。
+
+标准 gRPC 只直接支持单个 Protobuf Request 和单个 Protobuf Response。包含多个顶层输入或输出的 Origin RPC 不能直接自动暴露为标准 gRPC 方法，必须通过显式适配层映射到包装消息。
+
+## 13. 低延迟约束
+
+- `AsyncXxx`、`AwaitXxx` 只生成薄包装，共用一个未导出的底层调用核心；
+- 客户端不通过字符串方法名查找 RPC；
+- 热路径不使用反射检查回调签名；
+- Async 回调签名在生成阶段静态确定；
+- Await 不为每个调用额外创建辅助 goroutine；
+- Notify 和 Broadcast 不创建 pending response 条目；
+- 多参数直接编码到同一个输出缓冲区，不能为了接口方便在热路径反射组装通用 Map；
+- 成功广播路径不构建逐目标公开结果集合；
+- Future 可以作为内部状态机存在，但不是普通业务调用必须操作的公共对象。
+
+实现阶段必须分别基准验证 Async、Await、Notify 和 Broadcast 的延迟、内存分配和吞吐。
+
+## 14. 生成期校验
+
+`origin-gen` 至少校验：
+
+1. Context 存在且位于第一个参数；
+2. 不存在第二个 Context；
+3. 不使用可变参数；
+4. 所有输入和业务输出类型均可静态编码；
+5. error 最多一个且位于最后；
+6. 无返回方法只生成 Notify 和 Broadcast；
+7. 有任意返回值的方法不生成 Notify 或 Broadcast；
+8. 生成后的方法名在客户端类型中不冲突；
+9. 参数位置和类型变更符合兼容性规则；
+10. 需要直接暴露为 gRPC 的方法满足单个 Protobuf Request/Response 限制。
+
+所有失败必须指出接口、方法、参数或返回值位置、失败原因和可执行的修改建议，不能延迟到运行时反射调用时失败。
+
+## 15. 测试要求
+
+至少覆盖：
+
+1. `(T, error)` 生成 Async 和 Await；
+2. `T` 生成 Async 和 Await，并自动追加框架 error；
+3. `error` 生成无业务返回值的 Async 和 Await；
+4. 完全无返回值生成 Notify 和 Broadcast；
+5. 多输入、多输出和混合 Go/Protobuf 类型；
+6. error 位于开头、中间或出现多次时生成失败；
+7. 可赋值给 error 的自定义返回类型遵循末尾唯一规则；
+8. 可变参数生成失败；
+9. Async 回调只在调用方 Service 取得执行槽后运行；
+10. Async 快速完成不能抢占当前任务；
+11. Await 释放执行槽、FIFO 恢复并重新取得执行槽；
+12. Await 与 RPC 共用有效 Deadline，不重复应用 `15s`；
+13. Notify 不创建 pending、Future 或响应；
+14. Notify 只报告本地发送阶段错误；
+15. Broadcast 覆盖零目标、单目标、多目标、全部成功和部分失败；
+16. TCP 与 NATS 的 Notify、Broadcast 语义一致；
+17. 服务端未声明 error 时，框架错误仍能返回；
+18. 请求处理 panic 返回远端执行错误，通知处理 panic 只产生接收端诊断；
+19. 参数顺序和中间插入的兼容性检查；
+20. Async、Await、Notify 和 Broadcast 的低延迟基准。
+
+## 16. 已确认结论
+
+Origin v3 RPC 接口与调用语义最终采用：
+
+- 使用 Go 接口定义服务端 RPC；
+- 允许多个输入和多个业务输出，不设置人为数量上限；
+- Context 必须是第一个参数；
+- 不支持可变参数，使用 Slice 代替；
+- error 可以声明或省略，但最多一个且只能位于最后；
+- 客户端生成接口始终暴露一个最终 error；
+- 有任意返回值的方法生成 `AsyncXxx` 和 `AwaitXxx`；
+- 完全无返回值的方法生成 `NotifyXxx` 和 `BroadcastXxx`；
+- `AsyncXxx` 使用强类型回调，并把回调投递回调用方 Service；
+- `AwaitXxx` 内部自动使用 Service Await 规则，用户不手工操作 Future；
+- Notify 面向一个路由目标，不等待远端响应；
+- Broadcast 保留 v2 `CastGo` 的全目标广播能力，公共名称改为 `BroadcastXxx`；
+- 请求—响应 RPC 首版不支持广播收集多响应；
+- Async、Await、Notify 和 Broadcast 共用同一个底层调用核心；
+- Future 可以内部使用，但不是普通业务用户必须接触的 API。

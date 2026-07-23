@@ -16,7 +16,7 @@
 - CPU 密集任务与 cgo 的工作池实现；
 - 固定步长游戏世界 Tick。
 
-RPC 的契约与默认 Deadline 规则见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。
+RPC 的生成接口与调用分类见 [Origin v3 RPC 接口与调用语义设计](./2026-07-23-rpc-interface-and-call-semantics-design.md)，数据契约与默认 Deadline 规则见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。
 
 ## 2. 设计目标
 
@@ -35,7 +35,7 @@ v3 不要求开发者为 Service 配置 `Serial` 或 `Cooperative` 两种模式�
 - 同一时刻最多一个任务处于 `Running` 状态并拥有执行槽；
 - 普通同步业务代码持续持有执行槽；
 - 发起异步 RPC 后立即返回，不会自动让出当前执行槽；
-- 只有显式调用 `Await` 等 Origin 感知的等待点，当前任务才释放执行槽；
+- 只有显式调用 `Await` 或生成的 `AwaitXxx` 等 Origin 感知的等待点，当前任务才释放执行槽；
 - 等待完成不代表立即恢复，原任务必须重新进入就绪队列并再次取得执行槽；
 - 不允许通过普通 `time.Sleep`、阻塞 Channel 或无法被 Origin 感知的阻塞操作占着执行槽等待。
 
@@ -78,6 +78,8 @@ Await[T any](
 
 这段代码表示语义，不提前约束最终采用泛型包函数、生成代码或其他 Go API 外观。最终 API 必须保持强类型，并让调用点清楚显示这里会挂起当前 Service 任务。
 
+对于 RPC，`origin-gen` 生成 `AwaitXxx` 方法并在内部使用该 Await 原语。普通 RPC 用户不需要直接取得 Future，也不需要手工组合 `service.Await`。通用 Await 原语仍服务于 Redis、数据库、Sleep 和其他非 RPC 等待。
+
 普通 `Await` 的执行过程为：
 
 1. 根据传入 Context 计算有效 Deadline；
@@ -110,12 +112,12 @@ Await[T any](
 
 ### 7.1 RPC、Redis 与数据库
 
-支持 Context 的同步客户端调用可以直接放在 `Await` 的 `fn` 中。当前任务 goroutine 执行该调用，I/O 等待交给 Go 运行时，不需要每个请求再创建辅助 goroutine。
+RPC 使用生成的两种明确外观：
 
-异步 RPC 不会自动让出执行槽。开发者可以：
+- `AsyncXxx` 发起调用后立即返回，不自动让出执行槽；完成回调作为新任务进入调用方 Service 的 FIFO Ready 队列；
+- `AwaitXxx` 在内部使用 Await 原语，释放执行槽并在 Future 完成后恢复原任务。
 
-- 发起异步调用并立即返回，后续通过事件或回调处理；
-- 在需要顺序编程时显式 `Await` 该结果。
+Redis、数据库等支持 Context 的同步客户端调用可以直接放在通用 `Await` 的 `fn` 中。当前任务 goroutine 执行该调用，I/O 等待交给 Go 运行时，不需要每个请求再创建辅助 goroutine。
 
 ### 7.2 Sleep
 
@@ -155,7 +157,7 @@ Await[T any](
 - 已经开始的任务在取消后仍要恢复一次，重新取得执行槽并返回 `context.Canceled` 或 `context.DeadlineExceeded`，以便正常执行 `defer` 和业务清理；
 - Service 停止时取消所有 Waiting 任务的 Context，并按相同规则完成受控恢复和退出，不能只从队列中删除任务。
 
-如果 `Await` 内调用生成的 RPC，RPC 直接继承该 Context 的有效 Deadline。RPC 不重复附加另一套 `15s` 默认超时。
+生成的 `AwaitXxx` 把同一个有效 Context 传给底层 RPC 和内部 Await 原语。RPC 不重复附加另一套 `15s` 默认超时。
 
 ## 9. Timer 回调
 
@@ -205,8 +207,8 @@ Timer 回调可以调用 `Await`。挂起期间：
 至少覆盖：
 
 1. 同一个 Service 任意时刻只有一个任务持有执行槽；
-2. 普通代码和异步 RPC 不会隐式让出执行槽；
-3. `Await` 原子释放执行槽，并在恢复后重新取得执行槽；
+2. 普通代码和生成的 `AsyncXxx` 不会隐式让出执行槽；
+3. 通用 `Await` 和生成的 `AwaitXxx` 原子释放执行槽，并在恢复后重新取得执行槽；
 4. `fn` 在当前任务 goroutine 执行，不额外创建每请求辅助 goroutine；
 5. 新事件、Timer 与恢复任务严格按 FIFO 入队；
 6. 恢复任务不抢占 Running 任务；
@@ -228,6 +230,8 @@ Origin v3 Service 执行模型最终采用：
 - 同一 Service 任意时刻只允许一个任务访问 Service 状态；
 - 多个任务可以同时处于 Waiting，但恢复后必须重新竞争唯一执行槽；
 - `Await` 是显式挂起点，普通异步调用不会自动让出；
+- RPC 通过生成的 `AsyncXxx` 和 `AwaitXxx` 分别表达回调式异步与调度式等待；
+- `AwaitXxx` 内部使用通用 Await 原语，普通 RPC 用户不需要直接操作 Future；
 - 普通 I/O `Await` 由当前任务 goroutine 执行，不额外创建每请求辅助 goroutine；
 - 新任务、Timer 回调和恢复任务共用 FIFO Ready 队列；
 - `Await` 默认超时的最终兜底为 `15s`；

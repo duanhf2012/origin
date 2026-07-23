@@ -2,7 +2,7 @@
 
 ## 1. 文档范围
 
-本文记录 Origin v3 RPC 在接口定义、数据类型、序列化、传输边界和低延迟方面已经确认的设计。服务发现、服务调度模型和流式 RPC 不属于本文范围。`Await` 与任务恢复规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)，Deadline 的统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。
+本文记录 Origin v3 RPC 在数据类型、序列化、传输边界和低延迟方面已经确认的设计。服务发现、服务调度模型和流式 RPC 不属于本文范围。接口签名、生成方法与调用分类见 [Origin v3 RPC 接口与调用语义设计](./2026-07-23-rpc-interface-and-call-semantics-design.md)，`Await` 与任务恢复规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)，Deadline 的统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。
 
 ## 2. 设计目标
 
@@ -43,7 +43,7 @@ Origin Native RPC 使用 Go 接口作为契约，由 `origin-gen` 在编译前�
 
 `15s` 是防止请求无限等待的最终兜底值，不是业务目标延迟。Redis、数据库、战斗服内部 RPC 等延迟敏感路径应根据业务要求显式设置更短的 Deadline。
 
-一次请求与响应 RPC 的超时范围从调用进入 RPC 客户端开始，覆盖本地排队、路由、传输、服务端处理、响应传输和客户端完成 Future 的全过程。异步 RPC 同样适用：调用函数可以立即返回 Future，但 Future 最迟在有效 Deadline 到达时完成为超时。
+一次请求与响应 RPC 的超时范围从调用进入 RPC 客户端开始，覆盖本地排队、路由、传输、服务端处理、响应传输和客户端内部 Future 完成的全过程。异步 RPC 同样适用：生成的 `AsyncXxx` 立即返回，内部 Future 最迟在有效 Deadline 到达时完成为超时，并把强类型回调投递回调用方 Service。
 
 单向通知没有远端响应，但生成的调用函数仍使用相同的有效 Deadline，约束本地路由、排队和发送过程；发送完成后不等待远端业务执行结果。
 
@@ -71,6 +71,8 @@ gRPC 作为可选适配插件，可以与 Origin Native TCP 或 NATS 同时启�
 2. 其他 Go 类型使用 Origin 静态编解码协议。
 
 每个入参和出参独立判定，因此同一个 RPC 方法可以同时使用 `int64`、`string`、`*int`、普通 Go 结构体和顶层 Protobuf 消息，不要求为了统一序列化而包装成同一种请求结构。
+
+RPC 可以声明多个输入和多个输出。每个位置独立选择编解码路径，并由生成的内部请求、响应布局写入同一个 RPC 帧。参数数量、Context、可变参数、`error` 位置和生成方法名称属于 RPC 接口与调用语义设计。
 
 生成器通过类型是否为 Protobuf 消息静态识别第一类。Protobuf 生成类型通常以指针形式实现 `proto.Message`；如果值类型或其指针能够被静态识别为 Protobuf 消息，`origin-gen` 应生成对应的取址、空值检查和编解码代码，不在热路径使用反射判断。
 
