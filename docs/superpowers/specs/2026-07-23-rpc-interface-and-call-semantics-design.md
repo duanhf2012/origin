@@ -255,7 +255,7 @@ AsyncGetPosition(
 7. 回调不能在网络、NATS 或 TimerEngine goroutine 中直接执行；
 8. 即使 RPC 在注册后立即完成，也不能抢占当前 Running 任务。
 
-`AsyncXxx` 不单独返回提交错误。路由失败、编码失败、队列拒绝等立即失败也通过同一个强类型回调异步返回，避免同时维护“函数返回 error”和“回调 error”两条错误路径。调用方 Service 仍处于运行状态时，每次调用的回调最多投递一次。
+`AsyncXxx` 不单独返回提交错误。路由失败、编码失败、队列拒绝等立即失败也通过同一个强类型回调异步返回，避免同时维护“函数返回 error”和“回调 error”两条错误路径。调用方 Service 处于 Running 或允许排空回调的 Draining 状态时，每次调用的回调最多投递一次。
 
 示例：
 
@@ -281,6 +281,28 @@ s.loadingPlayers[playerID] = true
 ```
 
 普通业务用户不需要直接取得或保存 Future。生成的 `AsyncXxx` 内部仍可以使用 Future 统一管理 pending、完成、超时和取消。
+
+### 7.3 Draining 中的 pending 与回调
+
+每个 Async pending 记录必须包含所属 Service，供 RPC Runtime 在 Service 优雅停止时判断未完成调用。该归属本来就是把回调投递回调用方 Service 所需的信息，不为停止流程创建新的 TaskScope 或独立计数器。
+
+Service 进入 Draining 后：
+
+- Stop 前已经登记的 Async 继续等待响应、错误、超时或取消；
+- 正在排空的任务和 Async 回调仍可以发起新的 `AsyncXxx`；
+- 新调用在提交到 Transport 前先登记到所属 Service 的 pending 表；
+- 所有新调用继承 Service 关闭 Context 的上限；
+- 新的入站 RPC、Timer 和普通本地事件仍由 ServiceScheduler 拒绝。
+
+Async 完成时必须：
+
+1. 使用一次性终态转换防止响应、超时和取消重复完成；
+2. 先把强类型回调发布到所属 Service 的 Ready 队列；
+3. 确认发布成功后再删除 pending 记录。
+
+该顺序保证排空检查不会在“pending 已删除、回调尚未进入 Ready”的窗口提前进入 `OnStop`。发送失败和立即完成也使用同一路径。
+
+详细排空规则见 [Origin v3 Service 优雅停止设计](./2026-07-24-service-graceful-stop-design.md)。
 
 ## 8. Await 生成接口
 
@@ -586,21 +608,24 @@ Response:
 8. 可变参数生成失败；
 9. Async 回调只在调用方 Service 取得执行槽后运行；
 10. Async 快速完成不能抢占当前任务；
-11. Await 释放执行槽、FIFO 恢复并重新取得执行槽；
-12. Await 与 RPC 共用有效 Deadline，不重复应用 `15s`；
-13. Notify 不创建 pending、Future 或响应；
-14. Notify 只报告本地发送阶段错误；
-15. Broadcast 按 RPC 契约 ID 和方法 ID 匹配，不因接口或方法同名而误投；
-16. Broadcast 在发送端按目标 Node 去重，每个目标 Node 只提交一次；
-17. 同一 Node 内有一个或多个匹配 Service 时，每个 Service 各收到一次；
-18. 同一 Service 重复注册相同 RPC 契约和方法时注册失败；
-19. TCP Broadcast 覆盖零目标、单目标、多目标、全部成功和部分失败；
-20. NATS 的单 Node 单逻辑订阅入口不会因本地 Service 数量产生重复消息；
-21. TCP 与 NATS 的 Notify、Broadcast 业务语义一致；
-22. 服务端未声明 error 时，框架错误仍能返回；
-23. 请求处理 panic 返回远端执行错误，通知处理 panic 只产生接收端诊断；
-24. 参数顺序和中间插入的兼容性检查；
-25. Async、Await、Notify 和 Broadcast 的低延迟基准。
+11. Async pending 记录所属 Service，且先入 Ready、后删除 pending；
+12. Async 的响应、超时、取消和立即失败只完成一次；
+13. Draining 中的排空任务可以继续发起 Async，并受关闭 Context 限制；
+14. Await 释放执行槽、FIFO 恢复并重新取得执行槽；
+15. Await 与 RPC 共用有效 Deadline，不重复应用 `15s`；
+16. Notify 不创建 pending、Future 或响应；
+17. Notify 只报告本地发送阶段错误；
+18. Broadcast 按 RPC 契约 ID 和方法 ID 匹配，不因接口或方法同名而误投；
+19. Broadcast 在发送端按目标 Node 去重，每个目标 Node 只提交一次；
+20. 同一 Node 内有一个或多个匹配 Service 时，每个 Service 各收到一次；
+21. 同一 Service 重复注册相同 RPC 契约和方法时注册失败；
+22. TCP Broadcast 覆盖零目标、单目标、多目标、全部成功和部分失败；
+23. NATS 的单 Node 单逻辑订阅入口不会因本地 Service 数量产生重复消息；
+24. TCP 与 NATS 的 Notify、Broadcast 业务语义一致；
+25. 服务端未声明 error 时，框架错误仍能返回；
+26. 请求处理 panic 返回远端执行错误，通知处理 panic 只产生接收端诊断；
+27. 参数顺序和中间插入的兼容性检查；
+28. Async、Await、Notify 和 Broadcast 的低延迟基准。
 
 ## 16. 已确认结论
 
@@ -615,6 +640,8 @@ Origin v3 RPC 接口与调用语义最终采用：
 - 有任意返回值的方法生成 `AsyncXxx` 和 `AwaitXxx`；
 - 完全无返回值的方法生成 `NotifyXxx` 和 `BroadcastXxx`；
 - `AsyncXxx` 使用强类型回调，并把回调投递回调用方 Service；
+- Async pending 记录所属 Service，完成时先发布 Ready 回调、再删除 pending；
+- Draining 中的排空任务和回调可以继续发起 Async，并受 Service 关闭 Context 限制；
 - `AwaitXxx` 内部自动使用 Service Await 规则，用户不手工操作 Future；
 - Notify 面向一个路由目标，不等待远端响应；
 - Broadcast 保留 v2 `CastGo` 的全目标广播能力，公共名称改为 `BroadcastXxx`；

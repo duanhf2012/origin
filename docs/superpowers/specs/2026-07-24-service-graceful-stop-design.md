@@ -82,28 +82,70 @@ ServiceScheduler 在一个原子状态边界把 Service 切换到 `Stopping/Drai
 - 当前正在执行的任务；
 - 已经进入 Ready 队列的 RPC、普通事件和 Timer 回调；
 - 已经进入 Waiting 状态、尚待恢复的任务；
+- 已经登记到 RPC Runtime 或其他异步适配器、尚待产生回调的 pending 调用；
 - 上述任务所必需的完成、超时和取消信号。
 
 已经到期并进入 Ready 队列的 Timer 属于已接收任务；尚未到期的 Timer 不属于排空集合，在进入 `Stopping` 后取消。
 
 ## 6. Draining 调度规则
 
+### 6.1 任务延续
+
 `Draining` 期间只为排空集合调度 Runner：
 
 - 不接受新的根业务任务；
 - Stop 前已接收的 Ready 任务仍按原 FIFO 和单执行槽规则运行；
 - Waiting 任务的完成、超时和取消可以恢复原任务；
+- 正在执行的排空任务及其 Async 回调可以继续发起新的 `AwaitXxx`、`AsyncXxx`、Redis 或数据库等待；
+- 这些调用继续进入已有的 Waiting 表或按 Service 归属的 pending 表，不建立任务父子关系；
+- Async 回调中继续发起的等待遵守相同规则；
 - 没有排空任务时不为了轮询状态持续创建或唤醒 Runner；
 - 新提交入口即使持有旧 Service 引用，也不能重新激活已经收敛的调度器。
 
-`Draining` 结束条件至少包括：
+业务 Timer、入站 RPC 和普通本地事件仍属于新的根业务任务，不能因为由排空任务触发就绕过准入规则。Service API 只允许在当前活动 Runner 中使用；业务自行创建的外部 goroutine 不能借此向 `Draining` Service 派生工作。
+
+该方案不创建 `TaskScope`，也不维护父子任务树。Service 单执行槽保证正在执行的用户代码只可能来自已接收任务或它的框架回调，已有 Ready、Waiting 和 pending 状态足以表示延续。
+
+### 6.2 Waiting 排空
+
+Stop 前已经存在以及 `Draining` 中新产生的 Waiting 任务继续使用正常恢复规则：
+
+1. 外部操作完成、超时或取消；
+2. 原任务进入 FIFO Ready 队列；
+3. 活动 Runner 把执行槽交还给原任务 goroutine；
+4. 原 goroutine 从 Await 后继续执行；
+5. 任务完整返回并执行 `defer` 后才算结束。
+
+进入 `Draining` 不立即取消这些 Waiting。关闭 Deadline 到期后才统一取消仍未完成的等待，并且取消后仍要恢复一次，不能直接删除调用栈。
+
+### 6.3 Async pending 排空
+
+RPC Runtime 和任何向 Service 投递异步回调的适配器必须按所属 Service 保存已有 pending 记录。该记录本来就用于 Future、响应、超时和取消，不为优雅停止额外创建 `TaskScope` 或裸计数器。
+
+Async 完成顺序固定为：
+
+1. 通过一次性终态转换取得完成权；
+2. 把强类型回调加入所属 Service 的 FIFO Ready 队列；
+3. 确认回调已进入 Ready 后，再从所属 Service 的 pending 表删除记录；
+4. Runner 执行回调；
+5. 回调返回后，该回调任务结束。
+
+发送失败、路由失败、远端错误、超时和取消使用同一完成路径。必须先发布 Ready 回调再删除 pending，保证任意瞬间至少有 pending 记录或 Ready 回调存在，不能让排空检查观察到错误的全空状态。
+
+新 Async 调用必须先登记 pending 再向 Transport 提交，避免响应过快越过登记。每个 pending 只能完成一次。
+
+### 6.4 排空完成
+
+`Draining` 结束条件为：
 
 - 没有正在执行的普通任务；
-- Ready 队列中没有排空任务；
-- 没有尚未完成的 Waiting 任务；
-- 不存在尚未处理的必要完成信号。
+- Ready 队列为空；
+- Waiting 表为空；
+- RPC Runtime 和其他回调适配器中属于该 Service 的 pending 表为空。
 
-Stop 前已接收任务在排空期间能否继续发起新的 RPC、Redis 或数据库等待，尚未最终确认。该问题会影响排空集合是否允许派生“任务延续”，后续单独确定。
+检查在 ServiceScheduler 的有序状态边界执行。由于没有 Running 时不会再从业务代码登记新延续，而异步完成严格遵守“先入 Ready、后删 pending”，不需要跨模块持有一个大锁，也不需要独立排空计数器。
+
+满足全部条件后，最后一个 Runner 才能原子取得 finalizer 权限并进入 `Finalizing`。
 
 ## 7. finalizer 选举
 
@@ -191,6 +233,8 @@ finalizer 等待路径不创建 `TaskScope`，也不在 ServiceScheduler 中增�
 
 ## 10. Deadline 与取消
 
+`Draining` 使用统一的关闭 Context。排空任务在该阶段新发起的 Await、Async、Redis 和数据库操作，其有效 Deadline 不能突破关闭 Context。Stop 前已经登记的 Waiting 和 pending 在关闭 Context 到期时由所属 Scheduler 或适配器统一取消。
+
 `OnStop(ctx)` 必须携带关闭 Deadline，所有收尾操作继承该 Context。
 
 `OnStop` 的关闭 Context 取 Node/Application 总体关闭 Deadline 与 Service 级关闭 Deadline 中的较早值。`OnStop` 内的 RPC 和外部调用不能突破该父 Context：
@@ -255,7 +299,9 @@ Node 在全部 Service 的 `OnStop` 完成前必须保持：
 至少记录：
 
 - `Draining` 和 `Finalizing` 开始、结束时间；
-- Running、Ready、Waiting 排空数量和耗时；
+- Running、Ready、Waiting 和按 Service 归属的 pending 数量与排空耗时；
+- 最长 Waiting、pending 的操作名称、开始时间和 Deadline；
+- Draining 中新产生的 Await、Async 和回调数量；
 - Stop 后被拒绝的新 RPC、事件和 Timer 数量；
 - finalizer 执行者来源：最后 Runner、Stop 调用方或临时生命周期协程；
 - `OnStop` 执行时间、Await 次数和外部调用耗时；
@@ -272,21 +318,27 @@ Node 在全部 Service 的 `OnStop` 完成前必须保持：
 3. Waiting 任务可以通过完成、超时或取消恢复并退出；
 4. 尚未到期的业务 Timer 被取消，已进入 Ready 的 Timer 被排空；
 5. 排空期间不会接受新的根业务任务；
-6. 空闲 Service 收到 Stop 时不创建普通业务 Runner；
-7. 最后一个 Runner 可以接管 finalizer；
-8. 没有 Runner 时 Stop 调用方可以完成 finalizer；
-9. 并发 Stop 只执行一次 `OnStop` 和一次资源清理；
-10. `OnStop` 可以 `Await` RPC 存档并在同一 goroutine 恢复；
-11. `OnStop` 等待期间不执行普通 Service 任务；
-12. `OnStop` 不使用 `AsyncXxx`、Notify、Broadcast、Timer、本地事件或业务 goroutine 完成收尾；
-13. finalizer Await 不创建 `TaskScope`、Service `pendingAsync` 或替代 Runner；
-14. RPC Runtime、Transport 和 TimerEngine 在 `OnStop` 返回前保持可用；
-15. DBService 后停止时，调用方可以完成存档 RPC；
-16. DBService 已退休或提前停止时，错误能够返回并参与停止结果；
-17. `OnStop` 返回错误后仍执行资源清理；
-18. `OnStop` panic 被恢复且不会重复调用；
-19. 资源释放完成前状态不会变成 `Stopped`；
-20. `Stopped` 后不存在 Runner，任何提交或完成信号都不能重新唤醒 Service。
+6. 排空任务和 Async 回调可以继续发起 Await 或 Async，但不能创建根业务任务；
+7. Draining 中产生的 Waiting 和 pending 继续进入现有登记结构；
+8. Async 完成严格先进入 Ready、后删除 pending，不产生错误的全空窗口；
+9. Async 快速响应、立即失败、超时和取消都只完成并投递一次；
+10. 排空不创建 `TaskScope`、父子任务树或裸计数器；
+11. 关闭 Deadline 可以取消仍未完成的 Waiting 和 pending；
+12. 空闲 Service 收到 Stop 时不创建普通业务 Runner；
+13. 最后一个 Runner 可以接管 finalizer；
+14. 没有 Runner 时 Stop 调用方可以完成 finalizer；
+15. 并发 Stop 只执行一次 `OnStop` 和一次资源清理；
+16. `OnStop` 可以 `Await` RPC 存档并在同一 goroutine 恢复；
+17. `OnStop` 等待期间不执行普通 Service 任务；
+18. `OnStop` 不使用 `AsyncXxx`、Notify、Broadcast、Timer、本地事件或业务 goroutine 完成收尾；
+19. finalizer Await 不创建 `TaskScope`、Service `pendingAsync` 或替代 Runner；
+20. RPC Runtime、Transport 和 TimerEngine 在 `OnStop` 返回前保持可用；
+21. DBService 后停止时，调用方可以完成存档 RPC；
+22. DBService 已退休或提前停止时，错误能够返回并参与停止结果；
+23. `OnStop` 返回错误后仍执行资源清理；
+24. `OnStop` panic 被恢复且不会重复调用；
+25. 资源释放完成前状态不会变成 `Stopped`；
+26. `Stopped` 后不存在 Runner，任何提交或完成信号都不能重新唤醒 Service。
 
 ## 15. 已确认结论
 
@@ -294,7 +346,11 @@ Origin v3 Service 优雅停止采用：
 
 - 有界排空方案；
 - Stop 后拒绝新的 RPC、普通本地事件、业务 Timer 和独立根任务；
-- Stop 前已接收的 Running、Ready、Waiting 任务属于排空集合；
+- Stop 前已接收的 Running、Ready、Waiting 和按 Service 归属的 pending 调用属于排空集合；
+- 排空任务及其 Async 回调可以继续派生 Await、Async 和外部等待；
+- 延续继续使用已有 Ready、Waiting 和 pending 状态，不引入 `TaskScope`、父子任务树或裸计数器；
+- Async 完成必须先把回调放入 Ready，再删除 pending；
+- Running、Ready、Waiting 和所属 pending 全空后才能进入 `Finalizing`；
 - `Stopping` 内部使用 `Draining` 和 `Finalizing`，不增加公开状态；
 - 最后一个完成排空的 Runner 优先接管 finalizer；
 - 没有 Runner 时由 Stop 调用方或唯一临时生命周期协程完成收尾；
@@ -310,11 +366,10 @@ Origin v3 Service 优雅停止采用：
 
 ## 16. 后续讨论
 
-1. Draining 中已接收任务能否继续派生新的 RPC、Redis、数据库和 Await；
-2. Service 默认关闭 Deadline；
-3. Deadline 到期后的进程级处理；
-4. 同一 Node 内 Service 启停顺序的配置外观和默认规则；
-5. `OnStop` 与 Module 清理钩子的关系；
-6. Stop API 的同步、异步和重复调用外观；
-7. `Stopping` 状态发布到服务发现以及从远端路由摘除的时序；
-8. 在 `OnStop` 中误用 `AsyncXxx`、Notify、Broadcast 或业务 goroutine 时的开发期检测方式。
+1. Service 默认关闭 Deadline，以及 Draining 和 Finalizing 的时间预算分配；
+2. Deadline 到期后的进程级处理；
+3. 同一 Node 内 Service 启停顺序的配置外观和默认规则；
+4. `OnStop` 与 Module 清理钩子的关系；
+5. Stop API 的同步、异步和重复调用外观；
+6. `Stopping` 状态发布到服务发现以及从远端路由摘除的时序；
+7. 在 `OnStop` 中误用 `AsyncXxx`、Notify、Broadcast 或业务 goroutine 时的开发期检测方式。
