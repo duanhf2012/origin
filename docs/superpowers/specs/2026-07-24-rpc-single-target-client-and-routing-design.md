@@ -32,7 +32,7 @@
 3. 自动选择实例和精确指定实例使用相同的 `AwaitXxx`、`AsyncXxx`、`NotifyXxx` 方法外观。
 4. 不把 NodeID、ServiceName 重复加入每一个生成 RPC 方法。
 5. 不恢复 v2 的 `"Service.Method"` 字符串查找和运行时反射调用。
-6. 客户端是轻量逻辑代理，不拥有 TCP、NATS 或远端 Service 生命周期。
+6. 客户端是轻量逻辑代理，不建立或持有专属 TCP/NATS 连接，也不拥有远端 Service 生命周期；路由与连接由客户端所在 Node 的 RPC Runtime 统一管理。
 7. 一个 Service 的 RPC 边界保持简单，不支持 RPC 接口嵌入或跨 Service 聚合。
 8. 路由、编解码、Future、Deadline 和调度逻辑由生成代码与统一 Runtime 完成。
 
@@ -202,10 +202,12 @@ ServiceName = PlayerService
 客户端构造只创建轻量目标描述，不执行以下操作：
 
 - 不等待服务发现；
-- 不建立 TCP 或 NATS 连接；
+- 客户端自身不建立专属 TCP/NATS 连接；
 - 不固定当前路由表中的连接对象；
 - 不保证目标在下一次调用时仍然存在；
 - 不为调用创建 Future 或 Timer。
+
+“客户端不建立专属连接”不表示 RPC 绕过网络。真正调用时，客户端通过所在 Node 的 RPC Runtime 查询当前路由，并使用 Runtime 统一管理和复用的 TCP 连接或 NATS 连接完成发送。连接建立、复用、重连和关闭均属于 Node RPC Runtime 的职责。
 
 因此构造函数不返回路由错误。参数为空或目标不合法时，生成方法在进入统一调用核心后返回参数或路由错误，不发生 panic。
 
@@ -429,12 +431,14 @@ type rpcClientBase struct {
 
 客户端不保存：
 
-- 具体 TCP 连接；
-- NATS 连接；
+- 专属或具体的 TCP 连接对象；
+- 专属或具体的 NATS 连接对象；
 - 远端 Service 指针；
 - 可变路由快照指针；
 - RPC 方法字符串；
 - 每次调用的 Future。
+
+客户端只保存访问所在 Node RPC Runtime 所需的轻量句柄、逻辑目标和契约标识。每次调用都由 RPC Runtime 根据最新路由取得或复用内部连接：TCP Transport 使用 Node 级连接管理器，NATS Transport 使用 Node 级共享连接。客户端不负责连接生命周期，也不会因为底层重连而改变已经绑定的逻辑目标。
 
 客户端可以作为 Service 字段长期保存，也可以为动态玩家、场景或分片临时创建。实现目标是构造轻量值且不产生不必要的堆分配；最终通过基准测试验证。
 
@@ -576,7 +580,7 @@ Node 定向客户端：
 5. 普通客户端只选择同名、支持契约且可路由的实例；
 6. Node 客户端只选择指定 `NodeID + ServiceName`；
 7. Node 客户端目标失效时不切换到其他同名实例；
-8. 客户端构造不等待发现、不建立连接且不创建 Future；
+8. 客户端构造不等待发现、不建立专属 TCP/NATS 连接且不创建 Future；
 9. 当前快照中没有目标时，调用返回统一路由错误；
 10. Service 存在但不支持客户端契约时返回统一契约错误；
 11. `AwaitXxx`、`AsyncXxx` 和 `NotifyXxx` 在普通客户端和 Node 客户端上保持相同签名；
@@ -599,7 +603,8 @@ Node 定向客户端：
 - `origin-gen` 为每个 RPC 接口生成强类型客户端；
 - `NewXxxRPCClient(owner, serviceName)` 创建自动实例选择客户端；
 - `NewXxxRPCNodeClient(owner, nodeID, serviceName)` 创建精确实例客户端；
-- 客户端构造只绑定逻辑目标，不等待发现、不建立连接；
+- 客户端构造只绑定逻辑目标，不等待发现，也不建立或持有专属 TCP/NATS 连接；
+- 客户端调用统一通过所在 Node 的 RPC Runtime 使用内部管理和复用的路由与连接；
 - 自动客户端按实际 ServiceName、契约和可路由状态筛选候选实例；
 - Node 客户端固定 `NodeID + ServiceName`，失败时不切换其他实例；
 - 客户端绑定目标后统一调用 `AwaitXxx`、`AsyncXxx` 和 `NotifyXxx`；
