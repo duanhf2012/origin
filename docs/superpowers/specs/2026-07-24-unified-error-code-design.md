@@ -181,7 +181,9 @@ type WireError struct {
 
 首版不直接复用 gRPC 数值。gRPC 插件把 Origin Code 显式映射为 gRPC 状态，具体映射表单独设计。
 
-## 9. 首批生命周期错误码
+## 9. 首批框架错误码
+
+### 9.1 Service 生命周期
 
 ```go
 const (
@@ -197,6 +199,22 @@ const (
 ```
 
 退休 Service 收到新的请求—响应 RPC 时返回 `CodeServiceRetired`。Notify 和 Broadcast 没有远端响应通道，接收端拒绝投递并使用相同 Code 记录指标。
+
+### 9.2 RPC 路由
+
+```go
+const (
+    CodeRPCNoRoute             Code = 2001
+    CodeRPCInvalidRouteKey     Code = 2002
+    CodeRPCRouteSelectorFailed Code = 2003
+)
+```
+
+- `CodeRPCNoRoute`：当前快照没有合法候选，或者自定义 Selector 明确表示没有合适实例；
+- `CodeRPCInvalidRouteKey`：`Route(key)` 收到首版不支持的 Key 类型或 `nil`；
+- `CodeRPCRouteSelectorFailed`：自定义 Selector 为 nil、返回越界下标或发生 panic。
+
+这些错误遵守统一的固定错误复用和线协议规则。具体 Node、Service、Key 类型和 Selector 类型只进入结构化日志或 Trace，不加入固定错误对象和 RPC 线协议。
 
 ## 10. 与 Context 的关系
 
@@ -229,7 +247,8 @@ Origin 必须识别：
 7. cause、堆栈和敏感信息不会进入线协议；
 8. 重复错误码和越界编号在 CI 中失败；
 9. Context 取消和超时映射正确；
-10. TCP、NATS 和 gRPC 插件保持相同 Origin Code。
+10. TCP、NATS 和 gRPC 插件保持相同 Origin Code；
+11. 无可用路由、非法路由 Key 和自定义 Selector 失败返回各自稳定 Code。
 
 ## 13. 已确认结论
 
@@ -240,6 +259,7 @@ Origin 必须识别：
 5. 首版不传输 Details、cause 或 panic 堆栈。
 6. 程序不能依赖 Message 文本判断错误。
 7. 错误码按模块划分区间，项目业务码从 `100000` 开始。
+8. 首批 RPC 路由错误使用 `CodeRPCNoRoute`、`CodeRPCInvalidRouteKey` 和 `CodeRPCRouteSelectorFailed`。
 
 ## 14. 后续讨论
 

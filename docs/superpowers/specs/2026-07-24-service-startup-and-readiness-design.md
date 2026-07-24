@@ -12,7 +12,7 @@
 
 - Application 与 Node 的完整启停顺序生成规则；
 - Discovery Provider 的全量、增量和重连协议；
-- RPC 单目标负载均衡和幂等重试策略；
+- 幂等 RPC 的自动重试、退避和重试次数；
 - Service 正常运行阶段的协作式调度细节；
 - 生命周期超时配置的最终字段外观。
 
@@ -21,6 +21,7 @@
 - [Application 与 Node 生命周期设计](./2026-07-22-application-node-lifecycle-design.md)
 - [服务发现与关注筛选设计](./2026-07-24-service-discovery-and-interest-filter-design.md)
 - [RPC 接口与调用语义设计](./2026-07-23-rpc-interface-and-call-semantics-design.md)
+- [RPC 实例选择与路由策略设计](./2026-07-24-rpc-instance-selection-and-routing-strategy-design.md)
 - [Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)
 
 ## 2. 设计目标

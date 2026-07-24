@@ -10,7 +10,6 @@
 
 以下问题不在本文展开：
 
-- 自动路由在多个候选实例之间采用轮询、随机或其他选择算法；
 - 幂等 RPC 的自动重试策略；
 - Broadcast 的契约级目标计算和公开入口外观；
 - RPC Contract ID、Method ID 的具体编号算法；
@@ -24,6 +23,7 @@
 - [Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)
 - [Service 启动与就绪设计](./2026-07-24-service-startup-and-readiness-design.md)
 - [服务发现与关注筛选设计](./2026-07-24-service-discovery-and-interest-filter-design.md)
+- [RPC 实例选择与路由策略设计](./2026-07-24-rpc-instance-selection-and-routing-strategy-design.md)
 
 ## 2. 设计目标
 
@@ -176,7 +176,7 @@ NodeID      = 未指定
 - 当前可路由；
 - 通过 `allow_discovery`。
 
-存在多个候选实例时，由独立的实例选择策略选择一个。本设计不提前确定具体算法。
+存在多个候选实例时，按照 [RPC 实例选择与路由策略设计](./2026-07-24-rpc-instance-selection-and-routing-strategy-design.md) 选择一个。普通客户端默认轮询，也可以显式使用轮询、随机、按 Key 取模或自定义 Selector。
 
 ### 4.2 精确指定实例
 
@@ -606,6 +606,7 @@ Node 定向客户端：
 - 客户端构造只绑定逻辑目标，不等待发现，也不建立或持有专属 TCP/NATS 连接；
 - 客户端调用统一通过所在 Node 的 RPC Runtime 使用内部管理和复用的路由与连接；
 - 自动客户端按实际 ServiceName、契约和可路由状态筛选候选实例；
+- 自动客户端默认轮询，并支持显式轮询、随机、按 Key 取模和自定义 Selector；
 - Node 客户端固定 `NodeID + ServiceName`，失败时不切换其他实例；
 - 客户端绑定目标后统一调用 `AwaitXxx`、`AsyncXxx` 和 `NotifyXxx`；
 - 不生成带 Node 后缀或中缀的 RPC 方法；
