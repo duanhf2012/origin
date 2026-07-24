@@ -110,6 +110,17 @@ Runner 交接遵循：
 
 Runner、Ready 队列、执行槽和交接状态统一封装在 Service 调度器内部。RPC、Timer、Redis 适配器和业务 Service 只能提交普通任务、开始等待或通知等待完成，不得分别实现自己的协程切换逻辑。
 
+首版采用集中状态机方案，但不创建专用 Dispatcher goroutine：
+
+- `ServiceScheduler` 使用一个短临界区锁统一保护 Ready 队列、活动 Runner、Waiting 任务和停止状态；
+- 任务提交方只在锁内完成状态检查、入队和合并唤醒；
+- 活动 Runner 直接从 `ServiceScheduler` 出队并执行任务，不需要为每个事件经过 Dispatcher Channel 往返；
+- `Await` 释放执行槽、创建替代 Runner、恢复项入队和执行槽交接都在同一个状态机中完成；
+- 锁内禁止执行用户代码、RPC 编解码、日志输出或任何可能阻塞的操作；
+- 首版不使用无锁队列、分散 CAS 或固定 Runner 池；只有基准证明短锁成为瓶颈后才讨论替换内部实现。
+
+唤醒信号只表示“可能存在可运行任务”，不承载任务本身。重复唤醒可以合并，Runner 每次被唤醒后仍以锁内 Ready 队列为唯一事实来源，避免丢失唤醒和双 Runner 同时取得执行槽。
+
 Runner 循环只负责三件事：
 
 1. 取得下一个 Ready 项；
@@ -238,6 +249,7 @@ Timer 回调可以调用 `Await`。挂起期间：
 - 无 `Await` 的普通事件连续执行开销和 goroutine 创建次数；
 - 异步回调连续执行的调度开销；
 - `Await` 挂起、替代 Runner 创建和恢复交接开销；
+- Ready 队列短锁的竞争率和持锁时间；
 - Ready 队列长度和排队延迟；
 - Waiting 任务数量及内存占用；
 - RPC、Redis 和 Timer 混合负载下的 P50、P95、P99；
@@ -283,7 +295,9 @@ Timer 回调可以调用 `Await`。挂起期间：
 16. Service 停止期间 Waiting 任务的取消、恢复与引用清理；
 17. Timer 回调在 `Await` 期间不发生同 Timer 重叠执行；
 18. 高并发挂起、完成、超时和停止之间的竞态；
-19. Ready 与 Waiting 积压时的指标和过载行为。
+19. Ready 与 Waiting 积压时的指标和过载行为；
+20. 并发提交、空队列唤醒和 Runner 交接不会丢失任务或产生两个活动 Runner；
+21. 任何用户回调执行期间均未持有 `ServiceScheduler` 内部锁。
 
 ## 13. 已确认结论
 
@@ -297,6 +311,9 @@ Origin v3 Service 执行模型最终采用：
 - `Await` 是显式挂起点，普通异步调用不会自动让出；
 - `Await` 使当前 goroutine 与 Waiting 任务绑定，并创建一个替代 Runner 继续处理其他任务；
 - 恢复项被选中后，替代 Runner 把执行槽交还给原 goroutine 并退出，原 goroutine 成为活动 Runner；
+- `ServiceScheduler` 使用集中状态机和短临界区锁，不使用专用 Dispatcher goroutine；
+- 普通事件由活动 Runner 直接出队执行，不增加每事件 Channel 往返；
+- 首版不使用无锁调度结构，后续优化必须以基准结果为依据；
 - RPC 通过生成的 `AsyncXxx` 和 `AwaitXxx` 分别表达回调式异步与调度式等待；
 - `AwaitXxx` 内部使用通用 Await 原语，普通 RPC 用户不需要直接操作 Future；
 - 普通 I/O `Await` 由当前任务 goroutine 执行，不额外创建每请求辅助 goroutine；

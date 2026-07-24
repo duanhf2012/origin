@@ -1,0 +1,220 @@
+# Origin v3 Service 退休与正式停止设计
+
+## 1. 文档状态与范围
+
+- 状态：本文范围内的方案已确认
+- 确认日期：2026-07-24
+- 适用版本：Origin v3
+
+本文只规定 Service 退休状态、入站 RPC 摘流，以及退休与正式停止之间的边界。
+
+本文暂不确定：
+
+- `Retire`、`Resume`、`Stop` 的最终公开 API 外观；
+- `OnRetire`、`OnResume`、`OnStop` 等生命周期钩子的名称和调度顺序；
+- 收到正式 Stop 信号后的完整排空范围、超时和强制退出策略；
+- Node 与 Application 的优雅关闭编排。
+
+这些独立问题后续讨论。未确认项不能由实现阶段自行补成隐式行为。
+
+## 2. 设计目标
+
+1. 支持暂时关闭 Service 的新入站 RPC，而不关闭 Service。
+2. 退休是稳定运行状态，不自动演变为停止。
+3. 只有明确收到 Stop 信号，Service 才进入正式关闭流程。
+4. 已接收的请求继续完成，不因摘流被中途终止。
+5. 本地事件、Timer、`Await` 恢复、异步回调和出站访问在退休期间继续工作。
+6. 其他 Node 能通过服务发现观察退休状态，并从普通 RPC 路由中排除退休实例。
+7. 状态语义简单、可测试，不把“退休”“排空”“停止”混成一个隐式流程。
+
+## 3. 状态模型
+
+本文确认的状态转换为：
+
+```text
+Running  -> Retired
+Running  -> Stopping    仅由明确 Stop 信号触发
+Retired  -> Stopping    仅由明确 Stop 信号触发
+Stopping -> Stopped
+```
+
+`Retired` 是稳定状态：
+
+- 退休后不会因为入站 RPC 已排空而自动进入 `Stopping`；
+- 退休后不会自动关闭 Service、Transport、Timer 或其他资源；
+- 退休后不会自动调用停止钩子；
+- 没有 Stop 信号时，Service 可以一直保持 `Retired`。
+
+未来若提供恢复能力，只允许由明确的恢复操作使 `Retired` 回到 `Running`，不能根据流量或时间自动恢复。恢复 API 和钩子尚未确认。
+
+## 4. 进入退休状态
+
+进入退休状态必须在 ServiceScheduler 的有序状态边界内完成，确保后续任务看到一致状态。
+
+状态生效时至少完成：
+
+1. 把 Service 状态从 `Running` 原子切换为 `Retired`；
+2. 关闭新入站 RPC 的准入；
+3. 更新本地可路由状态，并向 Discovery Provider 发布退休状态；
+4. 唤醒需要观察状态变化的本地组件。
+
+已经越过准入边界并进入 Service Ready 队列的 RPC 属于“已接收请求”，必须继续执行。状态切换之后到达的 RPC 属于“新入站 RPC”，必须拒绝。
+
+`OnRetire` 是否存在，以及它相对于状态发布、已接收 RPC 和其他 Ready 任务的执行顺序，留待生命周期 API 设计确认。
+
+## 5. 退休状态允许和拒绝的任务
+
+### 5.1 拒绝的任务
+
+`Retired` 只拒绝新的入站 RPC：
+
+- 请求—响应 RPC：不进入 Service Ready 队列，返回 `CodeServiceRetired`；
+- Notify：不进入 Service Ready 队列，没有响应包，记录 `CodeServiceRetired` 指标；
+- Broadcast 中投递给该 Service 的 Notify：按 Notify 相同规则拒绝，不影响其他目标。
+
+请求是否属于“新入站”由第 4 节的准入边界决定，不能根据回调真正开始执行的时间判断。
+
+### 5.2 继续处理的任务
+
+以下能力在退休期间保持正常：
+
+- 退休前已经接收并进入 Ready 队列的 RPC；
+- Service 本地事件和内部任务；
+- Timer 到期回调；
+- 已挂起任务的 `Await` 完成、超时和取消恢复；
+- 异步 RPC、Redis、数据库等操作的结果回调；
+- Service 主动发起的出站 RPC、Notify、Redis 和数据库访问；
+- 服务发现、连接状态等框架事件；
+- 框架维护任务和可观测性任务。
+
+因此，“入站 RPC 已排空”不等于“Service Ready 队列已排空”，更不等于 Service 可以停止。
+
+## 6. Timer 行为
+
+Service 退休时不自动暂停或取消任何 Timer。Timer 继续到期并作为普通任务进入 ServiceScheduler。
+
+如果某类业务在退休期间不应继续执行，由业务层保存对应 `TimerID` 并显式调用：
+
+```go
+PauseTimer(timerID TimerID) bool
+ResumeTimer(timerID TimerID) bool
+```
+
+框架不替业务猜测哪些 Timer 属于流量入口、后台维护或状态保存。暂停和恢复的剩余时间、Cron 跳过以及运行中回调规则见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。
+
+## 7. 与正式 Stop 的边界
+
+只有明确收到 Stop 信号，Service 才能从 `Running` 或 `Retired` 进入 `Stopping`。
+
+进入 `Stopping` 后才允许执行正式关闭动作，例如：
+
+- 拒绝新任务；
+- 取消 Context；
+- 取消或清理 Timer；
+- 排空允许完成的任务；
+- 关闭业务资源；
+- 执行停止钩子；
+- 最终进入 `Stopped`。
+
+上述动作的精确顺序、哪些任务需要排空、默认超时、超时后的行为以及错误码，必须在后续“Service 优雅停止”设计中单独确认。本文只确认：
+
+- 退休不会触发正式关闭；
+- 退休排空已接收 RPC 后仍保持 `Retired`；
+- Stop 是进入 `Stopping` 的唯一外部触发条件。
+
+## 8. 服务发现与路由
+
+退休不会使 Service 从发现目录消失：
+
+- 远端监听者不能仅因退休收到 `Lost`；
+- TCP 连接不能仅因退休立即关闭；
+- Service 实例仍可查询，并带有 `Retired` 和“不可接受普通入站 RPC”的状态；
+- 普通单目标 RPC、Notify 和 Broadcast 路由排除退休实例；
+
+服务发现需要提供退休状态变化事件，使业务可以监听其他 Service 的退休状态。事件的最终接口和名称后续确定，本文只固定退休状态语义。
+
+若后续确认提供恢复能力，恢复后的路由恢复和发现事件语义必须随恢复 API 一并设计，本文不提前确定。
+
+详细快照规则见 [Origin v3 服务发现与关注筛选设计](./2026-07-24-service-discovery-and-interest-filter-design.md)。
+
+## 9. 错误处理
+
+请求—响应 RPC 被退休状态拒绝时，使用统一错误码：
+
+```go
+CodeServiceRetired Code = 1001
+```
+
+Notify 和 Broadcast 没有远端错误响应通道，接收端使用相同 Code 记录丢弃计数。调用方业务逻辑只依赖 Code，不比较 Message。
+
+统一错误表示、线协议和编号区间见 [Origin v3 统一错误码设计](./2026-07-24-unified-error-code-design.md)。
+
+## 10. 并发与调度约束
+
+- 退休状态切换由 `ServiceScheduler` 集中管理；
+- 检查准入与登记已接收 RPC 必须属于同一个原子边界，不能出现已拒绝请求仍进入 Ready 队列的窗口；
+- 状态锁内不能执行用户代码、网络操作或发现监听器；
+- 已接收 RPC、Timer 和其他任务仍遵守 Service 单执行槽规则；
+- 退休不创建第二个 Service 用户代码执行协程；
+- 状态事件通过 Ready 队列投递，不能在 Discovery Provider 或 Transport goroutine 中直接执行用户代码。
+
+ServiceScheduler 的执行槽和 Runner 交接规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)。
+
+## 11. 可观测性
+
+至少记录：
+
+- 当前 Service 状态和状态进入时间；
+- 退休次数和退休持续时间；
+- 退休前已接收但尚未完成的入站 RPC 数；
+- 因退休拒绝的请求—响应 RPC、Notify 和 Broadcast 数；
+- 按错误码聚合的拒绝数量；
+- 退休期间仍在运行的 Timer、Waiting 任务和 Ready 任务数；
+- 退休状态发布到 Discovery Provider 的延迟；
+- 远端可见状态和本地实际状态不一致的持续时间。
+
+日志必须限频，不能为退休期间每个被拒绝的 Notify 同步写一条日志。
+
+## 12. 测试要求
+
+后续实现至少验证：
+
+1. `Running` 可以进入 `Retired`；
+2. `Retired` 不会因已接收 RPC 排空自动进入 `Stopping`；
+3. 只有明确 Stop 信号能进入 `Stopping`；
+4. 状态切换前已接收的 RPC 可以完成；
+5. 状态切换后的新请求—响应 RPC 返回 `CodeServiceRetired`；
+6. 状态切换后的 Notify 和 Broadcast 不进入 Service Ready 队列；
+7. 本地事件、Timer、Await 恢复和异步回调在退休期间继续执行；
+8. Service 在退休期间仍可发起出站操作；
+9. 退休不会自动暂停或取消 Timer；
+10. 业务可以显式暂停和恢复 Timer；
+11. 退休实例仍在发现快照中，但不进入普通 RPC 候选路由；
+12. 退休不会产生 `Lost`，也不会仅因此关闭 TCP 连接；
+13. 远端监听者能观察退休状态；
+14. 准入检查和状态切换竞争时，每个请求只能明确归为“已接收”或“已拒绝”；
+15. 状态切换期间仍满足 Service 单执行槽约束。
+
+## 13. 已确认结论
+
+Origin v3 Service 退休采用：
+
+- `Retired` 是稳定的临时摘流状态；
+- 退休只拒绝新的入站 RPC；
+- 已接收 RPC 和其他 Service 任务继续处理；
+- 退休排空已接收 RPC 后不进入 `Stopping`；
+- 只有明确 Stop 信号才启动正式关闭；
+- 退休不自动关闭资源或触发停止钩子；
+- 退休不自动暂停 Timer，业务通过 `PauseTimer` 和 `ResumeTimer` 自行决定；
+- 退休实例仍保持发现可见和连接，但从普通 RPC 路由中排除；
+- 服务发现可以监听其他 Service 的退休状态；
+- 退休拒绝统一使用 `CodeServiceRetired`。
+
+## 14. 后续讨论
+
+1. `Retire`、`Resume` 和状态查询接口的最终外观；
+2. `OnRetire`、`OnResume` 与状态发布的精确顺序；
+3. 正式 Stop 的准入关闭、任务排空、Deadline 和强制退出；
+4. Stop 时 Timer、Waiting 任务和外部资源的处理；
+5. Node 与 Application 的优雅停止顺序；
+6. 退休状态监听器的公开注册和取消注册接口。

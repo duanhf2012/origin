@@ -4,6 +4,7 @@
 
 - 状态：本文范围内的方案已确认
 - 确认日期：2026-07-24
+- 最后更新：2026-07-24
 - 适用版本：Origin v3
 
 本文记录 Origin v3 服务发现可见快照、`allow_discovery` 关注筛选、发现与失去发现事件方面已经确认的设计。
@@ -14,7 +15,8 @@
 - 模板 Service 的构造器注册、实例配置和生命周期规则；
 - 单目标 RPC 的负载均衡和定向路由算法；
 - TCP 连接池、连接关闭延迟、心跳与重连；
-- Node 退休、优雅摘流和健康状态模型；
+- Service 退休与正式 Stop 的完整生命周期；
+- Node 级退休、优雅摘流和健康状态模型；
 - 发现监听器的最终公开注册、取消注册 API 外观。
 
 这些问题将在后续逐项讨论，不与本文已经确认的关注筛选和事件语义混合。
@@ -66,6 +68,7 @@ Discovery Provider 向当前 Node 提供原始 Node 与 Service 信息。原始�
 - TCP 地址或 Transport 所需端点；
 - Node 标签；
 - 当前公开的 Service 实例；
+- 每个 Service 的运行状态和是否接受普通入站 RPC；
 - 每个 Service 由生成代码注册的 RPC 契约和方法元数据。
 
 RPC 契约和方法元数据由 Go RPC 接口及 `origin-gen` 自动产生，不要求开发者在配置中重复声明 RPC 函数。
@@ -77,12 +80,14 @@ RPC 契约和方法元数据由 Go RPC 接口及 `origin-gen` 自动产生，不
 可见服务快照是以下功能的共同事实来源：
 
 - Service 查询；
-- RPC 候选路由构建；
+- RPC 候选路由构建，其中退休实例保持可见但不进入普通 RPC 候选路由；
 - Broadcast 目标 Node 计算；
 - TCP 连接需求计算；
 - `Discovered` 和 `Lost` 事件差异计算。
 
 业务代码不能修改快照。快照更新完成后才允许投递相应事件。
+
+“可见”与“可路由”是两个不同维度。`allow_discovery` 决定实例是否可见；实例的运行状态决定它当前是否接受普通入站 RPC。
 
 ### 4.3 具体 Service 实例
 
@@ -298,12 +303,14 @@ map[string][]string
 
 某个 Node 的最后一个匹配 Service 消失时，服务发现系统移除对应路由并向连接管理器发布“不再需要该 Node”的结果。连接管理器立即关闭还是延迟关闭，由独立的连接管理设计确定。
 
+匹配 Service 进入退休状态不等于消失。实例仍在可见快照中，但从普通 RPC 候选路由中排除；TCP 连接需求仍按可见实例计算，不能仅因退休立即关闭连接。
+
 ### 7.2 NATS
 
 NATS 模式下，当前 Node 维护的是到 NATS 的连接，而不是到每个远端 Node 的直连。`allow_discovery` 仍然决定：
 
 - 哪些 Service 进入可见快照；
-- 哪些 Service 进入 RPC 候选路由；
+- 哪些处于可路由状态的 Service 进入 RPC 候选路由；
 - 哪些 Service 产生发现与失去发现事件；
 - Broadcast 语义上包含哪些目标 Service。
 
@@ -372,9 +379,25 @@ type IDiscoveryListener interface {
 - Cooperative 场景与 RPC 恢复、Timer 等任务按 Ready 队列规则交错；
 - 监听器 panic 由 Service 任务边界恢复并记录，不破坏 Discovery Provider。
 
+### 8.5 退休状态事件
+
+Service 从 `Running` 进入 `Retired` 时仍属于同一个可见实例，因此：
+
+- 不产生 `Lost`；
+- 不删除可见快照中的实例；
+- 更新实例的运行状态和可路由标记；
+- 从普通请求—响应 RPC、Notify 和 Broadcast 的候选路由中排除；
+- 向订阅者产生“已退休”的状态变化事件。
+
+状态变化事件与 `Discovered`、`Lost` 使用相同的有序快照边界和 Service 调度投递规则。事件对象、监听接口和命名后续确定，本文只固定语义。
+
+退休状态的完整行为见 [Origin v3 Service 退休与正式停止设计](./2026-07-24-service-retirement-and-graceful-shutdown-design.md)。
+
+是否提供 `Retired -> Running` 恢复能力，以及恢复时使用独立状态事件还是复用其他事件，留待生命周期 API 讨论，不在本文中提前确认。
+
 ## 9. 发现状态与连接状态分离
 
-`Discovered` 表示 Service 已进入当前 Node 的可见快照和候选路由，不表示 TCP 已经完成连接，也不表示远端 Service 已经成功处理请求。
+`Discovered` 表示 Service 已进入当前 Node 的可见快照，不保证它当前处于普通 RPC 候选路由，也不表示 TCP 已经完成连接或远端 Service 已经成功处理请求。
 
 `Lost` 表示 Service 已离开可见快照，不等同于一次瞬时 TCP 断线。
 
@@ -383,9 +406,12 @@ type IDiscoveryListener interface {
 - 服务发现：`Discovered`、`Lost`；
 - TCP Node 连接：Connected、Disconnected；
 - NATS 连接：Connected、Disconnected；
-- 后续定义的健康、退休和可路由状态。
+- Service 运行与路由状态：Running、Retired、是否接受普通入站 RPC；
+- 后续定义的健康状态。
 
 服务发现更新必须先替换可查询快照和路由可见性，再把事件提交到 Service 调度队列。监听器执行时查询服务发现状态，应能看到与事件一致的新状态。
+
+退休只改变运行和可路由状态，不冒充 `Lost` 或 Transport 断线。
 
 ## 10. 配置校验与错误
 
@@ -447,7 +473,10 @@ Node 创建网络资源之前完成 `allow_discovery` 静态校验。以下情�
 25. 补发和并发增量更新之间不丢失、不重复且顺序稳定；
 26. 事件进入监听方 Service 的 FIFO Ready 队列；
 27. 事件执行前可查询快照已经更新；
-28. 服务发现事件与 TCP/NATS 连接事件互不冒充。
+28. 服务发现事件与 TCP/NATS 连接事件互不冒充；
+29. Service 退休后仍在可见快照中，但从普通 RPC 候选路由中排除；
+30. 退休产生状态变化事件，不产生 `Lost`；
+31. TCP 连接不会仅因某个可见 Service 退休而立即关闭。
 
 ## 13. 已确认结论
 
@@ -477,7 +506,10 @@ Origin v3 服务发现与关注筛选采用：
 - 第一版只支持区分大小写的精确标签匹配，不支持正则和通配符；
 - TCP 连接需求按目标 Node 去重；
 - TCP 与 NATS 共用同一可见服务语义；
-- 服务发现事件与 Transport 连接事件保持独立。
+- 服务发现事件与 Transport 连接事件保持独立；
+- Service 的“可见”和“可路由”分开表示；
+- 退休实例保持可见和连接，但从普通 RPC 候选路由中排除；
+- 退休通过状态变化事件通知，不冒充 `Lost`。
 
 ## 14. 后续讨论顺序
 
@@ -486,6 +518,7 @@ Origin v3 服务发现与关注筛选采用：
 1. 监听器注册、取消注册、多监听器和生命周期 API；
 2. Discovery Provider 抽象，以及静态配置、Origin Discovery、etcd 的首版支持范围；
 3. 全量快照、增量更新、版本号和 Provider 重连的一致性规则；
-4. Node 退休、健康状态与可路由状态；
-5. 单目标 RPC 的实例选择和定向路由；
-6. TCP 连接建立、关闭延迟、心跳与重连策略。
+4. Service 退休状态监听器的公开 API，以及恢复状态的接口；
+5. Node 退休、健康状态与可路由状态；
+6. 单目标 RPC 的实例选择和定向路由；
+7. TCP 连接建立、关闭延迟、心跳与重连策略。

@@ -4,6 +4,7 @@
 
 - 状态：已确认
 - 确认日期：2026-07-23
+- 最后更新：2026-07-24
 - 适用版本：Origin v3
 
 本文只设计 Origin v3 的定时器系统，范围包括：
@@ -34,6 +35,7 @@ Timer 回调最终如何与其他 Service 任务交错，由后续 Service 执�
 6. 一次性 Timer 不因 Service 繁忙而静默丢失；周期 Timer 在过载时合并错过的触发。
 7. 单 Node 按最多一百万个活跃定时任务进行容量和基准验证。
 8. 保持实现边界清晰。时间轮层级、桶数量等纯内部参数不进入公共接口，由实现阶段的基准测试决定。
+9. Service 进入退休状态时不自动暂停 Timer，由业务通过统一接口决定需要暂停和恢复的 Timer。
 
 ## 3. Origin v2 现状与取舍
 
@@ -146,6 +148,8 @@ type ITimer interface {
     TickerFunc(interval time.Duration, fn TimerFunc) TimerID
     CronFunc(expr string, fn TimerFunc) (TimerID, error)
 
+    PauseTimer(timerID TimerID) bool
+    ResumeTimer(timerID TimerID) bool
     CancelTimer(timerID *TimerID) bool
 }
 ```
@@ -190,7 +194,7 @@ s.CancelTimer(&timerID)
 - TimerID 在当前 Node 生命周期内单调生成并且不复用；
 - ID 耗尽时拒绝创建新 Timer，不能从头复用旧 ID；
 - Service 获得的是绑定当前 Service 所有者的 `ITimer` 实现；
-- `CancelTimer` 必须校验 Timer 所有者，不能取消其他 Service 的 Timer；
+- `PauseTimer`、`ResumeTimer` 和 `CancelTimer` 必须校验 Timer 所有者，不能操作其他 Service 的 Timer；
 - TimerID 只用于标识，不作为判断 Timer 当前是否仍活跃的唯一依据。
 
 ### 6.4 参数失败
@@ -203,7 +207,9 @@ s.CancelTimer(&timerID)
 - TimerEngine 已停止或所有者正在关闭时，创建操作失败；
 - 失败必须增加指标；配置或表达式错误应返回明确错误，不能静默修正。
 
-## 7. CancelTimer 语义
+## 7. Timer 控制语义
+
+### 7.1 CancelTimer
 
 接口接收 `*TimerID`，由框架负责清零：
 
@@ -223,6 +229,42 @@ CancelTimer(timerID *TimerID) bool
 8. Service 停止时通过回调 Context 和 Service 执行模型处理正在运行的任务。
 
 同一个 `TimerID` 变量不能被多个业务 goroutine 无序读写。业务变量仍遵循所属 Service 的状态访问规则；TimerEngine 内部状态转换必须并发安全。
+
+### 7.2 PauseTimer 与 ResumeTimer
+
+暂停和恢复接收 `TimerID` 值，不接收指针，也不修改调用方变量。暂停后的 Timer 仍然存在，ID 仍然有效；只有取消才通过 `CancelTimer(*TimerID)` 把外部变量清零。
+
+```go
+PauseTimer(timerID TimerID) bool
+ResumeTimer(timerID TimerID) bool
+```
+
+通用规则如下：
+
+1. `timerID == InvalidTimerID`、ID 不存在、所有者不匹配、Timer 已取消或已经完成时返回 `false`；
+2. 活跃 Timer 成功转为暂停状态时，`PauseTimer` 返回 `true`；
+3. 暂停 Timer 成功恢复为活跃状态时，`ResumeTimer` 返回 `true`；
+4. 重复暂停或重复恢复没有发生状态转换，返回 `false`；
+5. 暂停状态的 Timer 仍可以取消，取消后立即清理条目和回调引用；
+6. 暂停只影响后续触发，不取消、终止或回滚已经开始执行的回调。
+
+### 7.3 恢复后的时间语义
+
+采用“保留剩余时间”方案：
+
+- `AfterFunc` 暂停时保存距离到期的剩余时长，恢复后继续等待该剩余时长；
+- `TickerFunc` 暂停时保存距离下一节拍的剩余时长；恢复后的第一次触发等待该剩余时长，此后继续使用原始周期；
+- `CronFunc` 暂停期间的触发全部跳过；恢复时按当前墙上时间计算下一个未来匹配点，不补执行暂停期间错过的 Cron。
+
+如果 Timer 已经到期并进入 Ready 列表，但回调尚未开始，暂停成功并记为剩余时长 `0`。恢复后把该回调放到所属 Service 的后续调度轮次执行，不能在 `ResumeTimer` 调用栈内同步执行。
+
+### 7.4 与正在执行回调的竞争
+
+- 一次性 Timer 的回调已经开始时已不存在可暂停的未来触发，`PauseTimer` 返回 `false`；
+- 周期 Timer 或 Cron 的回调正在运行或因 `Await` 挂起时，`PauseTimer` 可以标记“当前回调结束后保持暂停”，当前回调继续执行；
+- 已标记暂停的周期 Timer 或 Cron 在当前回调结束后不再安排下一次触发；
+- `ResumeTimer` 只能恢复已经进入暂停状态的 Timer，不能使同一 Timer 的两个回调重叠；
+- 状态转换必须由 TimerEngine 原子裁决，业务代码不依赖并发调用的先后猜测结果。
 
 ## 8. Timer 类型与触发语义
 
@@ -322,6 +364,8 @@ Timer 是否能够与其他 Service 任务交错、哪些操作会形成挂起�
 
 相关规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)。
 
+Service 进入退休状态时，TimerEngine 不自动暂停或取消该 Service 的 Timer。退休只关闭新入站 RPC；Timer 仍按正常规则触发。业务需要暂时停止某项定时逻辑时，显式调用 `PauseTimer`，详细边界见 [Origin v3 Service 退休与正式停止设计](./2026-07-24-service-retirement-and-graceful-shutdown-design.md)。
+
 ## 11. RPC 与系统组件接入边界
 
 ### 11.1 RPC
@@ -365,8 +409,9 @@ Service 停止时：
 每个 Node 和所有者至少记录：
 
 - 当前活跃 Timer 数；
-- 注册、取消、触发和自然完成数量；
-- 无效注册和无效取消数量；
+- 当前暂停 Timer 数；
+- 注册、暂停、恢复、取消、触发和自然完成数量；
+- 无效注册、无效暂停、无效恢复和无效取消数量；
 - Ready 列表长度；
 - 周期触发合并次数；
 - 时间轮调度延迟；
@@ -385,6 +430,7 @@ Service 停止时：
 
 - 单线程注册和取消；
 - 多 goroutine 并发注册和取消；
+- 多 goroutine 并发暂停、恢复和取消；
 - RPC 正常响应导致的大量快速取消；
 - 大量 Timer 同一毫秒到期；
 - Timer 在不同时间轮层级之间迁移；
@@ -402,19 +448,27 @@ Service 停止时：
 1. 1ms 边界、向上取整和不提前触发；
 2. TimerID 唯一性和零值规则；
 3. `CancelTimer` 清零、返回值和所有者校验；
-4. 取消与到期、Ready、开始执行之间的竞争；
-5. 一次性 Timer 在 Service 繁忙时不丢失；
-6. 周期 Timer 错过合并且不自重入；
-7. Service 停止时批量取消和引用清理；
-8. 一个所有者积压不阻塞其他所有者；
-9. 合并唤醒不会丢失 Ready 状态；
-10. Cron 5 段和 6 段表达式兼容；
-11. Cron 本地时区、显式时区和非法时区；
-12. 墙上时钟向前、向后调整；
-13. RPC pending 正常完成、取消、超时和断线清理；
-14. RPC 与 `Await` 在没有上层 Deadline 时正确使用内置 `15s` 兜底；
-15. Node 停止期间拒绝新增并完整释放；
-16. TimerEngine goroutine不执行任何用户回调。
+4. `PauseTimer` 和 `ResumeTimer` 的返回值、状态转换和所有者校验；
+5. `AfterFunc` 暂停后保留剩余时长；
+6. `TickerFunc` 恢复后的第一次触发保留剩余时长，后续恢复原周期；
+7. `CronFunc` 跳过暂停期间的触发，并从下一个未来匹配点恢复；
+8. 暂停已到期但尚未执行的 Timer，恢复后在后续调度轮次执行；
+9. 暂停正在运行或 `Await` 中的周期回调，不终止当前回调且不产生重叠；
+10. 暂停状态仍可取消并完整清理引用；
+11. 取消与到期、Ready、开始执行之间的竞争；
+12. 一次性 Timer 在 Service 繁忙时不丢失；
+13. 周期 Timer 错过合并且不自重入；
+14. Service 退休不自动暂停或取消 Timer；
+15. Service 停止时批量取消和引用清理；
+16. 一个所有者积压不阻塞其他所有者；
+17. 合并唤醒不会丢失 Ready 状态；
+18. Cron 5 段和 6 段表达式兼容；
+19. Cron 本地时区、显式时区和非法时区；
+20. 墙上时钟向前、向后调整；
+21. RPC pending 正常完成、取消、超时和断线清理；
+22. RPC 与 `Await` 在没有上层 Deadline 时正确使用内置 `15s` 兜底；
+23. Node 停止期间拒绝新增并完整释放；
+24. TimerEngine goroutine不执行任何用户回调。
 
 ## 16. 已确认的取舍
 
@@ -426,7 +480,11 @@ Origin v3 定时器系统最终采用：
 - 单 Node 一百万活跃任务的设计和基准规模；
 - `IService` 直接组合 `ITimer`；
 - 对外只暴露 TimerID，不暴露内部 Timer 对象；
+- `PauseTimer(TimerID)` 和 `ResumeTimer(TimerID)` 不改变 TimerID；
 - `CancelTimer(*TimerID)` 负责把调用方变量清零；
+- `AfterFunc` 和 `TickerFunc` 暂停后保留距离下一次触发的剩余时长；
+- `CronFunc` 跳过暂停期间的触发，恢复后只计算下一个未来匹配点；
+- Service 退休不自动暂停 Timer，由业务显式决定；
 - Timer 回调接收 `context.Context` 和 TimerID；
 - 周期 Timer 使用固定节拍、错过合并的语义；
 - Cron 兼容 v2 的 5/6 段数字语法；

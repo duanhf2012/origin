@@ -4,6 +4,7 @@
 
 - 状态：已确认
 - 确认日期：2026-07-23
+- 最后更新：2026-07-24
 - 适用版本：Origin v3
 
 本文记录 Origin v3 RPC 的 Go 接口签名、生成代码外观、异步调用、调度式等待、通知、广播和错误返回方面已经确认的设计。
@@ -17,7 +18,7 @@
 - 客户端超时后的远端取消协议；
 - RPC 错误码和错误详情的完整线协议。
 
-数据类型和编解码规则见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，任务挂起与恢复规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)，Deadline 的统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。
+数据类型和编解码规则见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，任务挂起与恢复规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)，Deadline 的统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)，错误表示见 [Origin v3 统一错误码设计](./2026-07-24-unified-error-code-design.md)。
 
 ## 2. 设计目标
 
@@ -410,11 +411,11 @@ BroadcastPlayerOnline(
 
 ### 10.2 广播目标
 
-`BroadcastXxx` 在语义上面向调用时服务发现快照中所有匹配的 Service。匹配依据是生成阶段确定的稳定 RPC 契约 ID 和方法 ID，不按 Go 接口名或方法名字符串临时匹配，避免无关接口因同名而误收。
+`BroadcastXxx` 在语义上面向调用时服务发现快照中所有匹配且可路由的 Service。匹配依据是生成阶段确定的稳定 RPC 契约 ID 和方法 ID，不按 Go 接口名或方法名字符串临时匹配，避免无关接口因同名而误收。
 
 生成的 `rpcClient` 是绑定 RPC 契约和当前 Node RPC Runtime 的强类型逻辑代理，不是一条 TCP 或 NATS 连接，也不拥有连接生命周期。连接建立、复用、重连和关闭统一由当前 Node 的连接管理器和 Transport 管理。同一个 `rpcClient` 可以经过多个目标 Node 的 TCP 连接发送，也可以经过当前 Node 到 NATS 的连接发送。
 
-具体服务筛选与关注规则见 [Origin v3 服务发现与关注筛选设计](./2026-07-24-service-discovery-and-interest-filter-design.md)。退休节点和单目标路由规则继续由各自的独立设计确定。
+具体服务筛选与关注规则见 [Origin v3 服务发现与关注筛选设计](./2026-07-24-service-discovery-and-interest-filter-design.md)。退休 Service 保持可见但从普通 RPC 路由中排除，详见 [Origin v3 Service 退休与正式停止设计](./2026-07-24-service-retirement-and-graceful-shutdown-design.md)。单目标路由规则继续由独立设计确定。
 
 ### 10.3 按 Node 合并投递
 
@@ -503,7 +504,7 @@ GetPlayer(
 
 通知和广播没有响应通道，远端 panic 不能返回调用方，只在接收端记录日志、指标和追踪。
 
-具体错误码、错误详情、堆栈暴露和 gRPC 状态映射由独立错误模型设计确定。
+具体错误码、线协议和堆栈边界见 [Origin v3 统一错误码设计](./2026-07-24-unified-error-code-design.md)。gRPC 状态映射仍由插件设计单独确定。
 
 ## 12. 多输入多输出的内部布局
 

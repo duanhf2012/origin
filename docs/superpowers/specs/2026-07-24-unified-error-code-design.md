@@ -1,0 +1,251 @@
+# Origin v3 统一错误码设计
+
+## 1. 文档状态与范围
+
+- 状态：本文范围内的方案已确认
+- 确认日期：2026-07-24
+- 适用版本：Origin v3
+
+本文记录 Origin v3 统一错误码、本地 Go `error`、固定错误复用和 RPC 线协议错误的基础规则。
+
+以下独立问题不属于本文范围：
+
+- 每个业务项目的具体错误码清单；
+- gRPC 状态码的完整映射表；
+- HTTP 状态码映射；
+- 日志、Trace 和告警系统的字段规范；
+- 面向玩家的多语言提示文本。
+
+## 2. 背景
+
+Origin v2 大量使用 `errors.New` 和 `fmt.Errorf` 返回错误字符串。调用方如果需要区分超时、断线、路由失败或 Service 退休，只能比较文本或依赖调用位置，存在以下问题：
+
+- 错误文本修改会破坏程序判断；
+- TCP、NATS 和 gRPC 难以共享稳定语义；
+- 跨语言调用方无法使用 Go 的 `errors.Is`；
+- 相同错误在不同模块中使用不同文字；
+- 动态拼接错误字符串增加分配和 GC 压力。
+
+v3 使用稳定数值错误码解决程序判断和跨协议传输问题，但不把每个错误设计成携带任意详情的大对象。
+
+## 3. 设计目标
+
+1. 程序只通过稳定 `Code` 判断错误原因。
+2. TCP、NATS、gRPC 和本地调用共享同一套 Origin 错误码。
+3. 成功路径保持 `nil`，不增加任何错误对象开销。
+4. 固定框架错误可以复用，不为每次失败创建对象。
+5. 线协议只携带必要字段，不默认传输详情、堆栈和底层错误。
+6. 保持 Go 标准 `error`、`errors.Is`、`errors.As` 和包装习惯。
+7. 为项目业务错误保留独立编号空间。
+
+## 4. 核心模型
+
+### 4.1 Code
+
+```go
+type Code uint32
+
+const CodeOK Code = 0
+```
+
+`Code` 是跨模块、跨进程和跨语言的稳定判断依据。错误码一旦发布，不得改变语义，也不得把已经废弃的编号分配给其他错误。
+
+`CodeOK` 只表示成功。Go API 的成功值仍然使用 `nil`，不会为了表示成功创建错误对象。
+
+### 4.2 不公开完整 Error 结构
+
+首版不公开包含 `Code`、`Message`、`Details` 和 `cause` 的大错误结构。内部实现只需支持以下语义接口：
+
+```go
+type Coder interface {
+    Code() Code
+}
+
+func CodeOf(err error) Code
+func IsCode(err error, code Code) bool
+func New(code Code) error
+func NewMessage(code Code, message string) error
+func Wrap(code Code, cause error) error
+```
+
+这段代码描述语义，不提前锁定最终包名或构造函数名称。
+
+固定错误可以使用只保存 `Code` 的轻量内部类型；只有动态消息或底层 `cause` 存在时，才创建对应的包装错误。
+
+### 4.3 标准 Message 表
+
+Origin 为内置错误码维护标准文本表：
+
+```go
+var codeText = map[Code]string{
+    CodeCanceled:       "operation canceled",
+    CodeServiceRetired: "service is retired",
+}
+```
+
+固定错误的 `Error()` 通过错误码取得标准文本。标准 Message 用于日志和开发调试，不是程序判断条件，也不是面向玩家的多语言文案。
+
+以下写法禁止用于逻辑判断：
+
+```go
+if err.Error() == "service is retired" {
+}
+```
+
+必须使用：
+
+```go
+if originerr.IsCode(err, CodeServiceRetired) {
+}
+```
+
+## 5. 固定错误与分配
+
+高频框架错误使用全局只读哨兵：
+
+```go
+var (
+    ErrServiceRetired  = New(CodeServiceRetired)
+    ErrServiceStopping = New(CodeServiceStopping)
+    ErrServiceStopped  = New(CodeServiceStopped)
+    ErrServiceQueueFull = New(CodeServiceQueueFull)
+)
+```
+
+固定哨兵可以在多 goroutine 之间安全复用，不能包含单次请求的可变状态。
+
+使用固定哨兵时：
+
+- 成功路径没有额外开销；
+- 固定失败路径不动态格式化字符串；
+- 不为 NodeID、ServiceName 或 RPC 方法创建详情切片；
+- 需要诊断上下文时，由调用位置写入结构化日志或 Trace。
+
+如果某个预期业务结果可能频繁发生，例如金币不足、背包已满或玩家不在线，项目可以返回固定业务错误码或把结果码作为业务返回值，避免每次动态 `fmt.Errorf`。
+
+## 6. 本地 cause
+
+`Wrap` 可以在本地保留底层 `cause`：
+
+```go
+return originerr.Wrap(CodeStorageUnavailable, err)
+```
+
+规则如下：
+
+- `CodeOf` 返回外层稳定 Origin 错误码；
+- `errors.Is` 和 `errors.As` 可以继续检查本地 cause；
+- cause 只用于当前进程的日志、Trace 和错误链；
+- cause 的文本、具体 Go 类型和内部字段不进入 RPC 线协议；
+- panic 堆栈只保存在服务端诊断系统。
+
+## 7. 线协议
+
+TCP、NATS 和 gRPC 插件共用以下最小语义：
+
+```go
+type WireError struct {
+    Code    uint32
+    Message string
+}
+```
+
+`Message` 是可选字段：
+
+- 对于 Origin 已登记的固定错误，通常只发送 `Code`，接收端通过本地错误码表取得标准文本；
+- 只有确实需要向远端传递可公开的动态说明时才发送 `Message`；
+- 空 Message 不编码；
+- Message 不得包含 panic 堆栈、文件路径、数据库语句、密钥或其他敏感内部信息；
+- 接收端即使收到 Message，也只能按 `Code` 进行逻辑判断。
+
+首版不在线协议中加入 `Details`、`map[string]any` 或任意扩展对象。Node、Service、RPC 方法、请求 ID 等诊断信息通过日志和 Trace 关联。
+
+## 8. 编号区间
+
+首版按模块预留连续区间：
+
+| 范围 | 用途 |
+| --- | --- |
+| `0` | 成功 |
+| `1–999` | 通用错误、取消、超时、参数错误 |
+| `1000–1999` | Service 生命周期与调度 |
+| `2000–2999` | RPC 与路由 |
+| `3000–3999` | TCP、NATS 等 Transport |
+| `4000–4999` | 编解码与协议 |
+| `5000–5999` | 服务发现 |
+| `6000–6999` | Timer |
+| `10000–99999` | Origin 扩展和插件预留 |
+| `100000` 以上 | 项目业务错误 |
+
+所有 Origin 内置错误码集中登记。CI 必须检查重复编号和越界使用。删除或废弃的错误码保留编号，不得复用。
+
+首版不直接复用 gRPC 数值。gRPC 插件把 Origin Code 显式映射为 gRPC 状态，具体映射表单独设计。
+
+## 9. 首批生命周期错误码
+
+```go
+const (
+    CodeCanceled         Code = 1
+    CodeDeadlineExceeded Code = 2
+
+    CodeServiceRetired          Code = 1001
+    CodeServiceStopping         Code = 1002
+    CodeServiceStopped          Code = 1003
+    CodeServiceQueueFull        Code = 1004
+    CodeGracefulShutdownTimeout Code = 1005
+)
+```
+
+退休 Service 收到新的请求—响应 RPC 时返回 `CodeServiceRetired`。Notify 和 Broadcast 没有远端响应通道，接收端拒绝投递并使用相同 Code 记录指标。
+
+## 10. 与 Context 的关系
+
+Origin 必须识别：
+
+- `context.Canceled` → `CodeCanceled`；
+- `context.DeadlineExceeded` → `CodeDeadlineExceeded`。
+
+本地 API 仍支持 `errors.Is(err, context.Canceled)` 和 `errors.Is(err, context.DeadlineExceeded)`。跨网络后，调用方至少可以通过 Origin Code 得到相同语义。
+
+## 11. 性能约束
+
+- 成功路径只判断 `err == nil`；
+- 固定错误复用只读哨兵；
+- 已登记固定错误在线协议中可以只编码 `uint32 Code`；
+- 不为每个错误分配详情 Slice 或 Map；
+- 不在热路径动态格式化标准错误文本；
+- 错误码查询使用静态表或生成的 Switch，最终选择由基准测试决定。
+
+## 12. 测试要求
+
+至少覆盖：
+
+1. `nil` 表示成功且 `CodeOf(nil) == CodeOK`；
+2. 固定错误重复使用不产生每次调用分配；
+3. `CodeOf` 和 `IsCode` 可以穿透本地错误包装；
+4. `errors.Is`、`errors.As` 与 cause 共存；
+5. 固定 WireError 只携带 Code 时，远端得到标准 Message；
+6. 动态 Message 可以传输但不影响 Code 判断；
+7. cause、堆栈和敏感信息不会进入线协议；
+8. 重复错误码和越界编号在 CI 中失败；
+9. Context 取消和超时映射正确；
+10. TCP、NATS 和 gRPC 插件保持相同 Origin Code。
+
+## 13. 已确认结论
+
+1. Origin v3 使用稳定 `uint32 Code` 统一错误判断。
+2. 首版不公开重量级 Error 结构。
+3. 固定错误使用可复用哨兵，标准 Message 从本地错误码表取得。
+4. 线协议只包含 `Code + 可选 Message`。
+5. 首版不传输 Details、cause 或 panic 堆栈。
+6. 程序不能依赖 Message 文本判断错误。
+7. 错误码按模块划分区间，项目业务码从 `100000` 开始。
+
+## 14. 后续讨论
+
+后续独立确定：
+
+1. Origin Code 到 gRPC 状态码的映射；
+2. HTTP 状态码映射；
+3. 项目业务错误码的注册和代码生成方式；
+4. 面向玩家的多语言文案与业务错误码关系。
