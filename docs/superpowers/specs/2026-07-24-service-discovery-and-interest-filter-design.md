@@ -139,7 +139,7 @@ nodes:
 - `allow_discovery.node_labels` 用于匹配目标 Node 发布的标签；
 - `node_labels` 不会自动引用当前 Node 的同名标签，配置值始终明确表示目标值。
 
-`services` 和 `allow_discovery.services` 中的字符串均匹配公开的 `ServiceName`，不直接匹配 Go 实现类型。模板 Service 的实际名称与模板名称边界见[模板 Service 设计](./2026-07-24-service-template-design.md)；是否增加按模板筛选的显式字段将在后续单独确定。
+`services` 和 `allow_discovery.services` 中的字符串均匹配公开的实际 `ServiceName`，不直接匹配 Go 实现类型或模板名称。与 v2 一致，模板 Service 创建完成后按普通 Service 处理；需要关注多个模板实例时，必须逐个配置创建后的实际名称，不增加 `templates` 筛选字段。详细边界见[模板 Service 设计](./2026-07-24-service-template-design.md)。
 
 配置不使用 `contracts` 或逐个 RPC 函数列表。一个 Service 实现哪些 RPC 接口和方法，由生成代码在注册阶段确定并自动发布。
 
@@ -436,16 +436,18 @@ Node 创建网络资源之前完成 `allow_discovery` 静态校验。以下情�
 14. 同一个 Node 内重复的 ServiceName 在创建网络资源前失败；
 15. 不同 Node 可以发布相同 ServiceName，并形成两个独立实例；
 16. 服务快照和事件以 `NodeID + ServiceName` 标识实例；
-17. TCP 只对至少含一个匹配 Service 的远端 Node 产生连接需求；
-18. 同一 Node 多个匹配 Service 不产生多份连接需求；
-19. NATS 与 TCP 得到相同的可见服务快照；
-20. 新 Node、Service 新增、Service 删除和 Node 下线产生正确的差异事件；
-21. 重复 Provider 快照不产生重复事件；
-22. 监听器注册时收到当前快照补发；
-23. 补发和并发增量更新之间不丢失、不重复且顺序稳定；
-24. 事件进入监听方 Service 的 FIFO Ready 队列；
-25. 事件执行前可查询快照已经更新；
-26. 服务发现事件与 TCP/NATS 连接事件互不冒充。
+17. 模板实例可以通过创建后的实际 ServiceName 被精确匹配；
+18. 模板名称不能代替实际 ServiceName 匹配模板实例；
+19. TCP 只对至少含一个匹配 Service 的远端 Node 产生连接需求；
+20. 同一 Node 多个匹配 Service 不产生多份连接需求；
+21. NATS 与 TCP 得到相同的可见服务快照；
+22. 新 Node、Service 新增、Service 删除和 Node 下线产生正确的差异事件；
+23. 重复 Provider 快照不产生重复事件；
+24. 监听器注册时收到当前快照补发；
+25. 补发和并发增量更新之间不丢失、不重复且顺序稳定；
+26. 事件进入监听方 Service 的 FIFO Ready 队列；
+27. 事件执行前可查询快照已经更新；
+28. 服务发现事件与 TCP/NATS 连接事件互不冒充。
 
 ## 13. 已确认结论
 
@@ -463,6 +465,8 @@ Origin v3 服务发现与关注筛选采用：
 - 发现监听对象是具体 Service 实例；
 - 不增加用户可配置的 `ServiceID`，使用 `NodeID + ServiceName` 标识实例；
 - `ServiceName` 在一个 Node 内唯一，不同 Node 允许使用相同名称；
+- 模板 Service 创建完成后按普通 Service 处理，发现筛选只匹配实际 `ServiceName`；
+- 不增加按模板名称筛选的配置字段；
 - Node 重启后的新旧会话由 Provider 租约、会话或版本号区分；
 - 新监听器默认原子补发当前可见快照；
 - 通过新旧可见快照 Diff 产生 `Discovered` 和 `Lost`；
@@ -479,10 +483,9 @@ Origin v3 服务发现与关注筛选采用：
 
 在本文结论基础上，后续按以下顺序继续设计：
 
-1. 模板 Service 的发现筛选与 RPC 路由规则；
-2. 监听器注册、取消注册、多监听器和生命周期 API；
-3. Discovery Provider 抽象，以及静态配置、Origin Discovery、etcd 的首版支持范围；
-4. 全量快照、增量更新、版本号和 Provider 重连的一致性规则；
-5. Node 退休、健康状态与可路由状态；
-6. 单目标 RPC 的实例选择和定向路由；
-7. TCP 连接建立、关闭延迟、心跳与重连策略。
+1. 监听器注册、取消注册、多监听器和生命周期 API；
+2. Discovery Provider 抽象，以及静态配置、Origin Discovery、etcd 的首版支持范围；
+3. 全量快照、增量更新、版本号和 Provider 重连的一致性规则；
+4. Node 退休、健康状态与可路由状态；
+5. 单目标 RPC 的实例选择和定向路由；
+6. TCP 连接建立、关闭延迟、心跳与重连策略。
