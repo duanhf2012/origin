@@ -10,7 +10,7 @@
 
 以下相对独立的问题不在本文展开：
 
-- Service 配置和 Service 业务接口如何提供给 Module；
+- Service 自定义业务接口如何提供给 Module；
 - 本地事件的数据类型、订阅接口和完整实现；
 - Service 调度器、TimerEngine 和 RPC Runtime 的内部实现；
 - Application、Node 和多个 Service 之间的启停配置。
@@ -21,6 +21,7 @@ Module 对本地事件只规定接入边界，具体触发语义见 [Origin v3 �
 - [Origin v3 Service 启动与就绪设计](./2026-07-24-service-startup-and-readiness-design.md)
 - [Origin v3 Service 优雅停止设计](./2026-07-24-service-graceful-stop-design.md)
 - [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)
+- [Origin v3 Service 业务配置访问设计](./2026-07-24-service-business-configuration-access-design.md)
 
 ## 2. 设计目标
 
@@ -172,7 +173,7 @@ func (m *WorldModule) OnInit() error {
 
 子 Module 确实需要父对象提供的业务接口时，通过构造参数显式传入。这样依赖在代码中可见，并具有编译期类型检查。
 
-Module 如何取得所属 Service 提供的接口，以及如何通过该接口读取 Service 配置，在后续配置设计中单独确定。该能力不恢复按 Module ID、名称或类型遍历整棵树的查找方式。
+Module 可以通过 `Service()` 取得已经绑定的所属 `IService` 接口，并使用 `GetServiceConfig` 或 `ParseServiceConfig` 读取同一份只读 Service 业务配置。该能力不恢复按 Module ID、名称或类型遍历整棵树的查找方式。具体配置接口见 [Origin v3 Service 业务配置访问设计](./2026-07-24-service-business-configuration-access-design.md)。
 
 ### 5.4 内部身份
 
@@ -388,6 +389,8 @@ Module 直接组合常用能力，使用时不需要先取得 `.Service()` 或 `
 - 异步任务投递；
 - 本地事件接口。
 
+Service 业务配置不直接复制或组合到 Module。Module 通过 `m.Service()` 取得所属 `IService`，再调用 `GetServiceConfig` 或 `ParseServiceConfig`。
+
 例如：
 
 ```go
@@ -567,6 +570,7 @@ Origin v3 Module 首版最终采用：
 - 任一 Module 启动失败都会使 Service 启动失败；
 - 不对启动失败的当前 Module 调用 `OnStop`；
 - Module 直接组合 Timer、Await、异步任务和本地事件接口；
+- Module 通过所属 `IService` 读取 Service 业务配置；
 - 所有能力委托给所属 Service，不创建 Module 独立调度器；
 - 每个 Module 具有内部资源作用域；
 - 每个 Service 只有一个由 Service 和 Module 共享的本地事件总线；
