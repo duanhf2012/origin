@@ -153,7 +153,46 @@ nodes:
 - 没有执行到的条件分支不会改变网络拓扑；
 - 只监听服务状态但不发起 RPC 的业务同样能够声明关注关系。
 
-### 6.2 匹配组合
+### 6.2 未配置与显式空列表
+
+为兼容 v2，同时允许明确关闭远端业务服务发现，采用以下规则：
+
+- Node 完全没有配置 `allow_discovery` 字段：发现 Provider 范围内的全部公开 Service；
+- Node 显式配置 `allow_discovery: []`：不发现任何远端业务 Service；
+- Node 配置一个或多个规则：只发现至少匹配其中一条规则的远端业务 Service。
+
+示例：
+
+```yaml
+nodes:
+  - id: compatible-node
+    services:
+      - CompatibleService
+```
+
+`compatible-node` 没有 `allow_discovery` 字段，因此保持 v2 的默认行为，发现 Provider 范围内全部公开 Service。
+
+```yaml
+nodes:
+  - id: isolated-node
+    services:
+      - IsolatedService
+    allow_discovery: []
+```
+
+`isolated-node` 不发现任何远端业务 Service，也不会因业务服务匹配而产生 TCP Node 连接需求。本地 Service 注册、查询和本地调用不受影响。
+
+`allow_discovery` 只控制业务 Service 的可见性和由此产生的业务 RPC 连接需求，不得切断 Discovery Provider 自身所需的控制面连接，例如 etcd Client、NATS Client 或 Origin Discovery Master 连接。
+
+YAML 中写出字段但不给值会解析为 `null`，容易与“未配置”和“显式空列表”混淆，因此以下配置属于错误：
+
+```yaml
+allow_discovery:
+```
+
+需要发现全部时省略该字段；需要关闭远端业务服务发现时明确写成 `allow_discovery: []`。
+
+### 6.3 匹配组合
 
 匹配语义统一规定为：
 
@@ -172,7 +211,7 @@ Service 是 PlayerService 或 ChatService
 目标 Node 的 environment 是 production
 ```
 
-### 6.3 Node 标签
+### 6.4 Node 标签
 
 Node 标签用于表达区域、可用区、环境、集群等通用部署属性，例如：
 
@@ -188,7 +227,7 @@ labels:
 
 第一版使用区分大小写的精确匹配，不支持正则表达式或通配符。目标 Node 缺少规则要求的标签时，该规则不匹配。
 
-### 6.4 标签单值与多值
+### 6.5 标签单值与多值
 
 配置同时接受单值和多值：
 
@@ -321,6 +360,7 @@ Node 创建网络资源之前完成 `allow_discovery` 静态校验。以下情�
 - 多值标签配置为空列表；
 - 标签值不是字符串或字符串列表；
 - 同一 Node 的标签键重复且解析结果冲突；
+- `allow_discovery` 显式配置为 `null`；
 - 配置使用首版不支持的正则或通配表达方式。
 
 重复的 Service 名称和标签允许值在加载时去重。错误信息必须包含 Node ID、规则序号、字段路径、错误值和修改建议。
@@ -342,20 +382,24 @@ Node 创建网络资源之前完成 `allow_discovery` 静态校验。以下情�
 
 1. Node 可以直接配置本地 `services` 和远端 `allow_discovery.services`；
 2. 不配置 `contracts` 或 RPC 方法列表也能自动发布 RPC 能力；
-3. 单值和多值 `node_labels` 产生相同的内部列表结构；
-4. 同标签多值为 OR，不同标签为 AND，多条规则为 OR；
-5. 标签使用区分大小写的精确匹配；
-6. 空标签值、空列表和非法类型在创建网络资源前失败；
-7. TCP 只对至少含一个匹配 Service 的远端 Node 产生连接需求；
-8. 同一 Node 多个匹配 Service 不产生多份连接需求；
-9. NATS 与 TCP 得到相同的可见服务快照；
-10. 新 Node、Service 新增、Service 删除和 Node 下线产生正确的差异事件；
-11. 重复 Provider 快照不产生重复事件；
-12. 监听器注册时收到当前快照补发；
-13. 补发和并发增量更新之间不丢失、不重复且顺序稳定；
-14. 事件进入监听方 Service 的 FIFO Ready 队列；
-15. 事件执行前可查询快照已经更新；
-16. 服务发现事件与 TCP/NATS 连接事件互不冒充。
+3. 未配置 `allow_discovery` 时发现 Provider 范围内全部公开 Service；
+4. 显式 `allow_discovery: []` 时不发现远端业务 Service；
+5. `allow_discovery: null` 在创建网络资源前失败；
+6. 空列表不会切断 Discovery Provider 自身的控制面连接；
+7. 单值和多值 `node_labels` 产生相同的内部列表结构；
+8. 同标签多值为 OR，不同标签为 AND，多条规则为 OR；
+9. 标签使用区分大小写的精确匹配；
+10. 空标签值、空标签允许值列表和非法类型在创建网络资源前失败；
+11. TCP 只对至少含一个匹配 Service 的远端 Node 产生连接需求；
+12. 同一 Node 多个匹配 Service 不产生多份连接需求；
+13. NATS 与 TCP 得到相同的可见服务快照；
+14. 新 Node、Service 新增、Service 删除和 Node 下线产生正确的差异事件；
+15. 重复 Provider 快照不产生重复事件；
+16. 监听器注册时收到当前快照补发；
+17. 补发和并发增量更新之间不丢失、不重复且顺序稳定；
+18. 事件进入监听方 Service 的 FIFO Ready 队列；
+19. 事件执行前可查询快照已经更新；
+20. 服务发现事件与 TCP/NATS 连接事件互不冒充。
 
 ## 13. 已确认结论
 
@@ -364,6 +408,9 @@ Origin v3 服务发现与关注筛选采用：
 - 延续 v2 在 Node 下直接配置本地 Service 和允许发现 Service 的结构；
 - 使用 `allow_discovery.services` 显式声明关注关系；
 - 不根据业务代码或 RPC Client 使用情况自动推导关注关系；
+- 未配置 `allow_discovery` 时发现 Provider 范围内全部公开 Service；
+- 显式配置 `allow_discovery: []` 时不发现远端业务 Service；
+- `allow_discovery` 不切断 Discovery Provider 自身的控制面连接；
 - 配置不声明 RPC 契约和具体函数，RPC 能力由 Go 接口和生成代码自动发布；
 - 发现监听对象是具体 Service 实例；
 - 新监听器默认原子补发当前可见快照；
@@ -381,7 +428,7 @@ Origin v3 服务发现与关注筛选采用：
 
 在本文结论基础上，后续按以下顺序继续设计：
 
-1. `allow_discovery` 未配置、配置为空或规则只包含部分字段时的默认语义；
+1. 非空 `allow_discovery` 规则只配置 `services`、只配置 `node_labels` 或完全为空时的语义；
 2. ServiceName、ServiceID、动态实例和模板 Service 的身份模型；
 3. 监听器注册、取消注册、多监听器和生命周期 API；
 4. Discovery Provider 抽象，以及静态配置、Origin Discovery、etcd 的首版支持范围；
