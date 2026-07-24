@@ -4,6 +4,7 @@
 
 - 状态：已确认
 - 确认日期：2026-07-23
+- 最后更新：2026-07-24
 - 适用版本：Origin v3
 
 本文记录 Service 顺序编程、单执行槽协作式调度、`Await`、任务恢复、超时和取消方面已经确认的设计。
@@ -24,8 +25,9 @@ RPC 的生成接口与调用分类见 [Origin v3 RPC 接口与调用语义设计
 2. 同一个 Service 任意时刻只有一个任务拥有执行权并访问 Service 状态，避免普通业务状态产生并发读写。
 3. 任务等待 RPC、Redis、数据库或 Timer 时释放 Service 执行权，使其他任务能够继续处理。
 4. 挂起与恢复必须显式可见，避免普通函数在开发者不知情时让出 Service 执行权。
-5. 不为每一次普通 I/O 等待额外创建一个辅助 goroutine。
-6. 通过有界队列、默认超时、指标和过载保护，避免等待任务无限积累。
+5. 未发生 `Await` 的普通事件复用当前 Runner，不为每个事件创建 goroutine。
+6. `Await` 的等待函数由原任务 goroutine 执行，不再创建专门执行等待函数的辅助 goroutine；替代 Runner 只负责 Service 的后续任务。
+7. 通过有界队列、默认超时、指标和过载保护，避免等待任务无限积累。
 
 ## 3. 统一执行模型
 
@@ -41,6 +43,8 @@ v3 不要求开发者为 Service 配置 `Serial` 或 `Cooperative` 两种模式�
 
 因此，该模型在 Go 运行时层面可以同时存在多个 Service 任务 goroutine，但在 Service 状态层面始终保持单执行槽串行访问。它不是“一个 Service 永远只有一个物理 goroutine”，而是“一个 Service 永远只有一个拥有状态访问权的任务”。
 
+Service 使用一个当前活动的 Runner goroutine 执行业务任务。普通任务直接返回后，当前 Runner 取得并执行下一个 Ready 项，不创建新的 goroutine，也不进行不必要的 Runner 交接。恢复任务从 `Await` 后继续执行并最终返回时，同样由当前 Runner 直接处理后续 Ready 项。
+
 ## 4. 任务状态与调度
 
 Service 任务至少具有以下状态：
@@ -50,18 +54,69 @@ Service 任务至少具有以下状态：
 - `Waiting`：已经释放执行槽，等待外部操作、Timer 或取消；
 - `Completed`：任务已经返回并完成清理。
 
+### 4.1 普通任务与 Runner 复用
+
+普通事件、Timer 回调和异步 RPC 完成回调都作为 Ready 项处理。当前 Runner 取得普通 Ready 项后直接调用对应业务处理函数。
+
+业务处理函数正常返回且没有处于 `Await` 时：
+
+1. 当前任务进入 `Completed`；
+2. 当前 Runner 保持执行槽所有权；
+3. 当前 Runner 直接取得下一个 Ready 项；
+4. Ready 队列为空时，当前 Runner 等待新任务。
+
+普通任务之间不创建新 goroutine。异步 RPC 的发起方立即返回，完成回调是一个新的普通 Ready 项；它不恢复发起方的调用栈，也不触发特殊调度。回调本身如果调用 `Await`，再按相同的挂起与 Runner 交接规则处理。
+
+### 4.2 Await 与 Runner 交接
+
+`Await` 必须保留当前业务函数的 Go 调用栈，因此处于等待中的任务与原 goroutine 绑定。该 goroutine 不能用于执行其他业务任务。
+
+Runner 交接遵循：
+
+1. 当前 Runner 调用 `Await`，当前任务原子地释放执行槽并进入 `Waiting`；
+2. Service 调度器创建一个替代 Runner，负责继续取得并执行其他 Ready 项；
+3. 原 goroutine 在释放执行槽后执行等待函数；I/O 阻塞时由 Go 运行时挂起；
+4. 等待完成后，原任务以恢复项的形式追加到 FIFO Ready 队尾，原 goroutine 等待重新获得执行槽；
+5. 活动 Runner 取得该恢复项时，先停止访问 Service 状态，再把执行槽交给与任务绑定的原 goroutine；
+6. 完成交接的替代 Runner 退出，原 goroutine 从 `Await` 后继续执行并成为新的活动 Runner；
+7. 恢复任务正常返回后，该 Runner 直接继续处理后续 Ready 项。
+
+交接过程中可能同时存在多个物理 goroutine，但任意时刻只有获得执行槽的活动 Runner 可以执行 Service 业务代码。初始实现不使用固定 Runner 池，也不为每个普通事件创建 goroutine。
+
+忽略 RPC 客户端等外部组件自己的 goroutine，一个 Service 在稳定状态下的调度 goroutine 数量约为：
+
+```text
+1 个活动 Runner + 尚未恢复完成的挂起任务数量
+```
+
+挂起任务既包括正在等待外部结果的 `Waiting` 任务，也包括已经进入 Ready 队列但尚未取得执行槽的恢复任务。这是保留多个顺序调用栈所需的最小模型。挂起任务数量必须受过载保护约束，不能无限增长。
+
+### 4.3 Ready 顺序
+
 状态转换遵循：
 
 1. 新事件、Timer 回调和可恢复任务统一进入 FIFO Ready 队列；
-2. Dispatcher 从队首选择一个任务并授予执行槽；
+2. 当前 Runner 通过 Service 调度器从队首取得一个 Ready 项；
 3. 任务正常返回时进入 `Completed`；
 4. 任务调用 `Await` 时从 `Running` 进入 `Waiting`，并原子地释放执行槽；
 5. 等待条件完成后，任务追加到 Ready 队尾；
-6. 只有 Dispatcher 再次选中该任务并授予执行槽后，`Await` 才能返回到后续业务代码。
+6. 只有恢复项被选中并完成 Runner 交接后，`Await` 才能返回到后续业务代码。
 
 恢复任务不能插入队首、不能抢占当前 Running 任务。新任务、Timer 回调和 Await 恢复任务使用同一个 FIFO 顺序，保证规则简单、可理解并避免恢复风暴长期压制新事件。
 
 引擎关闭、取消传播等控制事件可以使用独立内部通道，但只能在任务边界改变业务任务状态，不能在任意一行用户代码中抢占执行槽。
+
+### 4.4 实现边界
+
+Runner、Ready 队列、执行槽和交接状态统一封装在 Service 调度器内部。RPC、Timer、Redis 适配器和业务 Service 只能提交普通任务、开始等待或通知等待完成，不得分别实现自己的协程切换逻辑。
+
+Runner 循环只负责三件事：
+
+1. 取得下一个 Ready 项；
+2. 执行普通任务；
+3. 遇到恢复项时完成执行槽交接。
+
+Runner、任务状态和内部唤醒通道不作为外部 API 暴露。这样可以把必要的并发复杂性限制在一个小型调度模块中，保持业务接口和其他独立系统易读、易维护。
 
 ## 5. Await 语义
 
@@ -84,12 +139,12 @@ Await[T any](
 
 1. 根据传入 Context 计算有效 Deadline；
 2. 当前任务原子地释放 Service 执行槽并进入 `Waiting`；
-3. 当前任务所在的同一个 goroutine 调用 `fn(ctx)`；
-4. Go 网络轮询器在 RPC、Redis、数据库等 I/O 等待期间挂起该 goroutine；
-5. 其他 Ready 任务取得 Service 执行槽；
-6. `fn` 返回后，原任务进入 Ready 队尾；
-7. Dispatcher 再次授予原任务执行槽；
-8. `Await` 向业务代码返回结果或错误。
+3. Service 调度器创建替代 Runner，继续处理其他 Ready 任务；
+4. 当前任务所在的同一个 goroutine 调用 `fn(ctx)`；
+5. Go 网络轮询器在 RPC、Redis、数据库等 I/O 等待期间挂起该 goroutine；
+6. `fn` 返回后，原任务进入 Ready 队尾并等待 Runner 交接；
+7. 活动 Runner 选中恢复项，把执行槽交回原 goroutine并退出；
+8. 原 goroutine 成为活动 Runner，`Await` 向业务代码返回结果或错误。
 
 普通 I/O `Await` 不额外创建一个 goroutine 执行 `fn`。等待中的 goroutine 仍然存在，但不占用操作系统线程，也不占用 Service 执行槽。
 
@@ -114,10 +169,12 @@ Await[T any](
 
 RPC 使用生成的两种明确外观：
 
-- `AsyncXxx` 发起调用后立即返回，不自动让出执行槽；完成回调作为新任务进入调用方 Service 的 FIFO Ready 队列；
+- `AsyncXxx` 发起调用后立即返回，不自动让出执行槽；当前 Runner 继续执行当前任务，完成回调作为普通新任务进入调用方 Service 的 FIFO Ready 队列；
 - `AwaitXxx` 在内部使用 Await 原语，释放执行槽并在 Future 完成后恢复原任务。
 
 Redis、数据库等支持 Context 的同步客户端调用可以直接放在通用 `Await` 的 `fn` 中。当前任务 goroutine 执行该调用，I/O 等待交给 Go 运行时，不需要每个请求再创建辅助 goroutine。
+
+异步完成回调与普通事件遵循同一 Runner 复用规则：回调执行完且没有调用 `Await` 时，当前 Runner 直接处理后续 Ready 项，不为回调单独创建 goroutine。
 
 ### 7.2 Sleep
 
@@ -153,7 +210,7 @@ Redis、数据库等支持 Context 的同步客户端调用可以直接放在通
 
 - `Await` 把有效 Context 传给 `fn`；
 - `fn` 必须主动监听 Context，框架不能强制终止忽略 Context 的 Go 函数；
-- 外部操作完成、Context 取消或 Deadline 到达只能使任务具备恢复条件，不能让等待任务越过 Dispatcher 直接访问 Service 状态；
+- 外部操作完成、Context 取消或 Deadline 到达只能使任务具备恢复条件，不能让等待任务越过活动 Runner 直接访问 Service 状态；
 - 已经开始的任务在取消后仍要恢复一次，重新取得执行槽并返回 `context.Canceled` 或 `context.DeadlineExceeded`，以便正常执行 `defer` 和业务清理；
 - Service 停止时取消所有 Waiting 任务的 Context，并按相同规则完成受控恢复和退出，不能只从队列中删除任务。
 
@@ -178,8 +235,9 @@ Timer 回调可以调用 `Await`。挂起期间：
 
 实现阶段必须基准验证：
 
-- 无 `Await` 的普通事件调度开销；
-- `Await` 挂起与恢复开销；
+- 无 `Await` 的普通事件连续执行开销和 goroutine 创建次数；
+- 异步回调连续执行的调度开销；
+- `Await` 挂起、替代 Runner 创建和恢复交接开销；
 - Ready 队列长度和排队延迟；
 - Waiting 任务数量及内存占用；
 - RPC、Redis 和 Timer 混合负载下的 P50、P95、P99；
@@ -194,6 +252,7 @@ Timer 回调可以调用 `Await`。挂起期间：
 
 - Ready、Running、Waiting 任务数量；
 - 新建、完成、取消和超时任务数量；
+- Runner 创建、交接和退出次数；
 - Ready 排队时间；
 - `Await` 外部操作耗时；
 - 外部操作完成到重新取得执行槽的恢复排队时间；
@@ -207,20 +266,24 @@ Timer 回调可以调用 `Await`。挂起期间：
 至少覆盖：
 
 1. 同一个 Service 任意时刻只有一个任务持有执行槽；
-2. 普通代码和生成的 `AsyncXxx` 不会隐式让出执行槽；
-3. 通用 `Await` 和生成的 `AwaitXxx` 原子释放执行槽，并在恢复后重新取得执行槽；
-4. `fn` 在当前任务 goroutine 执行，不额外创建每请求辅助 goroutine；
-5. 新事件、Timer 与恢复任务严格按 FIFO 入队；
-6. 恢复任务不抢占 Running 任务；
-7. RPC、Redis、数据库和 Sleep 的挂起恢复；
-8. 显式 Deadline、Service 默认值、Node 默认值和内置 `15s` 的优先级；
-9. 超时范围同时覆盖外部操作和恢复排队；
-10. `fn` 忽略 Context 时框架不会伪装成已经强制终止；
-11. 取消任务恢复一次并执行 `defer`；
-12. Service 停止期间 Waiting 任务的取消、恢复与引用清理；
-13. Timer 回调在 `Await` 期间不发生同 Timer 重叠执行；
-14. 高并发挂起、完成、超时和停止之间的竞态；
-15. Ready 与 Waiting 积压时的指标和过载行为。
+2. 连续普通事件由同一个 Runner 执行，不为每个事件创建 goroutine；
+3. 普通代码和生成的 `AsyncXxx` 不会隐式让出执行槽；
+4. 异步 RPC 完成回调作为普通 Ready 项执行，回调完成后复用当前 Runner；
+5. 通用 `Await` 和生成的 `AwaitXxx` 原子释放执行槽，并创建替代 Runner；
+6. `fn` 在当前任务 goroutine 执行，不额外创建执行 `fn` 的辅助 goroutine；
+7. 恢复项被选中时，替代 Runner 退出，原 goroutine 取得执行槽并成为活动 Runner；
+8. 多个 Waiting 任务存在时仍然只有一个活动 Runner；
+9. 新事件、Timer 与恢复任务严格按 FIFO 入队；
+10. 恢复任务不抢占 Running 任务；
+11. RPC、Redis、数据库和 Sleep 的挂起恢复；
+12. 显式 Deadline、Service 默认值、Node 默认值和内置 `15s` 的优先级；
+13. 超时范围同时覆盖外部操作和恢复排队；
+14. `fn` 忽略 Context 时框架不会伪装成已经强制终止；
+15. 取消任务恢复一次并执行 `defer`；
+16. Service 停止期间 Waiting 任务的取消、恢复与引用清理；
+17. Timer 回调在 `Await` 期间不发生同 Timer 重叠执行；
+18. 高并发挂起、完成、超时和停止之间的竞态；
+19. Ready 与 Waiting 积压时的指标和过载行为。
 
 ## 13. 已确认结论
 
@@ -228,8 +291,12 @@ Origin v3 Service 执行模型最终采用：
 
 - 一套统一的单执行槽协作式调度模型，不配置 Serial/Cooperative 模式；
 - 同一 Service 任意时刻只允许一个任务访问 Service 状态；
+- 普通任务完成后由当前 Runner 直接取得下一个 Ready 项，不为每个事件创建 goroutine；
+- 异步 RPC 完成回调作为普通 Ready 项执行，并复用相同的 Runner 快速路径；
 - 多个任务可以同时处于 Waiting，但恢复后必须重新竞争唯一执行槽；
 - `Await` 是显式挂起点，普通异步调用不会自动让出；
+- `Await` 使当前 goroutine 与 Waiting 任务绑定，并创建一个替代 Runner 继续处理其他任务；
+- 恢复项被选中后，替代 Runner 把执行槽交还给原 goroutine 并退出，原 goroutine 成为活动 Runner；
 - RPC 通过生成的 `AsyncXxx` 和 `AwaitXxx` 分别表达回调式异步与调度式等待；
 - `AwaitXxx` 内部使用通用 Await 原语，普通 RPC 用户不需要直接操作 Future；
 - 普通 I/O `Await` 由当前任务 goroutine 执行，不额外创建每请求辅助 goroutine；
