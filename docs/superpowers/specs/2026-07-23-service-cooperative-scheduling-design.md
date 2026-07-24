@@ -165,6 +165,7 @@ Service 进入 `Stopping/Finalizing` 并执行 `OnStop` 时采用独立的 final
 - finalizer goroutine 直接等待 Future 或关闭 Context；
 - Future 完成后唤醒同一个 finalizer goroutine；
 - 不释放执行槽给替代业务 Runner，也不处理普通 Ready 任务；
+- 不为 finalizer 创建 `TaskScope`、Service `pendingAsync` 或回调登记表；
 - 该行为只用于停止收尾，不能改变正常业务 `Await` 的交接语义。
 
 完整规则见 [Origin v3 Service 优雅停止设计](./2026-07-24-service-graceful-stop-design.md)。

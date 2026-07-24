@@ -158,19 +158,20 @@ func (s *PlayerService) OnStop(ctx context.Context) error {
 `OnStop` 可以：
 
 - 读取和整理当前 Service 的最终状态；
-- 发起 RPC、Redis、数据库等收尾操作；
-- 使用生成的 `AwaitXxx` 或通用 `Await` 顺序等待结果；
+- 使用生成的 `AwaitXxx` 或通用 `Await` 顺序执行 RPC、Redis、数据库等收尾操作；
 - 返回收尾错误。
 
 `OnStop` 不能：
 
+- 使用 `AsyncXxx` 回调式调用；
+- 使用 Notify 或 Broadcast 代替需要确认完成的收尾操作；
 - 注册 Timer；
 - 提交普通本地业务事件；
 - 重新接受入站 RPC；
 - 创建新的普通 Service Runner；
-- 把必须完成的存档交给未受框架跟踪的 fire-and-forget goroutine。
+- 启动业务 goroutine 或把存档交给 `fire-and-forget` 后台任务。
 
-需要确保完成的异步工作必须在 `OnStop` 返回前通过 `Await` 或其他明确等待方式结束。`OnStop` 返回即表示业务收尾已经完成，框架不自动猜测未登记的后台 goroutine。
+`OnStop` 的外部等待统一使用 Await 风格。`OnStop` 返回即表示业务收尾已经完成，框架不跟踪或猜测业务自行创建的异步回调和后台 goroutine。
 
 ## 9. Finalizing 中的 Await
 
@@ -183,6 +184,8 @@ func (s *PlayerService) OnStop(ctx context.Context) error {
 5. 原 goroutine 从 `Await` 返回并继续顺序执行 `OnStop`。
 
 该路径不释放执行权给新的业务 Runner，也不在等待期间处理普通 Service 任务。它会占用一个正在停止的 finalizer goroutine，但不会产生 Service 状态并发访问。
+
+finalizer 等待路径不创建 `TaskScope`，也不在 ServiceScheduler 中增加 `pendingAsync` 计数或回调登记表。RPC 请求仍使用 RPC Runtime 原本就需要的 pending call 记录；该记录由响应、超时或取消完成，不属于 Service 调度新增状态。
 
 普通 Service `Await` 的 Runner 交接规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)。finalizer 是停止阶段的特殊等待上下文，不能把该特殊行为扩散到正常业务调度。
 
@@ -275,14 +278,15 @@ Node 在全部 Service 的 `OnStop` 完成前必须保持：
 9. 并发 Stop 只执行一次 `OnStop` 和一次资源清理；
 10. `OnStop` 可以 `Await` RPC 存档并在同一 goroutine 恢复；
 11. `OnStop` 等待期间不执行普通 Service 任务；
-12. `OnStop` 不能创建 Timer 或重新开放业务调度；
-13. RPC Runtime、Transport 和 TimerEngine 在 `OnStop` 返回前保持可用；
-14. DBService 后停止时，调用方可以完成存档 RPC；
-15. DBService 已退休或提前停止时，错误能够返回并参与停止结果；
-16. `OnStop` 返回错误后仍执行资源清理；
-17. `OnStop` panic 被恢复且不会重复调用；
-18. 资源释放完成前状态不会变成 `Stopped`；
-19. `Stopped` 后不存在 Runner，任何提交或完成信号都不能重新唤醒 Service。
+12. `OnStop` 不使用 `AsyncXxx`、Notify、Broadcast、Timer、本地事件或业务 goroutine 完成收尾；
+13. finalizer Await 不创建 `TaskScope`、Service `pendingAsync` 或替代 Runner；
+14. RPC Runtime、Transport 和 TimerEngine 在 `OnStop` 返回前保持可用；
+15. DBService 后停止时，调用方可以完成存档 RPC；
+16. DBService 已退休或提前停止时，错误能够返回并参与停止结果；
+17. `OnStop` 返回错误后仍执行资源清理；
+18. `OnStop` panic 被恢复且不会重复调用；
+19. 资源释放完成前状态不会变成 `Stopped`；
+20. `Stopped` 后不存在 Runner，任何提交或完成信号都不能重新唤醒 Service。
 
 ## 15. 已确认结论
 
@@ -296,7 +300,9 @@ Origin v3 Service 优雅停止采用：
 - 没有 Runner 时由 Stop 调用方或唯一临时生命周期协程完成收尾；
 - finalizer 调用一次 `OnStop(ctx) error`；
 - `OnStop` 可以通过 `Await` 顺序等待 RPC、Redis 和数据库存档；
+- `OnStop` 的收尾外部调用只采用 Await 风格，不使用 `AsyncXxx` 回调、Notify 或 Broadcast；
 - finalizer Await 不创建替代业务 Runner，也不处理普通业务任务；
+- finalizer Await 不引入 `TaskScope`、Service `pendingAsync` 或回调登记表；
 - `OnStop` 完成后才执行框架资源清理并进入 `Stopped`；
 - 被依赖服务和 Node 基础设施必须晚于调用方 `OnStop` 停止；
 - 不通过特殊 RPC 绕过退休服务的准入规则；
@@ -310,4 +316,5 @@ Origin v3 Service 优雅停止采用：
 4. 同一 Node 内 Service 启停顺序的配置外观和默认规则；
 5. `OnStop` 与 Module 清理钩子的关系；
 6. Stop API 的同步、异步和重复调用外观；
-7. `Stopping` 状态发布到服务发现以及从远端路由摘除的时序。
+7. `Stopping` 状态发布到服务发现以及从远端路由摘除的时序；
+8. 在 `OnStop` 中误用 `AsyncXxx`、Notify、Broadcast 或业务 goroutine 时的开发期检测方式。

@@ -328,6 +328,8 @@ s.players[playerID] = player
 
 在 `OnStop(ctx)` 的 finalizer 上下文中，生成接口外观不变，但内部不执行第 3、5、6 步的普通 Runner 交接。finalizer goroutine 直接等待 Future 或 Context，完成后由同一个 goroutine 继续执行 `OnStop`，期间不调度普通 Service 任务。
 
+`OnStop` 的收尾外部调用只使用 `AwaitXxx`。`AsyncXxx`、Notify 和 Broadcast 不作为 finalizer 收尾方式，因为它们不能让 `OnStop` 的返回值准确表示远端工作已经完成。
+
 该特殊路径只用于停止收尾，详见 [Origin v3 Service 优雅停止设计](./2026-07-24-service-graceful-stop-design.md)。
 
 概念上等价于：
