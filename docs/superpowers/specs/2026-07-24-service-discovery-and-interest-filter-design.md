@@ -11,7 +11,7 @@
 以下独立问题不属于本文范围：
 
 - 静态配置、Origin Discovery、etcd 等 Discovery Provider 的具体接口与一致性实现；
-- 动态实例和模板 Service 的完整命名与构造规则；
+- 模板 Service 的构造器注册、实例配置和生命周期规则；
 - 单目标 RPC 的负载均衡和定向路由算法；
 - TCP 连接池、连接关闭延迟、心跳与重连；
 - Node 退休、优雅摘流和健康状态模型；
@@ -96,7 +96,7 @@ NodeID + ServiceName
 
 v3 首版不增加用户可配置的 `ServiceID`。`ServiceName` 在所属 Node 内必须唯一；同一个 `ServiceName` 可以出现在不同 Node 上，用于高可用副本和负载均衡。
 
-同一个 Node 内重复注册相同 `ServiceName` 属于配置错误。需要在一个 Node 内运行多个动态 Service 时，每个实例必须使用不同的 `ServiceName`。动态实例和模板 Service 如何获得名称及复用构造逻辑，由独立的 Service 注册设计确定。
+同一个 Node 内重复注册相同 `ServiceName` 属于配置错误。需要在一个 Node 内运行多个动态 Service 时，每个实例必须使用不同的 `ServiceName`。模板 Service 使用 `实际ServiceName:模板名称` 配置并在加载阶段规范化，详细规则见[模板 Service 设计](./2026-07-24-service-template-design.md)。
 
 Node 重启后产生的新旧会话由 Discovery Provider 的租约、会话或版本号区分，不要求开发者通过额外的 Service ID 解决陈旧事件问题。
 
@@ -139,7 +139,7 @@ nodes:
 - `allow_discovery.node_labels` 用于匹配目标 Node 发布的标签；
 - `node_labels` 不会自动引用当前 Node 的同名标签，配置值始终明确表示目标值。
 
-`services` 和 `allow_discovery.services` 中的字符串均匹配公开的 `ServiceName`，不直接匹配 Go 实现类型。动态实例和模板 Service 的命名规则由独立的 Service 注册设计确定。
+`services` 和 `allow_discovery.services` 中的字符串均匹配公开的 `ServiceName`，不直接匹配 Go 实现类型。模板 Service 的实际名称与模板名称边界见[模板 Service 设计](./2026-07-24-service-template-design.md)；是否增加按模板筛选的显式字段将在后续单独确定。
 
 配置不使用 `contracts` 或逐个 RPC 函数列表。一个 Service 实现哪些 RPC 接口和方法，由生成代码在注册阶段确定并自动发布。
 
@@ -479,7 +479,7 @@ Origin v3 服务发现与关注筛选采用：
 
 在本文结论基础上，后续按以下顺序继续设计：
 
-1. 动态实例和模板 Service 的命名与构造规则；
+1. 模板 Service 的发现筛选与 RPC 路由规则；
 2. 监听器注册、取消注册、多监听器和生命周期 API；
 3. Discovery Provider 抽象，以及静态配置、Origin Discovery、etcd 的首版支持范围；
 4. 全量快照、增量更新、版本号和 Provider 重连的一致性规则；
