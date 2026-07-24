@@ -72,7 +72,7 @@ Discovery Provider 向当前 Node 提供原始 Node 与 Service 信息。原始�
 - Node 标签；
 - 当前公开的 Service 实例；
 - 每个 Service 的运行状态和是否接受普通入站 RPC；
-- 每个 Service 由生成代码注册的 RPC 契约和方法元数据。
+- 每个公开 RPC 的 Service 由生成代码注册的唯一 RPC 契约和方法元数据。
 
 RPC 契约和方法元数据由 Go RPC 接口及 `origin-gen` 自动产生，不要求开发者在配置中重复声明 RPC 函数。
 
@@ -108,7 +108,7 @@ v3 首版不增加用户可配置的 `ServiceID`。`ServiceName` 在所属 Node 
 
 Node 重启后产生的新旧会话由 Discovery Provider 的租约、会话或版本号区分，不要求开发者通过额外的 Service ID 解决陈旧事件问题。
 
-多个 Service 即使实现相同 RPC 契约，也属于不同实例。Broadcast 仍遵守已经确认的规则：语义上投递给全部匹配 Service，网络上对同一个目标 Node 合并为一次消息。
+同类 Service 副本或模板实例即使实现相同 RPC 契约，也属于不同实例。Broadcast 仍遵守已经确认的规则：语义上投递给全部匹配 Service，网络上对同一个目标 Node 合并为一次消息。
 
 ## 5. Node 配置外观
 
@@ -149,7 +149,7 @@ nodes:
 
 `services` 和 `allow_discovery.services` 中的字符串均匹配公开的实际 `ServiceName`，不直接匹配 Go 实现类型或模板名称。与 v2 一致，模板 Service 创建完成后按普通 Service 处理；需要关注多个模板实例时，必须逐个配置创建后的实际名称，不增加 `templates` 筛选字段。详细边界见[模板 Service 设计](./2026-07-24-service-template-design.md)。
 
-配置不使用 `contracts` 或逐个 RPC 函数列表。一个 Service 实现哪些 RPC 接口和方法，由生成代码在注册阶段确定并自动发布。
+配置不使用 `contracts` 或逐个 RPC 函数列表。一个 Service 可以不公开 RPC；需要公开时最多绑定一个 RPC 接口，其方法由生成代码在注册阶段确定并自动发布。接口边界和客户端外观见 [单目标 RPC 客户端与路由设计](./2026-07-24-rpc-single-target-client-and-routing-design.md)。
 
 ## 6. 关注规则
 
@@ -493,7 +493,7 @@ Origin v3 服务发现与关注筛选采用：
 - `allow_discovery` 不切断 Discovery Provider 自身的控制面连接；
 - 单条规则缺少 `services` 或 `node_labels` 时，不限制缺少的维度；
 - 空规则、空 `services` 列表和空 `node_labels` 映射属于配置错误；
-- 配置不声明 RPC 契约和具体函数，RPC 能力由 Go 接口和生成代码自动发布；
+- 配置不声明 RPC 契约和具体函数；每个 Service 最多一个公开 RPC 接口，RPC 能力由 Go 接口和生成代码自动发布；
 - 发现监听对象是具体 Service 实例；
 - 不增加用户可配置的 `ServiceID`，使用 `NodeID + ServiceName` 标识实例；
 - `ServiceName` 在一个 Node 内唯一，不同 Node 允许使用相同名称；
@@ -523,5 +523,4 @@ Origin v3 服务发现与关注筛选采用：
 3. 全量快照、增量更新、版本号和 Provider 重连的一致性规则；
 4. Service 退休状态监听器的公开 API，以及恢复状态的接口；
 5. Node 退休、健康状态与可路由状态；
-6. 单目标 RPC 的实例选择和定向路由；
-7. TCP 连接建立、关闭延迟、心跳与重连策略。
+6. TCP 连接建立、关闭延迟、心跳与重连策略。

@@ -1,0 +1,609 @@
+# Origin v3 单目标 RPC 客户端与路由设计
+
+## 1. 文档状态与范围
+
+- 状态：本文范围内的方案已确认
+- 确认日期：2026-07-24
+- 适用版本：Origin v3
+
+本文定义单目标 RPC 的接口归属、强类型客户端生成、客户端取得方式、自动实例选择、`NodeID + ServiceName` 定向路由以及客户端到服务端的完整调用流程。
+
+以下问题不在本文展开：
+
+- 自动路由在多个候选实例之间采用轮询、随机或其他选择算法；
+- 幂等 RPC 的自动重试策略；
+- Broadcast 的契约级目标计算和公开入口外观；
+- RPC Contract ID、Method ID 的具体编号算法；
+- Service 与生成 Dispatcher 的最终注册 API；
+- TCP 连接池、NATS Subject 和线协议帧布局。
+
+相关设计见：
+
+- [RPC 接口与调用语义设计](./2026-07-23-rpc-interface-and-call-semantics-design.md)
+- [RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)
+- [Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)
+- [Service 启动与就绪设计](./2026-07-24-service-startup-and-readiness-design.md)
+- [服务发现与关注筛选设计](./2026-07-24-service-discovery-and-interest-filter-design.md)
+
+## 2. 设计目标
+
+1. 开发者先取得绑定目标的强类型客户端，再直接调用该 Service 的生成 RPC 方法。
+2. `NodeID + ServiceName` 只决定运行时目标，生成客户端类型决定编译时可调用的方法。
+3. 自动选择实例和精确指定实例使用相同的 `AwaitXxx`、`AsyncXxx`、`NotifyXxx` 方法外观。
+4. 不把 NodeID、ServiceName 重复加入每一个生成 RPC 方法。
+5. 不恢复 v2 的 `"Service.Method"` 字符串查找和运行时反射调用。
+6. 客户端是轻量逻辑代理，不拥有 TCP、NATS 或远端 Service 生命周期。
+7. 一个 Service 的 RPC 边界保持简单，不支持 RPC 接口嵌入或跨 Service 聚合。
+8. 路由、编解码、Future、Deadline 和调度逻辑由生成代码与统一 Runtime 完成。
+
+## 3. RPC 接口与 Service 边界
+
+### 3.1 一个 Service 最多一个公开 RPC 接口
+
+首版规则：
+
+- 一个 Service 可以没有公开 RPC；
+- 一个具有公开 RPC 的 Service 最多绑定一个顶层 RPC 接口；
+- 该接口直接声明该 Service 的全部 RPC 方法；
+- 同一个 RPC 接口可以由部署在不同 Node 上的同类 Service 副本或模板实例实现；
+- 职责不同的逻辑 Service 使用不同 RPC 接口和不同生成客户端。
+
+例如：
+
+```go
+type PlayerRPC interface {
+    GetPlayer(
+        ctx context.Context,
+        playerID int64,
+    ) (*pb.Player, error)
+
+    SavePlayer(
+        ctx context.Context,
+        player *pb.Player,
+    ) error
+
+    KickPlayer(
+        ctx context.Context,
+        playerID int64,
+        reason string,
+    )
+}
+```
+
+`PlayerService` 的方法实现可以分布在多个 `.go` 文件中，但公开 RPC 接口保持一份明确的来源。
+
+### 3.2 首版禁止接口嵌入
+
+RPC 接口只能直接声明方法，不支持嵌入任何其他接口：
+
+```go
+type PlayerRPC interface {
+    PlayerQueryRPC
+    PlayerCommandRPC
+}
+```
+
+`origin-gen` 必须拒绝该定义，并指出应把 RPC 方法直接声明在 `PlayerRPC` 中：
+
+```text
+cannot generate RPC interface PlayerRPC
+
+reason:
+  RPC interface embedding is not supported
+
+action:
+  declare RPC methods directly in PlayerRPC
+```
+
+该限制避免引入方法集合递归展开、循环嵌入、方法冲突、跨 Service 聚合和多目标路由歧义。未来只有在真实项目证明存在明确收益时才重新评估。
+
+### 3.3 禁止跨 Service 聚合
+
+`PlayerRPC` 和 `DBRPC` 表示两个 Service 契约时，不能再组合成一个目标客户端：
+
+```go
+type GameRPC interface {
+    PlayerRPC
+    DBRPC
+}
+```
+
+一个目标客户端只能绑定一个 ServiceName，以及可选的一个 NodeID。业务需要同时使用多个 Service 时，分别保存多个客户端：
+
+```go
+type GameClients struct {
+    Player contract.PlayerRPCClient
+    DB     contract.DBRPCClient
+}
+```
+
+该结构只是业务自己的客户端集合，不是 RPC 契约，也不改变两个客户端各自的目标。
+
+## 4. 两种生成客户端构造方式
+
+对于：
+
+```go
+type PlayerRPC interface {
+    GetPlayer(
+        ctx context.Context,
+        playerID int64,
+    ) (*pb.Player, error)
+}
+```
+
+`origin-gen` 概念上生成：
+
+```go
+type PlayerRPCClient struct {
+    // 仅包含框架内部的所有者句柄、目标和契约元数据。
+}
+
+func NewPlayerRPCClient(
+    owner origin.IService,
+    serviceName string,
+) PlayerRPCClient
+
+func NewPlayerRPCNodeClient(
+    owner origin.IService,
+    nodeID string,
+    serviceName string,
+) PlayerRPCClient
+```
+
+业务只传入当前 Service `owner`。框架从中取得当前 Node RPC Runtime、Service 调度上下文、Async 回调归属、默认 Deadline 和停止 Context，不公开此前讨论中临时使用的 `RPCCaller` 概念。
+
+### 4.1 自动选择实例
+
+```go
+dbClient := contract.NewDBRPCClient(
+    s,
+    "DBService",
+)
+```
+
+该客户端绑定：
+
+```text
+ServiceName = DBService
+NodeID      = 未指定
+```
+
+每次调用时，RPC Runtime 从当前可见快照中筛选：
+
+- 实际 ServiceName 完全相同；
+- 实现客户端对应的 RPC 契约和方法；
+- 当前可路由；
+- 通过 `allow_discovery`。
+
+存在多个候选实例时，由独立的实例选择策略选择一个。本设计不提前确定具体算法。
+
+### 4.2 精确指定实例
+
+```go
+playerClient := contract.NewPlayerRPCNodeClient(
+    s,
+    "player-2",
+    "PlayerService",
+)
+```
+
+该客户端绑定：
+
+```text
+NodeID      = player-2
+ServiceName = PlayerService
+```
+
+所有单目标方法都只调用该具体实例。目标不可路由时直接返回相应路由错误，不自动切换到其他 Node。
+
+### 4.3 构造客户端不代表发现成功
+
+客户端构造只创建轻量目标描述，不执行以下操作：
+
+- 不等待服务发现；
+- 不建立 TCP 或 NATS 连接；
+- 不固定当前路由表中的连接对象；
+- 不保证目标在下一次调用时仍然存在；
+- 不为调用创建 Future 或 Timer。
+
+因此构造函数不返回路由错误。参数为空或目标不合法时，生成方法在进入统一调用核心后返回参数或路由错误，不发生 panic。
+
+需要在启动阶段等待目标时，先使用：
+
+```go
+if err := s.AwaitNodeService(
+    ctx,
+    "player-2",
+    "PlayerService",
+); err != nil {
+    return err
+}
+```
+
+然后创建定向客户端。等待成功与真正发起 RPC 之间仍可能发生目标丢失，RPC 必须正常返回错误。
+
+## 5. 生成方法外观
+
+客户端已经保存目标，所以生成方法不再包含 NodeID、ServiceName，也不生成 `AwaitNodeXxx`、`AsyncNodeXxx` 或 `NotifyNodeXxx`。
+
+请求—响应方法：
+
+```go
+player, err := playerClient.AwaitGetPlayer(
+    ctx,
+    playerID,
+)
+```
+
+异步方法：
+
+```go
+playerClient.AsyncGetPlayer(
+    ctx,
+    playerID,
+    func(
+        ctx context.Context,
+        player *pb.Player,
+        err error,
+    ) {
+        // 在调用方 Service 的调度上下文中执行。
+    },
+)
+```
+
+通知方法：
+
+```go
+err := playerClient.NotifyKickPlayer(
+    ctx,
+    playerID,
+    "duplicate login",
+)
+```
+
+同一组生成方法既可以由自动选择客户端调用，也可以由 Node 定向客户端调用。目标模式只由客户端构造方式决定。
+
+Broadcast 不属于单目标路由。它继续遵守已经确认的契约级广播语义，不得因为某个单目标客户端绑定了 NodeID 或 ServiceName 而缩小或改变目标集合。Broadcast 的最终取得入口独立确定。
+
+## 6. 两个 Service 的完整示例
+
+### 6.1 RPC 定义
+
+`PlayerService`：
+
+```go
+type PlayerRPC interface {
+    GetPlayer(
+        ctx context.Context,
+        playerID int64,
+    ) (*pb.Player, error)
+
+    SavePlayer(
+        ctx context.Context,
+        player *pb.Player,
+    ) error
+
+    KickPlayer(
+        ctx context.Context,
+        playerID int64,
+        reason string,
+    )
+}
+```
+
+`DBService`：
+
+```go
+type DBRPC interface {
+    LoadPlayer(
+        ctx context.Context,
+        playerID int64,
+    ) (*pb.Player, error)
+
+    SavePlayer(
+        ctx context.Context,
+        player *pb.Player,
+    ) error
+
+    LoadServerConfig(
+        ctx context.Context,
+        serverID string,
+    ) (*pb.ServerConfig, error)
+}
+```
+
+### 6.2 GatewayService 定向调用 PlayerService
+
+Gateway 已知玩家当前归属 `player-2`：
+
+```go
+func (s *GatewayService) LoadPlayer(
+    ctx context.Context,
+    playerNodeID string,
+    playerID int64,
+) (*pb.Player, error) {
+    playerClient := contract.NewPlayerRPCNodeClient(
+        s,
+        playerNodeID,
+        "PlayerService",
+    )
+
+    return playerClient.AwaitGetPlayer(
+        ctx,
+        playerID,
+    )
+}
+```
+
+同一个客户端可以继续调用该目标 Service 的其他 RPC：
+
+```go
+err := playerClient.AwaitSavePlayer(
+    ctx,
+    player,
+)
+
+err = playerClient.NotifyKickPlayer(
+    ctx,
+    player.ID,
+    "duplicate login",
+)
+```
+
+### 6.3 PlayerService 自动选择 DBService
+
+DBService 有多个同名高可用实例：
+
+```text
+db-1 + DBService
+db-2 + DBService
+db-3 + DBService
+```
+
+PlayerService 在自身已经绑定 Node Runtime 后创建并保存客户端：
+
+```go
+type PlayerService struct {
+    origin.Service
+
+    dbClient contract.DBRPCClient
+}
+
+func (s *PlayerService) OnInit() error {
+    s.dbClient = contract.NewDBRPCClient(
+        s,
+        "DBService",
+    )
+
+    return nil
+}
+```
+
+实现 `PlayerRPC.GetPlayer`：
+
+```go
+func (s *PlayerService) GetPlayer(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error) {
+    return s.dbClient.AwaitLoadPlayer(
+        ctx,
+        playerID,
+    )
+}
+```
+
+`AwaitLoadPlayer` 挂起当前 PlayerService 任务，释放 Service 执行槽；DB RPC 完成后，原任务重新取得执行槽并从调用后继续顺序执行。
+
+需要指定 DB 实例时，改为：
+
+```go
+dbClient := contract.NewDBRPCNodeClient(
+    s,
+    "db-2",
+    "DBService",
+)
+
+err := dbClient.AwaitSavePlayer(
+    ctx,
+    player,
+)
+```
+
+## 7. 客户端内部组成
+
+生成客户端概念上保存：
+
+```go
+type rpcClientBase struct {
+    owner       serviceHandle
+    nodeID      string
+    serviceName string
+    contractID  uint32
+    targetMode  targetMode
+}
+```
+
+这些是实现语义，不提前锁定内部类型名和字段布局。
+
+客户端不保存：
+
+- 具体 TCP 连接；
+- NATS 连接；
+- 远端 Service 指针；
+- 可变路由快照指针；
+- RPC 方法字符串；
+- 每次调用的 Future。
+
+客户端可以作为 Service 字段长期保存，也可以为动态玩家、场景或分片临时创建。实现目标是构造轻量值且不产生不必要的堆分配；最终通过基准测试验证。
+
+## 8. 从客户端方法到服务端函数
+
+调用：
+
+```go
+playerClient.AwaitGetPlayer(
+    ctx,
+    playerID,
+)
+```
+
+生成方法已经静态知道：
+
+- PlayerRPC 的 Contract ID；
+- GetPlayer 的 Method ID；
+- 输入和输出布局；
+- 编解码函数；
+- Await 返回类型和错误位置。
+
+概念上进入统一调用核心：
+
+```go
+func (c PlayerRPCClient) AwaitGetPlayer(
+    ctx context.Context,
+    playerID int64,
+) (*pb.Player, error) {
+    return awaitRPC[*pb.Player](
+        c.owner,
+        ctx,
+        c.nodeID,
+        c.serviceName,
+        playerContractID,
+        getPlayerMethodID,
+        playerID,
+    )
+}
+```
+
+真正实现不要求使用泛型函数；示例只表达数据流。
+
+发送端 RPC Runtime：
+
+1. 根据客户端目标模式筛选路由；
+2. 校验目标 Service 支持 Contract ID 和 Method ID；
+3. 使用生成编码器写入请求；
+4. 通过 TCP、NATS 或本地 Transport 提交；
+5. 对请求—响应调用登记 Future 和 Deadline。
+
+目标 Node：
+
+1. 根据实际 ServiceName 找到本地 Service；
+2. 校验 Service 状态和入站准入；
+3. 根据生成的 Contract ID 和 Method ID 找到 Dispatcher；
+4. 使用生成解码器取得参数；
+5. 把 RPC 任务投递到目标 Service；
+6. 调用真实业务方法；
+7. 编码结果或错误并返回。
+
+生成 Dispatcher 使用静态表或 Switch，不在热路径反射查找方法，也不解析 `"Service.Method"`。
+
+## 9. 编译时类型与运行时目标
+
+以下通用接口不能直接提供强类型点号调用：
+
+```go
+client := s.GetRPCClient(
+    nodeID,
+    serviceName,
+)
+
+client.AwaitGetPlayer(...)
+```
+
+因为 `serviceName` 是运行时字符串，Go 编译器不能根据字符串改变 `client` 的方法集合。
+
+v3 通过生成构造函数解决：
+
+```go
+playerClient := contract.NewPlayerRPCNodeClient(
+    s,
+    nodeID,
+    serviceName,
+)
+```
+
+其中：
+
+- `PlayerRPCClient` 决定编译时有哪些 RPC 方法；
+- `nodeID + serviceName` 决定运行时调用哪个实例。
+
+如果目标 Service 没有注册 `PlayerRPC`，调用返回契约或路由错误，不会尝试按方法名反射执行。
+
+## 10. 失败与重选规则
+
+自动选择客户端：
+
+- 每次调用使用最新只读路由快照；
+- 没有候选实例时返回无可用路由错误；
+- 不因为构造过客户端而保留已经失效的实例；
+- 是否在发送前失败时重选另一个候选实例，留给幂等重试设计确定；
+- Notify 默认不自动重试。
+
+Node 定向客户端：
+
+- 只匹配指定 `NodeID + ServiceName`；
+- 目标退休、失去发现、停止或不支持目标契约时返回错误；
+- 不自动退化为同名 Service 的任意实例；
+- 不因为 TCP 重连或 NATS 重订阅改变逻辑目标。
+
+两类客户端都继承统一 Deadline：
+
+```text
+调用方显式 Deadline > Service 默认值 > Node 默认值 > Origin 内置 15s
+```
+
+## 11. 低延迟约束
+
+- 客户端构造不执行网络 I/O；
+- 生成客户端不使用反射发现方法；
+- 热路径使用稳定 Contract ID 和 Method ID；
+- ServiceName 和 NodeID 不拼接成临时 `"Node.Service.Method"` 字符串；
+- 自动路由读取不可变快照，不与发现更新持有长时间互斥锁；
+- 编解码使用生成函数；
+- Await 不为每次 RPC 创建辅助 goroutine；
+- 客户端临时创建和字段保存两种用法都必须进行分配与延迟基准测试；
+- TCP 与 NATS 共享上层目标语义和生成客户端，不复制业务 API。
+
+## 12. 测试要求
+
+后续实现至少验证：
+
+1. 一个 Service 未绑定 RPC 接口时可以正常启动；
+2. 一个 Service 尝试绑定两个公开 RPC 接口时在启动或生成阶段失败；
+3. RPC 接口嵌入任意其他接口时生成失败；
+4. 生成错误指出接口名、原因和直接声明方法的修改建议；
+5. 普通客户端只选择同名、支持契约且可路由的实例；
+6. Node 客户端只选择指定 `NodeID + ServiceName`；
+7. Node 客户端目标失效时不切换到其他同名实例；
+8. 客户端构造不等待发现、不建立连接且不创建 Future；
+9. 当前快照中没有目标时，调用返回统一路由错误；
+10. Service 存在但不支持客户端契约时返回统一契约错误；
+11. `AwaitXxx`、`AsyncXxx` 和 `NotifyXxx` 在普通客户端和 Node 客户端上保持相同签名；
+12. 不生成 `AwaitNodeXxx`、`AsyncNodeXxx` 和 `NotifyNodeXxx`；
+13. Async 回调投递回客户端所属 Service；
+14. Await 使用已确认的挂起、恢复和单执行槽规则；
+15. 显式 Deadline、Service 默认值、Node 默认值和内置 `15s` 生效；
+16. 目标在 `AwaitNodeService` 成功后、RPC 发起前丢失时正常返回路由错误；
+17. 生成 Dispatcher 不依赖运行时反射或方法名字符串；
+18. 模板 Service 使用实际 ServiceName 创建客户端并正确路由；
+19. TCP 与 NATS 对普通客户端和 Node 客户端保持相同目标语义；
+20. 客户端临时创建、字段保存、路由命中和路由失败的延迟与分配基准。
+
+## 13. 已确认结论
+
+- 一个 Service 可以没有公开 RPC，但最多绑定一个公开 RPC 接口；
+- RPC 接口直接声明该 Service 的全部 RPC 方法；
+- 首版不支持 RPC 接口嵌入或跨 Service 聚合；
+- 不同 Service 使用不同生成客户端；
+- `origin-gen` 为每个 RPC 接口生成强类型客户端；
+- `NewXxxRPCClient(owner, serviceName)` 创建自动实例选择客户端；
+- `NewXxxRPCNodeClient(owner, nodeID, serviceName)` 创建精确实例客户端；
+- 客户端构造只绑定逻辑目标，不等待发现、不建立连接；
+- 自动客户端按实际 ServiceName、契约和可路由状态筛选候选实例；
+- Node 客户端固定 `NodeID + ServiceName`，失败时不切换其他实例；
+- 客户端绑定目标后统一调用 `AwaitXxx`、`AsyncXxx` 和 `NotifyXxx`；
+- 不生成带 Node 后缀或中缀的 RPC 方法；
+- 生成客户端类型决定编译时方法集合，NodeID 与 ServiceName 决定运行时目标；
+- 生成代码使用 Contract ID、Method ID 和静态编解码，不在热路径解析方法字符串或反射查找函数；
+- Broadcast 继续使用独立的契约级广播语义，不从单目标绑定推导目标。

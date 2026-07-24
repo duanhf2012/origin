@@ -18,7 +18,7 @@
 - 客户端超时后的远端取消协议；
 - RPC 错误码和错误详情的完整线协议。
 
-数据类型和编解码规则见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，任务挂起与恢复规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)，Deadline 的统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)，错误表示见 [Origin v3 统一错误码设计](./2026-07-24-unified-error-code-design.md)。
+数据类型和编解码规则见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，任务挂起与恢复规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)，单目标客户端取得和路由规则见 [Origin v3 单目标 RPC 客户端与路由设计](./2026-07-24-rpc-single-target-client-and-routing-design.md)，Deadline 的统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)，错误表示见 [Origin v3 统一错误码设计](./2026-07-24-unified-error-code-design.md)。
 
 ## 2. 设计目标
 
@@ -53,6 +53,10 @@ type PlayerRPC interface {
     )
 }
 ```
+
+首版保持一个 Service 最多绑定一个公开 RPC 接口。该接口必须直接声明该 Service 的全部 RPC 方法，不支持嵌入其他接口，也不支持把不同 Service 的 RPC 聚合成一个客户端。一个 Service 可以完全不公开 RPC。
+
+方法实现可以分散在多个 `.go` 文件中，但 RPC 接口保持一份明确的对外契约。详细的客户端生成与目标绑定规则见 [Origin v3 单目标 RPC 客户端与路由设计](./2026-07-24-rpc-single-target-client-and-routing-design.md)。
 
 服务端实现原始方法名：
 
@@ -441,9 +445,9 @@ BroadcastPlayerOnline(
 
 `BroadcastXxx` 在语义上面向调用时服务发现快照中所有匹配且可路由的 Service。匹配依据是生成阶段确定的稳定 RPC 契约 ID 和方法 ID，不按 Go 接口名或方法名字符串临时匹配，避免无关接口因同名而误收。
 
-生成的 `rpcClient` 是绑定 RPC 契约和当前 Node RPC Runtime 的强类型逻辑代理，不是一条 TCP 或 NATS 连接，也不拥有连接生命周期。连接建立、复用、重连和关闭统一由当前 Node 的连接管理器和 Transport 管理。同一个 `rpcClient` 可以经过多个目标 Node 的 TCP 连接发送，也可以经过当前 Node 到 NATS 的连接发送。
+生成的 RPC 客户端和广播入口都是绑定 RPC 契约及当前 Node RPC Runtime 的强类型逻辑代理，不是一条 TCP 或 NATS 连接，也不拥有连接生命周期。连接建立、复用、重连和关闭统一由当前 Node 的连接管理器和 Transport 管理。
 
-具体服务筛选与关注规则见 [Origin v3 服务发现与关注筛选设计](./2026-07-24-service-discovery-and-interest-filter-design.md)。退休 Service 保持可见但从普通 RPC 路由中排除，详见 [Origin v3 Service 退休设计](./2026-07-24-service-retirement-design.md)。单目标路由规则继续由独立设计确定。
+具体服务筛选与关注规则见 [Origin v3 服务发现与关注筛选设计](./2026-07-24-service-discovery-and-interest-filter-design.md)。退休 Service 保持可见但从普通 RPC 路由中排除，详见 [Origin v3 Service 退休设计](./2026-07-24-service-retirement-design.md)。单目标客户端与路由规则见 [Origin v3 单目标 RPC 客户端与路由设计](./2026-07-24-rpc-single-target-client-and-routing-design.md)。
 
 ### 10.3 按 Node 合并投递
 
@@ -591,6 +595,8 @@ Response:
 8. 生成后的方法名在客户端类型中不冲突；
 9. 参数位置和类型变更符合兼容性规则；
 10. 需要直接暴露为 gRPC 的方法满足单个 Protobuf Request/Response 限制。
+11. RPC 接口没有嵌入其他接口；
+12. 一个 Service 没有绑定多个公开 RPC 接口。
 
 所有失败必须指出接口、方法、参数或返回值位置、失败原因和可执行的修改建议，不能延迟到运行时反射调用时失败。
 
@@ -625,13 +631,17 @@ Response:
 25. 服务端未声明 error 时，框架错误仍能返回；
 26. 请求处理 panic 返回远端执行错误，通知处理 panic 只产生接收端诊断；
 27. 参数顺序和中间插入的兼容性检查；
-28. Async、Await、Notify 和 Broadcast 的低延迟基准。
+28. Async、Await、Notify 和 Broadcast 的低延迟基准；
+29. RPC 接口嵌入其他接口时生成失败；
+30. 一个 Service 绑定多个公开 RPC 接口时生成或注册失败。
 
 ## 16. 已确认结论
 
 Origin v3 RPC 接口与调用语义最终采用：
 
 - 使用 Go 接口定义服务端 RPC；
+- 一个 Service 可以没有公开 RPC，但最多绑定一个公开 RPC 接口；
+- RPC 接口直接声明该 Service 的全部 RPC 方法，不支持接口嵌入或跨 Service 聚合；
 - 允许多个输入和多个业务输出，不设置人为数量上限；
 - Context 必须是第一个参数；
 - 不支持可变参数，使用 Slice 代替；

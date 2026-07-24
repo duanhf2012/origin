@@ -183,7 +183,17 @@ func (s *SceneService) OnStart(ctx context.Context) error {
 }
 ```
 
-`AwaitNodeService` 只负责确认指定实例当前可路由，不把后续普通 RPC 隐式绑定到该 Node。需要调用同一实例时，调用方还必须使用单目标 RPC 的定向路由接口；该接口的最终外观在单目标路由设计中独立确定。
+`AwaitNodeService` 只负责确认指定实例当前可路由，不把后续普通 RPC 隐式绑定到该 Node。需要调用同一实例时，调用方使用对应的生成 Node 客户端：
+
+```go
+client := contract.NewWorldRPCNodeClient(
+    s,
+    "world-1",
+    "WorldService",
+)
+```
+
+完整外观见 [单目标 RPC 客户端与路由设计](./2026-07-24-rpc-single-target-client-and-routing-design.md)。
 
 实例可能在等待成功后、定向 RPC 发起前丢失，因此 RPC 仍必须正常处理无可用路由、断线、取消和超时。
 
