@@ -1,4 +1,4 @@
-# Origin v3 Service 退休与正式停止设计
+# Origin v3 Service 退休设计
 
 ## 1. 文档状态与范围
 
@@ -6,13 +6,12 @@
 - 确认日期：2026-07-24
 - 适用版本：Origin v3
 
-本文只规定 Service 退休状态、入站 RPC 摘流，以及退休与正式停止之间的边界。
+本文只规定 Service 退休状态、入站 RPC 摘流，以及退休与正式停止之间的状态边界。
 
 本文暂不确定：
 
-- `Retire`、`Resume`、`Stop` 的最终公开 API 外观；
-- `OnRetire`、`OnResume`、`OnStop` 等生命周期钩子的名称和调度顺序；
-- 收到正式 Stop 信号后的完整排空范围、超时和强制退出策略；
+- `Retire`、`Resume` 的最终公开 API 外观；
+- `OnRetire`、`OnResume` 等退休生命周期钩子的名称和调度顺序；
 - Node 与 Application 的优雅关闭编排。
 
 这些独立问题后续讨论。未确认项不能由实现阶段自行补成隐式行为。
@@ -116,7 +115,7 @@ ResumeTimer(timerID TimerID) bool
 - 执行停止钩子；
 - 最终进入 `Stopped`。
 
-上述动作的精确顺序、哪些任务需要排空、默认超时、超时后的行为以及错误码，必须在后续“Service 优雅停止”设计中单独确认。本文只确认：
+上述动作的精确顺序、排空、finalizer、`OnStop` 和 Deadline 由独立文档规定，见 [Origin v3 Service 优雅停止设计](./2026-07-24-service-graceful-stop-design.md)。本文只确认：
 
 - 退休不会触发正式关闭；
 - 退休排空已接收 RPC 后仍保持 `Retired`；
@@ -214,7 +213,5 @@ Origin v3 Service 退休采用：
 
 1. `Retire`、`Resume` 和状态查询接口的最终外观；
 2. `OnRetire`、`OnResume` 与状态发布的精确顺序；
-3. 正式 Stop 的准入关闭、任务排空、Deadline 和强制退出；
-4. Stop 时 Timer、Waiting 任务和外部资源的处理；
-5. Node 与 Application 的优雅停止顺序；
-6. 退休状态监听器的公开注册和取消注册接口。
+3. Node 与 Application 的优雅停止顺序；
+4. 退休状态监听器的公开注册和取消注册接口。

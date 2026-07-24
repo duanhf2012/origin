@@ -146,6 +146,8 @@ node_b → node_d → node_a → node_c
 
 Application 必须顺序停止 Node，不并行停止。前一个 Node 完成停止并进入 `Stopped` 状态后，才停止下一个 Node。
 
+如果前一个 Node 的 Service 在 `OnStop` 中需要调用后一个 Node 的 `DBService` 等依赖服务，`stop_order` 必须保证被依赖 Node 后停止。后一个 Node 在依赖方 `OnStop` 完成前保持可路由；不能先让所有 Node 同时退休，再依赖普通 RPC 完成存档。Service finalizer、Await 和基础设施保活规则见 [Origin v3 Service 优雅停止设计](./2026-07-24-service-graceful-stop-design.md)。
+
 ## 10. 生命周期状态
 
 Application 至少应能观察 Node 的以下状态：

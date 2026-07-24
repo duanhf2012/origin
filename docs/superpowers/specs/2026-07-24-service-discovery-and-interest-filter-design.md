@@ -391,7 +391,7 @@ Service 从 `Running` 进入 `Retired` 时仍属于同一个可见实例，因�
 
 状态变化事件与 `Discovered`、`Lost` 使用相同的有序快照边界和 Service 调度投递规则。事件对象、监听接口和命名后续确定，本文只固定语义。
 
-退休状态的完整行为见 [Origin v3 Service 退休与正式停止设计](./2026-07-24-service-retirement-and-graceful-shutdown-design.md)。
+退休状态的完整行为见 [Origin v3 Service 退休设计](./2026-07-24-service-retirement-design.md)。
 
 是否提供 `Retired -> Running` 恢复能力，以及恢复时使用独立状态事件还是复用其他事件，留待生命周期 API 讨论，不在本文中提前确认。
 

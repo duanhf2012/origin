@@ -159,6 +159,16 @@ Await[T any](
 
 普通 I/O `Await` 不额外创建一个 goroutine 执行 `fn`。等待中的 goroutine 仍然存在，但不占用操作系统线程，也不占用 Service 执行槽。
 
+Service 进入 `Stopping/Finalizing` 并执行 `OnStop` 时采用独立的 finalizer 等待路径：
+
+- `OnStop` 中仍使用同样的 `AwaitXxx` 或通用 `Await` 外观；
+- finalizer goroutine 直接等待 Future 或关闭 Context；
+- Future 完成后唤醒同一个 finalizer goroutine；
+- 不释放执行槽给替代业务 Runner，也不处理普通 Ready 任务；
+- 该行为只用于停止收尾，不能改变正常业务 `Await` 的交接语义。
+
+完整规则见 [Origin v3 Service 优雅停止设计](./2026-07-24-service-graceful-stop-design.md)。
+
 ## 6. Service 状态访问规则
 
 调用 `Await` 前，业务代码仍持有 Service 执行槽，可以读取状态并复制调用参数。
@@ -223,7 +233,7 @@ Redis、数据库等支持 Context 的同步客户端调用可以直接放在通
 - `fn` 必须主动监听 Context，框架不能强制终止忽略 Context 的 Go 函数；
 - 外部操作完成、Context 取消或 Deadline 到达只能使任务具备恢复条件，不能让等待任务越过活动 Runner 直接访问 Service 状态；
 - 已经开始的任务在取消后仍要恢复一次，重新取得执行槽并返回 `context.Canceled` 或 `context.DeadlineExceeded`，以便正常执行 `defer` 和业务清理；
-- Service 停止时取消所有 Waiting 任务的 Context，并按相同规则完成受控恢复和退出，不能只从队列中删除任务。
+- Service 进入 `Stopping/Draining` 时不立即取消 Stop 前已经接收的 Waiting 任务；关闭 Deadline 到期后取消仍未完成任务的 Context，并按相同规则完成受控恢复和退出，不能只从队列中删除任务。
 
 生成的 `AwaitXxx` 把同一个有效 Context 传给底层 RPC 和内部 Await 原语。RPC 不重复附加另一套 `15s` 默认超时。
 
@@ -297,7 +307,9 @@ Timer 回调可以调用 `Await`。挂起期间：
 18. 高并发挂起、完成、超时和停止之间的竞态；
 19. Ready 与 Waiting 积压时的指标和过载行为；
 20. 并发提交、空队列唤醒和 Runner 交接不会丢失任务或产生两个活动 Runner；
-21. 任何用户回调执行期间均未持有 `ServiceScheduler` 内部锁。
+21. 任何用户回调执行期间均未持有 `ServiceScheduler` 内部锁；
+22. `OnStop` 中的 Await 在同一个 finalizer goroutine 恢复，不创建替代业务 Runner；
+23. finalizer 等待期间不执行普通 Service 任务。
 
 ## 13. 已确认结论
 
@@ -317,6 +329,7 @@ Origin v3 Service 执行模型最终采用：
 - RPC 通过生成的 `AsyncXxx` 和 `AwaitXxx` 分别表达回调式异步与调度式等待；
 - `AwaitXxx` 内部使用通用 Await 原语，普通 RPC 用户不需要直接操作 Future；
 - 普通 I/O `Await` 由当前任务 goroutine 执行，不额外创建每请求辅助 goroutine；
+- `OnStop` 使用独立的 finalizer Await 路径，不创建替代业务 Runner；
 - 新任务、Timer 回调和恢复任务共用 FIFO Ready 队列；
 - `Await` 默认超时的最终兜底为 `15s`；
 - 超时优先级为显式 Deadline、Service 默认值、Node 默认值、Origin 内置 `15s`；

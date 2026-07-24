@@ -344,7 +344,7 @@ Service 每次唤醒只处理有限批次的到期条目。批次结束后仍有
 - 不允许时间轮协程为降低积压而直接执行用户回调；
 - 过载通过排队延迟、指标、日志和告警暴露，不能静默改变一次性业务语义。
 
-Ready 列表保存的是原 Timer 条目，不为到期事件复制回调和业务数据。所有者关闭后，Ready 列表中的条目必须一并取消和清理。
+Ready 列表保存的是原 Timer 条目，不为到期事件复制回调和业务数据。Service 进入 `Stopping/Draining` 前已经进入 Ready 的条目按排空规则处理；所有者进入最终清理后，任何未完成条目必须取消并清理。
 
 ## 10. 与 Service 执行模型的边界
 
@@ -358,13 +358,13 @@ TimerEngine 面向 Service 执行器投递，不依赖某一种具体执行模�
 - Timer 回调完整返回前，Timer 状态保持为运行中；
 - 如果 Service 执行器支持调度式挂起，挂起期间 Timer 仍视为运行中；
 - `CancelTimer` 不能强制展开或终止正在执行的回调；
-- Service 停止时取消回调 Context，并由 Service 执行器完成恢复和清理。
+- Service 关闭 Deadline 到期时取消尚未完成回调的 Context，并由 Service 执行器完成恢复和清理。
 
 Timer 是否能够与其他 Service 任务交错、哪些操作会形成挂起点以及恢复顺序，由独立的 Service 执行模型设计确定。
 
 相关规则见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)。
 
-Service 进入退休状态时，TimerEngine 不自动暂停或取消该 Service 的 Timer。退休只关闭新入站 RPC；Timer 仍按正常规则触发。业务需要暂时停止某项定时逻辑时，显式调用 `PauseTimer`，详细边界见 [Origin v3 Service 退休与正式停止设计](./2026-07-24-service-retirement-and-graceful-shutdown-design.md)。
+Service 进入退休状态时，TimerEngine 不自动暂停或取消该 Service 的 Timer。退休只关闭新入站 RPC；Timer 仍按正常规则触发。业务需要暂时停止某项定时逻辑时，显式调用 `PauseTimer`，详细边界见 [Origin v3 Service 退休设计](./2026-07-24-service-retirement-design.md)。
 
 ## 11. RPC 与系统组件接入边界
 
@@ -395,12 +395,15 @@ RPC 的 Context、Deadline 优先级和调用范围见 [Origin v3 RPC 数据类�
 Service 停止时：
 
 1. 标记 Timer 所有者为关闭中，拒绝新增；
-2. 取消仍在时间轮中的 Timer；
-3. 移除 Ready 列表中尚未开始的 Timer；
-4. 清除这些 Timer 的回调、Context 和所有者引用；
-5. 取消正在执行回调的 Context；
-6. 按 Service 执行模型等待或终止正在退出的任务；
-7. 释放所有者索引。
+2. 取消仍在时间轮中、暂停中或尚未到期的业务 Timer；
+3. Stop 前已经到期并进入 Ready 队列的 Timer 回调属于排空集合，允许执行完成；
+4. 正在运行或 Waiting 的 Timer 回调按 Service 优雅停止规则排空；
+5. 关闭 Deadline 到期时取消尚未完成回调的 Context；
+6. `OnStop` 期间业务 `ITimer` 继续拒绝新增，但 Node TimerEngine 仍为 RPC 和关闭 Deadline 提供系统定时能力；
+7. finalizer 清除剩余回调、Context 和所有者引用；
+8. 释放所有者索引。
+
+完整停止顺序见 [Origin v3 Service 优雅停止设计](./2026-07-24-service-graceful-stop-design.md)。
 
 一次性 Timer 执行完成、周期 Timer 取消和 Cron 取消时执行同样的引用清理。对象池只能在基准证明有收益且 Reset 完整可验证时使用，首版不因假设性能收益增加复杂池化实现。
 
