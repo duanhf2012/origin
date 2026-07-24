@@ -414,7 +414,7 @@ BroadcastPlayerOnline(
 
 生成的 `rpcClient` 是绑定 RPC 契约和当前 Node RPC Runtime 的强类型逻辑代理，不是一条 TCP 或 NATS 连接，也不拥有连接生命周期。连接建立、复用、重连和关闭统一由当前 Node 的连接管理器和 Transport 管理。同一个 `rpcClient` 可以经过多个目标 Node 的 TCP 连接发送，也可以经过当前 Node 到 NATS 的连接发送。
 
-具体服务筛选、关注服务、退休节点和路由过滤规则由独立的服务发现与路由设计确定。
+具体服务筛选与关注规则见 [Origin v3 服务发现与关注筛选设计](./2026-07-24-service-discovery-and-interest-filter-design.md)。退休节点和单目标路由规则继续由各自的独立设计确定。
 
 ### 10.3 按 Node 合并投递
 
