@@ -1,0 +1,141 @@
+# Origin v2 功能盘点与 v3 迁移矩阵
+
+## 1. 文档目的
+
+本文件用于核对 Origin v2 已有能力，明确每项能力在 v3 中的去向，避免完全重构时遗漏重要功能。
+
+它不是要求 v3 首期一次性重做全部 v2。v3 先完成最小闭环，再按风险和依赖逐步补齐。
+
+## 2. 里程碑定义
+
+| 里程碑 | 目标 |
+|---|---|
+| M0：最小闭环 | 两个 Node、两个 Service 通过内置发现和 TCP RPC 完成启动、调用、定时任务、退休及优雅停止 |
+| M1：核心完备 | 补齐核心 RPC 语义、路由、序列化、NATS、etcd 和生产级可观测性 |
+| M2：适配器兼容 | 重建常用网络、数据库、消息队列及系统 Service/Module |
+| M3：生态工具 | 按实际项目需要迁移工具包、控制台和非核心组件 |
+
+## 3. 迁移策略
+
+| 策略 | 含义 |
+|---|---|
+| 保留 | v3 继续提供相同核心能力，外观可规范化 |
+| 重构 | 保留使用场景，但重新设计实现或接口 |
+| 替换 | 使用 v3 的新能力覆盖 v2 旧机制 |
+| 后置 | 首期不实现，在后续里程碑补齐 |
+| 待评估 | 必须用真实项目需求和维护成本判断是否迁移 |
+
+## 4. 核心对象与生命周期
+
+| v2 能力 | v2 参考位置 | v3 处理 | 里程碑 | 验证重点 |
+|---|---|---|---|---|
+| Node 作为程序启动单位 | `node/` | 保留，并新增 Application 管理多个 Node | M0 | 单进程多 Node 与单进程单 Node 行为一致 |
+| Service 注册与生命周期 | `service/service.go`、`service/manager.go` | 重构为明确状态机、就绪门、退休和排空 | M0 | 启停顺序、失败回滚、无停止后回调 |
+| Module 生命周期 | `service/module.go` | 保留并改为静态树，生命周期与 Service 对齐 | M0 | 父子启动顺序和逆序释放 |
+| Node 内 Service 启停顺序 | `node/`、配置示例 | 保留显式顺序；未配置项按声明顺序补齐，停止默认反序 | M0 | 部分配置、重复项、未知项校验 |
+| 模板 Service | v2 Service 配置与模板逻辑 | 保留以模板加新服务名创建实例的方式 | M2 | 多实例配置隔离和发现身份 |
+| Service 多协程数量配置 | `service/service.go` 的旧并发模型 | 替换为单执行权的协作式任务调度 | M0 | 任意时刻只有一个业务任务持有 Service 执行权 |
+
+对应设计见 [设计文档索引](../design/README.md)。
+
+## 5. 调度、事件、定时器与诊断
+
+| v2 能力 | v2 参考位置 | v3 处理 | 里程碑 | 验证重点 |
+|---|---|---|---|---|
+| Service 顺序事件处理 | `service/` | 保留，并允许任务在框架等待点挂起后交错执行 | M0 | 顺序编程外观、无 Service 状态并发 |
+| `AsyncDo` 与队列异步执行 | `concurrent/` | 重构为受控异步执行与 Service 恢复投递 | M1 | 队列上限、取消、过载和泄漏 |
+| 本地异步事件 | `event/` | 保留 | M0 子集 | `NotifyAsync` 下一任务触发 |
+| 本地同步事件 | `event/` | 新增明确的 `NotifySync` | M0 子集 | 同一调用栈、禁止跨 Service 并发 |
+| Timer 与 Cron | `util/timer/`、Service 定时接口 | 重构为 Node 统一时间引擎和 Service 投递 | M0 子集，M1 完备 | 取消、暂停、积压、停止清理 |
+| 固定步长定时器 | v2 FrameTimer 相关能力 | 暂不进入 v3 首版 | 待评估 | MMO 场景确有需求后单独设计 |
+| Profiler 与队列监控 | `profiler/`、`node/` | 后置并按 v3 调度指标重做 | M1 | 等待数、运行时长、队列水位、超时 |
+
+## 6. RPC
+
+| v2 能力 | v2 参考位置 | v3 处理 | 里程碑 | 验证重点 |
+|---|---|---|---|---|
+| 反射注册 RPC | `rpc/handler.go` 等 | 替换为 Go 接口契约和 Origin 自有代码生成 | M0 | 生成期发现非法签名、服务端绑定正确 |
+| 同步 RPC | `rpc/` | 替换为生成的 `AwaitXxx` 顺序调用外观 | M0 | 默认 15 秒、取消、挂起恢复 |
+| 异步 RPC | `rpc/` | 保留为生成的 `AsyncXxx` | M0 | 完成结果回到目标 Service 调度器 |
+| 可取消异步 RPC | v2 `withcancel` 风格 | 保留取消能力，规范化句柄和 Context | M1 | 取消竞态与迟到响应 |
+| 无返回通知 | v2 `Go` 风格 | 重构为生成的 `NotifyXxx` | M0 子集 | 只保证接受结果，不伪装业务成功 |
+| Broadcast / `CastGo` | `rpc/` | 保留广播语义，由内部连接管理按实例展开投递 | M1 | 部分失败结果和候选快照 |
+| 指定 Node、Service 调用 | `rpc/` | 保留，生成强类型客户端并由内部 RPC 管理器选连接 | M0 | 不生成重复的 Node 专用方法 |
+| 任意实例调用 | `rpc/` | 保留并显式路由策略 | M0 最小策略，M1 完备 | RoundRobin、Rand、ModKey、自定义路由 |
+| 本地 RPC 优化 | v2 本地调用路径 | M0 不做透明短路，先保持网络行为一致 | M1 | 短路前后序列化、超时和错误一致 |
+| TCP RPC | `rpc/server.go`、`rpc/client.go` 等 | 保留并重写 | M0 | 长连接、重连、背压、包大小限制 |
+| NATS RPC | `rpc/nats*.go` | 保留为可插拔传输 | M1 | 与 TCP 调用语义一致 |
+| 外部 gRPC 接入 | v2 无 | 新增为外部协议适配插件，不作为内部核心协议 | M2 | 跨语言、鉴权、错误映射 |
+| Protobuf/JSON/Raw 处理 | `rpc/processor*.go`、`network/processor*.go` | Protobuf 主路径进入 M0；其余按用途后置 | M0/M1 | 分配、兼容、边界类型 |
+| 普通 Go 类型和结构体 | v2 反射调用 | 重构为生成期布局和自有编码规则 | M1 | 嵌套、map、指针、Protobuf 字段 |
+| 压缩与最大包限制 | `rpc/compress.go`、配置 | 保留 | M1 | 压缩阈值、恶意包和内存上限 |
+| 默认 RPC 超时 | v2 默认 15 秒 | 保留 15 秒，可按调用覆盖 | M0 | 未显式超时时仍可退出 |
+
+## 7. 服务发现与配置
+
+| v2 能力 | v2 参考位置 | v3 处理 | 里程碑 | 验证重点 |
+|---|---|---|---|---|
+| 内置服务发现 | `cluster/origin_discovery.go` | 保留，不依赖外部中间件 | M0 | 注册、更新、失去发现、退休状态 |
+| etcd 服务发现 | `cluster/etcd_discovery.go` | 保留为可插拔实现 | M1 | 租约、断线恢复、事件去重 |
+| TTL 与失效处理 | `cluster/ttl.go` | 保留并统一到发现状态机 | M1 | 时钟漂移和假死实例清理 |
+| 发现与失去发现事件 | `cluster/` | 保留，并增加退休状态事件 | M0 | 顺序、重复事件和状态快照 |
+| 私有 Node/Service | `cluster/` 与配置 | 用关注规则和发布范围重构 | M1 | 不应暴露的实例不会建立连接 |
+| 正则发现筛选 | v2 `AllowDiscovery` | 替换为契约、Node 名、Service 名和多值标签规则 | M0 子集，M1 完备 | 先筛选后建连、规则可组合 |
+| Global/Service/NodeService 配置 | v2 JSON/YAML 配置 | 保留层级思想，外观尽量接近 v2 | M0 | 覆盖优先级、未知字段、类型错误 |
+| JSON/YAML 与环境变量 | v2 配置加载 | YAML 作为 M0 主路径；其他格式和展开后置 | M0/M1 | 可重复加载和明确错误位置 |
+| 读取字段或解析结构体 | v2 Service 配置接口 | 保留两种方式并规范化 | M0 | Module 可通过 Service 获取配置 |
+
+## 8. 网络适配器与系统 Service
+
+| v2 能力 | v2 参考位置 | v3 处理 | 里程碑 |
+|---|---|---|---|
+| TCP 客户端/服务器 | `network/tcp_*.go` | RPC 所需最小 TCP 内核进 M0，通用网络 API 后置 | M0/M2 |
+| KCP 客户端/服务器 | `network/kcp_*.go`、`sysmodule/kcp*.go` | 后置 | M2 |
+| WebSocket 客户端/服务器 | `network/websocket_*.go`、`sysservice/websocket*.go` | 后置 | M2 |
+| HTTP 与 Gin Service/Module | `network/http*.go`、`sysmodule/gin*.go`、`sysservice/http*.go` | 后置 | M2 |
+| 消息队列 Service | `sysservice/message_queue*.go` | 待项目需求确认后重构 | M2 |
+| Rank Service | `sysservice/rank*.go` | 待评估是否属于引擎核心 | M3 |
+
+## 9. 数据与外部系统 Module
+
+| v2 能力 | v2 参考位置 | v3 处理 | 里程碑 |
+|---|---|---|---|
+| MySQL Module | `sysmodule/mysql*.go` | 保留使用场景，重建为独立适配器 | M2 |
+| Redis Module | `sysmodule/redis*.go` | 保留使用场景，并接入通用 Await | M2 |
+| MongoDB Module | `sysmodule/mongodb*.go` | 后置 | M2 |
+| Kafka Module | `sysmodule/kafka*.go` | 后置 | M2 |
+| NATS Module/传输 | `rpc/nats*.go` 及相关配置 | 核心 RPC 传输在 M1，业务 Module 另行评估 | M1/M2 |
+| HTTP Client Pool | `sysmodule/http_client_pool.go` | 后置 | M2 |
+
+这些外部系统必须复用 Service 的通用 `Await` 调度语义，不能各自再造一套 Service 并发模型。
+
+## 10. 基础设施与工具
+
+| v2 能力 | v2 参考位置 | v3 处理 | 里程碑 |
+|---|---|---|---|
+| 日志 | `log/` | 核心日志接口进入 M0，具体实现保持可替换 | M0 |
+| 系统信号与进程控制 | `node/platform_*.go`、`util/sysprocess/` | 保留最小停服信号处理 | M0 |
+| 控制台命令 | `console/` | 后置 | M3 |
+| 队列、对象池、字节池、信号量 | `util/queue/`、`util/mempool/`、`util/bytespool/`、`concurrent/` | 不整体迁移，只在基准证明需要时引入 | 按需 |
+| SkipList、随机、哈希、UUID 等通用工具 | `util/` | 不视为 v3 核心兼容承诺，按项目需求迁移 | M3/按需 |
+| Blueprint、DeepCopy、FrameTimer 等工具 | `util/`、`sysmodule/` | 待评估 | M3 |
+
+## 11. M0 的兼容边界
+
+M0 保证的是核心行为闭环，不保证 v2 源码级兼容：
+
+1. 保留 Node、Service、Module、RPC、Timer、事件和配置的核心使用场景。
+2. 接口命名可以规范化，但尽量维持 v2 用户熟悉的调用结构。
+3. 同进程多 Node 仍通过 RPC 传输边界交互，不引入只在开发环境成立的隐式行为。
+4. NATS、etcd、外部 gRPC 和 v2 的系统 Module 不阻塞 M0。
+5. 每补齐一个后续能力，都必须同时补兼容说明、测试和性能基线。
+
+## 12. 盘点结论
+
+v2 的能力面明显大于 v3 首个闭环。最稳妥的行动顺序是：
+
+1. 用 M0 验证生命周期、调度、发现、RPC 和停止流程能够真正协同工作。
+2. 再补齐 NATS、etcd、完整路由和序列化等核心能力。
+3. 最后按真实项目优先级迁移网络、存储和工具生态。
+
+这样既不会丢失 v2 功能视野，也不会让首期被大量外围适配器拖住。

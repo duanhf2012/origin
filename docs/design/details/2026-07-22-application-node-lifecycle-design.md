@@ -1,5 +1,7 @@
 # Origin v3 Application 与 Node 生命周期设计
 
+> 文档类型：详细设计储备
+
 ## 1. 文档状态
 
 - 状态：已确认

@@ -1,0 +1,246 @@
+# Origin v3 M0 最小可运行闭环设计
+
+> 文档状态：草案，待开发者确认
+>
+> 日期：2026-07-25
+
+## 1. 目的
+
+M0 不追求一次性完成 Origin v3，而是用一个最小但真实的端到端场景验证最危险的设计是否能够共同工作。
+
+通过 M0 后，v3 应具备继续扩展的稳定骨架；未进入 M0 的详细设计继续保留在 `details/` 中。
+
+## 2. 验证场景
+
+示例 Application 包含两个 Node：
+
+- `player-node`：运行 `PlayerService`，拥有 `PlayerModule`。
+- `db-node`：运行 `DBService`，拥有 `PersistModule`。
+
+完整流程如下：
+
+1. Application 读取配置并选择启动两个 Node。
+2. Node 按配置顺序启动基础设施和 Service。
+3. `DBService` 完成初始化并发布可路由状态。
+4. `PlayerService.OnStart` 使用 `AwaitService("db-node.DBService")` 等待依赖，再完成初始化并进入可路由状态。
+5. Player 业务事件修改 Service 状态。
+6. Timer 到期后向 `PlayerService` 投递保存任务。
+7. `PlayerService` 通过生成的 `AwaitSavePlayer` 调用 `DBService`；等待期间释放 Service 执行权，其他已准入任务可以执行。
+8. 将 `PlayerService` 切换到 Retired 后，新的入站 RPC 被拒绝，但 Timer、本地事件和内部任务仍能运行。
+9. 恢复 Running 后重新接受入站 RPC。
+10. 收到 Stop 信号后按配置顺序停止：拒绝新任务、排空已有 Waiting/Async 任务、执行 `OnStop` 最终存档、逆序停止 Module，最后回收基础设施。
+
+## 3. 两种部署方式
+
+同一套示例必须支持：
+
+### 3.1 开发模式
+
+一个 Application 在同一进程内启动 `player-node` 和 `db-node`。
+
+### 3.2 生产等价模式
+
+两个进程各启动一个 Node。
+
+即使两个 Node 位于同一进程，它们之间也必须经过配置的 TCP RPC 传输边界，不允许 M0 使用进程内直接调用优化。这样可以避免只在单进程开发模式下正常、实际部署后才暴露的协议、序列化和连接问题。
+
+## 4. M0 范围
+
+### 4.1 Application 与配置
+
+M0 实现：
+
+- 一个 Application 管理并选择启动多个 Node。
+- Node 和 Service 的显式启动顺序。
+- 未配置的 Service 按声明顺序追加；停止顺序默认是有效启动顺序的反序。
+- YAML 主配置路径。
+- Service 配置支持按字段读取和解析到结构体。
+- 配置错误在启动前明确返回，不静默忽略。
+
+不在 M0 中实现 JSON、多配置源热更新和复杂环境变量替换。
+
+### 4.2 Node、Service 与 Module
+
+M0 实现：
+
+- Node、Service、Module 的最小生命周期状态机。
+- Node 基础设施先于业务 Service 启动，并晚于业务 Service 停止。
+- Service 就绪门、Running、Retired、Stopping 和 Stopped 语义。
+- 静态 Module 树。
+- Module 按父到子启动，按子到父逆序停止。
+- `OnInit`、`OnStart(ctx)`、`OnStop(ctx)`。
+- 生命周期失败回滚和停止超时保底。
+
+M0 不实现动态添加、删除或热替换 Module。
+
+### 4.3 Service 调度与 Await
+
+M0 实现统一调度模型：
+
+- 每个 Service 任意时刻只有一个任务持有业务执行权。
+- 普通任务执行完成后，Runner 继续从就绪队列取任务，不为每个事件创建新 goroutine。
+- 生成的异步 RPC 不主动让出当前任务。
+- `Await` 在 Origin 感知的等待点挂起当前任务并释放执行权。
+- Future 完成后只投递“任务可恢复”事件，由 Service 调度器恢复原任务。
+- 默认 Await 超时为 15 秒，可通过 Context 或调用选项覆盖。
+- `OnStop` 进入最终收尾阶段后独占 Service 执行权；其内部 Await 仍可等待结果，但不调度新的业务任务。
+
+M0 先验证调度正确性和稳定开销，不引入无限工作协程池。
+
+### 4.4 RPC 契约、生成与传输
+
+M0 只打通一条最小 RPC 主路径：
+
+```go
+type DBRPC interface {
+    SavePlayer(ctx context.Context, req *pb.SavePlayerRequest) *pb.SavePlayerResponse
+}
+```
+
+代码生成至少提供：
+
+```go
+AsyncSavePlayer(ctx, req)
+AwaitSavePlayer(ctx, req) (*pb.SavePlayerResponse, error)
+```
+
+如果示例再定义一个无业务返回值的方法，则生成 `NotifyXxx`，用于验证通知语义；通知不是 M0 主路径的前置条件。
+
+M0 规则：
+
+- 契约使用 Go 接口声明。
+- 业务接口不声明 `error`；生成客户端统一附加框架 `error`。
+- 首条链路只使用 Protobuf 消息，并使用 Protobuf 序列化。
+- 只支持一元 RPC，不支持流式 RPC。
+- 默认 RPC 超时 15 秒。
+- 支持按 `NodeID + ServiceName` 构造强类型单目标客户端。
+- 支持从已发现的同类 Service 中选择一个实例，M0 只需一个简单内建策略。
+- 客户端不直接拥有 TCP 连接；连接、重连和请求关联由内部 RPC 管理器负责。
+
+普通 Go 类型、自定义结构体编码、混合 Protobuf 字段、Broadcast、自定义路由、压缩和本地短路放到 M1。
+
+### 4.5 服务发现
+
+M0 实现不依赖外部中间件的内置服务发现：
+
+- 服务注册、更新、失去发现。
+- Running 与 Retired 状态传播。
+- 按 RPC 契约关注服务。
+- `AwaitService` 支持 `NodeName.ServiceName`。
+- 只对关注且可路由的服务建立 RPC 连接。
+
+标签多值匹配的完整组合规则、etcd、TTL 异常恢复和复杂筛选进入 M1。
+
+### 4.6 Timer 与本地事件
+
+M0 实现：
+
+- 一个 Node 共享一个 TimerEngine。
+- Timer 到期只向所属 Service 投递任务，不直接并发执行业务回调。
+- Service 直接组合最小 `ITimer` 能力。
+- 对外只返回 TimerID。
+- `CancelTimer(*TimerID)` 成功后将外部 ID 置零。
+- Service 退休不自动暂停 Timer；业务可以显式暂停和恢复。
+- Service 停止时清理归属资源，Stopped 后不能再投递回调。
+- Service 级 `NotifySync` 和 `NotifyAsync` 的最小实现。
+- Module 通过资源归属在停止时自动解除事件订阅。
+
+M0 的场景只要求一次性 Timer；Ticker、Cron 和完整过载策略在 M1 补齐。
+
+### 4.7 错误、日志与信号
+
+M0 实现：
+
+- 轻量统一框架错误码。
+- 至少覆盖服务未发现、服务未就绪、服务已退休、正在停止、超时、取消、传输失败和内部错误。
+- RPC 线协议传递错误码和必要消息，本地 cause 不跨网络。
+- 最小结构化日志，能够关联 Application、Node、Service、RPC 请求和生命周期阶段。
+- 操作系统 Stop 信号进入统一优雅停止流程。
+
+## 5. 明确不进入 M0 的能力
+
+- NATS RPC。
+- etcd 服务发现。
+- 外部 gRPC 插件。
+- KCP、WebSocket、HTTP、Gin 和通用网络框架。
+- MySQL、Redis、MongoDB、Kafka 等正式适配器；示例 DBService 可以使用可控的内存存储。
+- Broadcast、完整路由策略、自定义路由。
+- 普通 Go 结构体和混合 Protobuf 序列化。
+- 模板 Service。
+- 固定步长定时器。
+- 动态 Module。
+- 完整 Profiler、控制台和 v2 通用工具迁移。
+- 源码级 v2 兼容层。
+
+这些能力已记录在 [v2 功能迁移矩阵](../../migration/v2-feature-inventory.md)，不会因 M0 后置而丢失。
+
+## 6. 关键实现边界
+
+M0 只固定以下组件边界，不提前锁死完整包目录：
+
+| 组件 | 职责 |
+|---|---|
+| Application | 配置加载、Node 选择和整体启停 |
+| Node Runtime | 基础设施、Service 注册、显式顺序和资源回收 |
+| Service Runtime | 状态机、就绪队列、执行权、Await 恢复和生命周期 |
+| Module Runtime | 静态树、生命周期和资源归属 |
+| Contract Generator | 校验 Go 接口并生成强类型客户端与服务端绑定 |
+| RPC Manager | 连接管理、请求关联、超时、取消和传输选择 |
+| TCP Transport | 帧读写、连接、重连和背压边界 |
+| Discovery | 实例状态、关注筛选和发现事件 |
+| TimerEngine | 到期管理与 Service 任务投递 |
+
+不同组件通过窄接口协作，禁止业务代码直接依赖连接对象、时间轮或调度器内部结构。
+
+## 7. 风险优先验证
+
+M0 开始完整开发前，先用小型验证代码确认两个高风险点：
+
+1. 协作式 Await 能否在保持 Service 单执行权的同时，以可接受的分配和调度成本完成挂起恢复。
+2. Go 接口代码生成、Protobuf 编解码和 TCP 请求关联能否形成稳定且可诊断的最短链路。
+
+验证结果应记录：
+
+- 每次 RPC 的分配次数和字节数。
+- p50、p95、p99 延迟。
+- 挂起与恢复成本。
+- 并发请求下的 goroutine 数量。
+- 队列水位和超时行为。
+
+首版不凭经验写死性能门槛；先建立可复现基线，再与简洁性发生冲突时向开发者提供数据和方案选择。
+
+## 8. 验收标准
+
+M0 只有同时满足以下条件才算闭环：
+
+1. 示例能够以单进程双 Node 和双进程单 Node 两种方式运行。
+2. 两种方式使用相同 RPC 契约、序列化、发现和错误语义。
+3. 启动与停止顺序可通过日志和测试稳定复现。
+4. `PlayerService.OnStart` 能等待 `DBService` 被发现并就绪。
+5. `AwaitSavePlayer` 等待期间，同一 Service 可以处理另一个已准入任务，但任意时刻不会并发访问 Service 状态。
+6. Timer 回调和异步事件都通过 Service 调度器执行。
+7. Retired 状态拒绝新的入站 RPC，仍允许 Timer、事件和内部任务；恢复后重新可路由。
+8. Stop 会先排空已接收任务，再独占执行 `OnStop` 最终存档；超时后能够有界退出。
+9. Stopped 后没有业务 Runner、Timer 回调或 Future 恢复继续执行。
+10. 默认 15 秒超时、显式取消和主要框架错误码有自动化测试。
+11. 重复启停、异常断连和失败回滚通过竞态检测与泄漏检查。
+12. 保存性能基线，后续里程碑可以持续对比。
+
+## 9. 测试层级
+
+M0 至少包含：
+
+- 状态机、顺序、路由、TimerID 和错误码单元测试。
+- Service 调度、Await、Timer、Retire、Stop 的组合测试。
+- 真实 TCP 与内置发现的双 Node 集成测试。
+- 单进程和双进程端到端测试。
+- 超时、取消、断连、重复通知和 Stop 期间迟到响应等故障测试。
+- `go test -race` 和基础 benchmark。
+
+测试不得只覆盖正常路径。
+
+## 10. 设计确认后的行动
+
+本设计经开发者确认后，再编写 `docs/plans/01-minimal-vertical-loop-plan.md`。
+
+实现计划应按可验证的垂直切片拆分，而不是先把所有底层框架分别写完。每个切片都必须带测试，并能追溯到本文件和对应详细设计。
