@@ -14,10 +14,11 @@
 - RPC 契约、序列化和传输协议；
 - TimerEngine 的时间轮内部实现；
 - Service 发现、连接筛选和路由；
+- Module 树和本地事件接口外观；
 - CPU 密集任务与 cgo 的工作池实现；
 - 固定步长游戏世界 Tick。
 
-RPC 的生成接口与调用分类见 [Origin v3 RPC 接口与调用语义设计](./2026-07-23-rpc-interface-and-call-semantics-design.md)，数据契约与默认 Deadline 规则见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。
+RPC 的生成接口与调用分类见 [Origin v3 RPC 接口与调用语义设计](./2026-07-23-rpc-interface-and-call-semantics-design.md)，数据契约与默认 Deadline 规则见 [Origin v3 RPC 数据类型与序列化设计](./2026-07-23-rpc-data-and-serialization-design.md)，统一定时机制见 [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)。Module 与本地事件如何接入该执行槽，分别见 [Origin v3 Module 生命周期与运行模型设计](./2026-07-24-module-lifecycle-and-runtime-design.md) 和 [Origin v3 本地事件触发设计](./2026-07-24-local-event-dispatch-design.md)。
 
 ## 2. 设计目标
 
@@ -34,6 +35,7 @@ RPC 的生成接口与调用分类见 [Origin v3 RPC 接口与调用语义设计
 v3 不要求开发者为 Service 配置 `Serial` 或 `Cooperative` 两种模式，而采用一套统一模型：
 
 - 每个 Service 具有一个逻辑执行槽；
+- Service 自身和其全部 Module 共享该逻辑执行槽；
 - 同一时刻最多一个任务处于 `Running` 状态并拥有执行槽；
 - 普通同步业务代码持续持有执行槽；
 - 发起异步 RPC 后立即返回，不会自动让出当前执行槽；

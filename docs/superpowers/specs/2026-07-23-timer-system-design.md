@@ -10,7 +10,7 @@
 本文只设计 Origin v3 的定时器系统，范围包括：
 
 - Node 级 `TimerEngine`；
-- Service 对外的 `ITimer` 接口；
+- Service 和 Module 对外的 `ITimer` 接口；
 - `TimerID`、一次性 Timer、周期 Timer 和 Cron；
 - 到期任务的投递、取消、生命周期和过载规则；
 - RPC、连接管理和服务发现使用定时器的接入边界；
@@ -29,7 +29,7 @@ Timer 回调最终如何与其他 Service 任务交错，由后续 Service 执�
 
 1. 一个 Node 对外只有一套定时器能力，Service、RPC 和系统组件不各自维护互不一致的定时器实现。
 2. 每个 Node 独立持有一个 `TimerEngine`，不建立跨 Node 的 Application 全局定时器。
-3. Service 通过组合 `ITimer` 直接调用定时器方法，不需要先取得 `.Timers()` 对象。
+3. Service 和 Module 通过组合 `ITimer` 直接调用定时器方法，不需要先取得 `.Timers()` 对象。
 4. 业务层只持有 `TimerID`，不持有内部 Timer 对象。
 5. 时间轮协程只负责到期判断和投递，任何用户回调都在所属执行器中运行。
 6. 一次性 Timer 不因 Service 繁忙而静默丢失；周期 Timer 在过载时合并错过的触发。
@@ -164,6 +164,8 @@ type IService interface {
 }
 ```
 
+业务 Module 嵌入 `origin.Module` 后获得同一 `ITimer` 外观。它不创建独立 TimerEngine；框架把 Timer 归入该 Module 的资源作用域，并将回调投递到所属 Service 的执行器。Module 生命周期和资源清理见 [Origin v3 Module 生命周期与运行模型设计](./2026-07-24-module-lifecycle-and-runtime-design.md)。
+
 业务 Service 可以直接调用：
 
 ```go
@@ -193,8 +195,8 @@ s.CancelTimer(&timerID)
 - `0` 永远表示无效 ID；
 - TimerID 在当前 Node 生命周期内单调生成并且不复用；
 - ID 耗尽时拒绝创建新 Timer，不能从头复用旧 ID；
-- Service 获得的是绑定当前 Service 所有者的 `ITimer` 实现；
-- `PauseTimer`、`ResumeTimer` 和 `CancelTimer` 必须校验 Timer 所有者，不能操作其他 Service 的 Timer；
+- Service 获得的是绑定当前 Service 所有者的 `ITimer` 实现，Module 获得的是绑定其 Module 资源作用域的委托实现；
+- `PauseTimer`、`ResumeTimer` 和 `CancelTimer` 必须校验 Timer 所有者，不能操作其他 Service 或其他 Module 作用域的 Timer；
 - TimerID 只用于标识，不作为判断 Timer 当前是否仍活跃的唯一依据。
 
 ### 6.4 参数失败
@@ -481,7 +483,7 @@ Origin v3 定时器系统最终采用：
 - Service、RPC 和系统组件统一使用该引擎；
 - 分层时间轮，基础精度 `1ms`；
 - 单 Node 一百万活跃任务的设计和基准规模；
-- `IService` 直接组合 `ITimer`；
+- `IService` 和业务 Module 直接组合 `ITimer`；
 - 对外只暴露 TimerID，不暴露内部 Timer 对象；
 - `PauseTimer(TimerID)` 和 `ResumeTimer(TimerID)` 不改变 TimerID；
 - `CancelTimer(*TimerID)` 负责把调用方变量清零；

@@ -23,6 +23,7 @@
 - [RPC 接口与调用语义设计](./2026-07-23-rpc-interface-and-call-semantics-design.md)
 - [RPC 实例选择与路由策略设计](./2026-07-24-rpc-instance-selection-and-routing-strategy-design.md)
 - [Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)
+- [Module 生命周期与运行模型设计](./2026-07-24-module-lifecycle-and-runtime-design.md)
 
 ## 2. 设计目标
 
@@ -63,6 +64,8 @@ Service 启动期间处于 `Starting`。框架调用：
 ```go
 OnStart(ctx context.Context) error
 ```
+
+如果 Service 组合 Module，框架先按父先子后、同级添加顺序调用全部 `Module.OnStart(ctx)`，再调用 `Service.OnStart(ctx)`。只有两者全部成功后，Service 才能进入 `Running`。任一 Module 启动失败都会按已经成功的启动顺序逆序回滚，并使 Service 启动失败。
 
 `OnStart` 返回前：
 

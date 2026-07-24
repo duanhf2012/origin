@@ -13,10 +13,9 @@
 - Service 退休状态和服务发现摘流语义；
 - Node、Application 以及跨进程编排器的完整停止流程；
 - Service 之间停止顺序的最终配置外观；
-- 默认 Service 关闭 Deadline 和超时后的进程级强制退出策略；
-- Module 独立生命周期接口。
+- 默认 Service 关闭 Deadline 和超时后的进程级强制退出策略。
 
-退休状态见 [Origin v3 Service 退休设计](./2026-07-24-service-retirement-design.md)，Application 与 Node 的顺序规则见 [Origin v3 Application 与 Node 生命周期设计](./2026-07-22-application-node-lifecycle-design.md)。
+退休状态见 [Origin v3 Service 退休设计](./2026-07-24-service-retirement-design.md)，Application 与 Node 的顺序规则见 [Origin v3 Application 与 Node 生命周期设计](./2026-07-22-application-node-lifecycle-design.md)，Module 的树形停止和回滚规则见 [Origin v3 Module 生命周期与运行模型设计](./2026-07-24-module-lifecycle-and-runtime-design.md)。
 
 ## 2. 设计目标
 
@@ -159,7 +158,8 @@ Async 完成顺序固定为：
 
 finalizer 负责：
 
-- 调用一次 `OnStop(ctx)`；
+- 调用一次 `Service.OnStop(ctx)`；
+- 按启动顺序的严格逆序调用各 `Module.OnStop(ctx)`；
 - 执行框架资源和引用清理；
 - 发布最终停止结果；
 - 把状态切换为 `Stopped`；
@@ -214,6 +214,21 @@ func (s *PlayerService) OnStop(ctx context.Context) error {
 - 启动业务 goroutine 或把存档交给 `fire-and-forget` 后台任务。
 
 `OnStop` 的外部等待统一使用 Await 风格。`OnStop` 返回即表示业务收尾已经完成，框架不跟踪或猜测业务自行创建的异步回调和后台 goroutine。
+
+### 8.1 与 Module 的停止顺序
+
+Draining 完成后，finalizer 使用同一个关闭 Context 顺序执行：
+
+```text
+Service.OnStop
+  -> Module.OnStop（启动顺序的严格逆序）
+  -> Module 资源作用域和父子引用清理
+  -> Service 框架资源清理
+```
+
+`Service.OnStop` 最先执行，使业务可以在全部 Module 仍处于 `Running` 时完成存档和收尾。Module 为树形结构时，子 Module 先于父 Module 停止，同级 Module 按添加顺序的逆序停止。
+
+Module 的 `OnStop` 与 Service 使用相同的 finalizer Await 路径，不创建普通 Runner，也不在等待期间处理普通 Ready 任务。某个 Module 返回错误或发生 panic 时，框架记录并汇总错误，但继续停止其余 Module。
 
 ## 9. Finalizing 中的 Await
 
@@ -360,6 +375,8 @@ Origin v3 Service 优雅停止采用：
 - finalizer Await 不创建替代业务 Runner，也不处理普通业务任务；
 - finalizer Await 不引入 `TaskScope`、Service `pendingAsync` 或回调登记表；
 - `OnStop` 完成后才执行框架资源清理并进入 `Stopped`；
+- `Service.OnStop` 完成后，Module 按启动顺序的严格逆序执行 `OnStop`；
+- Module 停止错误或 panic 不阻断后续 Module 和框架清理；
 - 被依赖服务和 Node 基础设施必须晚于调用方 `OnStop` 停止；
 - 不通过特殊 RPC 绕过退休服务的准入规则；
 - `OnStop` 错误或 panic 不阻断必要清理和其他服务关闭。
@@ -369,7 +386,6 @@ Origin v3 Service 优雅停止采用：
 1. Service 默认关闭 Deadline，以及 Draining 和 Finalizing 的时间预算分配；
 2. Deadline 到期后的进程级处理；
 3. 同一 Node 内 Service 启停顺序的配置外观和默认规则；
-4. `OnStop` 与 Module 清理钩子的关系；
-5. Stop API 的同步、异步和重复调用外观；
-6. `Stopping` 状态发布到服务发现以及从远端路由摘除的时序；
-7. 在 `OnStop` 中误用 `AsyncXxx`、Notify、Broadcast 或业务 goroutine 时的开发期检测方式。
+4. Stop API 的同步、异步和重复调用外观；
+5. `Stopping` 状态发布到服务发现以及从远端路由摘除的时序；
+6. 在 `OnStop` 中误用 `AsyncXxx`、Notify、Broadcast 或业务 goroutine 时的开发期检测方式。

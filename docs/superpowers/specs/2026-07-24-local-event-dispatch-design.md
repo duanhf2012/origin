@@ -1,0 +1,288 @@
+# Origin v3 本地事件触发设计
+
+## 1. 文档状态与范围
+
+- 状态：本文范围内的方案已确认
+- 确认日期：2026-07-24
+- 适用版本：Origin v3
+
+本文定义 Service 内部本地事件总线、Module 接入边界，以及同步和异步事件的触发语义。
+
+以下问题不在本文展开：
+
+- 跨 Service、跨 Node 和跨进程消息；
+- RPC Notify 与 Broadcast；
+- 事件类型声明、事件 ID 和生成工具；
+- 事件专用错误码清单；
+- 强类型订阅接口的最终 Go 外观；
+- 监听者返回错误和 panic 后是否继续后续监听者；
+- 事件优先级、合并和持久化；
+- 同步事件监听者是否允许调用 Await。
+
+跨 Service 通信见 [Origin v3 RPC 接口与调用语义设计](./2026-07-23-rpc-interface-and-call-semantics-design.md)。Module 与 Service 的关系见 [Origin v3 Module 生命周期与运行模型设计](./2026-07-24-module-lifecycle-and-runtime-design.md)，普通事件如何进入调度器见 [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)。
+
+## 2. 设计目标
+
+1. 保留 v2 中“通知后在后续事件轮次回调”的异步语义。
+2. 新增低开销的同步触发方式，允许监听者在当前调用栈立即执行。
+3. 调用点无需查文档即可看出同步或异步语义。
+4. Service 与其全部 Module 共享一个简单的本地事件总线。
+5. 所有监听者继续遵守 Service 单执行权，不从外部 goroutine 直接执行用户代码。
+6. 订阅和清理具有明确归属，不再为每个 Module 创建独立事件处理器。
+7. 本地事件只承担进程内同一 Service 的解耦，不替代 RPC。
+
+## 3. 与 v2 的关系
+
+v2 的 `NotifyEvent` 不是同步函数调用。它把事件投递到事件通道，监听者在所属 Service 的后续事件处理中收到回调。
+
+v3 保留这一能力，但不继续使用容易混淆的单一名称。同步和异步触发采用两个明确接口：
+
+```go
+NotifyEventAsync(event Event) error
+NotifyEventSync(event Event) error
+```
+
+本文中的 `Event` 只表示事件负载的语义位置，不提前锁定最终事件接口、泛型函数或生成代码外观。
+
+首版不提供不带后缀的 `NotifyEvent`，也不提供运行期模式参数：
+
+```go
+// 不提供
+NotifyEvent(event Event)
+NotifyEvent(event Event, mode EventMode)
+```
+
+这样代码评审时可以直接判断调用是否会立即进入其他监听者。
+
+## 4. Service 级本地事件总线
+
+每个 Service 只有一个本地事件总线：
+
+- Service 自身可以订阅和触发事件；
+- 所有子 Module 共享该事件总线；
+- Module 不各自创建 `EventProcessor`；
+- 监听者的回调归所属 ServiceScheduler 执行；
+- Module 的订阅归其 Module 资源作用域；
+- Module 停止时由框架自动注销其全部订阅；
+- Service 停止时统一关闭事件总线并清理回调引用。
+
+Service 和 Module 可以使用普通强类型字段进行直接一对一调用。本地事件主要用于一对多通知、降低非核心依赖耦合和接收外部 I/O 投递。
+
+本地事件不得跨 Service。需要跨边界时使用：
+
+- 请求—响应 RPC；
+- RPC Notify；
+- Broadcast；
+- 明确设计的外部消息系统。
+
+### 4.1 静态订阅
+
+首版事件订阅只允许在初始化阶段建立：
+
+- Service 在 `Service.OnInit` 注册自己的监听者；
+- Module 在各自的 `Module.OnInit` 注册监听者；
+- 注册顺序就是同一事件的监听者执行顺序；
+- Service 初始化成功后，监听者集合不再由业务动态修改；
+- Module 初始化回滚或停止时，由框架依据资源作用域解除其订阅；
+- 首版不向业务提供运行期动态订阅和取消订阅。
+
+静态订阅与静态 Module 树保持一致，使派发热路径可以遍历稳定的紧凑监听者集合，不需要为业务运行期增删增加锁和快照复制。
+
+## 5. 异步触发
+
+接口语义：
+
+```go
+NotifyEventAsync(event Event) error
+```
+
+调用成功表示事件已经被所属 Service 接受，不表示监听者已经执行。
+
+### 5.1 Service 内部调用
+
+当调用方当前持有 Service 执行权时：
+
+1. 事件追加到 Service 的普通 Ready 队列尾部；
+2. 当前业务回调继续执行；
+3. 当前业务回调完整返回或因 Await 释放执行权；
+4. 事件按统一 FIFO 规则等待调度；
+5. Runner 取得该事件后，按注册顺序执行监听者。
+
+异步事件不会在 `NotifyEventAsync` 的调用栈内重入监听者。
+
+“异步”表示后续调度轮次，不承诺一定是当前任务之后的第一个 Ready 项。调用前已经入队的 RPC、Timer、事件和恢复任务仍按统一 FIFO 顺序执行。
+
+### 5.2 外部 goroutine 调用
+
+网络、文件监听或其他基础设施 goroutine 可以调用 `NotifyEventAsync`：
+
+1. 调用方只进行状态检查和线程安全入队；
+2. 调用方不执行任何业务监听者；
+3. 事件进入所属 Service 的普通 Ready 队列；
+4. 用户回调最终只在 Service 执行上下文中运行。
+
+多个外部 goroutine 并发投递时，顺序以 ServiceScheduler 的实际接收顺序为准，不根据调用方墙上时间重新排序。
+
+### 5.3 生命周期准入
+
+异步事件属于普通业务任务，遵守 Service 生命周期准入：
+
+- `Starting`：拒绝普通异步事件投递；
+- `Running`：正常接收和处理；
+- `Retired`：退休只关闭入站 RPC，本地异步事件仍正常工作；
+- `Stopping/Draining`：拒绝 Stop 状态边界之后的新事件；
+- `Stopping/Finalizing`：不再处理普通事件；
+- `Stopped`：拒绝投递。
+
+Stop 边界前已经被 ServiceScheduler 接受的事件属于 Draining 集合，按优雅停止规则完成。
+
+## 6. 同步触发
+
+接口语义：
+
+```go
+NotifyEventSync(event Event) error
+```
+
+同步调用按监听者注册顺序直接执行回调。全部监听者返回后，`NotifyEventSync` 才返回。
+
+同步触发：
+
+- 不进入 Ready 队列；
+- 不创建新的业务任务；
+- 不切换 Runner；
+- 不创建 goroutine；
+- 不进行不必要的锁竞争；
+- 允许监听者在当前调用栈继续同步触发其他事件。
+
+因此同步事件具有普通嵌套函数调用的重入语义。业务必须避免形成无限事件环。需要打断调用链或避免嵌套时，应改用 `NotifyEventAsync`。
+
+### 6.1 执行上下文限制
+
+`NotifyEventSync` 只能在调用方已经合法持有所属 Service 普通业务执行权时使用：
+
+- `Running` 和 `Retired` 状态下的活动业务任务可以调用；
+- `Stopping/Draining` 中，Stop 前已经接受且正在排空的活动任务可以继续调用；
+- `OnInit`、`OnStart`、`OnStop` 等生命周期回调不能调用；
+- `Stopping/Finalizing` 和 `Stopped` 不能调用。
+
+外部 goroutine、其他 Service 或没有执行权的异步完成 goroutine 调用时：
+
+- 不执行监听者；
+- 不自动退化为异步事件；
+- 返回“错误的 Service 执行上下文”错误；
+- 记录必要的诊断指标。
+
+不自动退化可以避免同一行代码在不同调用位置具有不同语义。
+
+### 6.2 监听顺序
+
+同一事件的监听者按照注册顺序执行：
+
+```text
+ListenerA -> ListenerB -> ListenerC
+```
+
+首版不提供监听优先级。需要顺序依赖的核心逻辑优先使用显式方法调用，不把事件优先级变成隐藏依赖。
+
+## 7. Module 接入
+
+Service 与 Module 直接组合本地事件能力：
+
+```go
+func (m *PlayerModule) playerLogin(playerID string) {
+    _ = m.NotifyEventAsync(PlayerLoginEvent{
+        PlayerID: playerID,
+    })
+}
+```
+
+同步触发：
+
+```go
+func (m *PlayerModule) levelChanged(playerID string, level int32) error {
+    return m.NotifyEventSync(PlayerLevelChangedEvent{
+        PlayerID: playerID,
+        Level:    level,
+    })
+}
+```
+
+底层仍然只有所属 Service 的一个事件总线和一个逻辑执行槽。Module 的直接调用外观不代表 Module 获得独立队列或独立线程。
+
+Module 的订阅关系在其资源作用域中登记。Module 初始化失败、启动回滚或正常停止时，框架自动解除订阅并清除闭包引用。
+
+## 8. 错误与 panic
+
+以下情况可以返回错误：
+
+- Service 不接受新的普通事件；
+- 异步事件队列达到有界容量；
+- 同步触发发生在错误执行上下文；
+- 事件类型或负载不符合最终事件契约。
+
+错误使用 Origin 统一错误码，不通过错误文本进行程序判断。具体错误码随事件类型和订阅接口设计统一登记，不在本文重复建立错误体系。
+
+无论后续选择何种监听者错误隔离策略，单个监听者发生 panic 时，框架至少必须：
+
+- 在监听者边界恢复；
+- 记录 Service、Module、事件类型和本地堆栈；
+- 不破坏 ServiceScheduler 的执行权状态；
+- 不因 panic 泄漏或重复释放 Service 执行权。
+
+“发生 panic 后是否继续同一事件的后续监听者”与监听者返回错误的外观一起确定，不在本文的触发接口范围内固定。
+
+## 9. 性能约束
+
+1. Service 内部同步触发不经过 Channel 或 Service Ready 队列。
+2. 异步触发只进行一次有界队列投递，不为投递额外创建 goroutine。
+3. 监听者集合按注册顺序使用紧凑结构遍历。
+4. Service 执行上下文内的派发不使用跨 Service 全局锁。
+5. 外部 goroutine 只在调度器入队边界进行必要并发保护。
+6. Module 不创建独立事件处理器和监听者转发表。
+7. 事件类型查找、接口装箱和内存分配需要通过基准测试验证。
+8. 如果类型安全与极限性能产生冲突，必须提供基准结果并与开发者确认，不提前采用复杂代码生成或对象池。
+
+## 10. 测试要求
+
+实现阶段至少覆盖：
+
+1. `NotifyEventAsync` 不在当前调用栈执行监听者；
+2. 异步事件进入统一 FIFO Ready 队列；
+3. 异步事件与 RPC、Timer 和 Await 恢复项遵守同一调度顺序；
+4. 外部 goroutine 只能投递，不能直接执行监听者；
+5. `NotifyEventSync` 在当前调用栈按注册顺序执行；
+6. 同步事件不创建 Ready 项或 goroutine；
+7. 外部 goroutine 调用同步事件被拒绝；
+8. 同步事件不会自动退化为异步事件；
+9. Service 与其 Module 共享同一个本地事件总线；
+10. 不同 Module 的订阅按注册顺序执行；
+11. Module 停止后不再收到事件；
+12. 初始化失败和启动回滚能清除 Module 订阅；
+13. Retired 状态仍能处理本地事件；
+14. Stop 边界后的新异步事件被拒绝；
+15. Stop 前已经接受的异步事件进入 Draining；
+16. 队列满、错误上下文和非法负载返回统一错误；
+17. 监听者 panic 不破坏 Service 执行权；
+18. 高频同步与异步触发的延迟、吞吐和分配基准。
+
+## 11. 已确认的取舍
+
+Origin v3 本地事件触发首版最终采用：
+
+- 每个 Service 一个本地事件总线；
+- Service 和全部 Module 共享；
+- 事件订阅只在 Service 和 Module 的 `OnInit` 阶段建立；
+- 本地事件不跨 Service 或 Node；
+- 保留 v2 的异步通知语义；
+- 同时支持同步立即触发；
+- 异步接口命名为 `NotifyEventAsync`；
+- 同步接口命名为 `NotifyEventSync`；
+- 不提供语义不明确的 `NotifyEvent`；
+- 不通过 `EventMode` 参数在运行期选择同步或异步；
+- 异步事件进入 Service 普通 FIFO Ready 队列；
+- 同步事件直接按注册顺序调用监听者；
+- 同步事件只能由持有所属 Service 执行权的调用方触发；
+- 外部 goroutine 只能异步投递；
+- Module 停止时自动清理其事件订阅；
+- 事件派发不创建 Module 独立调度器或 goroutine。

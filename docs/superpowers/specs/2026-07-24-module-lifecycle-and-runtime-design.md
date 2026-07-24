@@ -1,0 +1,573 @@
+# Origin v3 Module 生命周期与运行模型设计
+
+## 1. 文档状态与范围
+
+- 状态：本文范围内的方案已确认
+- 确认日期：2026-07-24
+- 适用版本：Origin v3
+
+本文定义 Module 的职责边界、树形组织、生命周期、启停顺序、失败回滚、执行模型和资源归属。
+
+以下相对独立的问题不在本文展开：
+
+- Service 配置和 Service 业务接口如何提供给 Module；
+- 本地事件的数据类型、订阅接口和完整实现；
+- Service 调度器、TimerEngine 和 RPC Runtime 的内部实现；
+- Application、Node 和多个 Service 之间的启停配置。
+
+Module 对本地事件只规定接入边界，具体触发语义见 [Origin v3 本地事件触发设计](./2026-07-24-local-event-dispatch-design.md)。Service 的正常调度、启动和停止规则分别见：
+
+- [Origin v3 Service 协作式调度设计](./2026-07-23-service-cooperative-scheduling-design.md)
+- [Origin v3 Service 启动与就绪设计](./2026-07-24-service-startup-and-readiness-design.md)
+- [Origin v3 Service 优雅停止设计](./2026-07-24-service-graceful-stop-design.md)
+- [Origin v3 定时器系统设计](./2026-07-23-timer-system-design.md)
+
+## 2. 设计目标
+
+1. 保留 v2 中 Service 组合 Module 和 Module 继续组合子 Module 的使用习惯。
+2. Module 的生命周期与 Service 使用一致的 `OnInit`、`OnStart` 和 `OnStop` 外观。
+3. Module 不引入独立业务协程、Mailbox 或调度器，继续遵守 Service 单执行权模型。
+4. 启动、停止和失败回滚具有唯一、确定且可测试的顺序。
+5. Module 的 Timer、事件订阅、异步回调和等待项具有独立资源归属，停止后不残留回调。
+6. 删除业务代码不需要的可变 Module ID、全局查找和运行期增删能力。
+7. 保持接口精简、强类型且接近普通 Go 结构体的使用方式。
+
+## 3. v2 现状与修补方向
+
+v2 中值得保留的能力包括：
+
+- `Service` 可以添加 Module；
+- Module 可以继续添加子 Module，形成树；
+- Module 可以使用所属 Service 的 RPC、Timer、并发投递和本地事件能力；
+- Module 释放时能够清理 Timer 和事件订阅。
+
+v3 不保留以下问题：
+
+- Module 只有 `OnInit` 和 `OnRelease`，启动、停止回调由不同模块自行约定；
+- `SetModuleId`、`NewModuleId` 和 `GetModule(id)` 等框架内部能力暴露给业务；
+- `OnInit` 失败时只删除部分索引，注入引用和资源回滚不完整；
+- 没有明确状态机，重复添加、重复释放和停止后复用的行为不确定；
+- 运行期添加 Module 时只执行 `OnInit`，没有完整启动语义；
+- 父子集合和全局索引可以从不受控 goroutine 修改；
+- Timer、事件和异步回调通过多组可变引用拼装，停止边界不完整；
+- Module 各自持有事件处理器，监听关系和清理路径复杂。
+
+v3 保留树形组合外观，同时由框架统一管理状态、顺序和资源作用域。
+
+## 4. Module 的职责边界
+
+Module 是一个 Service 内部的固定功能组件，不是新的部署层级。
+
+Module：
+
+- 只能属于一个 Service；
+- 可以拥有子 Module；
+- 可以保存自己的业务状态；
+- 可以使用所属 Service 的 Timer、Await、异步任务和本地事件能力；
+- 在日志和指标中具有独立身份与资源统计。
+
+Module 不是：
+
+- Node；
+- Service；
+- 服务发现单元；
+- RPC 路由目标；
+- 独立网络连接；
+- 独立调度器或独立执行槽；
+- 独立配置和部署单元。
+
+跨 Service、跨 Node 调用继续使用 RPC、Notify 或 Broadcast。Module 不能被远端直接寻址。
+
+## 5. 业务外观
+
+### 5.1 生命周期接口
+
+Module 生命周期与 Service 对齐：
+
+```go
+type IModule interface {
+    OnInit() error
+    OnStart(ctx context.Context) error
+    OnStop(ctx context.Context) error
+}
+```
+
+该代码只表示公共语义。框架用于取得内部基础对象的方法不作为业务 API 暴露。
+
+### 5.2 嵌入基础类型
+
+业务 Module 必须嵌入 `origin.Module`：
+
+```go
+type PlayerModule struct {
+    origin.Module
+}
+```
+
+`origin.Module` 为三个生命周期回调提供默认空实现。业务只覆盖需要的回调：
+
+```go
+func (m *PlayerModule) OnStart(ctx context.Context) error {
+    return nil
+}
+```
+
+Module 必须以指针传给 `AddModule`：
+
+```go
+m.player = &PlayerModule{}
+return m.AddModule(m.player)
+```
+
+以下行为非法：
+
+- 以值类型添加 Module；
+- 同一实例添加多次；
+- 将同一实例添加到不同父节点；
+- 复制已经附着的 `origin.Module`；
+- 将已经进入 `Stopped` 的实例重新添加或启动。
+
+框架通过内部状态检查拒绝这些操作，不向业务提供修改内部归属的 Setter。
+
+### 5.3 强类型持有
+
+父对象通过普通字段持有子 Module：
+
+```go
+type RankService struct {
+    origin.Service
+
+    rank *RankModule
+}
+
+func (s *RankService) OnInit() error {
+    s.rank = &RankModule{}
+    return s.AddModule(s.rank)
+}
+```
+
+树形 Module 使用相同方式：
+
+```go
+type WorldModule struct {
+    origin.Module
+
+    scene *SceneModule
+}
+
+func (m *WorldModule) OnInit() error {
+    m.scene = &SceneModule{}
+    return m.AddModule(m.scene)
+}
+```
+
+首版不提供以下业务接口：
+
+- `SetModuleID`；
+- `NewModuleID`；
+- `GetModule(id)`；
+- 按名称全局查找 Module；
+- 按 Go 类型全局查找 Module；
+- 运行时按树结构查找父 Module。
+
+子 Module 确实需要父对象提供的业务接口时，通过构造参数显式传入。这样依赖在代码中可见，并具有编译期类型检查。
+
+Module 如何取得所属 Service 提供的接口，以及如何通过该接口读取 Service 配置，在后续配置设计中单独确定。该能力不恢复按 Module ID、名称或类型遍历整棵树的查找方式。
+
+### 5.4 内部身份
+
+框架可以为 Module 分配内部 ID，但该 ID：
+
+- 只在所属 Service 生命周期内唯一；
+- 单调递增且不复用；
+- `0` 表示无效；
+- 只用于日志、指标、Timer 归属和资源跟踪；
+- 不作为业务查找、持久化或远程路由依据。
+
+业务 API 不依赖内部 ID。
+
+## 6. 静态 Module 树
+
+首版只允许在 `OnInit` 阶段构建 Module 树。
+
+规则如下：
+
+1. Service 的 `OnInit` 可以添加一级 Module；
+2. Module 的 `OnInit` 可以添加子 Module；
+3. `AddModule` 同步执行被添加 Module 的 `OnInit`；
+4. Service 的 `OnInit` 成功返回后，整棵 Module 树封闭；
+5. 进入 `Starting` 后，任何业务层 `AddModule` 或删除操作都被拒绝；
+6. 正常停止时由框架释放整棵树；
+7. 首版不提供运行期添加、替换或删除 Module。
+
+例如：
+
+```text
+Service.OnInit
+  AddModule(A)
+    A.OnInit
+      AddModule(A1)
+        A1.OnInit
+      A.OnInit 返回
+  AddModule(B)
+    B.OnInit
+  Service.OnInit 返回
+  Module 树封闭
+```
+
+静态树不需要处理运行期删除时尚未完成的 Timer、Await、事件和异步回调，也不需要为父子集合增加业务热路径锁。
+
+## 7. 生命周期状态
+
+每个 Module 具有内部一次性状态机：
+
+```text
+Created
+  -> Initializing
+  -> Initialized
+  -> Starting
+  -> Running
+  -> Stopping
+  -> Stopped
+```
+
+失败状态由框架内部记录，不增加业务需要操作的公开状态。
+
+状态只能向前转换。生命周期回调最多执行一次，`Stopped` 是终态。
+
+Module 只有在所属 Service 内运行，不单独公开退休状态。Service 退休时 Module 仍然正常运行，Timer 是否暂停仍由业务显式决定。
+
+## 8. Context 的用途
+
+`OnStart` 和 `OnStop` 接收 `context.Context`，用于：
+
+- 生命周期整体超时；
+- 启动取消和关闭取消；
+- 向 RPC、Redis、数据库和 Await 操作传递 Deadline；
+- 传递必要的 Trace 关联信息。
+
+禁止通过 Context 传递 Module、配置、数据库连接或其他业务依赖。
+
+`OnStop` 不能复用已经因停服而取消的运行期 Context。框架为优雅关闭创建独立的 `stopCtx`：
+
+```text
+收到 Stop
+  -> 停止普通业务准入
+  -> 完成 Draining
+  -> 创建带关闭 Deadline 的 stopCtx
+  -> 执行 Service.OnStop 和 Module.OnStop
+```
+
+否则 `OnStop` 中的存档 RPC 会在发起前立即得到 `context.Canceled`。
+
+生命周期 Context 的创建次数与生命周期回调数量同阶，不属于 RPC 或事件热路径，其性能成本可以忽略。
+
+## 9. 初始化与启动顺序
+
+Module 树按同级添加顺序保存。Module 的 `OnStart` 使用深度优先、父先子后的确定顺序。
+
+假设：
+
+```text
+Service
+├─ A
+│  ├─ A1
+│  └─ A2
+└─ B
+   └─ B1
+```
+
+完整启动顺序是：
+
+```text
+Service.OnInit
+  -> 各 Module.OnInit 在 AddModule 时同步执行
+  -> A.OnStart
+  -> A1.OnStart
+  -> A2.OnStart
+  -> B.OnStart
+  -> B1.OnStart
+  -> Service.OnStart
+  -> Service 进入 Running 并对外可用
+```
+
+这样 Service 的 `OnStart` 可以使用已经启动完成的全部 Module。
+
+父先子后的依赖约束是：
+
+- 子 Module 可以依赖已经启动的父 Module；
+- 父 Module 的启动过程不能依赖尚未启动的子 Module；
+- Module 之间需要依赖时，应按依赖先、使用者后的顺序添加；
+- 首版不建立 Module 依赖图，也不处理循环依赖。
+
+所有 Module 启动完成前：
+
+- Service 不进入 RPC 路由候选；
+- 不接受普通 RPC、Notify 和 Broadcast；
+- 不执行普通本地事件和业务 Timer；
+- Module 的 `OnStart` 可以通过生命周期等待路径执行 Await。
+
+## 10. 停止与释放顺序
+
+Service 完成普通任务排空后，停止顺序严格等于启动顺序的逆序：
+
+```text
+Service.OnStop
+  -> B1.OnStop
+  -> B.OnStop
+  -> A2.OnStop
+  -> A1.OnStop
+  -> A.OnStop
+  -> 框架资源清理
+  -> Service 进入 Stopped
+```
+
+`Service.OnStop` 最先执行，使 Service 可以在全部 Module 仍处于 `Running` 时完成存档、RPC 和其他收尾工作。
+
+每个 Module 的停止过程为：
+
+```text
+进入 Stopping
+  -> 拒绝该 Module 的新任务
+  -> Module.OnStop(stopCtx)
+  -> 取消该 Module 的 Timer、订阅和剩余回调引用
+  -> 进入 Stopped
+```
+
+在 Module 停止前，Service 已经完成 Draining，因此不会再有普通 Module 任务处于 Running、Ready 或 Waiting。
+
+树形释放遵循以下规则：
+
+- 子 Module 先于父 Module 停止；
+- 同级 Module 按添加顺序的逆序停止；
+- 子树停止完成前不解除父子引用；
+- 整个子树停止后，框架再从父对象的内部子节点集合中解除引用；
+- 父 Module 的 `OnStop` 不得依赖已经停止的子 Module；
+- 需要使用全部 Module 的跨组件收尾逻辑放在 `Service.OnStop`。
+
+## 11. 生命周期中的 Await
+
+Module 与 Service 使用同一套 Await 外观，但生命周期等待不等于正常业务调度。
+
+### 11.1 OnStart
+
+Module 的 `OnStart` 由唯一生命周期执行者顺序调用：
+
+- 可以使用 Await 风格 RPC、Redis 和数据库调用；
+- 等待期间服务发现和基础设施 goroutine 继续工作；
+- 不创建普通业务 Runner；
+- 不处理普通 Ready 任务；
+- 当前 Module 返回后才启动下一个 Module。
+
+### 11.2 正常运行
+
+Module 普通业务回调中的 Await 遵守 Service 协作式调度：
+
+- 当前任务释放 Service 执行权并进入 `Waiting`；
+- 其他 Service 或 Module 任务可以继续运行；
+- 原任务恢复并重新取得执行权后继续顺序执行；
+- Await 前后的业务状态可能已经发生逻辑变化，调用方必须重新校验。
+
+### 11.3 OnStop
+
+Module 的 `OnStop` 使用 Service finalizer 的等待路径：
+
+- 可以顺序等待存档 RPC 或其他支持 Context 的 I/O；
+- 不把执行权交给新的普通业务 Runner；
+- 不处理普通 Ready 任务；
+- 当前 Module 完成后才停止前一个 Module；
+- 所有等待受统一关闭 Deadline 约束。
+
+## 12. Service 能力组合
+
+Module 直接组合常用能力，使用时不需要先取得 `.Service()` 或 `.Timers()`：
+
+- `AddModule`；
+- `ITimer`；
+- 通用 Await；
+- 异步任务投递；
+- 本地事件接口。
+
+例如：
+
+```go
+type PlayerModule struct {
+    origin.Module
+
+    saveTimer origin.TimerID
+}
+
+func (m *PlayerModule) OnStart(ctx context.Context) error {
+    m.saveTimer = m.TickerFunc(time.Minute, m.save)
+    return m.Await(ctx, m.loadPlayer)
+}
+
+func (m *PlayerModule) OnStop(ctx context.Context) error {
+    m.CancelTimer(&m.saveTimer)
+    return m.Await(ctx, m.savePlayer)
+}
+```
+
+该外观不表示 Module 拥有独立运行时。所有能力内部委托给所属 Service：
+
+- Timer 回调投递到 Service 调度器；
+- Await 释放和恢复的是 Service 执行权；
+- 异步完成回调进入 Service Ready 队列；
+- 本地事件回调在 Service 执行上下文运行。
+
+## 13. Module 资源作用域
+
+每个 Module 在所属 Service 下拥有框架内部资源作用域，用于标记：
+
+- Timer；
+- 本地事件订阅；
+- 尚未投递的异步回调；
+- Module 所属的等待和完成通知；
+- 已排队但尚未开始的 Module 任务；
+- 日志、指标和追踪身份。
+
+资源作用域不作为业务对象暴露。
+
+正常停止时，Service 先完成全局 Draining，再按 Module 逆序关闭作用域。异常回滚时，框架使用相同作用域清理已注册资源，避免依赖业务手工维护多组引用表。
+
+Module 与 Service 共享 Node 的 TimerEngine、RPC Runtime 和 ServiceScheduler。资源隔离只表示所有权和批量清理边界，不表示每个 Module 创建独立引擎、队列或 goroutine。
+
+该资源作用域不是调度用的 `TaskScope`，不建立父子任务树，也不为 Draining 增加一套 Module 计数器。正常排空仍以 ServiceScheduler 已确认的 Running、Ready、Waiting 和 pending 状态为唯一事实来源；Module 归属只服务于状态检查、诊断和最终引用清理。
+
+## 14. 失败与回滚
+
+### 14.1 OnInit 失败
+
+任一 Module 的 `OnInit` 返回错误时：
+
+1. 当前 Module 及其子树不进入有效 Module 树；
+2. 框架清理已经注入的父子引用、事件订阅和内部资源；
+3. Service 初始化立即失败；
+4. 不调用该 Module 或其子节点的 `OnStop`。
+
+`OnInit` 只允许内存组装、配置解析、事件订阅、逻辑 RPC Client 创建和添加子 Module。它不得执行阻塞等待或创建需要业务回调才能释放的外部资源。
+
+### 14.2 Module.OnStart 失败
+
+任一 Module 的 `OnStart` 返回错误时：
+
+1. 当前 Module 不进入 `Running`；
+2. 不对只启动了一部分的当前 Module 调用 `OnStop`；
+3. 当前 Module 必须在 `OnStart` 内通过局部 `defer` 清理尚未交给框架的临时资源；
+4. 已经成功启动的 Module 按启动顺序的严格逆序执行 `OnStop`；
+5. `Service.OnStart` 不执行；
+6. Service 不对外可用。
+
+例如：
+
+```text
+A 启动成功
+A1 启动成功
+A2 启动失败
+```
+
+回滚顺序是：
+
+```text
+A1.OnStop
+A.OnStop
+Service 启动失败
+```
+
+### 14.3 Service.OnStart 失败
+
+如果全部 Module 已启动，而 `Service.OnStart` 失败：
+
+- Service 清理 `OnStart` 中尚未交给框架管理的临时资源；
+- 所有已启动 Module 按严格逆序停止；
+- Service 不进入 `Running`。
+
+### 14.4 OnStop 错误或 panic
+
+`OnStop` 返回错误或发生 panic 时：
+
+- 框架记录生命周期阶段、Service、Module 和统一错误码；
+- panic 被恢复并保留本地诊断堆栈；
+- 继续停止其他 Module；
+- 继续执行框架资源清理；
+- 最终向上返回聚合后的关闭结果。
+
+一个 Module 的停止失败不能阻止整个 Service 退出。关闭 Deadline 到达时按照 Service 优雅停止规则取消剩余等待并继续回收。
+
+## 15. 本地事件边界
+
+每个 Service 只有一个本地事件总线，Service 和全部 Module 共享。
+
+Module：
+
+- 可以直接订阅和触发本地事件；
+- 不创建独立 `EventProcessor`；
+- 停止时由资源作用域自动注销订阅；
+- 事件回调仍遵守 Service 单执行权。
+
+本地事件只用于同一个 Service 内部。跨 Service 和跨 Node 通信不能借用该总线。
+
+同步与异步触发使用无歧义接口：
+
+```go
+NotifyEventAsync(event Event) error
+NotifyEventSync(event Event) error
+```
+
+完整语义见独立的本地事件设计文档。
+
+## 16. 性能约束
+
+1. Module 不增加独立 goroutine、Mailbox、Runner 或调度锁。
+2. 静态 Module 树在启动后不修改，运行热路径不需要父子集合锁。
+3. Module 业务引用使用普通强类型字段，不经过 ID、名称或反射查找。
+4. Go 类型名等反射信息最多在添加 Module 时计算一次，不进入事件、Timer 或 RPC 热路径。
+5. 资源归属标记只用于投递检查、统计和批量清理，不复制业务负载。
+6. 如果资源作用域检查成为可测量瓶颈，必须先提供基准数据，再与开发者确认是否采用更复杂实现。
+
+## 17. 测试要求
+
+实现阶段至少覆盖：
+
+1. Service 添加一级 Module；
+2. Module 添加多层子 Module；
+3. 同级 Module 按添加顺序启动；
+4. 树形 Module 按严格逆序停止；
+5. `Service.OnStart` 在全部 Module 启动后执行；
+6. `Service.OnStop` 在全部 Module 停止前执行；
+7. `OnInit` 失败时完整解除当前子树；
+8. `OnStart` 失败时只回滚已经成功启动的 Module；
+9. `OnStop` 返回错误后继续释放剩余 Module；
+10. `OnStop` panic 恢复后继续释放；
+11. 重复添加同一实例被拒绝；
+12. 值类型、跨父节点复用和 `Stopped` 实例复用被拒绝；
+13. Service 启动后添加或删除 Module 被拒绝；
+14. Module Timer、事件订阅和异步回调按资源作用域清理；
+15. Module 普通 Await 与 Service 单执行权保持一致；
+16. Module 生命周期 Await 不启动普通业务 Runner；
+17. 关闭 Deadline 能取消 Module 的 `OnStop` 等待；
+18. 运行期 Module 调用不经过反射或全局查找。
+
+## 18. 已确认的取舍
+
+Origin v3 Module 首版最终采用：
+
+- 保留 Service—Module—子 Module 的树形组织；
+- Module 与 Service 对齐 `OnInit`、`OnStart(ctx)`、`OnStop(ctx)`；
+- `OnStop` 使用独立关闭 Context；
+- 业务 Module 嵌入 `origin.Module`，默认回调为空实现；
+- Module 必须以指针添加，同一实例只允许添加一次；
+- 只允许在 `OnInit` 构建静态 Module 树；
+- 业务通过强类型字段持有 Module；
+- Module ID 仅供框架内部使用；
+- 启动采用父先子后、同级按添加顺序；
+- 停止采用启动顺序的严格逆序；
+- `Service.OnStart` 在所有 Module 启动后执行；
+- `Service.OnStop` 在所有 Module 停止前执行；
+- 任一 Module 启动失败都会使 Service 启动失败；
+- 不对启动失败的当前 Module 调用 `OnStop`；
+- Module 直接组合 Timer、Await、异步任务和本地事件接口；
+- 所有能力委托给所属 Service，不创建 Module 独立调度器；
+- 每个 Module 具有内部资源作用域；
+- 每个 Service 只有一个由 Service 和 Module 共享的本地事件总线；
+- 事件触发使用 `NotifyEventAsync` 和 `NotifyEventSync` 两个明确接口。
