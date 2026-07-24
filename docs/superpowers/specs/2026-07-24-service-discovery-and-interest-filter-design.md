@@ -13,6 +13,7 @@
 
 - 静态配置、Origin Discovery、etcd 等 Discovery Provider 的具体接口与一致性实现；
 - 模板 Service 的构造器注册、实例配置和生命周期规则；
+- Service 启动期间等待远端 Service 和对外开放的完整规则；
 - 单目标 RPC 的负载均衡和定向路由算法；
 - TCP 连接池、连接关闭延迟、心跳与重连；
 - Service 退休与正式 Stop 的完整生命周期；
@@ -20,6 +21,8 @@
 - 发现监听器的最终公开注册、取消注册 API 外观。
 
 这些问题将在后续逐项讨论，不与本文已经确认的关注筛选和事件语义混合。
+
+Service 启动期间使用发现快照等待任意或指定实例的规则，见 [Service 启动与就绪设计](./2026-07-24-service-startup-and-readiness-design.md)。
 
 ## 2. 背景
 

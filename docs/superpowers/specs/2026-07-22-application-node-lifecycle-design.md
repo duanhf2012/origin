@@ -130,6 +130,8 @@ node_c → node_a → node_b → node_d
 
 Application 必须顺序启动 Node，不并行启动。前一个 Node 完成启动并进入 `Ready` 状态后，才能启动下一个 Node。
 
+Node 内部先启动 Transport、RPC Runtime 和服务发现等基础设施，再执行业务 Service 的 `OnStart`。Service 可以在 `OnStart` 中等待已经启动的远端 Node，但不能依赖有效启动顺序中尚未开始的后续 Node；否则会等待到启动 Context 结束并导致 Node 启动失败。详细规则见 [Service 启动与就绪设计](./2026-07-24-service-startup-and-readiness-design.md)。
+
 ## 9. 有效停止顺序
 
 Application 按以下规则生成有效停止顺序：
