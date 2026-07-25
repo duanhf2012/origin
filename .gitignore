@@ -11,3 +11,6 @@
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 .DS_Store
+
+# Default Linux output of examples/basic.
+/basic
