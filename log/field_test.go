@@ -13,6 +13,7 @@ import (
 func TestFieldValues(t *testing.T) {
 	t.Parallel()
 
+	// 建立全部主要 Field 构造器样本并锁定 Kind。
 	now := time.Now()
 	tests := []struct {
 		field originlog.Field
@@ -32,11 +33,13 @@ func TestFieldValues(t *testing.T) {
 		{field: originlog.Time("time", now), kind: originlog.TimeField},
 		{field: originlog.Err(errors.New("failed")), kind: originlog.ErrorField},
 	}
+	// 第一阶段统一检查 Key 对应的类型标签。
 	for _, test := range tests {
 		if test.field.Kind() != test.kind {
 			t.Errorf("%s kind = %v, want %v", test.field.Key(), test.field.Kind(), test.kind)
 		}
 	}
+	// 第二阶段分别检查各底层存储槽的读取结果。
 	if got := originlog.Int64("value", -3).Int64Value(); got != -3 {
 		t.Errorf("Int64Value() = %d", got)
 	}
@@ -63,6 +66,7 @@ func TestFieldValues(t *testing.T) {
 func TestBytesAndAnySnapshot(t *testing.T) {
 	t.Parallel()
 
+	// Bytes 构造后修改源切片，字段必须仍保留调用点快照。
 	source := []byte("before")
 	bytesField := originlog.Bytes("data", source)
 	copy(source, "after!")
@@ -70,10 +74,12 @@ func TestBytesAndAnySnapshot(t *testing.T) {
 		t.Fatalf("Bytes snapshot = %q, want before", got)
 	}
 
+	// Any 构造后修改源 Map，再反解 JSON 验证异步安全快照。
 	value := map[string]int{"score": 10}
 	anyField := originlog.Any("player", value)
 	value["score"] = 20
 
+	// 解码字段保存的 JSON，并断言仍是修改前值。
 	var snapshot map[string]int
 	if err := json.Unmarshal(anyField.BytesValue(), &snapshot); err != nil {
 		t.Fatalf("decode Any snapshot: %v", err)
@@ -86,7 +92,9 @@ func TestBytesAndAnySnapshot(t *testing.T) {
 func TestAnyMarshalFailureIsSnapshot(t *testing.T) {
 	t.Parallel()
 
+	// Channel 无法 JSON 编码，用于触发快照失败兜底。
 	field := originlog.Any("invalid", make(chan int))
+	// 兜底本身必须是合法 JSON 并包含可诊断错误文本。
 	var snapshot map[string]string
 	if err := json.Unmarshal(field.BytesValue(), &snapshot); err != nil {
 		t.Fatalf("decode fallback snapshot: %v", err)

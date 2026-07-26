@@ -21,9 +21,11 @@ type Buffer struct {
 // 对 nil 或已经释放的 Buffer 调用 Bytes 表示框架内部使用错误，因此
 // 直接 panic。返回切片只能在本 Buffer 的所有权释放前使用。
 func (b *Buffer) Bytes() []byte {
+	// 访问前验证所有权仍然有效，尽早暴露释放后使用问题。
 	if b == nil || !b.active {
 		panic("bufferpool: 不能访问 nil 或已经释放的 Buffer")
 	}
+	// 只暴露申请长度，隐藏档位向上取整得到的多余容量。
 	return b.data[:b.size]
 }
 
@@ -32,16 +34,19 @@ func (b *Buffer) Bytes() []byte {
 // nil 和在对象尚未被重新取得前的重复释放会被忽略。Release 不支持
 // 与 Bytes 或另一次 Release 并发执行；正确调用后，旧指针立即失效。
 func (b *Buffer) Release() {
+	// nil 与尚未重新取得前的重复释放保持幂等，方便 defer 清理。
 	if b == nil || !b.active {
 		return
 	}
 
 	// 先标记为失效，使同一所有者错误地再次释放时不会重复归还和扣减统计。
 	b.active = false
+	// 在清理字段前保存归还池、档位和容量，供统计及归还逻辑使用。
 	owner := b.owner
 	bucketID := b.bucket
 	capacity := cap(b.data)
 	owner.releaseUsage(bucketID, capacity)
+	// 有效长度不跨所有者保留，下一次 Acquire 会重新赋值。
 	b.size = 0
 
 	if int(bucketID) < bucketCount {

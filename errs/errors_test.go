@@ -13,6 +13,7 @@ import (
 func TestStableCodes(t *testing.T) {
 	t.Parallel()
 
+	// 表格显式锁定跨模块和跨语言可见的数值，防止插入常量造成漂移。
 	tests := []struct {
 		name string
 		code errs.Code
@@ -28,6 +29,7 @@ func TestStableCodes(t *testing.T) {
 		{name: "log output failed", code: errs.CodeLogOutputFailed, want: 7002},
 	}
 
+	// 所有数值在同一测试中集中验证。
 	for _, test := range tests {
 		if test.code != test.want {
 			t.Errorf("%s code = %d, want %d", test.name, test.code, test.want)
@@ -38,10 +40,12 @@ func TestStableCodes(t *testing.T) {
 func TestNew(t *testing.T) {
 	t.Parallel()
 
+	// 成功码必须映射为 nil。
 	if err := errs.New(errs.CodeOK); err != nil {
 		t.Fatalf("New(CodeOK) = %v, want nil", err)
 	}
 
+	// 已登记错误码必须复用公共哨兵并提供稳定文本。
 	tests := []struct {
 		code errs.Code
 		want error
@@ -56,6 +60,7 @@ func TestNew(t *testing.T) {
 		{code: errs.CodeLogOutputFailed, want: errs.ErrLogOutputFailed, text: "log output failed"},
 	}
 
+	// 同时验证对象身份和外观文本。
 	for _, test := range tests {
 		got := errs.New(test.code)
 		if got != test.want {
@@ -70,6 +75,7 @@ func TestNew(t *testing.T) {
 func TestUnknownCode(t *testing.T) {
 	t.Parallel()
 
+	// 使用未登记值验证数值不会丢失且文本包含原始码。
 	const code errs.Code = 777
 	err := errs.New(code)
 
@@ -84,6 +90,7 @@ func TestUnknownCode(t *testing.T) {
 func TestNewMessage(t *testing.T) {
 	t.Parallel()
 
+	// 先覆盖成功码和空消息两个退化分支。
 	if err := errs.NewMessage(errs.CodeOK, "ignored"); err != nil {
 		t.Fatalf("NewMessage(CodeOK, message) = %v, want nil", err)
 	}
@@ -91,6 +98,7 @@ func TestNewMessage(t *testing.T) {
 		t.Fatalf("empty message did not reuse ErrInvalidArgument")
 	}
 
+	// 非空消息应保持公开文本，同时仍按稳定码匹配。
 	err := errs.NewMessage(errs.CodeInvalidArgument, "player ID is empty")
 	if got := err.Error(); got != "player ID is empty" {
 		t.Fatalf("err.Error() = %q, want %q", got, "player ID is empty")
@@ -106,6 +114,7 @@ func TestNewMessage(t *testing.T) {
 func TestWrap(t *testing.T) {
 	t.Parallel()
 
+	// 覆盖 CodeOK 透传和 nil cause 复用哨兵。
 	cause := errors.New("storage unavailable")
 	if err := errs.Wrap(errs.CodeOK, cause); err != cause {
 		t.Fatalf("Wrap(CodeOK, cause) did not return cause")
@@ -114,6 +123,7 @@ func TestWrap(t *testing.T) {
 		t.Fatalf("Wrap(CodeInternal, nil) did not reuse ErrInternal")
 	}
 
+	// 真正包装同时保留稳定码、底层 cause、哨兵匹配和组合文本。
 	err := errs.Wrap(errs.CodeInternal, cause)
 	if got := errs.CodeOf(err); got != errs.CodeInternal {
 		t.Fatalf("CodeOf(err) = %d, want %d", got, errs.CodeInternal)
@@ -132,6 +142,7 @@ func TestWrap(t *testing.T) {
 func TestCodeOf(t *testing.T) {
 	t.Parallel()
 
+	// 表格覆盖直接错误、包装链、Context 兼容和普通错误兜底。
 	tests := []struct {
 		name string
 		err  error
@@ -153,6 +164,7 @@ func TestCodeOf(t *testing.T) {
 		{name: "plain error", err: errors.New("plain"), want: errs.CodeInternal},
 	}
 
+	// 每个样本同时验证 CodeOf 和 IsCode 的一致性。
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -170,6 +182,7 @@ func TestCodeOf(t *testing.T) {
 func TestContextCompatibility(t *testing.T) {
 	t.Parallel()
 
+	// Origin 取消和超时哨兵必须分别匹配标准库，且不能交叉匹配。
 	if !errors.Is(errs.ErrCanceled, context.Canceled) {
 		t.Fatalf("errors.Is(ErrCanceled, context.Canceled) = false")
 	}
@@ -184,8 +197,10 @@ func TestContextCompatibility(t *testing.T) {
 func TestErrorsAsCoder(t *testing.T) {
 	t.Parallel()
 
+	// 把动态消息错误放入普通 fmt 包装链。
 	err := fmt.Errorf("outer: %w", errs.NewMessage(errs.CodeInvalidConfig, "missing node"))
 
+	// errors.As 应能取得内部 Coder 并读取原始稳定码。
 	var coder errs.Coder
 	if !errors.As(err, &coder) {
 		t.Fatalf("errors.As(err, Coder) = false")
@@ -196,20 +211,24 @@ func TestErrorsAsCoder(t *testing.T) {
 }
 
 func TestFixedErrorDoesNotAllocate(t *testing.T) {
+	// 重复获取已登记哨兵，测量热路径是否保持零分配。
 	var err error
 	allocs := testing.AllocsPerRun(1000, func() {
 		err = errs.New(errs.CodeInternal)
 	})
 	runtime.KeepAlive(err)
 
+	// 分配次数必须严格为零。
 	if allocs != 0 {
 		t.Fatalf("New(CodeInternal) allocations = %f, want 0", allocs)
 	}
 }
 
 func BenchmarkNewFixed(b *testing.B) {
+	// 报告固定错误获取路径的分配和耗时。
 	b.ReportAllocs()
 
+	// 保存结果并在循环后 KeepAlive，防止编译器删除调用。
 	var err error
 	for b.Loop() {
 		err = errs.New(errs.CodeInternal)
@@ -218,8 +237,10 @@ func BenchmarkNewFixed(b *testing.B) {
 }
 
 func BenchmarkCodeOfFixed(b *testing.B) {
+	// 报告直接 Coder 快路径的分配和耗时。
 	b.ReportAllocs()
 
+	// 保存结果并在循环后 KeepAlive，防止编译器删除调用。
 	var code errs.Code
 	for b.Loop() {
 		code = errs.CodeOf(errs.ErrInternal)

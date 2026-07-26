@@ -24,7 +24,11 @@ const (
 	CodeLogOutputFailed Code = 7002
 )
 
+// codeText 返回已经登记的稳定英文错误文本。
+//
+// 未知错误码返回空字符串，由上层统一生成包含数值的兜底文本。
 func codeText(code Code) string {
+	// 使用显式 switch 固定错误码与文本的对应关系，避免可变全局 Map。
 	switch code {
 	case CodeOK:
 		return "ok"
@@ -43,6 +47,7 @@ func codeText(code Code) string {
 	case CodeLogOutputFailed:
 		return "log output failed"
 	default:
+		// 空字符串是“未登记”的内部标记，不作为最终错误文本对外返回。
 		return ""
 	}
 }

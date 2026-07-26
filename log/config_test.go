@@ -11,10 +11,12 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	t.Parallel()
 
+	// 获取一份独立默认配置，并先验证它可直接用于启动。
 	config := originlog.DefaultConfig()
 	if err := config.Validate(); err != nil {
 		t.Fatalf("DefaultConfig().Validate() = %v", err)
 	}
+	// 再锁定异步模式、控制台和文件路径等关键默认外观。
 	if config.Mode != originlog.AsyncMode {
 		t.Fatalf("default mode = %v, want async", config.Mode)
 	}
@@ -34,6 +36,7 @@ func TestDefaultConfig(t *testing.T) {
 func TestConfigValidation(t *testing.T) {
 	t.Parallel()
 
+	// 每个变更函数构造一种明确非法配置。
 	tests := []struct {
 		name   string
 		mutate func(*originlog.Config)
@@ -80,11 +83,13 @@ func TestConfigValidation(t *testing.T) {
 		},
 	}
 
+	// 所有非法输入都应映射为统一配置错误码。
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
 			var config originlog.Config
+			// 从零值或默认值出发应用当前非法变更。
 			test.mutate(&config)
 			err := config.Validate()
 			if !errs.IsCode(err, errs.CodeInvalidConfig) {
@@ -97,10 +102,12 @@ func TestConfigValidation(t *testing.T) {
 func TestParseLevel(t *testing.T) {
 	t.Parallel()
 
+	// 合法级别允许大小写差异，并返回标准枚举。
 	level, ok := originlog.ParseLevel("WARN")
 	if !ok || level != originlog.WarnLevel {
 		t.Fatalf("ParseLevel(WARN) = %v, %v", level, ok)
 	}
+	// 未支持的 trace 必须明确失败。
 	if _, ok := originlog.ParseLevel("trace"); ok {
 		t.Fatalf("ParseLevel(trace) unexpectedly succeeded")
 	}

@@ -11,6 +11,7 @@ import (
 func TestAcquireCapacityBuckets(t *testing.T) {
 	t.Parallel()
 
+	// 样本覆盖零长度、各类向上取整、最大档位和超大分配。
 	pool := NewPool(Options{})
 	tests := []struct {
 		name         string
@@ -29,6 +30,7 @@ func TestAcquireCapacityBuckets(t *testing.T) {
 		{name: "oversize", size: 64*1024 + 1, wantCapacity: 64*1024 + 1},
 	}
 
+	// 每个样本同时验证调用方可见长度和底层容量。
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			buf := pool.Acquire(test.size)
@@ -47,6 +49,7 @@ func TestAcquireCapacityBuckets(t *testing.T) {
 func TestEveryBucketBoundary(t *testing.T) {
 	t.Parallel()
 
+	// 逐档验证最小请求和恰好档位容量都落入同一个桶。
 	pool := NewPool(Options{})
 	for index := 0; index < bucketCount; index++ {
 		capacity := bucketCapacity(index)
@@ -67,6 +70,7 @@ func TestEveryBucketBoundary(t *testing.T) {
 func TestAcquireNegativeSizePanics(t *testing.T) {
 	t.Parallel()
 
+	// 负长度违反内部不变量，必须立即 panic。
 	assertPanics(t, func() {
 		NewPool(Options{}).Acquire(-1)
 	})
@@ -75,6 +79,7 @@ func TestAcquireNegativeSizePanics(t *testing.T) {
 func TestNilPoolPanics(t *testing.T) {
 	t.Parallel()
 
+	// nil Pool 不能隐式创建全局实例。
 	assertPanics(t, func() {
 		var pool *Pool
 		pool.Acquire(1)
@@ -84,9 +89,11 @@ func TestNilPoolPanics(t *testing.T) {
 func TestReleaseIsNilSafeAndDetectsImmediateReuse(t *testing.T) {
 	t.Parallel()
 
+	// nil Buffer 的 Release 允许用于统一 defer 清理。
 	var nilBuffer *Buffer
 	nilBuffer.Release()
 
+	// 取得并首次释放一个开启统计的档位对象。
 	pool := NewPool(Options{TrackUsage: true})
 	buf := pool.Acquire(16)
 	buf.Release()
@@ -102,6 +109,7 @@ func TestReleaseIsNilSafeAndDetectsImmediateReuse(t *testing.T) {
 func TestBytesAfterReleasePanics(t *testing.T) {
 	t.Parallel()
 
+	// 释放后保留旧指针，用于验证所有权失效检查。
 	buf := NewPool(Options{}).Acquire(16)
 	buf.Release()
 	assertPanics(t, func() {
@@ -112,6 +120,7 @@ func TestBytesAfterReleasePanics(t *testing.T) {
 func TestReleaseDoesNotClearPooledData(t *testing.T) {
 	t.Parallel()
 
+	// 写入已知字节后释放，验证默认低延迟路径不额外清零。
 	buf := NewPool(Options{}).Acquire(16)
 	buf.Bytes()[0] = 0x7f
 	buf.Release()
@@ -129,10 +138,12 @@ func TestReleaseDoesNotClearPooledData(t *testing.T) {
 func TestOversizeAndZeroReleaseDropReferences(t *testing.T) {
 	t.Parallel()
 
+	// 同时取得两个不进入固定档位池的特殊对象。
 	pool := NewPool(Options{TrackUsage: true})
 	zero := pool.Acquire(0)
 	oversize := pool.Acquire(64*1024 + 1)
 
+	// 释放后这两类对象应主动断开数组和 Pool 引用。
 	zero.Release()
 	oversize.Release()
 
@@ -147,6 +158,7 @@ func TestOversizeAndZeroReleaseDropReferences(t *testing.T) {
 			t.Errorf("%s Buffer 释放后仍保留 Pool 引用", name)
 		}
 	}
+	// 使用量统计也必须完全配平。
 	if stats := pool.Stats(); stats.InUseBuffers != 0 || stats.InUseCapacityBytes != 0 {
 		t.Fatalf("释放后统计未归零：%+v", stats)
 	}
@@ -155,6 +167,7 @@ func TestOversizeAndZeroReleaseDropReferences(t *testing.T) {
 func TestTrackingDisabledReturnsZeroSnapshot(t *testing.T) {
 	t.Parallel()
 
+	// 默认 Pool 即使存在未释放对象，也不执行原子统计。
 	pool := NewPool(Options{})
 	buf := pool.Acquire(1024)
 	stats := pool.Stats()
@@ -164,12 +177,14 @@ func TestTrackingDisabledReturnsZeroSnapshot(t *testing.T) {
 	if stats.InUseBuffers != 0 || stats.InUseCapacityBytes != 0 || stats.Buckets != nil {
 		t.Fatalf("关闭统计时应返回零值快照：%+v", stats)
 	}
+	// 最后归还对象，避免测试向 sync.Pool 留下活跃所有权。
 	buf.Release()
 }
 
 func TestTrackingSnapshot(t *testing.T) {
 	t.Parallel()
 
+	// 样本覆盖零长度、同档多个对象、相邻档、最大档和超大对象。
 	pool := NewPool(Options{TrackUsage: true})
 	buffers := []*Buffer{
 		pool.Acquire(0),
@@ -180,6 +195,7 @@ func TestTrackingSnapshot(t *testing.T) {
 		pool.Acquire(64*1024 + 1),
 	}
 
+	// 先验证总量和特殊类型统计。
 	stats := pool.Stats()
 	if !stats.Enabled {
 		t.Fatal("显式 TrackUsage=true 后统计未开启")
@@ -200,6 +216,7 @@ func TestTrackingSnapshot(t *testing.T) {
 	if got := len(stats.Buckets); got != bucketCount {
 		t.Fatalf("Buckets 长度=%d，期望=%d", got, bucketCount)
 	}
+	// 再抽查最小、第二和最大固定档位的计数。
 	if stats.Buckets[0].Capacity != 16 || stats.Buckets[0].InUseBuffers != 2 {
 		t.Fatalf("16 B 档位统计错误：%+v", stats.Buckets[0])
 	}
@@ -211,6 +228,7 @@ func TestTrackingSnapshot(t *testing.T) {
 		t.Fatalf("64 KiB 档位统计错误：%+v", stats.Buckets[bucketCount-1])
 	}
 
+	// 全部归还后使用统一辅助函数验证每个计数器归零。
 	for _, buf := range buffers {
 		buf.Release()
 	}
@@ -220,6 +238,7 @@ func TestTrackingSnapshot(t *testing.T) {
 func TestPoolsAreIsolated(t *testing.T) {
 	t.Parallel()
 
+	// 建立两个开启统计的独立实例，并分别持有同容量对象。
 	first := NewPool(Options{TrackUsage: true})
 	second := NewPool(Options{TrackUsage: true})
 	firstBuffer := first.Acquire(64)
@@ -229,10 +248,12 @@ func TestPoolsAreIsolated(t *testing.T) {
 		t.Fatal("独立 Pool 的统计相互影响")
 	}
 
+	// 释放第一个对象不能改变第二个 Pool 的计数。
 	firstBuffer.Release()
 	if first.Stats().InUseBuffers != 0 || second.Stats().InUseBuffers != 1 {
 		t.Fatal("释放第一个 Pool 的 Buffer 影响了第二个 Pool")
 	}
+	// 最后释放第二个对象并验证配平。
 	secondBuffer.Release()
 	assertTrackingEmpty(t, second)
 }
@@ -240,16 +261,20 @@ func TestPoolsAreIsolated(t *testing.T) {
 func TestConcurrentAcquireRelease(t *testing.T) {
 	t.Parallel()
 
+	// 固定工作数和迭代数，覆盖竞态检测同时保持测试耗时有界。
 	const (
 		workerCount = 16
 		iterations  = 2000
 	)
+	// 请求尺寸跨越零长度、多个档位和超大路径。
 	sizes := [...]int{0, 1, 16, 17, 64, 255, 1024, 4097, 32 * 1024, 64 * 1024, 64*1024 + 1}
+	// 两个 Pool 交错使用，用于发现隐藏全局状态。
 	pools := [...]*Pool{
 		NewPool(Options{TrackUsage: true}),
 		NewPool(Options{TrackUsage: true}),
 	}
 
+	// 每个 worker 独立选择 Pool 和尺寸，错误通过有界通道汇总。
 	var wait sync.WaitGroup
 	errors := make(chan error, workerCount)
 	wait.Add(workerCount)
@@ -258,6 +283,7 @@ func TestConcurrentAcquireRelease(t *testing.T) {
 			defer wait.Done()
 			pool := pools[worker%len(pools)]
 			for iteration := 0; iteration < iterations; iteration++ {
+				// 取得、写入、验证并在本轮内释放唯一所有权。
 				size := sizes[(worker+iteration)%len(sizes)]
 				buf := pool.Acquire(size)
 				data := buf.Bytes()
@@ -277,6 +303,7 @@ func TestConcurrentAcquireRelease(t *testing.T) {
 	wait.Wait()
 	close(errors)
 
+	// goroutine 结束后汇总数据串用错误并检查两个 Pool 统计。
 	for err := range errors {
 		t.Error(err)
 	}
@@ -291,8 +318,10 @@ func TestBurstMemoryRetention(t *testing.T) {
 	defer runtime.GOMAXPROCS(oldProcs)
 
 	baseline := heapAllocAfterGC()
+	// 开启统计，既检查生命周期也用于 KeepAlive Pool。
 	pool := NewPool(Options{TrackUsage: true})
 
+	// 第一阶段制造大量最大档位对象并全部归还。
 	const pooledCount = 512
 	buffers := make([]*Buffer, pooledCount)
 	for index := range buffers {
@@ -317,6 +346,7 @@ func TestBurstMemoryRetention(t *testing.T) {
 	}
 	buffers = nil
 
+	// 所有逻辑所有权必须已经归还，再触发 GC 观测活跃堆。
 	assertTrackingEmpty(t, pool)
 	after := heapAllocAfterGC()
 	runtime.KeepAlive(pool)
@@ -333,6 +363,7 @@ func TestBurstMemoryRetention(t *testing.T) {
 func assertTrackingEmpty(t *testing.T, pool *Pool) {
 	t.Helper()
 
+	// 先检查总量和两个特殊类型计数。
 	stats := pool.Stats()
 	if !stats.Enabled {
 		t.Fatal("测试要求统计已开启")
@@ -344,6 +375,7 @@ func assertTrackingEmpty(t *testing.T, pool *Pool) {
 		stats.OversizeBytes != 0 {
 		t.Fatalf("Pool 仍有未归还 Buffer：%+v", stats)
 	}
+	// 再逐档检查，避免总量计算缺陷掩盖单桶负数或残留。
 	for _, bucket := range stats.Buckets {
 		if bucket.InUseBuffers != 0 {
 			t.Fatalf("档位 %d 仍有 %d 个未归还 Buffer", bucket.Capacity, bucket.InUseBuffers)
@@ -354,11 +386,13 @@ func assertTrackingEmpty(t *testing.T, pool *Pool) {
 func assertPanics(t *testing.T, function func()) {
 	t.Helper()
 
+	// recover 只在 defer 中有效；没有 panic 时立即让当前测试失败。
 	defer func() {
 		if recover() == nil {
 			t.Fatal("期望 panic，但函数正常返回")
 		}
 	}()
+	// 执行调用方提供的违规操作。
 	function()
 }
 
@@ -369,6 +403,7 @@ func heapAllocAfterGC() uint64 {
 	runtime.GC()
 	debug.FreeOSMemory()
 
+	// GC 稳定后读取当前活跃堆字节，而不是累计分配量。
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
 	return memory.HeapAlloc

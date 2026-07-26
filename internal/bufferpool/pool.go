@@ -81,6 +81,7 @@ type bucket struct {
 
 // NewPool 创建一个相互独立的 Buffer Pool。
 func NewPool(options Options) *Pool {
+	// Pool 没有后台资源；构造阶段只固化是否启用热路径统计。
 	return &Pool{trackUsage: options.TrackUsage}
 }
 
@@ -89,12 +90,14 @@ func NewPool(options Options) *Pool {
 // size 为负数表示框架内部违反不变量，因此直接 panic。大于 64 KiB 的
 // Buffer 按实际大小分配，并在释放时交还给 Go 垃圾回收器。
 func (p *Pool) Acquire(size int) *Buffer {
+	// 首先拒绝违反 API 不变量的 Pool 和长度，避免后续产生错误切片。
 	if p == nil {
 		panic("bufferpool: 从 nil Pool 取得 Buffer")
 	}
 	if size < 0 {
 		panic("bufferpool: Buffer 长度不能为负数")
 	}
+	// 零长度对象不分配底层数组，也不占用固定容量档位。
 	if size == 0 {
 		buf := &Buffer{
 			owner:  p,
@@ -102,10 +105,12 @@ func (p *Pool) Acquire(size int) *Buffer {
 			active: true,
 		}
 		if p.trackUsage {
+			// 统计开启时记录唯一所有权已经交给调用方。
 			p.zeroSizeInUse.Add(1)
 		}
 		return buf
 	}
+	// 超出最大档位的请求按实际长度分配，避免池长期滞留大对象。
 	if size > maxPooledCapacity() {
 		buf := &Buffer{
 			data:   make([]byte, size),
@@ -115,13 +120,16 @@ func (p *Pool) Acquire(size int) *Buffer {
 			active: true,
 		}
 		if p.trackUsage {
+			// 同时记录数量和真实容量，便于排查超大 Buffer 未归还。
 			p.oversizeInUse.Add(1)
 			p.oversizeBytes.Add(int64(cap(buf.data)))
 		}
 		return buf
 	}
 
+	// 池化请求向上选择能够容纳 size 的最小 2 次幂档位。
 	index := bucketIndex(size)
+	// 优先复用该档位对象；sync.Pool 为空时才分配新的底层数组。
 	item := p.buckets[index].pool.Get()
 	var buf *Buffer
 	if item == nil {
@@ -136,11 +144,13 @@ func (p *Pool) Acquire(size int) *Buffer {
 		panic("bufferpool: Buffer 容量档位被污染")
 	}
 
+	// 每次取得都重新建立所有权、有效长度和档位，覆盖上一任使用者状态。
 	buf.owner = p
 	buf.size = size
 	buf.bucket = uint8(index)
 	buf.active = true
 	if p.trackUsage {
+		// 最后增加使用量，保证统计对应已经完成初始化并返回的对象。
 		p.buckets[index].inUse.Add(1)
 	}
 	return buf
@@ -150,10 +160,12 @@ func (p *Pool) Acquire(size int) *Buffer {
 //
 // 未开启 TrackUsage 时返回 Enabled=false 的零值快照，不推算任何数据。
 func (p *Pool) Stats() Stats {
+	// nil Pool 或关闭统计时不做原子读取和切片分配。
 	if p == nil || !p.trackUsage {
 		return Stats{}
 	}
 
+	// 先建立固定档位快照，再逐档汇总数量与容量。
 	stats := Stats{
 		Enabled: true,
 		Buckets: make([]BucketStats, bucketCount),
@@ -169,6 +181,7 @@ func (p *Pool) Stats() Stats {
 		stats.InUseCapacityBytes += count * int64(capacity)
 	}
 
+	// 零长度和超大对象不属于 buckets，需要单独读取并加入总数。
 	stats.ZeroSizeInUse = p.zeroSizeInUse.Load()
 	stats.OversizeInUse = p.oversizeInUse.Load()
 	stats.OversizeBytes = p.oversizeBytes.Load()
@@ -179,10 +192,12 @@ func (p *Pool) Stats() Stats {
 
 // releaseUsage 在首次有效释放时扣减对应档位的未归还统计。
 func (p *Pool) releaseUsage(bucketID uint8, capacity int) {
+	// 默认关闭统计时 Release 不执行任何原子操作。
 	if !p.trackUsage {
 		return
 	}
 
+	// 依据取得时固化的档位标记，精确扣减对应计数器。
 	switch bucketID {
 	case zeroSizeBucket:
 		p.zeroSizeInUse.Add(-1)
@@ -196,18 +211,22 @@ func (p *Pool) releaseUsage(bucketID uint8, capacity int) {
 
 // bucketIndex 返回能够容纳 size 的最小固定档位索引。
 func bucketIndex(size int) int {
+	// 16 B 以内全部使用最小档位。
 	if size <= 1<<minBucketShift {
 		return 0
 	}
+	// size-1 的位宽可把恰好为 2 次幂的长度留在当前档位。
 	return bits.Len(uint(size-1)) - minBucketShift
 }
 
 // bucketCapacity 返回固定档位对应的字节容量。
 func bucketCapacity(index int) int {
+	// 档位从 2^minBucketShift 开始连续递增。
 	return 1 << (minBucketShift + index)
 }
 
 // maxPooledCapacity 返回最大的可池化 Buffer 容量。
 func maxPooledCapacity() int {
+	// 最大档位保持为单一来源，避免 Acquire 边界与档位定义分离。
 	return 1 << maxBucketShift
 }
