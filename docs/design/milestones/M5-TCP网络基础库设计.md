@@ -1,6 +1,6 @@
 # Origin 第三版 M5 TCP 网络基础库设计
 
-> 文档状态：设计 Review 已通过，等待生成实施计划
+> 文档状态：已实现并通过验收
 > 创建日期：2026-07-26
 > 适用里程碑：M5
 > 前置依赖：M0 工程基础、M1 日志库、M2 内存复用库
@@ -804,8 +804,8 @@ M5 不预先写死绝对 QPS 或 p99 门槛。验收保存可复现环境、命�
 6. 增加 Fuzz、Benchmark、覆盖率审计和跨平台验证；
 7. 回写实施结果并提交 M5。
 
-本设计已经通过 Review。下一步先生成并 Review M5 实施计划；实施计划通过前不编写
-`internal/tcpnet` 生产代码。
+本设计已经通过 Review，并已按
+[M5 TCP 网络基础库实施计划](../../plans/M5-TCP网络基础库实施计划.md)完成实现与验收。
 
 ## 20. 已确认设计结论
 
@@ -831,11 +831,41 @@ M5 不预先写死绝对 QPS 或 p99 门槛。验收保存可复现环境、命�
 13. RPC Adapter 由 M10/M11 使用方定义最小 Send 接口，M5/M6 不实现共同大接口；
 14. M5 不自动重连，不包含 Node 握手、NodeID 或 RPC 语义；M10 Node 连接管理器在逻辑
     目标仍有效时负责有界退避重连，断线不自动重发非幂等调用；
-15. 收发热路径直接使用最终池化 Buffer，避免中间消息体复制；Benchmark 对比
-    scatter/gather 和完整帧复制，再决定最终发送实现。
+15. 收发热路径直接使用最终池化 Buffer，避免中间消息体复制；Benchmark 对比后采用
+    连接级复用描述符的 scatter/gather 发送，不拼接完整帧。
 
 另外已经确认：M5 是 RPC 与 TcpModule 共用的内部 TCP 基础库；TcpModule 本身作为后续
 独立系统设计，不进入 M5。
 
-M5 设计 Review 已通过，可以生成并单独 Review M5 实施计划；在实施计划通过前仍不编写
-`internal/tcpnet` 生产代码。
+M5 设计 Review 与实施计划均已通过，`internal/tcpnet` 已按上述边界完成。
+
+## 21. 实施与验收结果
+
+M5 于 2026-07-26 完成以下实现：
+
+1. `errs` 登记 `3001`～`3005` 五个 Transport 错误码及可复用哨兵；
+2. `internal/tcpnet` 提供默认配置、严格校验、一/二/四字节大小端长度帧、单次 Dial、
+   Listener、Conn、Handler、Send、Close 和 Wait；
+3. 每条连接固定一个 ReadLoop 和一个 WriteLoop；发送使用帧数与 payload 字节数双重有界
+   环形队列，队列满立即返回，不阻塞 Service；
+4. 收包在长度校验后直接取得最终 `bufferpool.Buffer`；发送使用连接级复用的
+   `net.Buffers` scatter/gather 描述符，不拼接完整帧；
+5. TCP_NODELAY 固定开启，KeepAlive、ReadTimeout 和 WriteTimeout 均按配置生效；
+6. 全部正常、过载、短读、短写、超时、回调错误、panic、并发 Close 和 Listener 关闭路径
+   都验证 Buffer 所有权归零；
+7. 单元测试、真实回环多连接集成测试、Fuzz、Benchmark、全仓竞态检测与跨平台构建通过。
+
+Windows/amd64 基准环境为 AMD Ryzen 7 7840HS：
+
+| 热路径 | 结果 |
+|---|---:|
+| 四字节长度头编解码 | `0.2660 ns/op`，`0 B/op`，`0 allocs/op` |
+| 环形队列入队并出队 | `36.56 ns/op`，`0 B/op`，`0 allocs/op` |
+| `writeItem` 连接级描述符复用 | `45.42 ns/op`，`0 B/op`，`0 allocs/op` |
+| scatter/gather 对照 | `71.83 ns/op`，`72 B/op`，`2 allocs/op` |
+| 完整帧复制对照 | `451.9 ns/op`，`1152 B/op`，`1 allocs/op` |
+
+其中最后两项使用 `io.Discard` 比较“分片写描述”与“重新拼接 1KB 完整帧”的成本；
+生产 `writeItem` 使用连接级描述符复用，单独基准已经达到零分配。Linux/amd64 真实机器
+测试与网络集成测试通过，Windows、Linux、macOS amd64/arm64 构建通过。单元覆盖率为
+`93.3%`，Fuzz 五秒执行约 `69.9` 万次且未发现异常。

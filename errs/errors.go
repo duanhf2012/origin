@@ -26,6 +26,16 @@ var (
 	ErrProcessAlreadyRunning error = newCodeError(CodeProcessAlreadyRunning)
 	// ErrProcessControlFailed 表示本地进程控制操作失败。
 	ErrProcessControlFailed error = newCodeError(CodeProcessControlFailed)
+	// ErrTransportUnavailable 表示底层连接或 I/O 当前不可用。
+	ErrTransportUnavailable error = newCodeError(CodeTransportUnavailable)
+	// ErrTransportClosed 表示 Transport 或连接已经关闭。
+	ErrTransportClosed error = newCodeError(CodeTransportClosed)
+	// ErrTransportOverloaded 表示有界连接或发送容量已经耗尽。
+	ErrTransportOverloaded error = newCodeError(CodeTransportOverloaded)
+	// ErrTransportProtocol 表示远端数据违反 Transport 帧协议。
+	ErrTransportProtocol error = newCodeError(CodeTransportProtocol)
+	// ErrTransportMessageTooLarge 表示消息超过配置的传输上限。
+	ErrTransportMessageTooLarge error = newCodeError(CodeTransportMessageTooLarge)
 	// ErrLogClosed 表示日志运行时已经关闭。
 	ErrLogClosed error = newCodeError(CodeLogClosed)
 	// ErrLogOutputFailed 表示日志输出创建、刷新或关闭失败。
@@ -121,6 +131,16 @@ func New(code Code) error {
 		return ErrProcessAlreadyRunning
 	case CodeProcessControlFailed:
 		return ErrProcessControlFailed
+	case CodeTransportUnavailable:
+		return ErrTransportUnavailable
+	case CodeTransportClosed:
+		return ErrTransportClosed
+	case CodeTransportOverloaded:
+		return ErrTransportOverloaded
+	case CodeTransportProtocol:
+		return ErrTransportProtocol
+	case CodeTransportMessageTooLarge:
+		return ErrTransportMessageTooLarge
 	case CodeLogClosed:
 		return ErrLogClosed
 	case CodeLogOutputFailed:

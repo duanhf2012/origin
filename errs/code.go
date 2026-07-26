@@ -22,6 +22,17 @@ const (
 	// CodeProcessControlFailed 表示本地进程锁、控制文件或停止通知操作失败。
 	CodeProcessControlFailed
 
+	// CodeTransportUnavailable 表示 Dial、Accept 或底层 I/O 导致传输不可用。
+	CodeTransportUnavailable Code = 3001
+	// CodeTransportClosed 表示本地 Transport 或连接已经关闭。
+	CodeTransportClosed Code = 3002
+	// CodeTransportOverloaded 表示连接数或发送队列达到有界上限。
+	CodeTransportOverloaded Code = 3003
+	// CodeTransportProtocol 表示远端数据违反 Transport 帧协议。
+	CodeTransportProtocol Code = 3004
+	// CodeTransportMessageTooLarge 表示发送或接收的消息超过配置上限。
+	CodeTransportMessageTooLarge Code = 3005
+
 	// CodeLogClosed 表示日志运行时已经关闭。
 	CodeLogClosed Code = 7001
 	// CodeLogOutputFailed 表示日志输出创建、刷新或关闭失败。
@@ -50,6 +61,16 @@ func codeText(code Code) string {
 		return "process already running"
 	case CodeProcessControlFailed:
 		return "process control failed"
+	case CodeTransportUnavailable:
+		return "transport unavailable"
+	case CodeTransportClosed:
+		return "transport closed"
+	case CodeTransportOverloaded:
+		return "transport overloaded"
+	case CodeTransportProtocol:
+		return "transport protocol error"
+	case CodeTransportMessageTooLarge:
+		return "transport message too large"
 	case CodeLogClosed:
 		return "log runtime closed"
 	case CodeLogOutputFailed:
