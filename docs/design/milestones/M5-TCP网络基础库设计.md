@@ -7,14 +7,14 @@
 
 ## 1. 目标
 
-M5 实现一个只面向 Origin 框架内部的 TCP 字节传输基础库，为后续 M10 TCP RPC 提供稳定、
-低延迟且可完整停止的连接能力。
+M5 实现一个只面向 Origin 框架内部的通用 TCP 字节传输基础库，为后续 M10 TCP RPC 和
+v3 TcpModule 提供稳定、低延迟且可完整停止的共同连接能力。
 
 M5 完成后必须能够：
 
 1. 监听 TCP 地址并接收多条连接；
 2. 使用 Context 连接一个 TCP 地址；
-3. 按固定长度帧读取和发送完整消息；
+3. 按严格配置的长度帧读取和发送完整消息；
 4. 在申请消息体 Buffer 前拒绝非法长度；
 5. 使用有界发送队列明确返回过载；
 6. 正确处理短写、断线、并发关闭和重复关闭；
@@ -22,8 +22,9 @@ M5 完成后必须能够：
 8. 停止并等待本组件创建的全部 goroutine；
 9. 用真实回环 TCP、故障注入、竞态检测和 Benchmark 保存基线。
 
-M5 不实现 RPC 方法、请求响应关联、Node 身份、自动重连或业务 Service。它只保证后续 RPC
-需要的传输能力，不提前实现 M10。
+M5 不实现 RPC 方法、请求响应关联、Node 身份、TcpModule ClientID、消息 Processor、
+自动重连或业务 Service。它只提供两种上层适配器共同需要的 TCP 能力，不提前实现 M10
+或 TcpModule。
 
 ## 2. 本里程碑边界
 
@@ -33,7 +34,7 @@ M5 不实现 RPC 方法、请求响应关联、Node 身份、自动重连或业�
 - TCP 客户端单次 Dial；
 - Connection 状态与地址；
 - 每条连接一个 ReadLoop 和一个 WriteLoop；
-- 固定四字节大端长度帧；
+- 一、二、四字节长度字段和大端、小端字节序；
 - 最大消息长度；
 - 有界发送消息数和有界待发送字节数；
 - 非阻塞发送与明确的队列过载错误；
@@ -57,6 +58,7 @@ M5 不实现 RPC 方法、请求响应关联、Node 身份、自动重连或业�
 - 半关闭和发送队列排空协议；
 - Application、Node、Service 或业务配置模型；
 - 面向业务使用者的通用 TCP Service。
+- TcpModule 的 ClientID、连接表、消息 Codec/Processor 和 Service 事件投递。
 
 这些能力分别属于 M6、M7～M12 或后续独立系统，不能因实现方便带入 M5。
 
@@ -70,7 +72,7 @@ v2 的 `network.MsgParser`、`NetConn` 和 RPC `IWriter` 证明以下边界有�
 - 每条 TCP 连接使用独立读写循环；
 - 写入先进入队列，业务 goroutine 不直接执行阻塞网络写；
 - TCP 与 NATS 最终都可以向 RPC Runtime 提供一个很小的“发送消息”能力；
-- 网络 Buffer 在读写完成后统一回收。
+- 网络 Buffer 使用单一所有权，并能从网络循环继续转移给上层适配器。
 
 ### 3.2 v2 不直接照搬的部分
 
@@ -91,14 +93,14 @@ M5 参考 v2 的实际使用经验，不复用或迁移 v2 源码。
 
 ## 4. 总体分层
 
-M5、M6 和后续 RPC 使用三层边界：
+M5、M6、后续 RPC 和 TcpModule 使用以下边界：
 
 ```text
-M9 RPC Runtime
-    │
-    ├── M10 TCP RPC Adapter ── M5 TCP 基础库 ── net.TCPConn
-    │
-    └── M11 NATS RPC Adapter ─ M6 NATS 基础库 ─ nats.Conn
+M9 RPC Runtime ── M10 TCP RPC Adapter ─┐
+                                       ├── M5 TCP 基础库 ── net.TCPConn
+后续 TcpModule ── TcpModule Adapter ───┘
+
+M9 RPC Runtime ── M11 NATS RPC Adapter ─── M6 NATS 基础库 ── nats.Conn
 ```
 
 分层规则：
@@ -108,7 +110,8 @@ M9 RPC Runtime
 3. RPC 侧的小接口由 M10/M11 的使用方定义；
 4. TCP Adapter 和 NATS Adapter 只转换目标、Buffer 所有权、入站来源和传输错误；
 5. 序列化、RequestID、pendingCall、路由和统一 RPC 错误只实现一次，放在 RPC Runtime；
-6. M5、M6 不相互依赖，也不依赖 RPC Runtime。
+6. TcpModule Adapter 负责 ClientID、连接表、业务消息编解码和 Service 事件投递；
+7. M5、M6 不相互依赖，也不依赖 RPC Runtime 或 TcpModule。
 
 这样既保留 v2 `IWriter` 的窄适配思想，又避免重新建立 `IRealClient` 一类大接口。
 
@@ -128,13 +131,14 @@ package tcpnet
 
 采用内部包的原因：
 
-- M5 当前唯一已确认用途是 Origin Native RPC；
+- M5 当前已确认由 Origin Native RPC 和后续 TcpModule 共同复用；
 - API 需要直接转移 `internal/bufferpool.Buffer` 所有权；
 - 业务若直接依赖底层 Connection，会阻碍后续协议和关闭规则调整；
-- v2 的通用 TCP/WS/KCP 业务 Service 属于后续独立适配器，不要求 M5 立即公开。
+- TcpModule 可以在 Origin 仓库内部导入该包，对业务提供自己的稳定外观；
+- v2 的 WS/KCP 业务能力属于后续独立适配器，不要求 M5 立即公开。
 
 首版不建立 `transport/tcp` 公共目录，也不定义名为 `Network`、`Channel`、`Session` 的通用
-大对象。M10 只在框架内部组合 `tcpnet`。
+大对象。M10 和后续 TcpModule 只在框架内部组合 `tcpnet`。
 
 ## 6. 建议 API 外观
 
@@ -143,9 +147,22 @@ package tcpnet
 ### 6.1 连接配置
 
 ```go
+type ByteOrder uint8
+
+const (
+    BigEndian ByteOrder = iota
+    LittleEndian
+)
+
+type FrameOptions struct {
+    LengthFieldSize int
+    ByteOrder       ByteOrder
+}
+
 type ConnectionOptions struct {
     Pool             *bufferpool.Pool
     Logger           log.Logger
+    Frame            FrameOptions
     MaxMessageSize   int
     SendQueueFrames  int
     SendQueueBytes   int
@@ -160,6 +177,8 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions
 
 | 字段 | 默认值 | 原因 |
 |---|---:|---|
+| `Frame.LengthFieldSize` | `4` | RPC 默认帧以及大消息上限都可直接使用 |
+| `Frame.ByteOrder` | `BigEndian` | 使用网络字节序作为新协议默认值 |
 | `MaxMessageSize` | `4 * 1024 * 1024` | 与已确认 RPC 最大消息 `4M` 一致 |
 | `SendQueueFrames` | `1024` | 限制大量小消息 |
 | `SendQueueBytes` | `8 * 1024 * 1024` | 限制大消息的最坏在途内存 |
@@ -168,6 +187,10 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions
 | `Logger` | Nop Logger | 测试和独立使用不依赖全局日志 |
 
 `Pool` 必须显式传入且不能为 nil。Pool 由更高层持有，Connection 只借用，不负责关闭。
+
+`LengthFieldSize` 只接受 `1`、`2`、`4`。`MaxMessageSize` 必须能由所选长度字段表达，例如
+一字节长度字段最大只能配置 `255B`。M10 TCP RPC Adapter 固定选择四字节大端，不允许
+Node 配置改变；后续 TcpModule 可以按已有客户端线协议选择一、二、四字节和大小端。
 
 M5 的 Go Options 使用 `int` 和 `time.Duration`。未来 M7 配置模型负责把 `config.ByteSize` 和
 `config.Duration` 转换为这些内部值，M5 不依赖配置加载包。
@@ -191,7 +214,7 @@ func DefaultListenOptions(pool *bufferpool.Pool) ListenOptions
 ```go
 type Handler interface {
     OnOpen(conn *Conn)
-    OnMessage(conn *Conn, payload []byte) error
+    OnMessage(conn *Conn, packet *bufferpool.Buffer) error
     OnClose(conn *Conn, cause error)
 }
 ```
@@ -203,13 +226,20 @@ type Handler interface {
 - 同一连接的三个回调不会并发执行；
 - `OnMessage` 返回错误会关闭该连接；
 - `OnClose` 恰好执行一次；
-- `payload` 只在 `OnMessage` 返回前有效，处理器不得保存；
+- `OnMessage` 开始执行时，接收 Buffer 的所有权从 ReadLoop 转移给 Handler；
+- Handler 必须在同步处理结束、解码失败、事件投递失败和 panic 路径释放 Buffer，或者把
+  唯一所有权继续转移给另一个明确负责释放的内部组件；
 - Handler 是框架内部协议适配器，不能直接执行 Service 业务逻辑；
 - Handler panic 属于框架内部故障，不按业务异常恢复继续使用连接。ReadLoop 的最外层
-  goroutine 边界捕获现场、记录一次堆栈、释放资源，并以 `CodeInternal` 原因触发
-  `OnClose`；M10 接入后必须据此把所属 Node 标记为失败并进入受控停止。
+  goroutine 边界捕获现场、记录一次堆栈，并以 `CodeInternal` 原因触发 `OnClose`；
+  Handler 自己的最外层所有权保护必须先释放尚未转移的 Buffer。M10 接入后还必须据此把
+  所属 Node 标记为失败并进入受控停止。
 
 每条 Connection 固定绑定一个 Handler。首版不提供运行中更换 Handler 或多个监听器链。
+
+RPC Adapter 在 Handler 内同步解码并释放 Buffer。TcpModule Adapter 可以把 Buffer 继续
+转移给 Service 事件队列，由事件处理完成、丢弃或 Service 停止清理路径统一释放。业务
+回调只看见解码后的消息或临时只读数据，不直接承担 `Release`。
 
 ### 6.4 Listener 和 Dial
 
@@ -244,31 +274,33 @@ func (conn *Conn) Wait(ctx context.Context) error
 
 ## 7. 长度帧协议
 
-M5 固定使用：
+M5 使用 v2 TcpModule 已有项目所需的长度字段模型：
 
 ```text
-+----------------------+----------------------+
-| payload_length uint32| payload              |
-| big endian, 4 bytes  | payload_length bytes |
-+----------------------+----------------------+
++--------------------------+----------------------+
+| payload_length           | payload              |
+| 1、2 或 4 bytes          | payload_length bytes |
+| big endian/little endian |                      |
++--------------------------+----------------------+
 ```
 
 规则：
 
-1. 长度字段表示 payload 长度，不包含四字节帧头；
-2. 网络字节序固定为 Big Endian；
-3. 帧头固定四字节，不提供一、二、四字节配置；
+1. 长度字段表示 payload 长度，不包含长度字段自身；
+2. 长度字段只能使用一、二、四字节；
+3. 二、四字节支持 Big Endian 和 Little Endian，一字节时字节序没有实际差异；
 4. payload 长度必须大于零；
 5. payload 长度不能超过 `MaxMessageSize`；
-6. `MaxMessageSize` 不能大于 `math.MaxUint32`；
+6. `MaxMessageSize` 不能超过所选长度字段能够表达的最大无符号整数；
 7. 长度校验必须发生在取得完整 payload Buffer 之前；
 8. 非法长度立即关闭连接，不尝试跳过当前帧继续解析；
 9. 半帧后 EOF、超时和其他 I/O 错误关闭连接；
 10. 一个 TCP 包可以包含多帧，一帧也可以拆成多个 TCP 包，读取统一使用
     `io.ReadFull`，不能依赖单次 `Read` 的边界。
 
-固定协议比 v2 的可变帧头和可变大小端更容易跨平台验证，也避免两个 Node 因配置不一致
-产生无法定位的解析错误。
+M5 支持这些选项是为了复用同一 TCP 核心并保持 v2 TcpModule 已有客户端线协议，不表示
+Origin RPC 也允许自由配置。M10 固定四字节 Big Endian，配置不一致必须在 Node 启动前
+拒绝；TcpModule 的字段值由它自己的配置显式给出。
 
 M5 帧内没有版本、压缩标志、RequestID 或错误码。它们属于 M10 RPC payload 的线协议。
 
@@ -278,39 +310,43 @@ M5 帧内没有版本、压缩标志、RequestID 或错误码。它们属于 M10
 
 ```text
 ReadLoop
-  → 栈上 [4]byte 读取长度
+  → 栈上 [4]byte 按实际长度字段读取
   → 校验长度
   → Pool.Acquire(payloadLength)
   → io.ReadFull
-  → OnMessage(conn, buffer.Bytes())
-  → buffer.Release()
+  → 将 Buffer 所有权转移给 Handler
+      ├── RPC Adapter：同步解码后 Release
+      └── TcpModule Adapter：转移给 Service 事件，事件结束后 Release
 ```
 
 约束：
 
-- ReadLoop 始终拥有接收 Buffer；
-- `OnMessage` 只是同步借用 `[]byte`；
-- `OnMessage` 返回成功、错误或连接关闭都由 ReadLoop 释放；
-- M10 必须在回调返回前完成 RPC 帧头解析及 Protobuf 解码；
-- 解码结果不能引用输入 Buffer；
-- Service 永远看不到网络 Buffer，也不负责释放。
+- ReadLoop 在完整读取前拥有 Buffer，完整读取后把唯一所有权交给 Handler；
+- `io.ReadFull` 失败时尚未转移，ReadLoop 必须释放；
+- Handler 一进入就安装本地所有权清理保护，只有成功转移后才能解除；
+- M10 在 Handler 中完成 RPC 帧头解析及 Protobuf 解码，随后释放；
+- TcpModule 投递异步事件成功后，由事件对象持有；队列拒绝、Service 停止和回调异常都
+  必须释放；
+- 解码结果不能引用已经释放的输入 Buffer；
+- 业务代码不直接持有 Buffer，也不调用 `Release`。
 
-该规则不使用引用计数，能够避免业务保存 payload 后导致池化内存泄漏或 ABA。
+该规则不使用引用计数。TcpModule 的异步事件只是把唯一所有权从网络 goroutine 转移到
+Service 队列，不是多个组件共享同一 Buffer。
 
 ### 8.2 发送
 
-建议把 RPC payload Buffer 直接转移给 Connection：
+建议把上层编码后的 payload Buffer 直接转移给 Connection：
 
 ```text
-RPC Encoder
+RPC Encoder / TcpModule Codec
   → Pool.Acquire(payloadLength)
   → 直接编码到 buffer.Bytes()
   → Conn.Send(buffer)
-  → WriteLoop 写 [4]byte 长度头和 payload
+  → WriteLoop 按 FrameOptions 写长度头和 payload
   → buffer.Release()
 ```
 
-WriteLoop 的队列项使用值类型保存四字节帧头、Buffer 指针和记账长度。底层通过
+WriteLoop 的队列项使用值类型保存最大四字节帧头、实际帧头长度、Buffer 指针和记账长度。底层通过
 `net.Buffers` 或等价的完整写入循环发送帧头和 payload，正确处理短写，同时避免为了 TCP
 帧头再复制一份完整 payload。
 
@@ -321,15 +357,35 @@ WriteLoop 的队列项使用值类型保存四字节帧头、Buffer 指针和记
 3. WriteLoop 是成功入队 Buffer 的唯一释放者；
 4. 完整写入、写失败和连接关闭均释放一次；
 5. 关闭时尚未发送的队列项全部释放；
-6. RPC 取消不能回收已经成功入队的 Buffer；
+6. RPC 取消或 TcpModule 上层事件取消不能回收已经成功入队的 Buffer；
 7. `Send` 不接受 nil 或长度为零的 Buffer；传入已释放 Buffer 属于框架内部违反所有权
    不变量，沿用 M2 `Buffer.Bytes()` 的 panic 规则；
 8. payload 超过最大消息长度时拒绝入队，所有权仍归调用方。
 
-这一做法相对 M2 储备文档中的“完整 TCP 帧 Buffer”有一处优化：Buffer 只保存 RPC payload，
-四字节长度头保存在预分配队列项中。它减少一次完整消息复制，也让同一 RPC payload
-Buffer 可以由 TCP Adapter 或 NATS Adapter 接管。开发者确认 M5 后，应同步修订 M2 详细
-设计中的发送路径表述。
+本设计让 Buffer 只保存上层 payload，最长四字节的长度头保存在预分配队列项中。它减少
+一次完整消息复制，也让同一 RPC payload Buffer 可以由 TCP Adapter 或 NATS Adapter
+接管。本轮确认后已同步修订 M2 详细设计中的发送路径表述。
+
+### 8.3 BufferPool 归属与生命周期
+
+M5 不创建包级全局 Pool，也不在每条 Connection 内隐式创建 Pool：
+
+1. M5 独立测试或单独构造时，由调用方先创建 `bufferpool.Pool` 并注入 Options；
+2. M7 接入后，由 Application 创建一个 Pool，同一 Application 内的 Node、TCP RPC 和
+   TcpModule 共享；
+3. Listener 和 Connection 只保存 Pool 指针，不拥有 Pool，也没有关闭 Pool 的权限；
+4. Pool 没有后台 goroutine 和 `Close`，但 Application 只有在全部 Connection、发送队列
+   和持有接收 Buffer 的 TcpModule 事件结束后，才能丢弃 Pool；
+5. `TrackUsage` 只在创建 Pool 时决定，M5 不能运行中开启或关闭；
+6. 默认关闭统计时，Acquire/Release 不增加统计原子操作；
+7. 开启统计时，完整 Application 停止后的 `InUseBuffers` 必须归零；单独停止某个 Node
+   时，其他 Node 仍可能使用共享 Pool，不能错误要求 Application 总统计立即归零；
+8. M5 的隔离测试使用专属 Pool，因此每个成功、错误和关闭用例结束时都必须验证归零。
+
+长度帧头和发送队列项是固定小值，分别使用栈上数组或预分配 channel 槽位，不进入
+BufferPool。超过 M2 最大池化档位 `64KB` 的消息仍使用统一 Buffer 所有权外观，但释放时
+交给 GC，不进入 `sync.Pool`；是否增加更大档位必须由 M5/M10 的真实包长与内存滞留
+Benchmark 决定。
 
 ## 9. 每条连接的 goroutine 模型
 
@@ -462,6 +518,7 @@ M5 建议在统一 `errs` 包增加以下 Transport 通用错误码，M6 后续�
 - 不把远端地址、凭证或消息内容写入稳定 Message；
 - `io.EOF`、`net.ErrClosed` 和 Context 错误按发生阶段映射；
 - RPC Adapter 在 M10/M11 把这些错误完成到 pendingCall；
+- TcpModule Adapter 把连接和帧错误转换为所属 Service 的连接事件或发送错误；
 - M5 不生成 RPC Response，也不决定某个错误是否可重试。
 
 ## 15. 与 M6 和 RPC Adapter 的衔接
@@ -500,7 +557,7 @@ type sender interface {
 - Send 失败时所有权仍归 RPC Runtime；
 - TCP Adapter 选择目标 Connection 并调用 `Conn.Send`；
 - NATS Adapter 生成 Subject、Publish，并在底层已接管或复制数据后释放 Buffer；
-- 入站 Adapter 把来源和借用的 payload 同步交给同一 RPC 解码入口。
+- 入站 TCP Adapter 取得 Buffer 所有权，同步交给 RPC 解码入口并释放。
 
 首版共同接口只统一发送热路径，不强行统一 Start、Subscribe、Reconnect、Connection Event
 和 Close。它们由 Node 分别持有具体 Adapter 并按真实生命周期管理。若 M10/M11 实现证明
@@ -521,6 +578,21 @@ type sender interface {
 | Transport 错误到 RPC 完成 | M10/M11 Adapter |
 
 TCP 和 NATS 不分别复制一次 RPC Client、代码生成或业务调用 API。
+
+## 15.4 与 TcpModule Adapter 的衔接
+
+后续 v3 TcpModule 直接复用 M5，不重新实现 Listener、Connection、帧解析、发送队列或
+BufferPool。它只负责：
+
+- 为连接生成 ClientID 并维护 ClientID 到 Connection 的映射；
+- 把 `OnOpen`、`OnMessage`、`OnClose` 转换为 Service 调度事件；
+- 选择 PB、JSON 或 Raw 等业务 Codec/Processor；
+- 把接收 Buffer 安全转移给异步事件，并在事件所有结束路径释放；
+- 编码发送消息并调用 `Conn.Send`；
+- 提供关闭客户端、查询远端地址和连接数量等业务外观。
+
+M5 不复用 v2 `Agent`，也不把 Processor、事件系统或 ClientID 放入 Connection。v3
+TcpModule 保留主要功能和已有客户端线协议，但不承诺 v2 源码级 API 或配置字段原样兼容。
 
 ## 16. 日志与可观测性
 
@@ -549,10 +621,11 @@ M5 通过注入的 `log.Logger` 记录低频生命周期和异常：
 - Options 默认值和全部非法组合；
 - 空地址、nil Pool、nil Handler；
 - `0`、`1`、最大值、最大值加一和 `uint32` 溢出长度；
-- 大端帧头；
+- 一、二、四字节长度字段及大端、小端帧头；
 - 帧头和消息体的逐字节短读；
 - 短写、多次短写、写零字节和写错误；
 - Send 成功与失败时的 Buffer 所有权；
+- RPC 同步释放、TcpModule 异步转移、事件拒绝和停止清理时的 Buffer 所有权；
 - 队列帧数满、字节数满以及释放后恢复额度；
 - Close 与 Send 并发；
 - 重复 Close、重复 Wait 和 Context 取消；
@@ -569,9 +642,10 @@ M5 通过注入的 `log.Logger` 记录低频生命周期和异常：
 
 ### 17.2 Fuzz
 
-Fuzz 固定帧解析：
+Fuzz 长度帧解析：
 
-- 任意四字节长度；
+- 一、二、四字节字段下的任意长度；
+- 大端和小端；
 - 截断帧头；
 - 截断 payload；
 - 多帧粘连；
@@ -659,7 +733,8 @@ M5 不预先写死绝对 QPS 或 p99 门槛。验收保存可复现环境、命�
 建议开发者逐项确认：
 
 1. M5 使用内部包 `internal/tcpnet`，暂不作为业务公共 TCP 库；
-2. 固定四字节 Big Endian 长度头，不提供大小端和帧头长度配置；
+2. M5 支持一、二、四字节长度字段以及大端、小端；M10 RPC 固定四字节大端，TcpModule
+   按既有客户端协议显式配置；本项已于 2026-07-26 确认；
 3. payload 必须非空，默认最大 `4M`；
 4. 每连接两个 goroutine，不为每消息创建 goroutine；
 5. 发送同时限制 `1024` 帧和 `8M` payload；
@@ -668,11 +743,14 @@ M5 不预先写死绝对 QPS 或 p99 门槛。验收保存可复现环境、命�
 8. Listener 关闭立即停止传输，不在 M5 增加 Drain；
 9. TCP_NODELAY 固定开启，KeepAlive 默认 `30s`，WriteTimeout 默认 `15s`；
 10. M5 不设置 ReadDeadline，心跳与判活留到 M10；
-11. 发送 Buffer 只保存 RPC payload，WriteLoop 使用独立四字节头，确认后同步修订 M2
-    储备文档；
+11. 发送 Buffer 只保存上层 payload，WriteLoop 使用最长四字节的独立长度头；接收 Buffer
+    可以由 RPC 同步释放或继续转移给 TcpModule Service 事件；本项已于 2026-07-26 确认；
 12. Transport 使用 `3001`～`3005` 五个轻量统一错误码；
 13. RPC Adapter 由 M10/M11 使用方定义最小 Send 接口，M5/M6 不实现共同大接口；
 14. M5 不自动重连，不包含 Node 握手、NodeID 或 RPC 语义；
 15. Benchmark 对比 scatter/gather 和完整帧复制，再决定最终发送实现。
+
+另外已经确认：M5 是 RPC 与 TcpModule 共用的内部 TCP 基础库；TcpModule 本身作为后续
+独立系统设计，不进入 M5。
 
 全部确认后，才能把复核清单更新为“允许实施”并生成 M5 实施计划。
