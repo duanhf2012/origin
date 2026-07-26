@@ -1,0 +1,5 @@
+framework:
+  name: origin-v3
+
+nodes:
+  - id: gateway-1
