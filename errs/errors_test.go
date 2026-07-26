@@ -25,6 +25,8 @@ func TestStableCodes(t *testing.T) {
 		{name: "internal", code: errs.CodeInternal, want: 3},
 		{name: "invalid argument", code: errs.CodeInvalidArgument, want: 4},
 		{name: "invalid config", code: errs.CodeInvalidConfig, want: 5},
+		{name: "process already running", code: errs.CodeProcessAlreadyRunning, want: 6},
+		{name: "process control failed", code: errs.CodeProcessControlFailed, want: 7},
 		{name: "log closed", code: errs.CodeLogClosed, want: 7001},
 		{name: "log output failed", code: errs.CodeLogOutputFailed, want: 7002},
 	}
@@ -56,6 +58,16 @@ func TestNew(t *testing.T) {
 		{code: errs.CodeInternal, want: errs.ErrInternal, text: "internal error"},
 		{code: errs.CodeInvalidArgument, want: errs.ErrInvalidArgument, text: "invalid argument"},
 		{code: errs.CodeInvalidConfig, want: errs.ErrInvalidConfig, text: "invalid config"},
+		{
+			code: errs.CodeProcessAlreadyRunning,
+			want: errs.ErrProcessAlreadyRunning,
+			text: "process already running",
+		},
+		{
+			code: errs.CodeProcessControlFailed,
+			want: errs.ErrProcessControlFailed,
+			text: "process control failed",
+		},
 		{code: errs.CodeLogClosed, want: errs.ErrLogClosed, text: "log runtime closed"},
 		{code: errs.CodeLogOutputFailed, want: errs.ErrLogOutputFailed, text: "log output failed"},
 	}

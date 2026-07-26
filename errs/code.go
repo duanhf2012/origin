@@ -17,6 +17,10 @@ const (
 	CodeInvalidArgument
 	// CodeInvalidConfig 表示配置无效。
 	CodeInvalidConfig
+	// CodeProcessAlreadyRunning 表示同名 Application 进程已经持有运行权。
+	CodeProcessAlreadyRunning
+	// CodeProcessControlFailed 表示本地进程锁、控制文件或停止通知操作失败。
+	CodeProcessControlFailed
 
 	// CodeLogClosed 表示日志运行时已经关闭。
 	CodeLogClosed Code = 7001
@@ -42,6 +46,10 @@ func codeText(code Code) string {
 		return "invalid argument"
 	case CodeInvalidConfig:
 		return "invalid config"
+	case CodeProcessAlreadyRunning:
+		return "process already running"
+	case CodeProcessControlFailed:
+		return "process control failed"
 	case CodeLogClosed:
 		return "log runtime closed"
 	case CodeLogOutputFailed:

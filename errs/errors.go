@@ -22,6 +22,10 @@ var (
 	ErrInvalidArgument error = newCodeError(CodeInvalidArgument)
 	// ErrInvalidConfig 表示配置无效。
 	ErrInvalidConfig error = newCodeError(CodeInvalidConfig)
+	// ErrProcessAlreadyRunning 表示同名 Application 进程已经运行。
+	ErrProcessAlreadyRunning error = newCodeError(CodeProcessAlreadyRunning)
+	// ErrProcessControlFailed 表示本地进程控制操作失败。
+	ErrProcessControlFailed error = newCodeError(CodeProcessControlFailed)
 	// ErrLogClosed 表示日志运行时已经关闭。
 	ErrLogClosed error = newCodeError(CodeLogClosed)
 	// ErrLogOutputFailed 表示日志输出创建、刷新或关闭失败。
@@ -113,6 +117,10 @@ func New(code Code) error {
 		return ErrInvalidArgument
 	case CodeInvalidConfig:
 		return ErrInvalidConfig
+	case CodeProcessAlreadyRunning:
+		return ErrProcessAlreadyRunning
+	case CodeProcessControlFailed:
+		return ErrProcessControlFailed
 	case CodeLogClosed:
 		return ErrLogClosed
 	case CodeLogOutputFailed:
