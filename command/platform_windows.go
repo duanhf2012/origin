@@ -4,6 +4,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"time"
@@ -76,6 +77,15 @@ func requestPlatformStop(_ int, stopPath string) error {
 	// O_EXCL 让并发 stop 只有一个真正创建文件，已存在按幂等请求处理。
 	file, err := os.OpenFile(stopPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if os.IsExist(err) {
+		// 只有已经存在的普通文件才表示另一个 stop 已发出同一请求。目录、设备或其他
+		// 文件类型不能伪装成幂等请求，否则目标永远收不到可删除的空控制文件。
+		info, statErr := os.Stat(stopPath)
+		if statErr != nil {
+			return statErr
+		}
+		if !info.Mode().IsRegular() {
+			return &os.PathError{Op: "create stop request", Path: stopPath, Err: errors.New("path is not a regular file")}
+		}
 		return nil
 	}
 	if err != nil {

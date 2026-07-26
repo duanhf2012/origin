@@ -45,3 +45,19 @@ func TestTryLockContentionAndRelease(t *testing.T) {
 		t.Fatalf("Release(second) error = %v", err)
 	}
 }
+
+func TestTryLockRejectsClosedFile(t *testing.T) {
+	t.Parallel()
+
+	// 已关闭句柄稳定触发平台系统调用错误，覆盖非竞争失败分类。
+	file, err := os.CreateTemp(t.TempDir(), "closed-*.pid")
+	if err != nil {
+		t.Fatalf("CreateTemp() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if acquired, err := TryLock(file); err == nil || acquired {
+		t.Fatalf("TryLock(closed) = (%v, %v), want system error", acquired, err)
+	}
+}
