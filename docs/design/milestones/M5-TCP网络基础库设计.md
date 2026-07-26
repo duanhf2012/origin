@@ -1,6 +1,6 @@
 # Origin 第三版 M5 TCP 网络基础库设计
 
-> 文档状态：草案，等待开发者 Review
+> 文档状态：设计 Review 已通过，等待生成实施计划
 > 创建日期：2026-07-26
 > 适用里程碑：M5
 > 前置依赖：M0 工程基础、M1 日志库、M2 内存复用库
@@ -24,7 +24,8 @@ M5 完成后必须能够：
 
 M5 不实现 RPC 方法、请求响应关联、Node 身份、TcpModule ClientID、消息 Processor、
 自动重连或业务 Service。它只提供两种上层适配器共同需要的 TCP 能力，不提前实现 M10
-或 TcpModule。
+或 TcpModule。RPC 断线后的重连由 M10 Node 连接管理器负责，M5 只提供可取消的单次
+`Dial` 和连接关闭通知。
 
 ## 2. 本里程碑边界
 
@@ -38,7 +39,7 @@ M5 不实现 RPC 方法、请求响应关联、Node 身份、TcpModule ClientID�
 - 最大消息长度；
 - 有界发送消息数和有界待发送字节数；
 - 非阻塞发送与明确的队列过载错误；
-- TCP_NODELAY、KeepAlive 和写超时；
+- TCP_NODELAY、KeepAlive、可选读空闲超时和写超时；
 - 连接、Listener 的幂等关闭与等待；
 - 内部 BufferPool 接入；
 - 连接建立、断开和关键错误日志；
@@ -166,6 +167,7 @@ type ConnectionOptions struct {
     MaxMessageSize   int
     SendQueueFrames  int
     SendQueueBytes   int
+    ReadTimeout      time.Duration
     WriteTimeout     time.Duration
     KeepAlive        time.Duration
 }
@@ -180,8 +182,9 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions
 | `Frame.LengthFieldSize` | `4` | RPC 默认帧以及大消息上限都可直接使用 |
 | `Frame.ByteOrder` | `BigEndian` | 使用网络字节序作为新协议默认值 |
 | `MaxMessageSize` | `4 * 1024 * 1024` | 与已确认 RPC 最大消息 `4M` 一致 |
-| `SendQueueFrames` | `1024` | 限制大量小消息 |
+| `SendQueueFrames` | `4096` | 通用 TCP 默认值，限制大量小消息且控制每连接队列槽位内存 |
 | `SendQueueBytes` | `8 * 1024 * 1024` | 限制大消息的最坏在途内存 |
+| `ReadTimeout` | `0` | 默认允许健康空闲连接长期存在；非零值表示读空闲超时 |
 | `WriteTimeout` | `15s` | 防止单次网络写永久占住 WriteLoop |
 | `KeepAlive` | `30s` | 使用系统 TCP 保活辅助发现死连接 |
 | `Logger` | Nop Logger | 测试和独立使用不依赖全局日志 |
@@ -191,6 +194,12 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions
 `LengthFieldSize` 只接受 `1`、`2`、`4`。`MaxMessageSize` 必须能由所选长度字段表达，例如
 一字节长度字段最大只能配置 `255B`。M10 TCP RPC Adapter 固定选择四字节大端，不允许
 Node 配置改变；后续 TcpModule 可以按已有客户端线协议选择一、二、四字节和大小端。
+
+M5 将发送帧数和待发送字节数都作为上层可设置的 Go Options，不把某个业务场景写死在
+TCP 库中。M10 内部 RPC 的首版默认值覆盖为 `16384` 帧和 `8M`，以承受可信 Node 连接上
+大量小 RPC 的瞬时突发；后续 TcpModule 按外部客户端数量、消息大小和慢客户端策略单独
+配置。`SendQueueFrames` 和 `SendQueueBytes` 都必须大于零，任意一个达到上限都拒绝新帧。
+队列上限表示准入边界，不代表建立连接时预先申请对应 payload 内存。
 
 M5 的 Go Options 使用 `int` 和 `time.Duration`。未来 M7 配置模型负责把 `config.ByteSize` 和
 `config.Duration` 转换为这些内部值，M5 不依赖配置加载包。
@@ -289,7 +298,7 @@ M5 使用 v2 TcpModule 已有项目所需的长度字段模型：
 1. 长度字段表示 payload 长度，不包含长度字段自身；
 2. 长度字段只能使用一、二、四字节；
 3. 二、四字节支持 Big Endian 和 Little Endian，一字节时字节序没有实际差异；
-4. payload 长度必须大于零；
+4. payload 长度允许为零；
 5. payload 长度不能超过 `MaxMessageSize`；
 6. `MaxMessageSize` 不能超过所选长度字段能够表达的最大无符号整数；
 7. 长度校验必须发生在取得完整 payload Buffer 之前；
@@ -297,6 +306,11 @@ M5 使用 v2 TcpModule 已有项目所需的长度字段模型：
 9. 半帧后 EOF、超时和其他 I/O 错误关闭连接；
 10. 一个 TCP 包可以包含多帧，一帧也可以拆成多个 TCP 包，读取统一使用
     `io.ReadFull`，不能依赖单次 `Read` 的边界。
+
+零长度帧仍然完整消费长度字段并向 Handler 交付一个有效的零长度 Buffer，不调用
+`io.ReadFull` 读取 payload，也不能把它误判为 EOF。M5 是通用 TCP 层，不根据上层语义
+拒绝空帧；M10 RPC Adapter 仍负责检查 RPC 协议头是否完整。Protobuf 空消息或所有隐式
+字段均为默认值时，业务消息序列化结果可能为零字节，因此空 payload 是合法传输能力。
 
 M5 支持这些选项是为了复用同一 TCP 核心并保持 v2 TcpModule 已有客户端线协议，不表示
 Origin RPC 也允许自由配置。M10 固定四字节 Big Endian，配置不一致必须在 Node 启动前
@@ -313,7 +327,7 @@ ReadLoop
   → 栈上 [4]byte 按实际长度字段读取
   → 校验长度
   → Pool.Acquire(payloadLength)
-  → io.ReadFull
+  → payloadLength > 0 时直接 io.ReadFull 到最终 Buffer
   → 将 Buffer 所有权转移给 Handler
       ├── RPC Adapter：同步解码后 Release
       └── TcpModule Adapter：转移给 Service 事件，事件结束后 Release
@@ -358,13 +372,23 @@ WriteLoop 的队列项使用值类型保存最大四字节帧头、实际帧头�
 4. 完整写入、写失败和连接关闭均释放一次；
 5. 关闭时尚未发送的队列项全部释放；
 6. RPC 取消或 TcpModule 上层事件取消不能回收已经成功入队的 Buffer；
-7. `Send` 不接受 nil 或长度为零的 Buffer；传入已释放 Buffer 属于框架内部违反所有权
-   不变量，沿用 M2 `Buffer.Bytes()` 的 panic 规则；
+7. `Send` 不接受 nil Buffer，但接受有效的零长度 Buffer；传入已释放 Buffer 属于框架内部
+   违反所有权不变量，沿用 M2 `Buffer.Bytes()` 的 panic 规则；
 8. payload 超过最大消息长度时拒绝入队，所有权仍归调用方。
 
 本设计让 Buffer 只保存上层 payload，最长四字节的长度头保存在预分配队列项中。它减少
 一次完整消息复制，也让同一 RPC payload Buffer 可以由 TCP Adapter 或 NATS Adapter
 接管。本轮确认后已同步修订 M2 详细设计中的发送路径表述。
+
+收发热路径还遵守以下低拷贝规则：
+
+- 接收端不创建中间消息体切片，校验长度后直接从 socket 读入最终池化 Buffer；
+- RPC Encoder 和 TcpModule Codec 尽量直接编码到最终 payload Buffer；
+- 不为了帧头拼接复制完整 payload，优先使用 `net.Buffers` 或等价 scatter/gather 写入；
+- 不在热路径做 `[]byte` 与 `string` 的无意义互转，不为每帧创建 goroutine，也不记录
+  正常逐帧日志；
+- Windows、Linux 分别用 Benchmark 比较 scatter/gather 与完整帧复制；若收益不足或实现
+  明显复杂，必须先与开发者确认后再调整。
 
 ### 8.3 BufferPool 归属与生命周期
 
@@ -433,6 +457,20 @@ Benchmark 决定。
 - 只限制数量时，少量 `4M` 消息仍可能占用大量内存；
 - 只限制字节时，海量极小消息仍可能占用大量队列槽和对象。
 
+默认值按使用场景区分：
+
+| 使用场景 | `SendQueueFrames` | `SendQueueBytes` |
+|---|---:|---:|
+| M5 通用 TCP | `4096` | `8M` |
+| M10 内部 RPC | `16384` | `8M` |
+| 后续 TcpModule | 按业务显式配置 | 按业务显式配置 |
+
+[nats.go Pending Limits](https://pkg.go.dev/github.com/nats-io/nats.go) 默认采用 `65536` 条与
+`64M` 两个上限，说明成熟消息系统会允许远高于 `1024` 的小消息突发；但 NATS Broker
+订阅队列与 Origin 每条 Node TCP 连接的内存模型不同，不能直接照搬。Origin RPC 首版选择
+`16384`，在提高突发容量的同时避免每条连接预留过多队列槽位；确有需要的项目可以显式
+提高到 `65536`，但必须结合连接数、平均消息大小、队列高水位和 p99 延迟复核内存成本。
+
 `Send` 使用非阻塞准入：
 
 1. 先校验连接状态和 Buffer；
@@ -441,8 +479,21 @@ Benchmark 决定。
 4. 任一项不足立即返回 `CodeTransportOverloaded`；
 5. 不等待队列、不丢弃旧消息、不静默丢新消息，也不因队满关闭连接。
 
-RPC Runtime 收到过载后立即完成本次调用，不把本地队列等待时间隐藏在网络层。需要业务
-重试时由更高层结合幂等性、Deadline 和路由决定，M5 不自动重试。
+空 payload 也占用一个帧槽位，因此不能绕过帧数限制。RPC Runtime 收到过载后立即完成
+本次调用，不把本地队列等待时间隐藏在网络层。需要业务重试时由更高层结合幂等性、
+Deadline 和路由决定，M5 不自动重试。
+
+M5 只报告背压，不理解 Request、Response 或外部客户端语义。上层默认处理规则为：
+
+- 新 RPC Request 或 Notify 无法入队时，立即把本次发送完成为过载错误，不关闭连接；
+- RPC Response 无法入队时，M10 关闭该连接，使对端 pending 立即失败，避免等待到默认
+  `15s` 超时；
+- 后续 TcpModule 对持续过载的外部连接按慢客户端处理，默认断开并由客户端重连和同步；
+- 任何非幂等 RPC 都不能因为过载或重连被框架自动重发。
+
+该策略与 [Netty WriteBufferWaterMark](https://netty.io/4.2/api/io/netty/channel/WriteBufferWaterMark.html)
+按待写字节高低水位报告不可写、NATS 同时限制待处理消息数和字节数的方向一致：优先保护
+事件循环延迟和进程内存，不用无限队列掩盖过载。
 
 ## 11. TCP 参数
 
@@ -451,15 +502,17 @@ RPC Runtime 收到过载后立即完成本次调用，不把本地队列等待�
 - TCP_NODELAY：开启，降低小 RPC 帧等待；
 - KeepAlive：默认开启，周期使用 Options；
 - Linger：不主动设置为零，避免正常 Close 强制发送 RST；
-- ReadDeadline：不设置；
+- ReadDeadline：`ReadTimeout == 0` 时不设置；非零时在连接开始读取前设置，并在每次成功
+  读取完整帧后刷新为 `now + ReadTimeout`；
 - WriteDeadline：每个队列项开始写前设置 `now + WriteTimeout`；
 - Dial：使用 Context；
 - Listen：使用 `net.ListenConfig`；
 - 地址：交给 Go `net` 包解析，支持 IPv4 与 IPv6。
 
-M5 不设置 ReadDeadline，是因为空闲但健康的 Node 连接可能长期没有业务数据，而 M5 尚未
-实现应用层心跳。M10 的握手和后续连接管理将决定心跳及失活策略，不能把 RPC 默认 `15s`
-超时误当成连接空闲超时。
+`ReadTimeout` 表示连接读空闲超时，不是 RPC 调用超时。默认关闭是因为空闲但健康的 Node
+连接可能长期没有业务数据，而 M5 尚未实现应用层心跳。M10 接入心跳后再为 RPC 连接配置
+与心跳周期匹配的非零值，不能把 RPC 默认 `15s` 误当成连接空闲超时。读超时、写超时或
+半帧超时都关闭连接；写操作可能已经输出部分帧，超时后不能继续复用同一字节流。
 
 ## 12. Listener 生命周期
 
@@ -496,6 +549,10 @@ M5 使用立即传输关闭，不提供“发送队列 Drain 后再关闭”：
 - Context 到期只结束调用方等待，不把组件重新标记为运行；
 - 多次 Close 返回相同终态，不 panic；
 - TCP 半关闭统一按完整连接关闭处理。
+
+这里的 Drain 指“先停止新发送，再等待当前写入和已入队 Buffer 全部写完，最后关闭连接”。
+TCP 写队列排空最多证明字节已经交给本机操作系统，不能证明远端 RPC 已经执行完成，因此
+它不能替代 RPC 请求—响应或业务确认。
 
 上层优雅停止会先停止 RPC 准入并排空 pendingCall，再关闭 Transport。此时正常情况下发送
 队列已经为空。M5 再增加 Drain 会引入第二套 Deadline、半关闭和失败裁决，首版收益不足。
@@ -579,7 +636,7 @@ type sender interface {
 
 TCP 和 NATS 不分别复制一次 RPC Client、代码生成或业务调用 API。
 
-## 15.4 与 TcpModule Adapter 的衔接
+### 15.4 与 TcpModule Adapter 的衔接
 
 后续 v3 TcpModule 直接复用 M5，不重新实现 Listener、Connection、帧解析、发送队列或
 BufferPool。它只负责：
@@ -593,6 +650,22 @@ BufferPool。它只负责：
 
 M5 不复用 v2 `Agent`，也不把 Processor、事件系统或 ClientID 放入 Connection。v3
 TcpModule 保留主要功能和已有客户端线协议，但不承诺 v2 源码级 API 或配置字段原样兼容。
+
+### 15.5 与 RPC 重连的衔接
+
+M5 的 `Dial(ctx, ...)` 永远只尝试一次，已经关闭的 `Conn` 永远不复活。M10 为每个逻辑
+Node 目标建立连接管理器，并负责：
+
+1. 目标仍然有效时发起单次 Dial、握手并发布新的 Ready 连接；
+2. 连接断开后立即使用 Transport 错误完成绑定在旧连接上的 pendingCall；
+3. 使用有界指数退避和抖动建立新物理连接；
+4. 目标地址变化时使用最新地址；
+5. 目标被移除、Context 取消或 Node 停止时立即停止重连；
+6. 重连只恢复后续调用能力，不自动重发已经失败的非幂等 RPC。
+
+M10 的静态目标测试先把“目标仍然有效”表示为测试生命周期；后续接入服务发现时，发现快照
+中的目标存在状态驱动同一连接管理器，Lost 事件停止重连。这样 M5 不依赖 NodeID、服务发现
+和退避策略，同时 RPC 仍具备生产需要的断线恢复能力。
 
 ## 16. 日志与可观测性
 
@@ -621,12 +694,15 @@ M5 通过注入的 `log.Logger` 记录低频生命周期和异常：
 - Options 默认值和全部非法组合；
 - 空地址、nil Pool、nil Handler；
 - `0`、`1`、最大值、最大值加一和 `uint32` 溢出长度；
+- 零长度 payload 的收发、所有权和连续空帧；
 - 一、二、四字节长度字段及大端、小端帧头；
 - 帧头和消息体的逐字节短读；
 - 短写、多次短写、写零字节和写错误；
 - Send 成功与失败时的 Buffer 所有权；
 - RPC 同步释放、TcpModule 异步转移、事件拒绝和停止清理时的 Buffer 所有权；
 - 队列帧数满、字节数满以及释放后恢复额度；
+- M5 `4096` 和 RPC `16384` 默认覆盖值、配置边界及空帧占用帧额度；
+- ReadTimeout 关闭、刷新、读空闲超时以及 WriteTimeout 部分写后关闭；
 - Close 与 Send 并发；
 - 重复 Close、重复 Wait 和 Context 取消；
 - OnOpen、OnMessage、OnClose 顺序及恰好一次；
@@ -663,6 +739,7 @@ Fuzz 长度帧解析：
 - 对端断开；
 - 本地关闭；
 - 大消息；
+- 空 payload；
 - 队列过载后连接仍可继续使用；
 - Listener 关闭后全部连接和 goroutine 退出；
 - BufferPool 开启统计后最终归零。
@@ -704,6 +781,7 @@ M5 保存以下基线：
 - p50、p95、p99 延迟；
 - 吞吐量；
 - 队列接近满载时的延迟；
+- `4096`、`16384` 和 `65536` 帧容量下的队列槽位内存、并发准入和过载成本；
 - 突发流量结束后的 Buffer 未归还和堆滞留；
 - `net.Buffers` 帧头加 payload 与复制完整帧两种方案的对照。
 
@@ -726,31 +804,38 @@ M5 不预先写死绝对 QPS 或 p99 门槛。验收保存可复现环境、命�
 6. 增加 Fuzz、Benchmark、覆盖率审计和跨平台验证；
 7. 回写实施结果并提交 M5。
 
-在本设计通过 Review 前，不创建 M5 实施计划，不编写 `internal/tcpnet` 生产代码。
+本设计已经通过 Review。下一步先生成并 Review M5 实施计划；实施计划通过前不编写
+`internal/tcpnet` 生产代码。
 
-## 20. 开工前待确认
+## 20. 已确认设计结论
 
-建议开发者逐项确认：
+以下结论已于 2026-07-26 完成 Review：
 
 1. M5 使用内部包 `internal/tcpnet`，暂不作为业务公共 TCP 库；
 2. M5 支持一、二、四字节长度字段以及大端、小端；M10 RPC 固定四字节大端，TcpModule
    按既有客户端协议显式配置；本项已于 2026-07-26 确认；
-3. payload 必须非空，默认最大 `4M`；
+3. payload 允许为空，nil Buffer 非法，默认最大 `4M`；
 4. 每连接两个 goroutine，不为每消息创建 goroutine；
-5. 发送同时限制 `1024` 帧和 `8M` payload；
-6. 队列满返回过载，不关闭连接、不阻塞等待、不丢日志式静默处理；
+5. TCP 库允许上层配置帧数和字节数；M5 默认 `4096` 帧和 `8M`，M10 RPC 默认
+   `16384` 帧和 `8M`；
+6. 队列满由 M5 非阻塞返回过载，不静默丢弃；Request/Notify、Response 和 TcpModule
+   慢客户端的后续动作由各自上层按第 10 节处理；
 7. `Conn.Close` 发起关闭，`Wait(ctx)` 负责等待；
-8. Listener 关闭立即停止传输，不在 M5 增加 Drain；
+8. Listener 关闭立即停止传输，M5 不增加只能保证本地写出的 Transport Drain；
 9. TCP_NODELAY 固定开启，KeepAlive 默认 `30s`，WriteTimeout 默认 `15s`；
-10. M5 不设置 ReadDeadline，心跳与判活留到 M10；
+10. M5 支持 ReadTimeout 和 WriteTimeout；ReadTimeout 默认 `0`，M10 心跳接入后再设置
+    非零读空闲超时；
 11. 发送 Buffer 只保存上层 payload，WriteLoop 使用最长四字节的独立长度头；接收 Buffer
     可以由 RPC 同步释放或继续转移给 TcpModule Service 事件；本项已于 2026-07-26 确认；
 12. Transport 使用 `3001`～`3005` 五个轻量统一错误码；
 13. RPC Adapter 由 M10/M11 使用方定义最小 Send 接口，M5/M6 不实现共同大接口；
-14. M5 不自动重连，不包含 Node 握手、NodeID 或 RPC 语义；
-15. Benchmark 对比 scatter/gather 和完整帧复制，再决定最终发送实现。
+14. M5 不自动重连，不包含 Node 握手、NodeID 或 RPC 语义；M10 Node 连接管理器在逻辑
+    目标仍有效时负责有界退避重连，断线不自动重发非幂等调用；
+15. 收发热路径直接使用最终池化 Buffer，避免中间消息体复制；Benchmark 对比
+    scatter/gather 和完整帧复制，再决定最终发送实现。
 
 另外已经确认：M5 是 RPC 与 TcpModule 共用的内部 TCP 基础库；TcpModule 本身作为后续
 独立系统设计，不进入 M5。
 
-全部确认后，才能把复核清单更新为“允许实施”并生成 M5 实施计划。
+M5 设计 Review 已通过，可以生成并单独 Review M5 实施计划；在实施计划通过前仍不编写
+`internal/tcpnet` 生产代码。
