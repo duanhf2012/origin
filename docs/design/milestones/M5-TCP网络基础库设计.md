@@ -107,7 +107,8 @@ M9 RPC Runtime ── M11 NATS RPC Adapter ─── M6 NATS 基础库 ── na
 分层规则：
 
 1. M5 公开的是 TCP 原生连接能力，不假装 NATS 也存在 TCP Connection；
-2. M6 公开的是 NATS 原生发布、订阅和请求响应能力，不为兼容 TCP 增加假连接；
+2. M6 公开的是 NATS 原生发布订阅能力，不为兼容 TCP 增加假连接，也不包装原生
+   Request/Reply；
 3. RPC 侧的小接口由 M10/M11 的使用方定义；
 4. TCP Adapter 和 NATS Adapter 只转换目标、Buffer 所有权、入站来源和传输错误；
 5. 序列化、RequestID、pendingCall、路由和统一 RPC 错误只实现一次，放在 RPC Runtime；
@@ -613,7 +614,8 @@ type sender interface {
 - Send 成功后 Adapter 取得 Buffer 所有权；
 - Send 失败时所有权仍归 RPC Runtime；
 - TCP Adapter 选择目标 Connection 并调用 `Conn.Send`；
-- NATS Adapter 生成 Subject、Publish，并在底层已接管或复制数据后释放 Buffer；
+- NATS Adapter 根据目标 NodeID 生成 Node 级 Subject 并执行 Publish；目标 ServiceName
+  已在 RPC payload 中，不进入 Subject；底层接管或复制数据后释放 Buffer；
 - 入站 TCP Adapter 取得 Buffer 所有权，同步交给 RPC 解码入口并释放。
 
 首版共同接口只统一发送热路径，不强行统一 Start、Subscribe、Reconnect、Connection Event
