@@ -1,7 +1,9 @@
 package service
 
 import (
+	"sync/atomic"
 	"testing"
+	"time"
 
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
@@ -13,10 +15,14 @@ type testService struct {
 
 // testRuntime 是单元测试可完全控制的只读运行环境。
 type testRuntime struct {
-	nodeID string
-	name   string
-	state  State
-	peer   IService
+	nodeID   string
+	name     string
+	state    State
+	peer     IService
+	limit    int
+	active   atomic.Int64
+	nextID   atomic.Uint64
+	location *time.Location
 }
 
 func (runtime *testRuntime) NodeID() string           { return runtime.nodeID }
@@ -25,6 +31,21 @@ func (runtime *testRuntime) State() State             { return runtime.state }
 func (runtime *testRuntime) Logger() originlog.Logger { return originlog.NewNop() }
 func (runtime *testRuntime) LookupService(string) (IService, bool) {
 	return runtime.peer, runtime.peer != nil
+}
+func (runtime *testRuntime) AcquireTimerSlot() (TimerID, bool) {
+	if runtime.limit <= 0 || runtime.active.Add(1) > int64(runtime.limit) {
+		runtime.active.Add(-1)
+		return InvalidTimerID, false
+	}
+	return TimerID(runtime.nextID.Add(1)), true
+}
+func (runtime *testRuntime) ReleaseTimerSlot() { runtime.active.Add(-1) }
+func (runtime *testRuntime) TimerLimit() int   { return runtime.limit }
+func (runtime *testRuntime) TimerLocation() *time.Location {
+	if runtime.location == nil {
+		return time.Local
+	}
+	return runtime.location
 }
 
 func TestBindRuntimeAndQueries(t *testing.T) {

@@ -1,6 +1,20 @@
 package node
 
-import "github.com/duanhf2012/origin/v3/service"
+import (
+	"time"
+
+	"github.com/duanhf2012/origin/v3/service"
+)
+
+// Options 是 Application 构建 Node 时传入的冻结运行选项。
+//
+// 它不属于 YAML/JSON 配置模型；默认值统一由 Application 处理。
+type Options struct {
+	// MaxTimersPerNode 是当前 Node 全部 Service 共享的业务 Timer 总额度。
+	MaxTimersPerNode int
+	// TimerLocation 是当前 Node 全部 Cron Timer 使用的统一只读时区。
+	TimerLocation *time.Location
+}
 
 // Config 是一个 Node 在配置文件中的最小静态定义。
 type Config struct {

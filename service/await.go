@@ -84,6 +84,7 @@ func (scheduler *serviceScheduler) await(
 	task.awaitPanic = nil
 	task.awaitPanicStack = nil
 	scheduler.deadlineBindings[deadlineID] = deadlineBinding{
+		kind:       deadlineBindingAwait,
 		task:       task,
 		token:      token,
 		generation: generation,

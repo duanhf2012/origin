@@ -7,6 +7,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.14.3
 	github.com/nats-io/nats.go v1.52.0
 	github.com/nats-io/nkeys v0.4.16
+	github.com/robfig/cron/v3 v3.0.1
 	go.uber.org/zap v1.28.0
 	golang.org/x/sys v0.47.0
 )

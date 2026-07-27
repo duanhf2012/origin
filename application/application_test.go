@@ -510,6 +510,43 @@ func TestApplicationConstructionAndCreatedStopEdges(t *testing.T) {
 	}
 }
 
+func TestApplicationTimerOptionsDefaultsAndValidation(t *testing.T) {
+	// 零值 Options 必须冻结稳定的三百万额度和创建 Application 时的本地时区，
+	// 业务无需为普通场景增加配置。
+	app := New()
+	if app.options.Timer.MaxTimersPerNode != DefaultMaxTimersPerNode {
+		t.Fatalf(
+			"MaxTimersPerNode = %d，期望 %d",
+			app.options.Timer.MaxTimersPerNode,
+			DefaultMaxTimersPerNode,
+		)
+	}
+	if app.options.Timer.Location != time.Local {
+		t.Fatal("默认 Timer Location 未冻结为 time.Local")
+	}
+
+	// 负数额度没有“无限”或“禁用”的稳定含义，必须在首次启动前记录参数错误。
+	invalid := New(Options{
+		Timer: TimerOptions{MaxTimersPerNode: -1},
+	})
+	if invalid.catalog.freeze() == nil {
+		t.Fatal("负 Timer 额度未记录错误")
+	}
+
+	// 显式 Location 必须原样保留，不能被默认本地时区覆盖。
+	location := time.FixedZone("test-zone", 8*60*60)
+	explicit := New(Options{
+		Timer: TimerOptions{
+			MaxTimersPerNode: 16,
+			Location:         location,
+		},
+	})
+	if explicit.options.Timer.MaxTimersPerNode != 16 ||
+		explicit.options.Timer.Location != location {
+		t.Fatalf("显式 Timer Options 被修改: %+v", explicit.options.Timer)
+	}
+}
+
 func TestRollbackBuiltNodesPreservesPrimaryError(t *testing.T) {
 	// 直接构造一个尚未启动的 Node，模拟后续 Node 在装配阶段失败的部分初始化场景。
 	target := &lifecycleTestService{}
@@ -521,6 +558,10 @@ func TestRollbackBuiltNodesPreservesPrimaryError(t *testing.T) {
 			Service:  target,
 		}},
 		originlog.NewNop(),
+		node.Options{
+			MaxTimersPerNode: DefaultMaxTimersPerNode,
+			TimerLocation:    time.Local,
+		},
 	)
 	if err != nil {
 		t.Fatalf("node.New() error = %v", err)

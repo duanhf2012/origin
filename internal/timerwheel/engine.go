@@ -152,6 +152,17 @@ func New(options Options) (*Engine, error) {
 	return engine, nil
 }
 
+// Now 返回当前 Engine 所使用 Clock 的时间。
+//
+// 上层组件必须通过该方法读取时间轮的统一时间源，不能混用 time.Now；否则测试时钟、
+// 到期时间和延迟统计会处于不同时间轴。Clock 的实现必须遵守 Options 中的并发安全契约。
+func (engine *Engine) Now() time.Time {
+	if engine == nil || engine.clock == nil {
+		return time.Time{}
+	}
+	return engine.clock.Now()
+}
+
 // Start 记录单调基准并启动唯一工作 goroutine。
 func (engine *Engine) Start() error {
 	if engine == nil {
@@ -279,6 +290,11 @@ func (engine *Engine) Close() error {
 	if engine.stats.stopDuration == 0 {
 		engine.stats.stopDuration = time.Since(startedAt)
 	}
+	// Engine 是一次性 Node 资源。关闭后主动断开高水位索引和池引用，避免百万级
+	// Deadline 曾经增长出的 Map 桶及池对象跟随已停止 Node 长期保留。
+	engine.entries = nil
+	engine.queues = nil
+	engine.entryPool = sync.Pool{}
 	engine.mu.Unlock()
 	return nil
 }

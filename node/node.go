@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime/debug"
 	"sync/atomic"
+	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/timerwheel"
@@ -38,6 +40,16 @@ type Node struct {
 	started []*serviceEntry
 	// timerEngine 是当前 Node 独占的 Deadline 时间轮；它先于 OnStart 启动、晚于 OnStop 关闭。
 	timerEngine *timerwheel.Engine
+	// timerResources 只保存标量、原子计数和时区，不按最大额度预分配业务 Timer。
+	timerResources nodeTimerResources
+}
+
+// nodeTimerResources 管理当前 Node 生命周期内唯一 TimerID 和共享活跃额度。
+type nodeTimerResources struct {
+	maxTimers     int64
+	activeTimers  atomic.Int64
+	nextTimerID   atomic.Uint64
+	timerLocation *time.Location
 }
 
 // serviceEntry 保存单个 Service 的运行身份和由 Node 拥有的状态。
@@ -59,13 +71,30 @@ type serviceRuntime struct {
 }
 
 // New 校验绑定数据并创建尚未启动的 Node。
-func New(config Config, bindings []ServiceBinding, logger originlog.Logger) (*Node, error) {
+func New(
+	config Config,
+	bindings []ServiceBinding,
+	logger originlog.Logger,
+	options Options,
+) (*Node, error) {
 	// Node 身份和 Service 列表必须在分配运行对象前完整有效。
 	if config.ID == "" {
 		return nil, invalidConfig("Node ID 不能为空")
 	}
 	if len(bindings) == 0 {
 		return nil, invalidConfig(fmt.Sprintf("Node %q 没有 Service", config.ID))
+	}
+	if options.MaxTimersPerNode <= 0 {
+		return nil, invalidConfig(fmt.Sprintf(
+			"Node %q 的 MaxTimersPerNode 必须大于 0",
+			config.ID,
+		))
+	}
+	if options.TimerLocation == nil {
+		return nil, invalidConfig(fmt.Sprintf(
+			"Node %q 的 TimerLocation 不能为空",
+			config.ID,
+		))
 	}
 
 	// 按已知数量一次分配有序表和查询表，避免装配时重复扩容。
@@ -77,6 +106,10 @@ func New(config Config, bindings []ServiceBinding, logger originlog.Logger) (*No
 		services:        make([]*serviceEntry, 0, len(bindings)),
 		byName:          make(map[string]*serviceEntry, len(bindings)),
 		started:         make([]*serviceEntry, 0, len(bindings)),
+		timerResources: nodeTimerResources{
+			maxTimers:     int64(options.MaxTimersPerNode),
+			timerLocation: options.TimerLocation,
+		},
 	}
 	instance.state.Store(uint32(StateCreated))
 
@@ -125,6 +158,52 @@ func New(config Config, bindings []ServiceBinding, logger originlog.Logger) (*No
 	}
 	instance.timerEngine = timerEngine
 	return instance, nil
+}
+
+// acquireTimerSlot 原子申请一个活跃额度并分配永不复用的 Node TimerID。
+func (node *Node) acquireTimerSlot() (service.TimerID, bool) {
+	if node == nil {
+		return service.InvalidTimerID, false
+	}
+
+	// 先申请共享活跃额度；CAS 失败时重新读取，确保多个 Service 并发创建不会突破上限。
+	for {
+		active := node.timerResources.activeTimers.Load()
+		if active >= node.timerResources.maxTimers {
+			return service.InvalidTimerID, false
+		}
+		if node.timerResources.activeTimers.CompareAndSwap(active, active+1) {
+			break
+		}
+	}
+
+	// ID 使用不回绕的 CAS。达到 MaxUint64 后永久拒绝新 ID，并归还刚取得的额度。
+	for {
+		previous := node.timerResources.nextTimerID.Load()
+		if previous == math.MaxUint64 {
+			node.releaseTimerSlot()
+			return service.InvalidTimerID, false
+		}
+		if node.timerResources.nextTimerID.CompareAndSwap(previous, previous+1) {
+			return service.TimerID(previous + 1), true
+		}
+	}
+}
+
+// releaseTimerSlot 归还一个已经脱离全部业务容器的 Timer 活跃额度。
+func (node *Node) releaseTimerSlot() {
+	if node == nil {
+		panic("node: nil Node 不能归还 Timer Slot")
+	}
+	for {
+		active := node.timerResources.activeTimers.Load()
+		if active <= 0 {
+			panic("node: Timer Slot 重复归还")
+		}
+		if node.timerResources.activeTimers.CompareAndSwap(active, active-1) {
+			return
+		}
+	}
 }
 
 // ID 返回 Node 的稳定身份。
@@ -223,7 +302,8 @@ func (node *Node) Start(ctx context.Context) error {
 		}
 	}
 
-	// 时间轮运行后再进入启动阶段；started 在调用前追加以保证失败实例也会 OnStop。
+	// 时间轮运行后再进入启动阶段。每个 Scheduler 先 Prepare，使 OnStart 可以登记 Timer，
+	// 但不启动任何用户任务；Prepare 失败的 Service 尚未进入 OnStart，因此不加入停止序列。
 	for _, entry := range node.services {
 		// 在进入每个业务回调前观察取消，避免超时后继续启动后续 Service。
 		if err := contextFailure(ctx); err != nil {
@@ -236,6 +316,23 @@ func (node *Node) Start(ctx context.Context) error {
 			}
 		}
 		entry.state.Store(uint32(service.StateStarting))
+		if err := service.PrepareScheduler(
+			entry.instance,
+			node.schedulerConfig,
+			node.timerEngine,
+		); err != nil {
+			entry.state.Store(uint32(service.StateFailed))
+			node.state.Store(uint32(StateFailed))
+			return &lifecycleContext{
+				nodeID:      node.id,
+				serviceName: entry.name,
+				phase:       "scheduler_prepare",
+				cause:       err,
+			}
+		}
+
+		// 从真正进入 OnStart 前开始记录停止责任；OnStart 或 Activate 失败都必须先清理
+		// Prepared Scheduler，再执行当前 Service 的 OnStop。
 		node.started = append(node.started, entry)
 		err := callLifecycle(entry, "on_start", func() error {
 			return entry.instance.OnStart(ctx)
@@ -247,23 +344,20 @@ func (node *Node) Start(ctx context.Context) error {
 			return err
 		}
 
-		// OnStart 成功后再创建 Scheduler；只有装配完整且 Node 发布 Running 后才会接收任务。
-		if err := service.StartScheduler(
-			entry.instance,
-			node.schedulerConfig,
-			node.timerEngine,
-		); err != nil {
+		// 先发布 Service Running，再激活 Runner 和 watcher；已在 OnStart 到期的 Timer
+		// 随后才会转成 Ready Task，因此绝不会与 OnStart 并发。
+		entry.state.Store(uint32(service.StateRunning))
+		if err := service.ActivateScheduler(entry.instance); err != nil {
 			entry.startError = true
 			entry.state.Store(uint32(service.StateFailed))
 			node.state.Store(uint32(StateFailed))
 			return &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
-				phase:       "scheduler_start",
+				phase:       "scheduler_activate",
 				cause:       err,
 			}
 		}
-		entry.state.Store(uint32(service.StateRunning))
 	}
 	// 最后一个回调可能在执行期间越过 Deadline 却返回 nil，发布 Ready 前必须再次确认。
 	if err := contextFailure(ctx); err != nil {
@@ -335,6 +429,16 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 	var result error
 	for index := len(node.started) - 1; index >= 0; index-- {
 		entry := node.started[index]
+		// 先在 Scheduler 锁内关闭新任务和新 Timer 的准入，再向业务发布 Stopping。
+		// 两者的固定顺序消除“业务已经看到 Stopping、旧创建方却仍提交 Timer”的竞态。
+		if err := service.BeginStopScheduler(entry.instance); err != nil {
+			result = errors.Join(result, &lifecycleContext{
+				nodeID:      node.id,
+				serviceName: entry.name,
+				phase:       "scheduler_begin_stop",
+				cause:       err,
+			})
+		}
 		// started 只由 Start 追加一次；清理后置空可以让重复 Stop 保持幂等。
 		entry.state.Store(uint32(service.StateStopping))
 
@@ -387,6 +491,26 @@ func (runtime *serviceRuntime) Logger() originlog.Logger {
 // LookupService 实现 service.Runtime，只查询当前 Node。
 func (runtime *serviceRuntime) LookupService(name string) (service.IService, bool) {
 	return runtime.node.Service(name)
+}
+
+// AcquireTimerSlot 实现 service.Runtime，并委托当前 Node 的唯一 ID 与共享额度。
+func (runtime *serviceRuntime) AcquireTimerSlot() (service.TimerID, bool) {
+	return runtime.node.acquireTimerSlot()
+}
+
+// ReleaseTimerSlot 实现 service.Runtime，并归还当前 Node 的共享活跃额度。
+func (runtime *serviceRuntime) ReleaseTimerSlot() {
+	runtime.node.releaseTimerSlot()
+}
+
+// TimerLimit 实现 service.Runtime，供每个 Scheduler 建立有界但不预分配的到期队列。
+func (runtime *serviceRuntime) TimerLimit() int {
+	return int(runtime.node.timerResources.maxTimers)
+}
+
+// TimerLocation 实现 service.Runtime，返回 Node 创建后保持只读的统一 Cron 时区。
+func (runtime *serviceRuntime) TimerLocation() *time.Location {
+	return runtime.node.timerResources.timerLocation
 }
 
 // lifecycleContext 允许 Application 在不依赖具体错误类型时提取结构化失败位置。

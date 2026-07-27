@@ -16,6 +16,8 @@ import (
 // 业务类型通常嵌入 Service，并只覆盖实际需要的生命周期方法。未导出的 baseService 方法
 // 保证只有嵌入 Origin Service 的类型才能进入框架装配。
 type IService interface {
+	ITimer
+
 	OnInit() error
 	OnStart(ctx context.Context) error
 	OnStop(ctx context.Context) error
@@ -113,7 +115,7 @@ func (service *Service) DispatchAsync(fn func(context.Context)) error {
 	}
 
 	// 公开生命周期先于内部状态发布。该检查既给未启动调用稳定错误，也防止
-	// StartScheduler 已创建但 Node 尚未发布 Running 时提前接收业务任务。
+	// PrepareScheduler 已创建但 Node 尚未发布 Running 时提前接收业务任务。
 	if err := service.acceptanceError(); err != nil {
 		return err
 	}

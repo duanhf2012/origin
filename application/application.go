@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/duanhf2012/origin/v3/command"
 	"github.com/duanhf2012/origin/v3/errs"
@@ -74,6 +75,23 @@ func New(supplied ...Options) *Application {
 			errs.CodeInvalidArgument,
 			"Application 启停超时不能为负数",
 		)
+	}
+	// Timer Options 只在 Application 创建冷路径归一化一次。Node 接收的始终是完整值，
+	// 不再维护第二套默认优先级。
+	if instance.options.Timer.MaxTimersPerNode == 0 {
+		instance.options.Timer.MaxTimersPerNode = DefaultMaxTimersPerNode
+	}
+	if instance.options.Timer.MaxTimersPerNode < 0 {
+		instance.catalog.err = errors.Join(
+			instance.catalog.err,
+			errs.NewMessage(
+				errs.CodeInvalidArgument,
+				"Application Timer 最大数量不能为负数",
+			),
+		)
+	}
+	if instance.options.Timer.Location == nil {
+		instance.options.Timer.Location = time.Local
 	}
 	return instance
 }
@@ -424,7 +442,15 @@ func (app *Application) buildNodes(configs []node.Config) ([]*node.Node, error) 
 			})
 			names[name] = struct{}{}
 		}
-		current, err := node.New(configured, bindings, app.logger)
+		current, err := node.New(
+			configured,
+			bindings,
+			app.logger,
+			node.Options{
+				MaxTimersPerNode: app.options.Timer.MaxTimersPerNode,
+				TimerLocation:    app.options.Timer.Location,
+			},
+		)
 		if err != nil {
 			return nil, rollbackBuiltNodes(result, err)
 		}

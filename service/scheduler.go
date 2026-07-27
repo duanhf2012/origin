@@ -27,6 +27,7 @@ type schedulerState uint8
 
 const (
 	schedulerCreated schedulerState = iota
+	schedulerPrepared
 	schedulerRunning
 	schedulerDraining
 	schedulerStopped
@@ -41,6 +42,16 @@ const (
 	taskWaiting
 	taskRecoveryReady
 	taskCompleted
+)
+
+// serviceTaskKind 区分同一 Ready 队列中的业务投递和 Timer 回调。
+//
+// 两类任务共用执行槽、Await 和停止排空规则，只在调用入口与完成后的资源处理上不同。
+type serviceTaskKind uint8
+
+const (
+	taskKindDispatch serviceTaskKind = iota
+	taskKindTimer
 )
 
 // taskContextKey 是不可从 service 包外构造的 Context 私有键。
@@ -72,7 +83,12 @@ type serviceTask struct {
 	scheduler *serviceScheduler
 	context   *taskContext
 	fn        func(context.Context)
-	state     taskState
+	kind      serviceTaskKind
+	timer     *businessTimer
+	// timerGeneration 固定 Timer Task 建立时的代次，使 Pause/Resume/Cancel 后留在
+	// Ready 队列中的旧任务变成可识别的无害墓碑。
+	timerGeneration uint64
+	state           taskState
 	// pooled 只在 Task 已完整清零且位于 sync.Pool 中时为 true。
 	pooled bool
 
@@ -91,10 +107,20 @@ type serviceTask struct {
 	restoredPanicStack []byte
 }
 
-// deadlineBinding 防止旧 DeadlineID 在同一 Task 的下一次 Await 中误取消新等待。
+// deadlineBindingKind 区分 Service 共用 DeadlineQueue 中的 Await 和业务 Timer。
+type deadlineBindingKind uint8
+
+const (
+	deadlineBindingAwait deadlineBindingKind = iota
+	deadlineBindingTimer
+)
+
+// deadlineBinding 防止旧 DeadlineID 误作用到复用后的 Await Task 或业务 Timer。
 type deadlineBinding struct {
+	kind       deadlineBindingKind
 	task       *serviceTask
 	token      *taskContext
+	timer      *businessTimer
 	generation uint64
 }
 
@@ -105,9 +131,13 @@ type serviceScheduler struct {
 	mu     sync.Mutex
 	stopMu sync.Mutex
 
-	state  schedulerState
-	config SchedulerConfig
-	logger originlog.Logger
+	state schedulerState
+	// activated 区分从 Prepared 直接停止和已经启动过 Runner 的 Draining。
+	// 状态进入 Draining 后仅凭 state 无法恢复这一事实，因此单独冻结该生命周期标记。
+	activated bool
+	config    SchedulerConfig
+	logger    originlog.Logger
+	runtime   Runtime
 
 	ready       *ringqueue.Queue[*serviceTask]
 	runningTask *serviceTask
@@ -127,6 +157,15 @@ type serviceScheduler struct {
 	awaitTimeoutTotal     uint64
 	panicTotal            uint64
 
+	// timerPanicLastLog 和 timerPanicSuppressed 只聚合周期 Timer 的重复 panic 日志。
+	// 状态受 mu 保护；达到 99 次自动取消时会强制越过时间窗口输出最终诊断。
+	timerPanicLastLog    time.Time
+	timerPanicSuppressed uint64
+	// timerQuotaLastLog 和 timerQuotaSuppressed 聚合同一 Service 的 Timer 额度拒绝诊断。
+	// RejectedTotal 仍逐次精确累计，日志只用于低频提示。
+	timerQuotaLastLog    time.Time
+	timerQuotaSuppressed uint64
+
 	wake       chan struct{}
 	runnerDone chan struct{}
 
@@ -137,13 +176,20 @@ type serviceScheduler struct {
 	deadlineBindings map[timerwheel.DeadlineID]deadlineBinding
 	deadlineDone     chan struct{}
 
+	timerEngine *timerwheel.Engine
+	timers      map[TimerID]*businessTimer
+	duePending  *ringqueue.Queue[dueTimerEntry]
+	timerPool   sync.Pool
+	timerStats  TimerStats
+
 	stopResult error
 }
 
-// StartScheduler 为 target 创建一次性的 Ready、Runner 和 Deadline 控制资源。
+// PrepareScheduler 为 target 创建一次性的 Ready 和 Deadline 控制资源，但不启动 goroutine。
 //
-// 该函数是 node 包使用的框架装配边界，不是业务生命周期入口。
-func StartScheduler(
+// 该函数在业务 OnStart 前调用，使 OnStart 可以登记 Timer，同时保证任何用户任务都不会
+// 与 OnStart 并发。ActivateScheduler 才会启动 Runner 和 Deadline watcher。
+func PrepareScheduler(
 	target IService,
 	config SchedulerConfig,
 	timerEngine *timerwheel.Engine,
@@ -176,6 +222,16 @@ func StartScheduler(
 	if err != nil {
 		return errs.Wrap(errs.CodeInternal, err)
 	}
+	// DuePending 只按 Node Timer 额度建立硬上限，初始仍使用小容量渐进增长。
+	// 它存放轻量值条目，不复制回调，也不会按三百万默认额度预分配。
+	dueInitialCapacity := min(initialReadyCapacity, base.runtime.TimerLimit())
+	duePending, err := ringqueue.New[dueTimerEntry](
+		dueInitialCapacity,
+		base.runtime.TimerLimit(),
+	)
+	if err != nil {
+		return errs.Wrap(errs.CodeInternal, err)
+	}
 	deadlineQueue, err := timerEngine.NewDeadlineQueue()
 	if err != nil {
 		return fmt.Errorf("创建 Service DeadlineQueue: %w", err)
@@ -184,9 +240,10 @@ func StartScheduler(
 
 	// 冻结 Service 级超时覆盖并建立全部同步对象，之后才原子发布 Scheduler。
 	scheduler := &serviceScheduler{
-		state:            schedulerRunning,
+		state:            schedulerPrepared,
 		config:           normalized,
 		logger:           base.runtime.Logger(),
+		runtime:          base.runtime,
 		ready:            ready,
 		wake:             make(chan struct{}, 1),
 		runnerDone:       make(chan struct{}),
@@ -195,6 +252,9 @@ func StartScheduler(
 		deadlineQueue:    deadlineQueue,
 		deadlineBindings: make(map[timerwheel.DeadlineID]deadlineBinding),
 		deadlineDone:     make(chan struct{}),
+		timerEngine:      timerEngine,
+		timers:           make(map[TimerID]*businessTimer),
+		duePending:       duePending,
 	}
 	if base.defaultAwaitTimeout > 0 {
 		scheduler.config.DefaultAwaitTimeout = base.defaultAwaitTimeout
@@ -205,11 +265,80 @@ func StartScheduler(
 		deadlineQueue.Close()
 		return invalidArgument("ServiceScheduler 不能重复启动")
 	}
+	return nil
+}
 
-	// 两个 goroutine 的所有者都是当前 Scheduler：最后一个活动 Runner 关闭 runnerDone，
-	// Deadline 控制协程在 Queue 关闭后关闭 deadlineDone。
+// ActivateScheduler 在 Service 已发布 Running 后启动唯一 Runner 和 Deadline watcher。
+func ActivateScheduler(target IService) error {
+	// 激活只接受已经由 PrepareScheduler 完整发布的真实 Service。
+	if target == nil || isNilService(target) {
+		return invalidArgument("Service 不能为空")
+	}
+	base := target.baseService()
+	if base == nil || base.runtime == nil {
+		return invalidArgument("Service 尚未绑定 Runtime")
+	}
+	if base.runtime.State() != StateRunning {
+		return invalidArgument("ServiceScheduler 只能在 Service Running 阶段激活")
+	}
+	scheduler := base.scheduler.Load()
+	if scheduler == nil {
+		return errs.ErrServiceNotReady
+	}
+
+	// 状态转换先于 goroutine 创建；只有首位激活者能取得两个后台资源的所有权。
+	scheduler.mu.Lock()
+	if scheduler.state != schedulerPrepared {
+		scheduler.mu.Unlock()
+		return invalidArgument("ServiceScheduler 不能重复激活")
+	}
+	scheduler.state = schedulerRunning
+	scheduler.activated = true
+	scheduler.mu.Unlock()
+
+	// 最后一个活动 Runner 关闭 runnerDone；Deadline watcher 在 Queue 关闭后关闭
+	// deadlineDone。两者都由 StopScheduler 等待并回收。
 	go scheduler.run()
 	go scheduler.watchDeadlines()
+	return nil
+}
+
+// BeginStopScheduler 在 Scheduler 状态锁内关闭新任务和新 Timer 的准入。
+//
+// Node 必须先调用本函数，再对外发布 Service Stopping，最后调用 StopScheduler 排空。
+// Timer 创建和该状态转换使用同一把锁，因此不存在“已经观察到 Stopping 却仍创建成功”
+// 的检查与使用竞态。该函数不等待 Runner，也不执行 OnStop。
+func BeginStopScheduler(target IService) error {
+	if target == nil || isNilService(target) {
+		return invalidArgument("Service 不能为空")
+	}
+	base := target.baseService()
+	if base == nil {
+		return invalidArgument("Service 基础对象不能为空")
+	}
+	scheduler := base.scheduler.Load()
+	if scheduler == nil {
+		return nil
+	}
+
+	scheduler.mu.Lock()
+	notifyRunner := false
+	switch scheduler.state {
+	case schedulerPrepared, schedulerRunning:
+		// Draining 是全部任务和 Timer 创建入口在同一锁内检查的线性化边界。
+		scheduler.state = schedulerDraining
+		scheduler.cancelUnreadyTimersLocked()
+		notifyRunner = scheduler.activated
+	case schedulerDraining, schedulerStopped:
+		// 重复关闭准入保持幂等，由 StopScheduler 返回最终停止结果。
+	default:
+		scheduler.mu.Unlock()
+		return errs.ErrServiceNotReady
+	}
+	scheduler.mu.Unlock()
+	if notifyRunner {
+		scheduler.notifyRunner()
+	}
 	return nil
 }
 
@@ -249,9 +378,16 @@ func (scheduler *serviceScheduler) dispatch(fn func(context.Context)) error {
 		scheduler.mu.Unlock()
 		return errs.ErrServiceNotReady
 	}
+
+	// 已经到期的 Timer 先于本次新投递取得空闲额度，但不会越过原先已经位于 Ready
+	// 队列中的任务；提升只是追加到同一 FIFO 尾部。
+	promotedTimer := scheduler.promoteDueTimersLocked()
 	if scheduler.accepted >= scheduler.config.MaxTasks {
 		scheduler.rejectedTotal++
 		scheduler.mu.Unlock()
+		if promotedTimer {
+			scheduler.notifyRunner()
+		}
 		return errs.ErrServiceQueueFull
 	}
 
@@ -311,12 +447,30 @@ func (scheduler *serviceScheduler) nextTask() (
 	defer scheduler.mu.Unlock()
 
 	// Ready 非空时先遵守 FIFO；Draining 也必须处理完已经接受的全部任务。
-	next, ok := scheduler.ready.Dequeue()
-	if ok {
+	// 被 Pause/Resume/Cancel 失效的 Timer Task 是队列墓碑，在同一锁内清理后继续
+	// 检查下一个元素，不占用执行槽，也不调用用户函数。
+	for {
+		next, ok := scheduler.ready.Dequeue()
+		if !ok {
+			break
+		}
 		switch next.state {
 		case taskReady:
+			// 只有尚未开始的 Timer Task 才可能成为 Pause/Resume/Cancel 留下的墓碑。
+			// Timer 回调从 Await 恢复时，Task 是 RecoveryReady、Timer 则仍为 Running；
+			// 该组合必须直接恢复原 goroutine，不能套用 Ready 状态校验。
+			if next.kind == taskKindTimer &&
+				!scheduler.timerTaskCurrentLocked(next) {
+				scheduler.discardStaleTimerTaskLocked(next)
+				continue
+			}
 			if scheduler.running != 0 || scheduler.runningTask != nil {
 				panic("service: 普通任务取出时执行槽仍被占用")
+			}
+			// Timer Task 只有真正取得唯一执行槽时才从 Ready 进入 Running；
+			// 普通 Dispatch Task 不需要额外资源状态转换。
+			if next.kind == taskKindTimer {
+				scheduler.startTimerTaskLocked(next)
 			}
 			next.state = taskRunning
 			scheduler.running = 1
@@ -368,6 +522,15 @@ func (scheduler *serviceScheduler) restoreTaskLocked(task *serviceTask) *service
 // executeTask 调用一个普通根任务，并在最外层恢复业务 panic。
 func (scheduler *serviceScheduler) executeTask(task *serviceTask) {
 	panicValue, panicStack, panicked := callTask(task)
+	var timerID TimerID
+	var timerKind string
+	logTimerPanic := true
+	var suppressedTimerPanics uint64
+	if task.kind == taskKindTimer && task.timer != nil {
+		// Timer 对象可能在完成锁事务中回池，日志字段必须在清零前复制为值。
+		timerID = task.timer.id
+		timerKind = task.timer.kind.String()
+	}
 
 	// 无论正常返回或 panic，根任务都只在同一锁事务中完成一次并归还执行槽。
 	scheduler.mu.Lock()
@@ -376,6 +539,25 @@ func (scheduler *serviceScheduler) executeTask(task *serviceTask) {
 		scheduler.running != 1 {
 		scheduler.mu.Unlock()
 		panic("service: 根任务完成时执行槽状态不一致")
+	}
+	// 一次性 Timer 无论正常返回还是 panic 都已完成。先解除 Scheduler 索引和统计，
+	// 等 Task 清除 timer 指针后再归还对象池，避免池对象仍被活动 Task 引用。
+	var taskTimer *businessTimer
+	var finishedTimer *businessTimer
+	if task.kind == taskKindTimer {
+		taskTimer = task.timer
+		finishedTimer = scheduler.finishTimerTaskLocked(task, panicked)
+		if panicked && taskTimer.kind != businessTimerAfter {
+			// 周期 Timer 可能持续 panic。普通重复项只按一秒窗口聚合；第 99 次导致
+			// 自动取消时强制写出，确保最终原因不会因限流丢失。
+			panicLimitReached := taskTimer.panicCount >= maxConsecutiveTimerPanics &&
+				taskTimer.state == businessTimerCanceled
+			logTimerPanic, suppressedTimerPanics =
+				scheduler.timerPanicLogDecisionLocked(
+					time.Now(),
+					panicLimitReached,
+				)
+		}
 	}
 	task.state = taskCompleted
 	scheduler.runningTask = nil
@@ -388,17 +570,44 @@ func (scheduler *serviceScheduler) executeTask(task *serviceTask) {
 
 	// 完成时先使不可复用令牌失效，再完整清零并回池。旧 Context 仍保留父 Context，
 	// 可以安全查询 Done/Err/Value，但其原子 Task 指针为 nil。
+	if taskTimer != nil {
+		taskTimer.taskReferences--
+		if taskTimer.taskReferences < 0 {
+			scheduler.mu.Unlock()
+			panic("service: Timer Task 引用计数下溢")
+		}
+	}
 	scheduler.releaseTaskLocked(task)
+	if finishedTimer != nil {
+		scheduler.releaseTerminalTimerIfUnreferencedLocked(finishedTimer)
+	}
+	// 根任务释放 Accepted 额度后，最早到期的 Timer 优先取得该额度并追加到 Ready。
+	// 当前 goroutine 会继续 Runner 循环，因此不需要额外唤醒。
+	scheduler.promoteDueTimersLocked()
 	scheduler.mu.Unlock()
 
 	if panicked {
 		// panic 属于关键错误，使用 ErrorStack 的可靠写出路径；panic_stack 字段保存真正的
 		// 业务原始位置，日志自身的 stack 则标出框架恢复边界，二者只形成一条日志。
-		scheduler.logger.ErrorStack(
-			"service task panic",
-			originlog.String("panic", fmt.Sprint(panicValue)),
-			originlog.String("panic_stack", string(panicStack)),
-		)
+		if timerID != InvalidTimerID && logTimerPanic {
+			scheduler.logger.ErrorStack(
+				"service timer callback panic",
+				originlog.String("panic", fmt.Sprint(panicValue)),
+				originlog.String("panic_stack", string(panicStack)),
+				originlog.Uint64("timer_id", uint64(timerID)),
+				originlog.String("timer_kind", timerKind),
+				originlog.Uint64(
+					"suppressed_timer_panics",
+					suppressedTimerPanics,
+				),
+			)
+		} else if timerID == InvalidTimerID {
+			scheduler.logger.ErrorStack(
+				"service task panic",
+				originlog.String("panic", fmt.Sprint(panicValue)),
+				originlog.String("panic_stack", string(panicStack)),
+			)
+		}
 	}
 }
 
@@ -420,7 +629,14 @@ func callTask(task *serviceTask) (
 		}
 	}()
 
-	task.fn(task.context)
+	switch task.kind {
+	case taskKindDispatch:
+		task.fn(task.context)
+	case taskKindTimer:
+		callTimerTask(task)
+	default:
+		panic("service: 未知 Task 类型")
+	}
 	return nil, nil, false
 }
 
@@ -451,6 +667,7 @@ func (scheduler *serviceScheduler) acquireTaskLocked(
 	task.scheduler = scheduler
 	task.context = token
 	task.fn = fn
+	task.kind = taskKindDispatch
 	task.state = taskReady
 	token.task.Store(task)
 	return task
@@ -486,11 +703,33 @@ func (scheduler *serviceScheduler) stop(ctx context.Context) error {
 		scheduler.mu.Unlock()
 		return result
 	}
-	if scheduler.state != schedulerRunning {
+	if scheduler.state == schedulerPrepared ||
+		(scheduler.state == schedulerDraining && !scheduler.activated) {
+		// Prepared 阶段从未创建 Runner 或 watcher。当前停止者直接取得全部冷路径资源，
+		// 关闭 Queue、取消 Context 并发布 Stopped，不能等待无人关闭的 Done Channel。
+		scheduler.state = schedulerDraining
+		scheduler.ready.Clear()
+		scheduler.cancelUnreadyTimersLocked()
 		scheduler.mu.Unlock()
-		return errs.ErrServiceStopping
+		scheduler.deadlineQueue.Close()
+		scheduler.cancelLifetime(errs.ErrServiceStopped)
+		scheduler.mu.Lock()
+		scheduler.cancelAllTimersLocked()
+		scheduler.releaseStoppedStorageLocked()
+		scheduler.state = schedulerStopped
+		scheduler.stopResult = nil
+		scheduler.mu.Unlock()
+		return nil
 	}
-	scheduler.state = schedulerDraining
+	if scheduler.state == schedulerRunning {
+		scheduler.state = schedulerDraining
+		// 未进入 Ready 的 Timer 不属于已接受业务任务，立即取消；已经 Ready/Running/Waiting
+		// 的回调仍由唯一 Runner 按原 FIFO 排空。
+		scheduler.cancelUnreadyTimersLocked()
+	} else if scheduler.state != schedulerDraining {
+		scheduler.mu.Unlock()
+		return errs.ErrServiceNotReady
+	}
 	scheduler.mu.Unlock()
 	scheduler.notifyRunner()
 
@@ -518,17 +757,91 @@ func (scheduler *serviceScheduler) stop(ctx context.Context) error {
 	scheduler.cancelLifetime(errs.ErrServiceStopped)
 
 	scheduler.mu.Lock()
+	scheduler.cancelAllTimersLocked()
 	if scheduler.ready.Len() != 0 || scheduler.accepted != 0 ||
 		scheduler.running != 0 || scheduler.awaiting != 0 ||
-		len(scheduler.deadlineBindings) != 0 {
+		len(scheduler.deadlineBindings) != 0 ||
+		len(scheduler.timers) != 0 ||
+		scheduler.duePending.Len() != 0 {
 		scheduler.mu.Unlock()
 		panic("service: Scheduler 停止后仍包含运行资源")
 	}
-	scheduler.ready.Clear()
+	scheduler.releaseStoppedStorageLocked()
 	scheduler.state = schedulerStopped
 	scheduler.stopResult = stopContextError
 	scheduler.mu.Unlock()
 	return stopContextError
+}
+
+// releaseStoppedStorageLocked 释放一次性 Scheduler 在峰值运行期间增长出的容器和私有对象池。
+//
+// Scheduler 指针会留在 Service 中用于幂等 Stop 和只读统计，因此仅 Clear 队列仍会长期保留
+// 底层数组。该函数只能在全部任务、Timer 和 Deadline 均已排空后调用；累计统计与停止结果
+// 继续保留，业务存储则断开引用交给 GC。
+func (scheduler *serviceScheduler) releaseStoppedStorageLocked() {
+	if scheduler.ready.Len() != 0 ||
+		len(scheduler.deadlineBindings) != 0 ||
+		len(scheduler.timers) != 0 ||
+		scheduler.duePending.Len() != 0 {
+		panic("service: 释放 Stopped Scheduler 存储前资源未排空")
+	}
+
+	scheduler.ready = nil
+	scheduler.deadlineQueue = nil
+	scheduler.deadlineBindings = nil
+	scheduler.timerEngine = nil
+	scheduler.timers = nil
+	scheduler.duePending = nil
+
+	// sync.Pool 不提供显式清空方法；替换为零值可立即断开当前 Scheduler 对池中对象的引用。
+	scheduler.taskPool = sync.Pool{}
+	scheduler.timerPool = sync.Pool{}
+}
+
+const timerPanicLogInterval = time.Second
+
+// timerPanicLogDecisionLocked 决定一个周期 Timer panic 是否立即写日志。
+//
+// 每个 Service 在一个窗口内只可靠写出第一条重复 panic；其余条目累计到下一条日志的
+// suppressed_timer_panics 字段。force 用于第 99 次自动取消，保证最终日志不受窗口限制。
+func (scheduler *serviceScheduler) timerPanicLogDecisionLocked(
+	now time.Time,
+	force bool,
+) (logNow bool, suppressed uint64) {
+	windowElapsed := scheduler.timerPanicLastLog.IsZero() ||
+		!now.After(scheduler.timerPanicLastLog) ||
+		now.Sub(scheduler.timerPanicLastLog) >= timerPanicLogInterval
+	if force || windowElapsed {
+		suppressed = scheduler.timerPanicSuppressed
+		scheduler.timerPanicSuppressed = 0
+		scheduler.timerPanicLastLog = now
+		return true, suppressed
+	}
+
+	scheduler.timerPanicSuppressed++
+	return false, 0
+}
+
+const timerQuotaLogInterval = time.Second
+
+// timerQuotaLogDecisionLocked 聚合高峰期重复的 Node Timer 额度耗尽日志。
+//
+// 该函数只更新常数大小状态；调用方必须在解锁后执行实际日志写入。
+func (scheduler *serviceScheduler) timerQuotaLogDecisionLocked(
+	now time.Time,
+) (logNow bool, suppressed uint64) {
+	windowElapsed := scheduler.timerQuotaLastLog.IsZero() ||
+		!now.After(scheduler.timerQuotaLastLog) ||
+		now.Sub(scheduler.timerQuotaLastLog) >= timerQuotaLogInterval
+	if windowElapsed {
+		suppressed = scheduler.timerQuotaSuppressed
+		scheduler.timerQuotaSuppressed = 0
+		scheduler.timerQuotaLastLog = now
+		return true, suppressed
+	}
+
+	scheduler.timerQuotaSuppressed++
+	return false, 0
 }
 
 // stopContextResult 把停止 Context 的原因映射到稳定的框架错误。
@@ -588,36 +901,63 @@ func (scheduler *serviceScheduler) watchDeadlines() {
 			}
 
 			// 每批最多收集固定数量的 CancelFunc，锁外执行 Context 取消，避免任意
-			// Context 子树唤醒成本落在 Scheduler 状态锁内。
+			// Context 子树唤醒成本落在 Scheduler 状态锁内。Timer 到期只建立普通
+			// Service Task，也绝不在 watcher 中直接执行用户回调。
 			var cancels [deadlineDrainBatch]context.CancelCauseFunc
 			cancelCount := 0
+			wakeRunner := false
 			scheduler.mu.Lock()
 			for _, id := range drained {
 				binding, exists := scheduler.deadlineBindings[id]
 				if !exists {
 					continue
 				}
-				task := binding.task
-				if task == nil ||
-					binding.token == nil ||
-					binding.token.task.Load() != task ||
-					task.context != binding.token ||
-					task.awaitGeneration != binding.generation ||
-					task.awaitDeadlineID != id ||
-					(task.state != taskWaiting && task.state != taskRecoveryReady) {
-					delete(scheduler.deadlineBindings, id)
-					continue
-				}
+				switch binding.kind {
+				case deadlineBindingAwait:
+					task := binding.task
+					if task == nil ||
+						binding.token == nil ||
+						binding.token.task.Load() != task ||
+						task.context != binding.token ||
+						task.awaitGeneration != binding.generation ||
+						task.awaitDeadlineID != id ||
+						(task.state != taskWaiting && task.state != taskRecoveryReady) {
+						delete(scheduler.deadlineBindings, id)
+						continue
+					}
 
-				delete(scheduler.deadlineBindings, id)
-				task.awaitDeadlineID = timerwheel.InvalidDeadlineID
-				cancels[cancelCount] = task.awaitCancel
-				cancelCount++
+					delete(scheduler.deadlineBindings, id)
+					task.awaitDeadlineID = timerwheel.InvalidDeadlineID
+					cancels[cancelCount] = task.awaitCancel
+					cancelCount++
+				case deadlineBindingTimer:
+					timer := binding.timer
+					if timer == nil ||
+						timer.generation != binding.generation ||
+						timer.deadlineID != id ||
+						timer.state != businessTimerScheduled ||
+						scheduler.timers[timer.id] != timer {
+						delete(scheduler.deadlineBindings, id)
+						continue
+					}
+
+					delete(scheduler.deadlineBindings, id)
+					timer.deadlineID = timerwheel.InvalidDeadlineID
+					if scheduler.enqueueExpiredTimerLocked(timer) {
+						wakeRunner = true
+					}
+				default:
+					delete(scheduler.deadlineBindings, id)
+					panic("service: Deadline 绑定类型无效")
+				}
 			}
 			scheduler.mu.Unlock()
 
 			for index := 0; index < cancelCount; index++ {
 				cancels[index](context.DeadlineExceeded)
+			}
+			if wakeRunner {
+				scheduler.notifyRunner()
 			}
 			if len(drained) < deadlineDrainBatch {
 				break

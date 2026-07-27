@@ -2,6 +2,7 @@ package node
 
 import (
 	"testing"
+	"time"
 
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
@@ -18,6 +19,10 @@ func BenchmarkServiceLookup(b *testing.B) {
 			Service:  target,
 		}},
 		originlog.NewNop(),
+		Options{
+			MaxTimersPerNode: 3_000_000,
+			TimerLocation:    time.Local,
+		},
 	)
 	if err != nil {
 		b.Fatalf("创建 Benchmark Node: %v", err)
@@ -30,5 +35,24 @@ func BenchmarkServiceLookup(b *testing.B) {
 		if _, exists := current.Service("player"); !exists {
 			b.Fatal("未找到 player Service")
 		}
+	}
+}
+
+// BenchmarkTimerSlotAcquireRelease 测量 Node 共享额度和单调 ID 的原子热路径。
+func BenchmarkTimerSlotAcquireRelease(b *testing.B) {
+	current := &Node{
+		timerResources: nodeTimerResources{
+			maxTimers:     3_000_000,
+			timerLocation: time.Local,
+		},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, ok := current.acquireTimerSlot(); !ok {
+			b.Fatal("申请 Timer 额度失败")
+		}
+		current.releaseTimerSlot()
 	}
 }

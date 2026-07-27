@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,7 +169,7 @@ func TestNodeSchedulerLifecycleOrder(t *testing.T) {
 	}
 }
 
-func TestNodeSchedulerStartFailureRollsBackService(t *testing.T) {
+func TestNodeSchedulerPrepareFailureDoesNotEnterServiceStart(t *testing.T) {
 	events := make([]string, 0, 3)
 	current := newTestNodeWithConfig(t, Config{
 		ID: "game-1",
@@ -191,14 +192,14 @@ func TestNodeSchedulerStartFailureRollsBackService(t *testing.T) {
 		t.Fatalf("Scheduler 启动错误没有生命周期位置: %v", err)
 	}
 	_, _, phase := located.LifecycleContext()
-	if phase != "scheduler_start" {
+	if phase != "scheduler_prepare" {
 		t.Fatalf("Scheduler 错误 phase = %q", phase)
 	}
 	if rollbackErr := current.Rollback(context.Background()); rollbackErr != nil {
 		t.Fatalf("Rollback() error = %v", rollbackErr)
 	}
-	if !slices.Equal(events, []string{"init:a", "start:a", "stop:a"}) {
-		t.Fatalf("Scheduler 启动失败回滚顺序 = %v", events)
+	if !slices.Equal(events, []string{"init:a"}) {
+		t.Fatalf("Scheduler Prepare 失败不应进入 Start/Stop，事件 = %v", events)
 	}
 }
 
@@ -373,6 +374,157 @@ func TestNodeMetadataAndServiceRuntimeQueries(t *testing.T) {
 	}
 }
 
+func TestNodeTimerSlotsAreBoundedAndIDsNeverRepeat(t *testing.T) {
+	// 使用两个额度建立最小边界，验证额度只限制活跃数量而不复用已经发出的 ID。
+	current := newTestNodeWithOptions(
+		t,
+		Options{
+			MaxTimersPerNode: 2,
+			TimerLocation:    time.UTC,
+		},
+		&lifecycleService{label: "a"},
+	)
+	first, ok := current.acquireTimerSlot()
+	if !ok || first == service.InvalidTimerID {
+		t.Fatal("第一次 Timer Slot 申请失败")
+	}
+	second, ok := current.acquireTimerSlot()
+	if !ok || second == service.InvalidTimerID || second == first {
+		t.Fatalf("第二次 TimerID = %d，与第一次 %d 冲突", second, first)
+	}
+	if _, ok := current.acquireTimerSlot(); ok {
+		t.Fatal("超过 Node Timer 额度后仍然申请成功")
+	}
+
+	// 归还一个活跃额度后可以继续创建，但新 ID 必须保持单调且不复用。
+	current.releaseTimerSlot()
+	third, ok := current.acquireTimerSlot()
+	if !ok || third == first || third == second {
+		t.Fatalf("释放额度后的 TimerID = %d，历史值为 %d/%d", third, first, second)
+	}
+	current.releaseTimerSlot()
+	current.releaseTimerSlot()
+}
+
+func TestNodeTimerSlotsConcurrentLimitAndUniqueIDs(t *testing.T) {
+	const (
+		timerLimit = 128
+		attempts   = 1024
+	)
+	current := newTestNodeWithOptions(
+		t,
+		Options{
+			MaxTimersPerNode: timerLimit,
+			TimerLocation:    time.UTC,
+		},
+		&lifecycleService{label: "a"},
+	)
+
+	// 同时竞争远多于额度的申请，成功数量必须精确等于上限，且每个 ID 全局唯一。
+	ids := make(chan service.TimerID, attempts)
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(attempts)
+	for index := 0; index < attempts; index++ {
+		go func() {
+			defer waitGroup.Done()
+			if id, ok := current.acquireTimerSlot(); ok {
+				ids <- id
+			}
+		}()
+	}
+	waitGroup.Wait()
+	close(ids)
+
+	unique := make(map[service.TimerID]struct{}, timerLimit)
+	for id := range ids {
+		if _, exists := unique[id]; exists {
+			t.Fatalf("并发申请返回重复 TimerID %d", id)
+		}
+		unique[id] = struct{}{}
+	}
+	if len(unique) != timerLimit {
+		t.Fatalf("并发申请成功数 = %d, want %d", len(unique), timerLimit)
+	}
+
+	// 每个成功申请只归还一次，最终活跃额度必须严格回到零。
+	for range unique {
+		current.releaseTimerSlot()
+	}
+	if active := current.timerResources.activeTimers.Load(); active != 0 {
+		t.Fatalf("全部归还后 activeTimers = %d", active)
+	}
+
+	// 额外归还属于框架内部状态损坏，必须立即 panic，不能静默下溢。
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("重复归还 Timer Slot 未 panic")
+			}
+		}()
+		current.releaseTimerSlot()
+	}()
+}
+
+func TestTimerIDCannotControlAnotherServiceInSameNode(t *testing.T) {
+	events := make([]string, 0, 8)
+	first := &lifecycleService{label: "a", events: &events}
+	second := &lifecycleService{label: "b", events: &events}
+	current := newTestNode(t, first, second)
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// TimerID 在 Node 内唯一，但控制入口仍必须校验所属 Service 的私有索引。另一个 Service
+	// 即使拿到真实 ID，也不能暂停、恢复或取消该 Timer。
+	id := first.AfterFunc(time.Hour, func(context.Context, service.TimerID) {})
+	if id == service.InvalidTimerID {
+		t.Fatal("第一个 Service 创建 Timer 失败")
+	}
+	if second.PauseTimer(id) || second.ResumeTimer(id) {
+		t.Fatal("另一个 Service 控制了不属于自己的 TimerID")
+	}
+	foreignID := id
+	if second.CancelTimer(&foreignID) {
+		t.Fatal("另一个 Service 取消了不属于自己的 TimerID")
+	}
+	if foreignID != service.InvalidTimerID {
+		t.Fatalf("跨 Service Cancel 后调用方 ID 未清零: %d", foreignID)
+	}
+	if !first.CancelTimer(&id) {
+		t.Fatal("所属 Service 不能取消自己的 Timer")
+	}
+	if err := current.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+func TestNodeTimerOptionsRejectInvalidValues(t *testing.T) {
+	serviceBinding := []ServiceBinding{{
+		Name:     "a",
+		Template: "lifecycleService",
+		Service:  &lifecycleService{label: "a"},
+	}}
+	for _, test := range []struct {
+		name    string
+		options Options
+	}{
+		{name: "zero limit", options: Options{TimerLocation: time.UTC}},
+		{name: "negative limit", options: Options{MaxTimersPerNode: -1, TimerLocation: time.UTC}},
+		{name: "nil location", options: Options{MaxTimersPerNode: 1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := New(
+				Config{ID: "game-1", Services: []string{"a"}},
+				serviceBinding,
+				originlog.NewNop(),
+				test.options,
+			); err == nil {
+				t.Fatal("无效 Node Timer Options 未返回错误")
+			}
+		})
+	}
+}
+
 func TestNodeCancellationAndInvalidCalls(t *testing.T) {
 	events := make([]string, 0, 2)
 	current := newTestNode(t, &lifecycleService{label: "a", events: &events})
@@ -415,7 +567,15 @@ func TestNodeNewRejectsInvalidBindings(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := New(test.config, test.bindings, originlog.NewNop()); err == nil {
+			if _, err := New(
+				test.config,
+				test.bindings,
+				originlog.NewNop(),
+				Options{
+					MaxTimersPerNode: 3_000_000,
+					TimerLocation:    time.Local,
+				},
+			); err == nil {
 				t.Fatal("New() 未返回错误")
 			}
 		})
@@ -459,6 +619,39 @@ func newTestNodeWithConfig(
 	config Config,
 	services ...*lifecycleService,
 ) *Node {
+	return newTestNodeWithConfigAndOptions(
+		t,
+		config,
+		Options{
+			MaxTimersPerNode: 3_000_000,
+			TimerLocation:    time.Local,
+		},
+		services...,
+	)
+}
+
+func newTestNodeWithOptions(
+	t *testing.T,
+	options Options,
+	services ...*lifecycleService,
+) *Node {
+	return newTestNodeWithConfigAndOptions(
+		t,
+		Config{
+			ID:       "game-1",
+			Services: []string{"unused"},
+		},
+		options,
+		services...,
+	)
+}
+
+func newTestNodeWithConfigAndOptions(
+	t *testing.T,
+	config Config,
+	options Options,
+	services ...*lifecycleService,
+) *Node {
 	t.Helper()
 	bindings := make([]ServiceBinding, len(services))
 	for index, target := range services {
@@ -473,6 +666,7 @@ func newTestNodeWithConfig(
 		config,
 		bindings,
 		originlog.NewNop(),
+		options,
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

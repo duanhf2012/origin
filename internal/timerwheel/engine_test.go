@@ -200,6 +200,19 @@ func TestTickRoundingAndNoEarlyExpiry(t *testing.T) {
 	}
 }
 
+func TestEngineNowUsesInjectedClock(t *testing.T) {
+	engine, _, clock, _ := newFakeTimerEngine(t, false)
+	expected := clock.Now()
+	if actual := engine.Now(); !actual.Equal(expected) {
+		t.Fatalf("Engine.Now() = %v，期望 %v", actual, expected)
+	}
+	clock.Advance(37 * time.Millisecond)
+	expected = clock.Now()
+	if actual := engine.Now(); !actual.Equal(expected) {
+		t.Fatalf("Clock 前进后 Engine.Now() = %v，期望 %v", actual, expected)
+	}
+}
+
 func TestZeroDelayRunsOnLaterEngineRound(t *testing.T) {
 	_, queue, clock, wake := newFakeTimerEngine(t, false)
 
@@ -406,6 +419,12 @@ func TestEngineCloseImplicitlyCleansEveryQueue(t *testing.T) {
 	if stats.CleanedTotal != 4 {
 		t.Fatalf("CleanedTotal = %d，期望 4", stats.CleanedTotal)
 	}
+	engine.mu.Lock()
+	if engine.entries != nil || engine.queues != nil {
+		engine.mu.Unlock()
+		t.Fatal("Engine Close 后仍持有高水位 Map")
+	}
+	engine.mu.Unlock()
 	for index, queue := range []*DeadlineQueue{first, second} {
 		select {
 		case _, open := <-queue.ExpiredSignal():

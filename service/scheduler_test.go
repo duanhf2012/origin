@@ -20,9 +20,13 @@ const schedulerTestTimeout = 5 * time.Second
 
 // schedulerTestRuntime 使用原子生命周期状态支持测试并发调用公开 Service API。
 type schedulerTestRuntime struct {
-	nodeID string
-	name   string
-	state  atomic.Uint32
+	nodeID        string
+	name          string
+	state         atomic.Uint32
+	active        atomic.Int64
+	nextID        atomic.Uint64
+	timerLimit    int
+	timerLocation *time.Location
 }
 
 func (runtime *schedulerTestRuntime) NodeID() string      { return runtime.nodeID }
@@ -33,6 +37,32 @@ func (runtime *schedulerTestRuntime) State() State {
 func (runtime *schedulerTestRuntime) Logger() originlog.Logger { return originlog.NewNop() }
 func (runtime *schedulerTestRuntime) LookupService(string) (IService, bool) {
 	return nil, false
+}
+func (runtime *schedulerTestRuntime) AcquireTimerSlot() (TimerID, bool) {
+	limit := runtime.timerLimit
+	if limit == 0 {
+		limit = 3_000_000
+	}
+	if runtime.active.Add(1) > int64(limit) {
+		runtime.active.Add(-1)
+		return InvalidTimerID, false
+	}
+	return TimerID(runtime.nextID.Add(1)), true
+}
+func (runtime *schedulerTestRuntime) ReleaseTimerSlot() {
+	runtime.active.Add(-1)
+}
+func (runtime *schedulerTestRuntime) TimerLimit() int {
+	if runtime.timerLimit == 0 {
+		return 3_000_000
+	}
+	return runtime.timerLimit
+}
+func (runtime *schedulerTestRuntime) TimerLocation() *time.Location {
+	if runtime.timerLocation != nil {
+		return runtime.timerLocation
+	}
+	return time.Local
 }
 
 // schedulerFixture 集中拥有测试 Service、Runtime 和 Node TimerEngine。
@@ -58,7 +88,7 @@ func newSchedulerFixtureWithServiceTimeout(
 	t.Helper()
 
 	// 测试严格复刻 Node 启动顺序：绑定、TimerEngine Start、Service Starting、
-	// StartScheduler、Service Running。
+	// PrepareScheduler、Service Running、ActivateScheduler。
 	target := &testService{}
 	runtimeState := &schedulerTestRuntime{
 		nodeID: "game-1",
@@ -84,11 +114,15 @@ func newSchedulerFixtureWithServiceTimeout(
 		t.Fatalf("TimerEngine.Start() error = %v", err)
 	}
 	runtimeState.state.Store(uint32(StateStarting))
-	if err := StartScheduler(target, config, engine); err != nil {
+	if err := PrepareScheduler(target, config, engine); err != nil {
 		engine.Close()
-		t.Fatalf("StartScheduler() error = %v", err)
+		t.Fatalf("PrepareScheduler() error = %v", err)
 	}
 	runtimeState.state.Store(uint32(StateRunning))
+	if err := ActivateScheduler(target); err != nil {
+		engine.Close()
+		t.Fatalf("ActivateScheduler() error = %v", err)
+	}
 
 	fixture := &schedulerFixture{
 		service: target,
@@ -107,6 +141,127 @@ func newSchedulerFixtureWithServiceTimeout(
 		_ = engine.Close()
 	})
 	return fixture
+}
+
+func newPreparedSchedulerFixture(
+	t testing.TB,
+	config SchedulerConfig,
+) *schedulerFixture {
+	t.Helper()
+
+	// Prepared fixture 只创建底层资源，不启动 Runner 或 Deadline watcher，用于验证 OnStart
+	// 阶段不会与任何业务任务并发。
+	target := &testService{}
+	runtimeState := &schedulerTestRuntime{
+		nodeID: "game-1",
+		name:   "PlayerService",
+	}
+	runtimeState.state.Store(uint32(StateStarting))
+	if err := BindRuntime(target, runtimeState); err != nil {
+		t.Fatalf("BindRuntime() error = %v", err)
+	}
+	engine, err := timerwheel.New(timerwheel.DefaultOptions())
+	if err != nil {
+		t.Fatalf("timerwheel.New() error = %v", err)
+	}
+	if err := engine.Start(); err != nil {
+		t.Fatalf("TimerEngine.Start() error = %v", err)
+	}
+	if err := PrepareScheduler(target, config, engine); err != nil {
+		_ = engine.Close()
+		t.Fatalf("PrepareScheduler() error = %v", err)
+	}
+
+	fixture := &schedulerFixture{
+		service: target,
+		runtime: runtimeState,
+		engine:  engine,
+	}
+	t.Cleanup(func() {
+		runtimeState.state.Store(uint32(StateStopping))
+		ctx, cancel := context.WithTimeout(context.Background(), schedulerTestTimeout)
+		_ = StopScheduler(ctx, target)
+		cancel()
+		runtimeState.state.Store(uint32(StateStopped))
+		_ = engine.Close()
+	})
+	return fixture
+}
+
+func TestPreparedSchedulerDoesNotRunUntilActivated(t *testing.T) {
+	fixture := newPreparedSchedulerFixture(t, DefaultSchedulerConfig())
+	scheduler := fixture.service.scheduler.Load()
+	if scheduler == nil || scheduler.state != schedulerPrepared {
+		t.Fatalf("Prepared Scheduler 状态 = %v", scheduler)
+	}
+
+	// Service 仍为 Starting 时公开投递必须拒绝，且尚不存在可执行该任务的 Runner。
+	ran := make(chan struct{}, 1)
+	if err := fixture.service.DispatchAsync(func(context.Context) {
+		ran <- struct{}{}
+	}); !errors.Is(err, errs.ErrServiceNotReady) {
+		t.Fatalf("Prepared DispatchAsync() error = %v", err)
+	}
+	select {
+	case <-ran:
+		t.Fatal("Prepared 阶段执行了业务任务")
+	default:
+	}
+
+	// Node 先发布 Service Running，再激活 Scheduler；之后普通投递恢复既有行为。
+	fixture.runtime.state.Store(uint32(StateRunning))
+	if err := ActivateScheduler(fixture.service); err != nil {
+		t.Fatalf("ActivateScheduler() error = %v", err)
+	}
+	if err := fixture.service.DispatchAsync(func(context.Context) {
+		ran <- struct{}{}
+	}); err != nil {
+		t.Fatalf("Running DispatchAsync() error = %v", err)
+	}
+	receive(t, ran)
+}
+
+func TestStopPreparedSchedulerReleasesResourcesWithoutGoroutine(t *testing.T) {
+	fixture := newPreparedSchedulerFixture(t, DefaultSchedulerConfig())
+	fixture.runtime.state.Store(uint32(StateStopping))
+	if err := StopScheduler(context.Background(), fixture.service); err != nil {
+		t.Fatalf("StopScheduler() error = %v", err)
+	}
+	scheduler := fixture.service.scheduler.Load()
+	if scheduler.state != schedulerStopped {
+		t.Fatalf("Prepared Stop 后状态 = %v", scheduler.state)
+	}
+	if stats := fixture.engine.Stats(); stats.Queues != 0 {
+		t.Fatalf("Prepared Stop 后 DeadlineQueue 数量 = %d", stats.Queues)
+	}
+	assertSchedulerStoppedStorageReleased(t, scheduler)
+}
+
+// assertSchedulerStoppedStorageReleased 验证一次性 Scheduler 停止后不会继续持有峰值队列、
+// Timer 索引或时间轮资源。统计值和停止结果仍保留，业务存储则必须允许 GC 回收。
+func assertSchedulerStoppedStorageReleased(
+	t *testing.T,
+	scheduler *serviceScheduler,
+) {
+	t.Helper()
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	if scheduler.ready != nil ||
+		scheduler.deadlineQueue != nil ||
+		scheduler.deadlineBindings != nil ||
+		scheduler.timerEngine != nil ||
+		scheduler.timers != nil ||
+		scheduler.duePending != nil {
+		t.Fatalf(
+			"Stopped Scheduler 仍持有业务存储: ready=%v queue=%v bindings=%v engine=%v timers=%v due=%v",
+			scheduler.ready != nil,
+			scheduler.deadlineQueue != nil,
+			scheduler.deadlineBindings != nil,
+			scheduler.timerEngine != nil,
+			scheduler.timers != nil,
+			scheduler.duePending != nil,
+		)
+	}
 }
 
 func (fixture *schedulerFixture) stop(t *testing.T) {
@@ -783,16 +938,16 @@ func TestSchedulerDispatchStateAndNilErrors(t *testing.T) {
 	}
 }
 
-func TestStartAndStopSchedulerValidation(t *testing.T) {
+func TestPrepareActivateAndStopSchedulerValidation(t *testing.T) {
 	var typedNil *testService
-	if err := StartScheduler(nil, SchedulerConfig{}, nil); !errors.Is(err, errs.ErrInvalidArgument) {
-		t.Fatalf("nil StartScheduler() error = %v", err)
+	if err := PrepareScheduler(nil, SchedulerConfig{}, nil); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("nil PrepareScheduler() error = %v", err)
 	}
-	if err := StartScheduler(typedNil, SchedulerConfig{}, nil); !errors.Is(err, errs.ErrInvalidArgument) {
-		t.Fatalf("typed nil StartScheduler() error = %v", err)
+	if err := PrepareScheduler(typedNil, SchedulerConfig{}, nil); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("typed nil PrepareScheduler() error = %v", err)
 	}
-	if err := StartScheduler(&testService{}, SchedulerConfig{}, nil); !errors.Is(err, errs.ErrInvalidArgument) {
-		t.Fatalf("unbound StartScheduler() error = %v", err)
+	if err := PrepareScheduler(&testService{}, SchedulerConfig{}, nil); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("unbound PrepareScheduler() error = %v", err)
 	}
 	if err := StopScheduler(nil, &testService{}); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("nil Context StopScheduler() error = %v", err)
@@ -811,33 +966,46 @@ func TestStartAndStopSchedulerValidation(t *testing.T) {
 	defer engine.Close()
 
 	// 错误生命周期、nil Engine 和非法部分配置都必须在创建 DeadlineQueue 前拒绝。
-	if err := StartScheduler(target, SchedulerConfig{}, engine); !errors.Is(err, errs.ErrInvalidArgument) {
-		t.Fatalf("Created StartScheduler() error = %v", err)
+	if err := PrepareScheduler(target, SchedulerConfig{}, engine); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("Created PrepareScheduler() error = %v", err)
 	}
 	runtimeState.state.Store(uint32(StateStarting))
-	if err := StartScheduler(target, SchedulerConfig{}, nil); !errors.Is(err, errs.ErrInvalidArgument) {
-		t.Fatalf("nil Engine StartScheduler() error = %v", err)
+	if err := PrepareScheduler(target, SchedulerConfig{}, nil); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("nil Engine PrepareScheduler() error = %v", err)
 	}
-	if err := StartScheduler(target, SchedulerConfig{
+	if err := PrepareScheduler(target, SchedulerConfig{
 		MaxTasks:            1,
 		MaxAwaitTasks:       2,
 		DefaultAwaitTimeout: time.Second,
 	}, engine); !errs.IsCode(err, errs.CodeInvalidConfig) {
-		t.Fatalf("invalid config StartScheduler() error = %v", err)
+		t.Fatalf("invalid config PrepareScheduler() error = %v", err)
 	}
 
 	// 尚未运行的 Engine 不能创建 DeadlineQueue；启动后完全零值配置自动使用稳定默认。
-	if err := StartScheduler(target, SchedulerConfig{}, engine); err == nil {
-		t.Fatal("未启动 Engine 的 StartScheduler() 未返回错误")
+	if err := PrepareScheduler(target, SchedulerConfig{}, engine); err == nil {
+		t.Fatal("未启动 Engine 的 PrepareScheduler() 未返回错误")
 	}
 	if err := engine.Start(); err != nil {
 		t.Fatalf("Engine.Start() error = %v", err)
 	}
-	if err := StartScheduler(target, SchedulerConfig{}, engine); err != nil {
-		t.Fatalf("zero config StartScheduler() error = %v", err)
+	if err := PrepareScheduler(target, SchedulerConfig{}, engine); err != nil {
+		t.Fatalf("zero config PrepareScheduler() error = %v", err)
 	}
-	if err := StartScheduler(target, SchedulerConfig{}, engine); !errors.Is(err, errs.ErrInvalidArgument) {
-		t.Fatalf("duplicate StartScheduler() error = %v", err)
+	if err := PrepareScheduler(target, SchedulerConfig{}, engine); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("duplicate PrepareScheduler() error = %v", err)
+	}
+	if err := ActivateScheduler(nil); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("nil ActivateScheduler() error = %v", err)
+	}
+	if err := ActivateScheduler(target); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("Starting ActivateScheduler() error = %v", err)
+	}
+	runtimeState.state.Store(uint32(StateRunning))
+	if err := ActivateScheduler(target); err != nil {
+		t.Fatalf("ActivateScheduler() error = %v", err)
+	}
+	if err := ActivateScheduler(target); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("duplicate ActivateScheduler() error = %v", err)
 	}
 
 	runtimeState.state.Store(uint32(StateStopping))

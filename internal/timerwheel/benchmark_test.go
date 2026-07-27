@@ -248,9 +248,9 @@ func BenchmarkTimerWheelTickPrecision(b *testing.B) {
 	}
 }
 
-// BenchmarkTimerWheelActiveDeadlines 记录 M8 要求的三档活跃容量建立和清理基线。
+// BenchmarkTimerWheelActiveDeadlines 记录 M8/M10 要求的四档活跃容量建立和清理基线。
 func BenchmarkTimerWheelActiveDeadlines(b *testing.B) {
-	for _, count := range []int{10_000, 100_000, 1_000_000} {
+	for _, count := range []int{10_000, 100_000, 1_000_000, 3_000_000} {
 		b.Run(fmt.Sprintf("%d", count), func(b *testing.B) {
 			b.StopTimer()
 			for iteration := 0; iteration < b.N; iteration++ {

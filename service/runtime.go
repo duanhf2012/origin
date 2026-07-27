@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
@@ -18,6 +19,10 @@ type Runtime interface {
 	State() State
 	Logger() originlog.Logger
 	LookupService(name string) (IService, bool)
+	AcquireTimerSlot() (TimerID, bool)
+	ReleaseTimerSlot()
+	TimerLimit() int
+	TimerLocation() *time.Location
 }
 
 // BindRuntime 把一个尚未绑定的 Service 实例与唯一 Node 运行环境关联。
