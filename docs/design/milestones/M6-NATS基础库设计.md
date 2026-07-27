@@ -8,7 +8,7 @@
 
 ## 1. 目标
 
-M6 实现一个只面向 Origin 框架内部的 Core NATS 基础库，为 M13 NATS RPC、后续 NATS
+M6 实现一个只面向 Origin 框架内部的 Core NATS 基础库，为 M14 NATS RPC、后续 NATS
 服务发现控制面以及可能出现的内部消息模块提供共同的连接能力。
 
 M6 完成后必须能够：
@@ -25,7 +25,7 @@ M6 完成后必须能够：
 
 M6 只负责 NATS 连接、Subject、原始字节消息和资源生命周期，不实现 Origin RPC
 RequestID、ContractID、MethodID、ServiceName、代码生成、路由、服务发现或业务 Service
-调度。M13 再把 M11 RPC Runtime 与 M6 组合起来。
+调度。M14 再把 M11 RPC Runtime、M12 静态编解码和 M13 远端调用状态与 M6 组合起来。
 
 ## 2. 为什么使用官方客户端
 
@@ -140,8 +140,8 @@ M6 保留“一条 Node 连接由 Node 自己持有”的方向，但把 RPC、�
 - 自定义 NATS Client 替换接口；
 - 为 NATS 和 TCP 建立共同的大型 Transport 接口。
 
-M12/M13 的 RPC 使用方在需要时定义最小适配接口。M6 不为了外观统一而让 TCP 假装拥有
-Subject，也不让 NATS 假装拥有逐 Node TCP Connection；但 M12/M13 必须把两者接入同一
+M13/M14 的 RPC 使用方在需要时定义最小适配接口。M6 不为了外观统一而让 TCP 假装拥有
+Subject，也不让 NATS 假装拥有逐 Node TCP Connection；但 M13/M14 必须把两者接入同一
 RPC Runtime、同一线协议语义和同一 Service 调度入口，不能形成两套 RPC 实现。
 
 ## 5. 包与依赖边界
@@ -264,7 +264,7 @@ nodes:
           pending_size: 8M
 ```
 
-M6 只实现 Options 和校验，不在本里程碑把该结构接入完整 Node 配置；M7/M13 接入时再把
+M6 只实现 Options 和校验，不在本里程碑把该结构接入完整 Node 配置；M7/M14 接入时再把
 对应配置片段解析为 `natsnet.Options`。
 
 ## 7. 认证与 TLS
@@ -382,7 +382,7 @@ type MessageHandler func(message Message)
 因此：
 
 1. `Publish` 返回后，调用方可以立即复用或释放原 payload；
-2. M13 可以把 `bufferpool.Buffer.Bytes()` 传给 M6，并在 Publish 返回后释放 Buffer；
+2. M14 可以把 `bufferpool.Buffer.Bytes()` 传给 M6，并在 Publish 返回后释放 Buffer；
 3. M6 包装层不能为了“保险”再复制一次 payload；
 4. 必须通过测试锁定“Publish 返回后修改源切片不改变接收数据”的依赖行为；
 5. 依赖升级时必须重新执行该所有权测试。
@@ -396,7 +396,7 @@ Handler 把 `Data` 视为只读：
 
 - 同步解码可以直接读取；
 - 需要跨 goroutine 或长期持有时，由新的所有者自行复制；
-- M13 若需要把消息转入异步 Service 调度队列，应在 NATS 回调中完成必要的协议校验，
+- M14 若需要把消息转入异步 Service 调度队列，应在 NATS 回调中完成必要的协议校验，
   再把明确拥有的数据对象投递给调度器；
 - M6 不为入站消息增加引用计数或 BufferPool 二次包装。
 
@@ -415,12 +415,12 @@ Handler 把 `Data` 视为只读：
 因此首版决定：
 
 - M6 入站直接使用只读 Data，不复制到 BufferPool；
-- M13 可以用 BufferPool 构建统一 RPC 线协议，Publish 返回后立即归还 Buffer；
-- M13 的 NATS 回调必须快速校验和解码，不能无界持有 Data；
+- M14 可以用 BufferPool 构建统一 RPC 线协议，Publish 返回后立即归还 Buffer；
+- M14 的 NATS 回调必须快速校验和解码，不能无界持有 Data；
 - RPC Runtime 在回调返回后不得继续引用原始 Data；需要异步调度的数据必须在回调内解码
   到明确拥有的 Request/参数对象；
 - 不为统一 TCP/NATS 所有权而在热路径引入 `Packet` 接口、每消息 Release 闭包或引用计数；
-- 若 M13 基准证明大字节字段复制成为主要瓶颈，再单独 Review“可转移所有权 Packet”方案，
+- 若 M14 基准证明大字节字段复制成为主要瓶颈，再单独 Review“可转移所有权 Packet”方案，
   不在 M6 预先增加复杂度。
 
 ### 9.4 空消息
@@ -438,7 +438,7 @@ M6 在 Publish 前检查 `MaxMessageSize`，超过上限返回
 1. NATS Server 的 `max_payload` 和官方客户端协议解析先形成第一层边界；
 2. M6 在进入 Handler 前再次检查 Origin `MaxMessageSize`；
 3. 超限消息不进入 Handler，并通过异步错误事件和日志报告；
-4. M13 在反序列化前再次按 RPC 配置检查。
+4. M14 在反序列化前再次按 RPC 配置检查。
 
 与 TCP 不同，NATS 协议解析和 `Msg.Data` 分配由官方客户端完成，Origin 无法在该客户端
 分配前执行自己的大小检查。不能为了满足表面一致性自行重写 NATS 协议。
@@ -474,13 +474,13 @@ Core NATS 是至多一次投递，不提供持久化和消费确认。
 M6 不包装 NATS 原生 `Request`、`RequestWithContext` 或 Reply Inbox。M6 只提供普通
 Publish 和长期 Subscribe。
 
-M13 的 Origin RPC 固定沿用 v2 的核心模式：
+M14 的 Origin RPC 固定沿用 v2 的核心模式：
 
 1. Node 的 RPC Runtime 启动时订阅由自身 NodeID 确定的稳定请求 Subject 和响应 Subject；
 2. 每个 Node 只建立一个逻辑请求入口和一个逻辑响应入口，不按本地 Service 数量增加订阅；
-3. 调用方由 M11 RPC Runtime 创建 RequestID、pendingCall 和 Deadline；
+3. 调用方由 M13 补齐的统一远端 RPC Runtime 创建 RequestID、pendingCall 和 Deadline；
 4. 服务发现和 Route 先选出逻辑目标 `NodeID + ServiceName`；
-5. M13 只使用目标 NodeID 计算 Node 级请求 Subject，并通过普通 `Publish` 发送；
+5. M14 只使用目标 NodeID 计算 Node 级请求 Subject，并通过普通 `Publish` 发送；
 6. 请求数据包携带 RequestID、目标 ServiceName、方法、来源 NodeID 和 Deadline；
 7. 目标 Node 的 RPC Runtime 读取 ServiceName，投递到对应 Service 的独立有界调度队列；
 8. 远端处理完成后，使用来源 NodeID 计算 Node 级响应 Subject 并通过普通 `Publish` 返回；
@@ -517,9 +517,9 @@ M6 不静默处理慢消费者：
 3. `Subscription.Stats()` 暴露 Pending、PendingBytes 和 Dropped；
 4. Handler panic 被捕获、记录堆栈并丢弃当前消息，Subscription 继续处理后续消息；
 5. M6 不在慢消费者时自动关闭共享 Connection；
-6. M13 可以根据 RPC 消息分类决定告警、停止 Subscription、让 Node 退休或停服。
+6. M14 可以根据 RPC 消息分类决定告警、停止 Subscription、让 Node 退休或停服。
 
-M13 的 Handler 已经收到消息、但 Origin RPC 入口队列已满时：
+M14 的 Handler 已经收到消息、但 Origin RPC 入口队列已满时：
 
 - Request 必须从请求包读取来源 NodeID，向该 Node 的稳定响应 Subject 返回统一
   `CodeServiceQueueFull` 错误，响应包保留原 RequestID；
@@ -544,7 +544,7 @@ MessageHandler 在 `nats.go` 的订阅回调 goroutine 中执行。
 - 同一异步 Subscription 的 Handler 按 NATS 客户端顺序执行；
 - 不同 Subscription 可以并发；
 - Handler 不能直接执行 Service 业务逻辑；
-- M13 Adapter 只做快速协议校验、必要所有权转换和调度投递；
+- M14 Adapter 只做快速协议校验、必要所有权转换和调度投递；
 - Handler 不能无限阻塞；
 - Handler panic 由 M6 在最外层恢复，记录一次堆栈后继续；
 - 连接锁、Subscription 锁和 M6 状态锁都不能跨 Handler 调用持有。
@@ -585,7 +585,7 @@ Context-aware Dialer：
 - 不允许 `MaxAttempts < 0`；
 - 连接正在重连时，Publish 可能进入有界 Reconnect Buffer；
 - Buffer 满时返回 `CodeTransportOverloaded`；
-- M13 的 RPC 请求必须在线协议中携带 Deadline，远端拒绝已经过期的迟到请求。
+- M14 的 RPC 请求必须在线协议中携带 Deadline，远端拒绝已经过期的迟到请求。
 
 M6 不把“重连期间本地接受”描述成“远端已收到”。这属于 NATS 的有界缓冲语义，不是
 RPC 自动重试。
@@ -633,7 +633,7 @@ type EventHandler func(event Event)
 规则：
 
 - EventHandler 是内部基础设施回调，不是 Service 业务回调；
-- M7/M13 后续把事件转换为 Node/Service 调度事件；
+- 后续 Node/RPC 接入层按自身生命周期把事件转换为受控调度事件；
 - M6 不为事件建立第二个有界队列；
 - EventHandler 必须快速返回；
 - EventHandler panic 被恢复并记录，不破坏 `nats.go` 回调调度器；
@@ -730,10 +730,10 @@ M6 的低延迟原则：
 6. 不对每条 Publish 执行 Flush；
 7. Handler 使用函数类型，不建立反射分发；
 8. 状态事件和日志不进入普通消息热路径；
-9. 不使用 Headers 承载 Origin RPC 元数据，M13 统一放入 RPC payload 或 Subject；
+9. 不使用 Headers 承载 Origin RPC 元数据，M14 统一放入 RPC payload 或 Subject；
 10. Origin RPC 不调用原生同步 Request，避免与 M11 重复建立响应 Channel、pending 状态和
     Deadline；
-11. M13 每个 Node 只使用稳定的请求/响应 Subscription，不按 Service 或 RPC 调用创建
+11. M14 每个 Node 只使用稳定的请求/响应 Subscription，不按 Service 或 RPC 调用创建
     Subscription；
 12. 用 Benchmark 对比直接 `nats.go` 与 `natsnet` 包装层，检查额外分配。
 
@@ -745,7 +745,7 @@ M6 的低延迟原则：
 
 M6 不使用 unsafe、自定义 NATS 协议或复杂对象池绕过这些成熟客户端边界。
 
-## 21. Subject 与 M13 边界
+## 21. Subject 与 M14 边界
 
 M6 只把 Subject 当作调用方提供的 NATS 地址：
 
@@ -755,7 +755,7 @@ M6 只把 Subject 当作调用方提供的 NATS 地址：
 - 不通过 Header 注入来源 Node；
 - 不知道 Request、Notify、Broadcast 或 Discovery。
 
-M13 单独设计：
+M14 单独设计：
 
 - 基于 NodeID 的稳定 RPC Request/Response Subject；
 - App/环境隔离前缀；
@@ -796,7 +796,7 @@ Origin RPC 首版不这样处理。普通 RPC 已经通过服务发现、`RouteR
 - Broadcast 无法保证“每个被发现目标 Node 各投递一次”；
 - 重复 NodeID 等部署错误可能被 Queue Group 隐藏。
 
-因此 M13 首版规则为：
+因此 M14 首版规则为：
 
 1. Request、Notify 和逐 Node Broadcast 均发布到明确目标 Node 的稳定 Subject；
 2. 目标 Node 使用普通 Subscription，不加入 Queue Group；
@@ -814,7 +814,7 @@ Origin RPC 首版不这样处理。普通 RPC 已经通过服务发现、`RouteR
 - 都有明确 Close/Wait 和资源所有者；
 - 都不执行 Service 业务逻辑；
 - 都限制消息大小和内存；
-- 都由 M12/M13 Adapter 接入同一 RPC Runtime。
+- 都由 M13/M14 Adapter 接入同一 RPC Runtime。
 
 差异：
 
@@ -831,25 +831,27 @@ Origin RPC 首版不这样处理。普通 RPC 已经通过服务发现、`RouteR
 
 “不建立共同大接口”不等于 TCP 和 NATS 各自实现一套 RPC。适配边界固定如下：
 
-- M11 拥有生成客户端语义、RequestID、pendingCall、默认 `15s` Deadline、取消、统一错误码
-  和响应完成；
-- M12 TCP Adapter 只负责把统一 RPC 帧发送到选定 TCP Connection，并把入站帧交给 M11；
-- M13 NATS Adapter 只负责把同一 RPC 帧发布到选定的稳定 Subject，并把请求/响应订阅收到
-  的数据交给 M11；
+- M11 拥有生成客户端、同 Node 调用和 Dispatcher 语义，M12 拥有普通 Go 静态编解码；
+- M13 在统一 RPC Runtime 中补齐 RequestID、pendingCall、默认 `15s` Deadline、远端取消、
+  统一错误码和响应完成；
+- M13 TCP Adapter 只负责把统一 RPC 帧发送到选定 TCP Connection，并把入站帧交给统一
+  RPC Runtime；
+- M14 NATS Adapter 只负责把同一 RPC 帧发布到选定的稳定 Subject，并把请求/响应订阅收到
+  的数据交给统一 RPC Runtime；
 - 两个 Adapter 使用相同的 Request/Response/Notify/Broadcast 消息分类和 RPC 线协议；
 - 两个 Adapter 进入同一个 Service 调度入口，业务 Service 和生成代码不知道当前使用
   TCP 还是 NATS；
 - `AsyncXxx`、`AwaitXxx`、`NotifyXxx` 和 Broadcast 的用户外观不因 Transport 改变；
-- Transport 发送成功都只表示“本地传输层已接受”，RPC 完成必须等待 M11 收到响应或
+- Transport 发送成功都只表示“本地传输层已接受”，RPC 完成必须等待统一 RPC Runtime 收到响应或
   Deadline；
-- M11 的同步入站处理函数在返回后不能继续引用传入的原始字节；TCP Adapter 随后归还
+- RPC Runtime 的同步入站处理函数在返回后不能继续引用传入的原始字节；TCP Adapter 随后归还
   BufferPool，NATS Adapter 随后释放对 `Msg.Data` 的引用。
 
 共同点停在 RPC 语义和线协议层，不强求共同的底层对象：
 
 - TCP 入站持有 `*bufferpool.Buffer`，需要显式归还；
 - NATS 入站持有 GC 管理的 `[]byte`，无需也不能归还给 Origin BufferPool；
-- Adapter 分别处理所有权，再调用同一 M11 入站函数；
+- Adapter 分别处理所有权，再调用同一 RPC Runtime 入站函数；
 - 首版不创建 `TransportMessage` 接口或 `Release func()`，避免每消息接口装箱、闭包和逃逸。
 
 这套边界既保证“RPC 与 TCP 适配”，又避免为了形式统一增加热路径复制。
@@ -979,9 +981,9 @@ Windows 和 Linux 必须分别执行真实 NATS Server 集成测试。macOS 至�
 12. Connection 和 Subscription 同时提供立即 `Close` 与有 Deadline 的 `Drain`；
 13. M6 使用原始 `[]byte`，不接入 BufferPool，也不额外复制 payload；接受官方客户端的
     固有 GC 分配，并通过 Benchmark 记录基线；
-14. M6 不定义任何 Origin Subject，全部留给 M13 和服务发现系统；
-15. 不建立 TCP/NATS 共同大接口，但 M12/M13 必须接入同一 M11 RPC Runtime 和统一线协议；
-16. M13 不使用 NATS 原生 Request/Reply；每个 Node 使用稳定的 Node 级请求/响应 Subject
+14. M6 不定义任何 Origin Subject，全部留给 M14 和服务发现系统；
+15. 不建立 TCP/NATS 共同大接口，但 M13/M14 必须接入同一 RPC Runtime、M12 Codec 和统一线协议；
+16. M14 不使用 NATS 原生 Request/Reply；每个 Node 使用稳定的 Node 级请求/响应 Subject
     和普通 Publish，ServiceName 与 RequestID 放入统一 RPC 线协议；
 17. 普通 Origin RPC 不使用 Queue Group，继续由服务发现和 Route 明确选择目标 Node；
 18. RPC 入口过载时 Request 立即回复统一过载错误，Notify 计数并丢弃，不阻塞 NATS
