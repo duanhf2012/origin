@@ -59,6 +59,9 @@ M11 必须同时遵守：
 15. ContractID 和 MethodID 使用生成期 SHA-256 截断值，发现碰撞时生成失败；
 16. 完整 SHA-256 契约指纹保留给兼容性检查和后续 Node 握手；
 17. 不允许手工覆盖 ContractID 或 MethodID。
+18. 每个 Node 创建并独占一个 `rpc.Runtime`，但 RPC 的业务目标始终是 Service；
+19. 生成客户端只在构造冷路径取得一次 Runtime，不在调用热路径查询或断言；
+20. Dispatcher 使用静态方法分派和静态编解码函数，不建立公共 Codec 接口。
 
 ## 4. M11 交付范围
 
@@ -67,6 +70,7 @@ M11 必须同时遵守：
 - `cmd/origingen` 命令入口；
 - `internal/rpcgen` 生成器实现；
 - 公开 `rpc` 包的最小类型和生成代码调用边界；
+- 每个 Node 独占的 `rpc.Runtime` 及 Service Runtime 窄桥接；
 - 模块级 `origingen rpc ./...` 扫描；
 - `//origin:rpc` 契约发现和完整签名校验；
 - ContractID、MethodID 和契约指纹生成；
@@ -536,26 +540,105 @@ type dispatcherProvider interface {
 }
 ```
 
-以上名称表达职责，最终公开签名仍需在 M11 后续 Review 中确认。该接口由 Node 使用方
-定义，不建立包级全局 `IRPCService` 注册表。
+`RPCDispatcher` 方法名和返回类型已经确认。`dispatcherProvider` 由 Node 使用方定义为
+未导出接口，避免额外公开一个只供框架装配使用的接口类型；跨包识别只要求生成方法本身
+导出。不建立包级全局 `IRPCService` 注册表。
 
 ### 10.4 Node 注册
 
+每个 Node 创建并独占一个 `*rpc.Runtime`。同一 Application 中的多个 Node 分别持有不同
+Runtime，不能共享 Dispatcher 目录、路由状态或以后加入的 TCP/NATS 连接状态。
+
 Node 在实例装配冷路径：
 
-1. 按已经确定的 Service 配置创建实例；
-2. 检查实例是否实现 Dispatcher Provider；
-3. 校验 Dispatcher 的 ContractID、MethodID 和指纹；
-4. 以实际 ServiceName 保存到当前 Node 私有目录；
-5. 重复 ServiceName、重复方法或描述不一致时使 Node 启动失败；
-6. Node 停止时随 Service 目录一起释放。
+1. 创建当前 Node 的 `rpc.Runtime`；
+2. 按已经确定的 Service 配置创建实例；
+3. 检查实例是否实现 Dispatcher Provider；
+4. 校验 Dispatcher 的 ContractID 和指纹；
+5. 调用 Runtime 注册方法，把实际 ServiceName、Service 实例和 Dispatcher 保存到当前
+   Node 私有目录；
+6. 重复 ServiceName、同一 Service 重复注册或描述不一致时使 Node 启动失败；
+7. Node 停止时关闭 Runtime，并随 Service 目录一起释放。
 
-注册目录属于 Node 实例，不使用包级可变全局状态。同一进程中的多个 Application 和 Node
-互不污染。
+`rpc.Runtime` 是 Node 内部的 RPC 路由和执行基础设施，不是 RPC 业务目标。RPC 契约、
+客户端和 Dispatcher 始终面向 Service；Node 只提供 Service 实例所在的运行和连接边界。
+
+注册目录属于 `rpc.Runtime` 实例，不使用包级可变全局状态。同一进程中的多个 Application
+和 Node 互不污染。
+
+### 10.5 Service 到 RPC Runtime 的最小桥接
+
+`service` 包不导入 `rpc` 或 `node`。M11 在 `service` 包提供只读框架辅助函数：
+
+```go
+func RuntimeOf(target IService) Runtime
+```
+
+该函数返回 Service 绑定时已经存在的 `service.Runtime`；nil、未绑定或有类型 nil 的
+Service 返回 nil，不发生 panic。
+
+`node.serviceRuntime` 在原有 `service.Runtime` 能力之外额外实现：
+
+```go
+func (runtime *serviceRuntime) RPCRuntime() *rpc.Runtime
+```
+
+`rpc` 包内部只在生成客户端构造冷路径使用以下未导出接口取得当前 Node Runtime：
+
+```go
+type runtimeProvider interface {
+    RPCRuntime() *Runtime
+}
+```
+
+调用链为：
+
+```text
+生成客户端
+    -> rpc.NewGeneratedClient(owner, target, contractID)
+    -> service.RuntimeOf(owner)
+    -> runtimeProvider.RPCRuntime()
+    -> 当前 Node 的 *rpc.Runtime
+```
+
+这样保持 `service -> rpc`、`rpc -> node` 的反向依赖都不存在，也不需要全局 Map 按
+Service 指针查找 Runtime。生成客户端只在构造时完成一次接口断言；每次 RPC 调用不重复
+取得或断言 Runtime。
 
 ## 11. Dispatcher
 
-### 11.1 静态分派
+### 11.1 最小接口
+
+M11 固定以下最小 Dispatcher 外观：
+
+```go
+type ContractFingerprint [32]byte
+
+type Dispatcher interface {
+    ContractID() ContractID
+    Fingerprint() ContractFingerprint
+
+    Dispatch(
+        ctx context.Context,
+        methodID MethodID,
+        request []byte,
+        responseDst []byte,
+    ) ([]byte, error)
+}
+```
+
+语义固定为：
+
+- `ContractID` 和 `Fingerprint` 只读取生成期常量，不在调用热路径计算；
+- `request` 是只读的已编码业务载荷；
+- `responseDst` 由 `rpc.Runtime` 提供，Dispatcher 把响应追加到该 Slice；
+- 返回的 Slice 是本次完整响应，可以与 `responseDst` 共享底层数组；
+- Dispatcher 返回后不能继续持有 `ctx`、`request`、`responseDst` 或返回 Slice；
+- Runtime 管理请求和响应 Buffer 的最终释放，Dispatcher 不直接接触 BufferPool；
+- Notify 仍走同一 Dispatch 入口，但 Runtime 不消费业务响应；
+- 未知 MethodID、解码失败、业务错误、panic 和编码失败均返回统一错误。
+
+### 11.2 静态分派
 
 生成 Dispatcher 使用 MethodID Switch 或等价静态表：
 
@@ -578,7 +661,7 @@ default:
 - 每次构建方法 Map；
 - 为每个参数做运行时类型判断。
 
-### 11.2 Dispatcher 职责
+### 11.3 Dispatcher 职责
 
 生成 Dispatcher 只负责：
 
@@ -587,10 +670,35 @@ default:
 3. 以静态类型调用真实 Service 方法；
 4. 捕获并转换业务方法边界 panic；
 5. 编码业务结果和最终错误；
-6. 按统一所有权规则释放输入和临时 Buffer。
+6. 不保留输入和输出 Slice，只释放 Dispatcher 自己明确创建且未转移所有权的临时对象。
 
 目标查找、Service 状态、队列准入、Await 恢复和未来 Transport 不复制到每个
 Dispatcher。
+
+### 11.4 不建立公共 Codec 接口
+
+M11 不定义 `rpc.Codec` 或通用 `Encode(any)`、`Decode(any)` 接口。`origingen` 为每个方法
+直接生成静态函数，例如：
+
+```go
+func encodeGetPlayerRequest(
+    dst []byte,
+    playerID int64,
+) ([]byte, error)
+
+func decodeGetPlayerRequest(
+    src []byte,
+) (playerID int64, err error)
+
+func encodeGetPlayerResponse(
+    dst []byte,
+    player *pb.Player,
+    callErr error,
+) ([]byte, error)
+```
+
+生成客户端和 Dispatcher 直接调用这些函数。这样不需要 `any`、运行时反射、Codec 查找
+或接口动态分派；M12 扩展普通结构体时继续生成静态函数，不改变 Dispatcher 接口。
 
 ## 12. M11 数据类型
 
@@ -790,13 +898,17 @@ rpc
 约束：
 
 1. `service` 不反向导入 `node`；
-2. `rpc` 不导入 `node`；
-3. 生成代码不能导入 Origin 的 `internal` 包；
-4. Node 只通过最小 Dispatcher Provider 接口识别 RPC Service；
-5. 不为了隐藏所有生成代码入口建立大型抽象层；
-6. 只有业务或生成代码确实需要的类型才公开；
-7. 是否建立独立 `internal/rpcruntime`，只有在实现证明能够降低职责耦合且不造成生成代码
-   越过 Go `internal` 边界时再决定，M11 默认不预建。
+2. `service` 不导入 `rpc`；
+3. `rpc` 不导入 `node`；
+4. 每个 Node 创建一个 `rpc.Runtime`，通过 `node.serviceRuntime` 的窄桥接供生成客户端取得；
+5. 生成客户端构造时只进行一次 Runtime 接口断言，RPC 热路径直接使用已保存指针；
+6. 生成代码不能导入 Origin 的 `internal` 包；
+7. Node 只通过最小 Dispatcher Provider 接口识别 RPC Service；
+8. 不建立公共 Codec 接口，编解码使用生成的静态函数；
+9. 不为了隐藏所有生成代码入口建立大型抽象层；
+10. 只有业务或生成代码确实需要的类型才公开；
+11. 是否建立独立 `internal/rpcruntime`，只有在实现证明能够降低职责耦合且不造成生成代码
+    越过 Go `internal` 边界时再决定，M11 默认不预建。
 
 ## 17. 冷路径与热路径
 
@@ -810,7 +922,8 @@ rpc
 - Service 实现关系识别；
 - Dispatcher 描述校验；
 - ServiceName 到 Dispatcher 的注册；
-- 方法表构建。
+- 方法表构建；
+- 从 owner 取得并保存当前 Node 的 `*rpc.Runtime`。
 
 冷路径优先保证诊断清晰和结果确定，不为了微小启动速度牺牲可维护性。
 
@@ -880,7 +993,9 @@ rpc
 15. 请求—响应业务方法 panic 返回统一错误；
 16. Notify panic 只产生目标侧诊断；
 17. 输入、响应和失败路径 Buffer 全部释放；
-18. 停止后没有 goroutine、Timer 或 Buffer 泄漏。
+18. 停止后没有 goroutine、Timer 或 Buffer 泄漏；
+19. 同一进程中的多个 Node 使用完全隔离的 RPC Runtime 注册目录；
+20. nil、未绑定或缺少 RPC Runtime 的 owner 不 panic，并返回统一错误。
 
 ### 18.3 数据类型
 
@@ -902,6 +1017,7 @@ rpc
 - 基础类型编码和解码；
 - 顶层 Protobuf 编码和解码；
 - Dispatcher 命中；
+- 生成客户端构造时取得 Runtime 的成本和分配；
 - 同 Node Await、Async、Notify；
 - 自调用和跨 Service 调用；
 - 目标不存在和队列满失败路径；
@@ -922,10 +1038,6 @@ const (
     getPlayerMethodID   rpc.MethodID   = 0x...
 )
 
-var playerRPCDescriptor = rpc.ContractDescriptor{
-    // 生成期常量和只读描述。
-}
-
 type PlayerRPCClient struct {
     client rpc.Client
 }
@@ -938,7 +1050,7 @@ func NewPlayerRPCClient(
         client: rpc.NewGeneratedClient(
             owner,
             target,
-            playerRPCDescriptor,
+            playerRPCContractID,
         ),
     }
 }
@@ -951,25 +1063,39 @@ func (c PlayerRPCClient) AwaitGetPlayer(
 }
 ```
 
-业务不直接依赖 `rpc.Client`、Descriptor 或 Dispatcher 的低层调用方法。公开这些类型只为
-生成代码、Node 装配或诊断确有需要，不能把它们扩张成另一套手写 RPC API。
+业务不直接依赖 `rpc.Client` 或 Dispatcher 的低层调用方法。公开这些类型只为生成代码
+和 Node 装配，不能把它们扩张成另一套手写 RPC API。是否额外公开只读 Descriptor 仍由
+后续 Review 决定。
+
+`rpc.Client` 是值语义的生成代码底座，概念字段为：
+
+```go
+type Client struct {
+    owner      service.IService
+    runtime    *Runtime
+    target     Target
+    contractID ContractID
+}
+```
+
+字段保持未导出。`NewGeneratedClient` 不执行路由、网络 I/O 或等待；owner 无效或尚未绑定
+RPC Runtime 时构造出不可调用的安全 Client，真正调用返回统一参数或未就绪错误，不发生
+panic。客户端不持有独立 TCP/NATS 连接。
 
 ## 20. 后续 M11 Review 项
 
 以下问题已经定位，但尚未最终确认。每次只讨论一个问题，确认后立即回写本文：
 
-1. `rpc.Dispatcher`、生成客户端底座和生成 Codec 的最小精确接口；
-2. `service.IService` 与 `rpc` 取得 NodeID、本地 Service 和调度入口的最简依赖边界；
-3. 本地 RPC Deadline 和取消如何复用 M8 TimerEngine，且不传递调用方 Task Context；
-4. Async 是否只使用 Context 取消，还是额外返回公开取消句柄；
-5. M11 基础类型的精确线布局、`int`/`uint` 跨平台规则和具名别名；
-6. `localCall` 的字段、完成同步原语以及是否池化；
-7. M11 新增错误码的名称、编号和 panic 映射；
-8. Go 包加载是否固定使用 `golang.org/x/tools/go/packages` 及具体版本；
-9. Protobuf 依赖版本和高性能 Marshal/Unmarshal API；
-10. 接口标记被删除后，旧 `origin_rpc.gen.go` 的安全清理规则；
-11. 完整契约指纹的精确规范化字节布局；
-12. M11 是否需要公开只读 Descriptor 诊断接口。
+1. 本地 RPC Deadline 和取消如何复用 M8 TimerEngine，且不传递调用方 Task Context；
+2. Async 是否只使用 Context 取消，还是额外返回公开取消句柄；
+3. M11 基础类型的精确线布局、`int`/`uint` 跨平台规则和具名别名；
+4. `localCall` 的字段、完成同步原语以及是否池化；
+5. M11 新增错误码的名称、编号和 panic 映射；
+6. Go 包加载是否固定使用 `golang.org/x/tools/go/packages` 及具体版本；
+7. Protobuf 依赖版本和高性能 Marshal/Unmarshal API；
+8. 接口标记被删除后，旧 `origin_rpc.gen.go` 的安全清理规则；
+9. 完整契约指纹的精确规范化字节布局；
+10. M11 是否需要公开只读 Descriptor 诊断接口。
 
 在以上内容完成确认、本文状态改为“已确认”并在复核清单记录“允许实施”之前，不创建 M11
 实施计划，不编写 M11 代码。
