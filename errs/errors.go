@@ -26,6 +26,18 @@ var (
 	ErrProcessAlreadyRunning error = newCodeError(CodeProcessAlreadyRunning)
 	// ErrProcessControlFailed 表示本地进程控制操作失败。
 	ErrProcessControlFailed error = newCodeError(CodeProcessControlFailed)
+	// ErrServiceRetired 表示 Service 处于退休状态并拒绝新的 RPC 请求。
+	ErrServiceRetired error = newCodeError(CodeServiceRetired)
+	// ErrServiceStopping 表示 Service 已经开始停止并拒绝新的工作。
+	ErrServiceStopping error = newCodeError(CodeServiceStopping)
+	// ErrServiceStopped 表示 Service 已经完全停止或启动失败。
+	ErrServiceStopped error = newCodeError(CodeServiceStopped)
+	// ErrServiceQueueFull 表示 Service 任务容量已经达到硬上限。
+	ErrServiceQueueFull error = newCodeError(CodeServiceQueueFull)
+	// ErrGracefulShutdownTimeout 表示优雅停止超过调用方给定的期限。
+	ErrGracefulShutdownTimeout error = newCodeError(CodeGracefulShutdownTimeout)
+	// ErrServiceNotReady 表示 Service 尚未完成启动或调度器尚未开放。
+	ErrServiceNotReady error = newCodeError(CodeServiceNotReady)
 	// ErrTransportUnavailable 表示底层连接或 I/O 当前不可用。
 	ErrTransportUnavailable error = newCodeError(CodeTransportUnavailable)
 	// ErrTransportClosed 表示 Transport 或连接已经关闭。
@@ -131,6 +143,18 @@ func New(code Code) error {
 		return ErrProcessAlreadyRunning
 	case CodeProcessControlFailed:
 		return ErrProcessControlFailed
+	case CodeServiceRetired:
+		return ErrServiceRetired
+	case CodeServiceStopping:
+		return ErrServiceStopping
+	case CodeServiceStopped:
+		return ErrServiceStopped
+	case CodeServiceQueueFull:
+		return ErrServiceQueueFull
+	case CodeGracefulShutdownTimeout:
+		return ErrGracefulShutdownTimeout
+	case CodeServiceNotReady:
+		return ErrServiceNotReady
 	case CodeTransportUnavailable:
 		return ErrTransportUnavailable
 	case CodeTransportClosed:

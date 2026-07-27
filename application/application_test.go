@@ -256,6 +256,82 @@ nodes:
 	}
 }
 
+func TestLoadConfigSchedulerDefaultsAndOverrides(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: default-1
+    services: [lifecycleTestService]
+  - id: custom-1
+    scheduler:
+      max_tasks: 1234
+      max_await_tasks: 321
+      default_await_timeout: 3s
+    services: [lifecycleTestService]
+`)
+	loaded, err := loadConfig(directory)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+
+	// 省略 scheduler 使用统一默认值；显式配置则完整转换为运行时 time.Duration。
+	if loaded.nodes[0].Scheduler != service.DefaultSchedulerConfig() {
+		t.Fatalf("默认 Scheduler = %+v", loaded.nodes[0].Scheduler)
+	}
+	custom := loaded.nodes[1].Scheduler
+	if custom.MaxTasks != 1234 || custom.MaxAwaitTasks != 321 ||
+		custom.DefaultAwaitTimeout != 3*time.Second {
+		t.Fatalf("自定义 Scheduler = %+v", custom)
+	}
+}
+
+func TestLoadConfigSchedulerPartialOverrideAndValidation(t *testing.T) {
+	partialDirectory := writeApplicationConfig(t, `
+nodes:
+  - id: game-1
+    scheduler:
+      default_await_timeout: 2s
+    services: [lifecycleTestService]
+`)
+	loaded, err := loadConfig(partialDirectory)
+	if err != nil {
+		t.Fatalf("partial loadConfig() error = %v", err)
+	}
+	if loaded.nodes[0].Scheduler.MaxTasks != service.DefaultMaxTasks ||
+		loaded.nodes[0].Scheduler.MaxAwaitTasks != service.DefaultMaxAwaitTasks ||
+		loaded.nodes[0].Scheduler.DefaultAwaitTimeout != 2*time.Second {
+		t.Fatalf("部分覆盖 Scheduler = %+v", loaded.nodes[0].Scheduler)
+	}
+
+	// 零容量、Await 超过总任务、零超时和未知字段都必须在配置加载阶段拒绝。
+	for _, content := range []string{
+		`nodes:
+  - id: game-1
+    scheduler: {max_tasks: 0}
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    scheduler: {max_tasks: 10, max_await_tasks: 11}
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    scheduler: {default_await_timeout: 0s}
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    scheduler: {unknown: 1}
+    services: [lifecycleTestService]
+`,
+	} {
+		directory := writeApplicationConfig(t, content)
+		if _, err := loadConfig(directory); !errs.IsCode(err, errs.CodeInvalidConfig) {
+			t.Fatalf("非法 scheduler loadConfig() error = %v", err)
+		}
+	}
+}
+
 func TestCatalogRejectsNonZeroTemplate(t *testing.T) {
 	app := New()
 	app.Setup(&lifecycleTestService{started: true})

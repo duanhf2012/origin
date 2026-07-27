@@ -22,6 +22,19 @@ const (
 	// CodeProcessControlFailed 表示本地进程锁、控制文件或停止通知操作失败。
 	CodeProcessControlFailed
 
+	// CodeServiceRetired 表示 Service 处于退休状态并拒绝新的 RPC 请求。
+	CodeServiceRetired Code = 1001
+	// CodeServiceStopping 表示 Service 已经开始停止并拒绝新的工作。
+	CodeServiceStopping Code = 1002
+	// CodeServiceStopped 表示 Service 已经完全停止或启动失败。
+	CodeServiceStopped Code = 1003
+	// CodeServiceQueueFull 表示 Service 已接受任务或 Await 任务达到有界上限。
+	CodeServiceQueueFull Code = 1004
+	// CodeGracefulShutdownTimeout 表示优雅停止没有在调用方给定的期限内完成。
+	CodeGracefulShutdownTimeout Code = 1005
+	// CodeServiceNotReady 表示 Service 尚未完成启动或调度器尚未开放。
+	CodeServiceNotReady Code = 1006
+
 	// CodeTransportUnavailable 表示 Dial、Accept 或底层 I/O 导致传输不可用。
 	CodeTransportUnavailable Code = 3001
 	// CodeTransportClosed 表示本地 Transport 或连接已经关闭。
@@ -61,6 +74,18 @@ func codeText(code Code) string {
 		return "process already running"
 	case CodeProcessControlFailed:
 		return "process control failed"
+	case CodeServiceRetired:
+		return "service retired"
+	case CodeServiceStopping:
+		return "service stopping"
+	case CodeServiceStopped:
+		return "service stopped"
+	case CodeServiceQueueFull:
+		return "service queue full"
+	case CodeGracefulShutdownTimeout:
+		return "graceful shutdown timeout"
+	case CodeServiceNotReady:
+		return "service not ready"
 	case CodeTransportUnavailable:
 		return "transport unavailable"
 	case CodeTransportClosed:

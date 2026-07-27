@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
@@ -121,6 +122,83 @@ func TestNodeTimerEngineLifecycleOrder(t *testing.T) {
 	stats := current.timerEngine.Stats()
 	if stats.Running || !stats.Closed {
 		t.Fatalf("Node Stop 后 TimerEngine 状态 = %+v，期望已关闭", stats)
+	}
+}
+
+func TestNodeSchedulerLifecycleOrder(t *testing.T) {
+	events := make([]string, 0, 3)
+	target := &lifecycleService{label: "scheduler-probe", events: &events}
+	current := newTestNode(t, target)
+
+	// OnStart 发生在 Scheduler 创建前，业务任务不能在服务尚未 Running 时提前进入。
+	target.onStart = func() {
+		err := target.DispatchAsync(func(context.Context) {})
+		if !errors.Is(err, errs.ErrServiceNotReady) {
+			t.Errorf("OnStart 中 DispatchAsync() error = %v", err)
+		}
+	}
+	// Node 必须先停止并排空 Scheduler，再调用 OnStop。
+	target.onStop = func() {
+		err := target.DispatchAsync(func(context.Context) {})
+		if !errors.Is(err, errs.ErrServiceStopping) {
+			t.Errorf("OnStop 中 DispatchAsync() error = %v", err)
+		}
+		stats := target.ExecutionStats()
+		if stats.Accepted != 0 || stats.Running != 0 || stats.Awaiting != 0 {
+			t.Errorf("OnStop 中 Scheduler 未排空: %+v", stats)
+		}
+	}
+
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	taskDone := make(chan struct{})
+	if err := target.DispatchAsync(func(context.Context) {
+		close(taskDone)
+	}); err != nil {
+		t.Fatalf("Running DispatchAsync() error = %v", err)
+	}
+	select {
+	case <-taskDone:
+	case <-time.After(time.Second):
+		t.Fatal("Scheduler 没有执行 Running 任务")
+	}
+	if err := current.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+func TestNodeSchedulerStartFailureRollsBackService(t *testing.T) {
+	events := make([]string, 0, 3)
+	current := newTestNodeWithConfig(t, Config{
+		ID: "game-1",
+		Scheduler: service.SchedulerConfig{
+			MaxTasks:            1,
+			MaxAwaitTasks:       2,
+			DefaultAwaitTimeout: time.Second,
+		},
+		Services: []string{"unused"},
+	}, &lifecycleService{label: "a", events: &events})
+
+	err := current.Start(context.Background())
+	if !errs.IsCode(err, errs.CodeInvalidConfig) {
+		t.Fatalf("Start() error = %v", err)
+	}
+	var located interface {
+		LifecycleContext() (nodeID, serviceName, phase string)
+	}
+	if !errors.As(err, &located) {
+		t.Fatalf("Scheduler 启动错误没有生命周期位置: %v", err)
+	}
+	_, _, phase := located.LifecycleContext()
+	if phase != "scheduler_start" {
+		t.Fatalf("Scheduler 错误 phase = %q", phase)
+	}
+	if rollbackErr := current.Rollback(context.Background()); rollbackErr != nil {
+		t.Fatalf("Rollback() error = %v", rollbackErr)
+	}
+	if !slices.Equal(events, []string{"init:a", "start:a", "stop:a"}) {
+		t.Fatalf("Scheduler 启动失败回滚顺序 = %v", events)
 	}
 }
 

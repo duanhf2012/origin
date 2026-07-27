@@ -1,11 +1,17 @@
 package node
 
+import "github.com/duanhf2012/origin/v3/service"
+
 // Config 是一个 Node 在配置文件中的最小静态定义。
 type Config struct {
 	// ID 是 Node 在当前配置和集群中的稳定身份。
 	ID string
 	// Private 表示该 Node 后续不发布到服务发现。
 	Private bool
+	// Scheduler 定义当前 Node 下每个 Service 独立使用的调度容量和默认 Await 超时。
+	//
+	// 完全零值表示使用 service.DefaultSchedulerConfig；部分非零配置必须自身完整有效。
+	Scheduler service.SchedulerConfig
 	// Services 按声明顺序保存当前 Node 实际启用的 Service。
 	Services []string
 }

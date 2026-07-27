@@ -4,7 +4,10 @@ package service
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+	"time"
 
+	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
 
@@ -16,6 +19,11 @@ type IService interface {
 	OnInit() error
 	OnStart(ctx context.Context) error
 	OnStop(ctx context.Context) error
+
+	DispatchAsync(fn func(context.Context)) error
+	Await(ctx context.Context, fn func(context.Context) error) error
+	SetDefaultAwaitTimeout(timeout time.Duration) error
+	ExecutionStats() ExecutionStats
 
 	baseService() *Service
 }
@@ -29,6 +37,10 @@ type Service struct {
 	bindMu sync.Mutex
 	// runtime 在 Node 完成实例装配后保持只读。
 	runtime Runtime
+	// defaultAwaitTimeout 只允许 OnInit 在调度器启动前写入，启动后保持只读。
+	defaultAwaitTimeout time.Duration
+	// scheduler 使用原子指针连接冷路径装配和并发业务热路径，避免每次查询 bindMu。
+	scheduler atomic.Pointer[serviceScheduler]
 }
 
 // OnInit 是不需要初始化逻辑时使用的默认空实现。
@@ -89,6 +101,91 @@ func (service *Service) LookupService(name string) (IService, bool) {
 		return nil, false
 	}
 	return service.runtime.LookupService(name)
+}
+
+// DispatchAsync 把新的根任务异步投递到当前 Service 的串行执行上下文。
+//
+// 成功只表示任务已被有界队列接收；函数不会等待任务执行完成。
+func (service *Service) DispatchAsync(fn func(context.Context)) error {
+	// 先校验基础对象和函数，确保无效调用不读取未绑定的 Runtime。
+	if service == nil || fn == nil {
+		return errs.ErrInvalidArgument
+	}
+
+	// 公开生命周期先于内部状态发布。该检查既给未启动调用稳定错误，也防止
+	// StartScheduler 已创建但 Node 尚未发布 Running 时提前接收业务任务。
+	if err := service.acceptanceError(); err != nil {
+		return err
+	}
+	scheduler := service.scheduler.Load()
+	if scheduler == nil {
+		return errs.ErrServiceNotReady
+	}
+	return scheduler.dispatch(fn)
+}
+
+// Await 暂时释放当前 Service 执行权，在原任务 goroutine 中等待 fn 返回，然后恢复原调用栈。
+func (service *Service) Await(
+	ctx context.Context,
+	fn func(context.Context) error,
+) error {
+	// Await 必须同时拥有 receiver、Origin Task Context 和真实等待函数。
+	if service == nil || ctx == nil || fn == nil {
+		return errs.ErrInvalidArgument
+	}
+	scheduler := service.scheduler.Load()
+	if scheduler == nil {
+		return errs.ErrServiceNotReady
+	}
+	return scheduler.await(ctx, fn)
+}
+
+// SetDefaultAwaitTimeout 设置当前 Service 覆盖 Node 默认值的 Await 超时。
+//
+// 该方法只允许由当前运行实例在 OnInit 中调用；启动后热路径只读取冻结结果。
+func (service *Service) SetDefaultAwaitTimeout(timeout time.Duration) error {
+	// 正时长是唯一有效覆盖值；零值表示没有 Service 级覆盖，不能通过本方法显式设置。
+	if service == nil || timeout <= 0 {
+		return errs.ErrInvalidArgument
+	}
+
+	// bindMu 只覆盖初始化冷路径，使并发误用无法在 Scheduler 发布后修改冻结配置。
+	service.bindMu.Lock()
+	defer service.bindMu.Unlock()
+	if service.runtime == nil ||
+		service.runtime.State() != StateInitializing ||
+		service.scheduler.Load() != nil {
+		return errs.ErrInvalidArgument
+	}
+	service.defaultAwaitTimeout = timeout
+	return nil
+}
+
+// ExecutionStats 返回当前 Service 调度器的一致执行统计快照。
+func (service *Service) ExecutionStats() ExecutionStats {
+	// 未绑定或尚未启动的 Service 没有调度数据，返回结构体零值便于诊断路径安全调用。
+	if service == nil {
+		return ExecutionStats{}
+	}
+	scheduler := service.scheduler.Load()
+	if scheduler == nil {
+		return ExecutionStats{}
+	}
+	return scheduler.statsSnapshot()
+}
+
+// acceptanceError 把公开 Service 生命周期映射为稳定的调度准入错误。
+func (service *Service) acceptanceError() error {
+	switch service.State() {
+	case StateRunning:
+		return nil
+	case StateStopping:
+		return errs.ErrServiceStopping
+	case StateStopped, StateFailed:
+		return errs.ErrServiceStopped
+	default:
+		return errs.ErrServiceNotReady
+	}
 }
 
 // baseService 返回嵌入对象，供 BindRuntime 完成唯一所有权绑定。

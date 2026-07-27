@@ -11,6 +11,7 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
+	"github.com/duanhf2012/origin/v3/service"
 )
 
 // loadedConfig 是 M7 真正消费的框架配置快照。
@@ -28,9 +29,19 @@ type bufferPoolConfig struct {
 
 // nodeConfig 与公开 node.Config 分离，使配置 Tag 不污染运行时对象。
 type nodeConfig struct {
-	ID       string   `json:"id"`
-	Private  bool     `json:"private"`
-	Services []string `json:"services"`
+	ID        string                 `json:"id"`
+	Private   bool                   `json:"private"`
+	Scheduler *schedulerConfigMirror `json:"scheduler"`
+	Services  []string               `json:"services"`
+}
+
+// schedulerConfigMirror 使用指针区分“字段省略”和用户显式写入的零值。
+//
+// 这种表示只存在于配置冷路径；运行时统一转换为不含指针的 service.SchedulerConfig。
+type schedulerConfigMirror struct {
+	MaxTasks            *int                   `json:"max_tasks"`
+	MaxAwaitTasks       *int                   `json:"max_await_tasks"`
+	DefaultAwaitTimeout *originconfig.Duration `json:"default_await_timeout"`
 }
 
 // logConfigMirror 使用字符串和公开 config 值类型承接用户配置。
@@ -131,10 +142,34 @@ func loadConfig(directory string) (loadedConfig, error) {
 			)
 		}
 		seen[configured.ID] = struct{}{}
+		schedulerConfig := service.DefaultSchedulerConfig()
+		if configured.Scheduler != nil {
+			// 从稳定默认值开始逐项覆盖，允许项目只调整真正关心的容量或超时。
+			if configured.Scheduler.MaxTasks != nil {
+				schedulerConfig.MaxTasks = *configured.Scheduler.MaxTasks
+			}
+			if configured.Scheduler.MaxAwaitTasks != nil {
+				schedulerConfig.MaxAwaitTasks = *configured.Scheduler.MaxAwaitTasks
+			}
+			if configured.Scheduler.DefaultAwaitTimeout != nil {
+				schedulerConfig.DefaultAwaitTimeout =
+					configured.Scheduler.DefaultAwaitTimeout.Duration()
+			}
+		}
+		// 配置错误应在 Application 构造阶段暴露，而不是等到某个 Service 已经 OnStart 后
+		// 才由 Scheduler 装配失败触发整组回滚。
+		if err := schedulerConfig.Validate(); err != nil {
+			return loadedConfig{}, invalidConfigf(
+				"Node %q 的 scheduler 配置无效: %v",
+				configured.ID,
+				err,
+			)
+		}
 		result.nodes[index] = node.Config{
-			ID:       configured.ID,
-			Private:  configured.Private,
-			Services: append([]string(nil), configured.Services...),
+			ID:        configured.ID,
+			Private:   configured.Private,
+			Scheduler: schedulerConfig,
+			Services:  append([]string(nil), configured.Services...),
 		}
 	}
 	return result, nil

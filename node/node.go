@@ -26,6 +26,8 @@ type Node struct {
 	id      string
 	private bool
 	logger  originlog.Logger
+	// schedulerConfig 是当前 Node 为每个 ServiceScheduler 提供的冻结默认策略。
+	schedulerConfig service.SchedulerConfig
 
 	// state 为查询提供无锁快照，生命周期写入由单一控制路径串行执行。
 	state atomic.Uint32
@@ -68,12 +70,13 @@ func New(config Config, bindings []ServiceBinding, logger originlog.Logger) (*No
 
 	// 按已知数量一次分配有序表和查询表，避免装配时重复扩容。
 	instance := &Node{
-		id:       config.ID,
-		private:  config.Private,
-		logger:   logger.With(originlog.String("node_id", config.ID)),
-		services: make([]*serviceEntry, 0, len(bindings)),
-		byName:   make(map[string]*serviceEntry, len(bindings)),
-		started:  make([]*serviceEntry, 0, len(bindings)),
+		id:              config.ID,
+		private:         config.Private,
+		logger:          logger.With(originlog.String("node_id", config.ID)),
+		schedulerConfig: config.Scheduler,
+		services:        make([]*serviceEntry, 0, len(bindings)),
+		byName:          make(map[string]*serviceEntry, len(bindings)),
+		started:         make([]*serviceEntry, 0, len(bindings)),
 	}
 	instance.state.Store(uint32(StateCreated))
 
@@ -243,6 +246,23 @@ func (node *Node) Start(ctx context.Context) error {
 			node.state.Store(uint32(StateFailed))
 			return err
 		}
+
+		// OnStart 成功后再创建 Scheduler；只有装配完整且 Node 发布 Running 后才会接收任务。
+		if err := service.StartScheduler(
+			entry.instance,
+			node.schedulerConfig,
+			node.timerEngine,
+		); err != nil {
+			entry.startError = true
+			entry.state.Store(uint32(service.StateFailed))
+			node.state.Store(uint32(StateFailed))
+			return &lifecycleContext{
+				nodeID:      node.id,
+				serviceName: entry.name,
+				phase:       "scheduler_start",
+				cause:       err,
+			}
+		}
 		entry.state.Store(uint32(service.StateRunning))
 	}
 	// 最后一个回调可能在执行期间越过 Deadline 却返回 nil，发布 Ready 前必须再次确认。
@@ -317,6 +337,17 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 		entry := node.started[index]
 		// started 只由 Start 追加一次；清理后置空可以让重复 Stop 保持幂等。
 		entry.state.Store(uint32(service.StateStopping))
+
+		// Scheduler 先拒绝新的根任务并排空已经接受的工作。它完全退出后 OnStop 才能安全
+		// 访问 Service 状态，避免与旧 Task 并发。
+		if err := service.StopScheduler(ctx, entry.instance); err != nil {
+			result = errors.Join(result, &lifecycleContext{
+				nodeID:      node.id,
+				serviceName: entry.name,
+				phase:       "scheduler_stop",
+				cause:       err,
+			})
+		}
 		err := callLifecycle(entry, "on_stop", func() error {
 			return entry.instance.OnStop(ctx)
 		})
