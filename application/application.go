@@ -394,18 +394,27 @@ func (app *Application) buildNodes(configs []node.Config) ([]*node.Node, error) 
 		for _, declaration := range configured.Services {
 			name, template, private, err := parseServiceDeclaration(declaration)
 			if err != nil {
-				return nil, fmt.Errorf("Node %q: %w", configured.ID, err)
+				return nil, rollbackBuiltNodes(result, fmt.Errorf(
+					"Node %q: %w",
+					configured.ID,
+					err,
+				))
 			}
 			if _, duplicate := names[name]; duplicate {
-				return nil, invalidConfigf(
+				return nil, rollbackBuiltNodes(result, invalidConfigf(
 					"Node %q 的 ServiceName %q 规范化后重复",
 					configured.ID,
 					name,
-				)
+				))
 			}
 			instance, err := app.catalog.instantiate(template)
 			if err != nil {
-				return nil, fmt.Errorf("Node %q Service %q: %w", configured.ID, name, err)
+				return nil, rollbackBuiltNodes(result, fmt.Errorf(
+					"Node %q Service %q: %w",
+					configured.ID,
+					name,
+					err,
+				))
 			}
 			bindings = append(bindings, node.ServiceBinding{
 				Name:     name,
@@ -417,11 +426,21 @@ func (app *Application) buildNodes(configs []node.Config) ([]*node.Node, error) 
 		}
 		current, err := node.New(configured, bindings, app.logger)
 		if err != nil {
-			return nil, err
+			return nil, rollbackBuiltNodes(result, err)
 		}
 		result = append(result, current)
 	}
 	return result, nil
+}
+
+// rollbackBuiltNodes 释放装配阶段已经创建、但尚未启动的 Node 底层资源。
+func rollbackBuiltNodes(nodes []*node.Node, primary error) error {
+	result := primary
+	// Node 尚未执行 OnStart，因此 Rollback 不会触发业务 OnStop，只会反序关闭已创建资源。
+	for index := len(nodes) - 1; index >= 0; index-- {
+		result = errors.Join(result, nodes[index].Rollback(context.Background()))
+	}
+	return result
 }
 
 // startNodes 按选中顺序启动 Node，并记录真正 Ready 的 Node。
@@ -448,10 +467,12 @@ func (app *Application) rollbackStartup(primary error) error {
 	defer cancel()
 	result := primary
 
-	// nodes 中第一个未进入 started 的对象就是当前失败 Node。
-	if len(app.started) < len(app.nodes) {
-		result = errors.Join(result, app.nodes[len(app.started)].Rollback(stopCtx))
+	// buildNodes 会先创建全部选中 Node。启动中途失败时，从最后一个尚未 Ready 的 Node
+	// 反序关闭到当前失败 Node，避免失败位置之后尚未启动的 TimerEngine 等资源泄漏。
+	for index := len(app.nodes) - 1; index >= len(app.started); index-- {
+		result = errors.Join(result, app.nodes[index].Rollback(stopCtx))
 	}
+	// 已经 Ready 的 Node 再按真实启动顺序严格反序执行完整 Stop。
 	for index := len(app.started) - 1; index >= 0; index-- {
 		result = errors.Join(result, app.started[index].Stop(stopCtx))
 	}

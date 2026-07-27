@@ -6,7 +6,7 @@
 
 ## 1. 实施目标
 
-实现内部 `natsnet` 包，为后续 M11 NATS RPC 和服务发现控制面提供 Core NATS 连接、
+实现内部 `natsnet` 包，为后续 M13 NATS RPC 和服务发现控制面提供 Core NATS 连接、
 发布订阅、有限重连、认证、TLS、Pending 限制、状态事件以及可完整等待的资源生命周期。
 
 M6 只处理 Subject 和原始字节消息，不实现 Origin RPC Subject、RequestID、ServiceName、

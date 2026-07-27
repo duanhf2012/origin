@@ -20,10 +20,17 @@ type lifecycleService struct {
 	startErr   error
 	stopErr    error
 	panicPhase string
+	onInit     func()
+	onStart    func()
+	onStop     func()
 }
 
 func (target *lifecycleService) OnInit() error {
 	*target.events = append(*target.events, "init:"+target.label)
+	if target.onInit != nil {
+		// 可选探针只观察 Node 内部资源状态，不改变生产生命周期顺序。
+		target.onInit()
+	}
 	if target.panicPhase == "init" {
 		panic("init panic")
 	}
@@ -32,6 +39,10 @@ func (target *lifecycleService) OnInit() error {
 
 func (target *lifecycleService) OnStart(context.Context) error {
 	*target.events = append(*target.events, "start:"+target.label)
+	if target.onStart != nil {
+		// OnStart 探针用于验证启动回调之前的框架资源已经可用。
+		target.onStart()
+	}
 	if target.panicPhase == "start" {
 		panic("start panic")
 	}
@@ -40,6 +51,10 @@ func (target *lifecycleService) OnStart(context.Context) error {
 
 func (target *lifecycleService) OnStop(context.Context) error {
 	*target.events = append(*target.events, "stop:"+target.label)
+	if target.onStop != nil {
+		// OnStop 探针用于验证业务清理期间 Node 资源尚未被提前回收。
+		target.onStop()
+	}
 	if target.panicPhase == "stop" {
 		panic("stop panic")
 	}
@@ -71,6 +86,44 @@ func TestNodeLifecycleOrder(t *testing.T) {
 	}
 }
 
+func TestNodeTimerEngineLifecycleOrder(t *testing.T) {
+	events := make([]string, 0, 3)
+	target := &lifecycleService{label: "timer-probe", events: &events}
+	current := newTestNode(t, target)
+
+	// OnInit 发生在 Engine Start 之前，避免初始化失败后曾经启动后台 goroutine。
+	target.onInit = func() {
+		stats := current.timerEngine.Stats()
+		if stats.Running || stats.Closed {
+			t.Errorf("OnInit 中 TimerEngine 状态 = %+v，期望尚未启动", stats)
+		}
+	}
+	// OnStart 和 OnStop 都需要时间基础设施继续运行，供后续 Await/Timer 清理复用。
+	target.onStart = func() {
+		stats := current.timerEngine.Stats()
+		if !stats.Running || stats.Closed {
+			t.Errorf("OnStart 中 TimerEngine 状态 = %+v，期望运行中", stats)
+		}
+	}
+	target.onStop = func() {
+		stats := current.timerEngine.Stats()
+		if !stats.Running || stats.Closed {
+			t.Errorf("OnStop 中 TimerEngine 状态 = %+v，期望仍运行", stats)
+		}
+	}
+
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := current.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	stats := current.timerEngine.Stats()
+	if stats.Running || !stats.Closed {
+		t.Fatalf("Node Stop 后 TimerEngine 状态 = %+v，期望已关闭", stats)
+	}
+}
+
 func TestNodeInitFailureDoesNotStartOrStop(t *testing.T) {
 	events := make([]string, 0, 2)
 	cause := errors.New("init failed")
@@ -87,6 +140,10 @@ func TestNodeInitFailureDoesNotStartOrStop(t *testing.T) {
 	}
 	if rollbackErr := current.Rollback(context.Background()); rollbackErr != nil {
 		t.Fatalf("空 Rollback() error = %v", rollbackErr)
+	}
+	stats := current.timerEngine.Stats()
+	if stats.Running || !stats.Closed {
+		t.Fatalf("OnInit 失败回滚后的 TimerEngine 状态 = %+v，期望未启动即关闭", stats)
 	}
 }
 
@@ -111,6 +168,41 @@ func TestNodeStartFailureRollsBackEnteredServices(t *testing.T) {
 	}
 	if !slices.Equal(events, want) {
 		t.Fatalf("回滚顺序 = %v, want %v", events, want)
+	}
+	if stats := current.timerEngine.Stats(); stats.Running || !stats.Closed {
+		t.Fatalf("OnStart 失败回滚后的 TimerEngine 状态 = %+v，期望已关闭", stats)
+	}
+}
+
+func TestNodeTimerEngineStartFailureIsLocatedAndRecoverable(t *testing.T) {
+	events := make([]string, 0, 2)
+	current := newTestNode(t, &lifecycleService{label: "a", events: &events})
+
+	// 人工预启动内部 Engine，稳定制造 Node 正常路径中的重复 Start 错误。
+	if err := current.timerEngine.Start(); err != nil {
+		t.Fatalf("预启动 TimerEngine error = %v", err)
+	}
+	err := current.Start(context.Background())
+	var located interface {
+		LifecycleContext() (nodeID, serviceName, phase string)
+	}
+	if !errors.As(err, &located) {
+		t.Fatalf("TimerEngine 启动错误没有生命周期位置: %v", err)
+	}
+	nodeID, serviceName, phase := located.LifecycleContext()
+	if nodeID != "game-1" || serviceName != "" || phase != "timer_engine_start" {
+		t.Fatalf("TimerEngine 错误位置 = %q/%q/%q", nodeID, serviceName, phase)
+	}
+	if !slices.Equal(events, []string{"init:a"}) {
+		t.Fatalf("TimerEngine 启动失败后仍执行了 Service 启停: %v", events)
+	}
+
+	// 失败回滚仍需关闭已运行 Engine，且没有进入 OnStart 的 Service 不能收到 OnStop。
+	if rollbackErr := current.Rollback(context.Background()); rollbackErr != nil {
+		t.Fatalf("Rollback() error = %v", rollbackErr)
+	}
+	if stats := current.timerEngine.Stats(); stats.Running || !stats.Closed {
+		t.Fatalf("回滚后 TimerEngine 状态 = %+v，期望已关闭", stats)
 	}
 }
 
@@ -307,5 +399,13 @@ func newTestNodeWithConfig(
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	t.Cleanup(func() {
+		// 测试若在断言前提前失败，仍回收尚未关闭的 Engine，避免 goroutine 或 Timer 泄漏污染后续用例。
+		if stats := current.timerEngine.Stats(); !stats.Closed {
+			if rollbackErr := current.Rollback(context.Background()); rollbackErr != nil {
+				t.Errorf("测试清理 Rollback() error = %v", rollbackErr)
+			}
+		}
+	})
 	return current
 }

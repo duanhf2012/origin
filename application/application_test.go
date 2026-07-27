@@ -13,6 +13,7 @@ import (
 	"github.com/duanhf2012/origin/v3/command"
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -134,6 +135,8 @@ nodes:
     services: [lifecycleTestService]
   - id: bad-1
     services: [lifecycleTestService]
+  - id: later-1
+    services: [lifecycleTestService]
 `)
 	app := newSilentApplication()
 	app.Setup(&lifecycleTestService{})
@@ -158,6 +161,15 @@ nodes:
 	badService, _ := bad.Service("lifecycleTestService")
 	if badService.(*lifecycleTestService).stopped {
 		t.Fatal("OnInit 失败 Service 不应调用 OnStop")
+	}
+	// 失败 Node 之后已经完成装配但尚未启动的 Node 也必须回收内部资源。
+	later, _ := app.Node("later-1")
+	if later.State() != node.StateFailed {
+		t.Fatalf("未启动 Node 回滚后 State = %v，期望 Failed", later.State())
+	}
+	laterService, _ := later.Service("lifecycleTestService")
+	if laterService.(*lifecycleTestService).stopped {
+		t.Fatal("尚未 OnStart 的后续 Service 不应调用 OnStop")
 	}
 }
 
@@ -419,6 +431,33 @@ func TestApplicationConstructionAndCreatedStopEdges(t *testing.T) {
 	app.Setup(&lifecycleTestService{})
 	if err := app.catalog.freeze(); err == nil {
 		t.Fatal("Stopped 后 Setup 未记录错误")
+	}
+}
+
+func TestRollbackBuiltNodesPreservesPrimaryError(t *testing.T) {
+	// 直接构造一个尚未启动的 Node，模拟后续 Node 在装配阶段失败的部分初始化场景。
+	target := &lifecycleTestService{}
+	built, err := node.New(
+		node.Config{ID: "built-1", Services: []string{"LifecycleService"}},
+		[]node.ServiceBinding{{
+			Name:     "LifecycleService",
+			Template: "LifecycleService",
+			Service:  target,
+		}},
+		originlog.NewNop(),
+	)
+	if err != nil {
+		t.Fatalf("node.New() error = %v", err)
+	}
+	primary := errors.New("next node build failed")
+
+	// 回滚必须保留原始失败，同时把已创建 Node 置为不可复用的 Failed。
+	result := rollbackBuiltNodes([]*node.Node{built}, primary)
+	if !errors.Is(result, primary) {
+		t.Fatalf("rollbackBuiltNodes() 丢失原始错误: %v", result)
+	}
+	if built.State() != node.StateFailed {
+		t.Fatalf("回滚后 Node State = %v，期望 Failed", built.State())
 	}
 }
 

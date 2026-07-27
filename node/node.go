@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/duanhf2012/origin/v3/errs"
+	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/service"
 )
@@ -33,6 +34,8 @@ type Node struct {
 	byName   map[string]*serviceEntry
 	// started 只包含已经进入过 OnStart 的 Service，决定唯一停止顺序。
 	started []*serviceEntry
+	// timerEngine 是当前 Node 独占的 Deadline 时间轮；它先于 OnStart 启动、晚于 OnStop 关闭。
+	timerEngine *timerwheel.Engine
 }
 
 // serviceEntry 保存单个 Service 的运行身份和由 Node 拥有的状态。
@@ -111,6 +114,13 @@ func New(config Config, bindings []ServiceBinding, logger originlog.Logger) (*No
 		instance.services = append(instance.services, entry)
 		instance.byName[binding.Name] = entry
 	}
+
+	// 所有 Service 绑定成功后再创建 Node 独占时间轮，避免前序校验失败时遗留底层 Timer。
+	timerEngine, err := timerwheel.New(timerwheel.DefaultOptions())
+	if err != nil {
+		return nil, fmt.Errorf("创建 Node %q TimerEngine: %w", config.ID, err)
+	}
+	instance.timerEngine = timerEngine
 	return instance, nil
 }
 
@@ -200,7 +210,17 @@ func (node *Node) Start(ctx context.Context) error {
 		entry.state.Store(uint32(service.StateInitialized))
 	}
 
-	// 全部 OnInit 成功后再进入启动阶段；started 在调用前追加以保证失败实例也会 OnStop。
+	// 全部 OnInit 成功后启动 Node 唯一时间轮，使每个 OnStart 都能依赖统一 Deadline 能力。
+	if err := node.timerEngine.Start(); err != nil {
+		node.state.Store(uint32(StateFailed))
+		return &lifecycleContext{
+			nodeID: node.id,
+			phase:  "timer_engine_start",
+			cause:  err,
+		}
+	}
+
+	// 时间轮运行后再进入启动阶段；started 在调用前追加以保证失败实例也会 OnStop。
 	for _, entry := range node.services {
 		// 在进入每个业务回调前观察取消，避免超时后继续启动后续 Service。
 		if err := contextFailure(ctx); err != nil {
@@ -252,7 +272,9 @@ func (node *Node) Rollback(ctx context.Context) error {
 	if ctx == nil {
 		return invalidArgument(fmt.Sprintf("Node %q 的回滚 Context 不能为空", node.id))
 	}
+	// 失败实例仍先获得反序 OnStop，最后再关闭 Node 时间轮并等待其 goroutine 退出。
 	result := node.stopStarted(ctx, true)
+	result = errors.Join(result, node.timerEngine.Close())
 	node.state.Store(uint32(StateFailed))
 	return result
 }
@@ -280,7 +302,9 @@ func (node *Node) Stop(ctx context.Context) error {
 	// 正常停止会发布 Stopping/Stopped；失败回滚由 Rollback 保持 Failed。
 	node.state.Store(uint32(StateStopping))
 	node.logger.Info("node stopping")
+	// Service 清理阶段保留时间轮运行，全部 OnStop 返回后才回收 Node 最后的后台资源。
 	result := node.stopStarted(ctx, false)
+	result = errors.Join(result, node.timerEngine.Close())
 	node.state.Store(uint32(StateStopped))
 	node.logger.Info("node stopped")
 	return result
@@ -345,6 +369,15 @@ type lifecycleContext struct {
 
 // Error 返回包含 Node、Service 和生命周期阶段的诊断文本。
 func (failure *lifecycleContext) Error() string {
+	// Node 自身资源阶段没有 ServiceName，使用单独文本避免输出含糊的空 Service。
+	if failure.serviceName == "" {
+		return fmt.Sprintf(
+			"Node %q %s 失败: %v",
+			failure.nodeID,
+			failure.phase,
+			failure.cause,
+		)
+	}
 	return fmt.Sprintf(
 		"Node %q Service %q %s 失败: %v",
 		failure.nodeID,
