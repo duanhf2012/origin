@@ -145,17 +145,22 @@ func validateFileLink(path, resolvedRoot string) (fs.FileInfo, error) {
 	if err != nil {
 		return nil, invalidConfig("配置文件链接目标无效 " + path + ": " + err.Error())
 	}
+	// WalkDir 本来就不会递归目录链接；先识别最终类型，确保根内或根外的目录链接都按
+	// “不跟随、不读取”规则安全忽略，而不会被误判成越界配置文件。
+	info, err := os.Stat(absoluteTarget)
+	if err != nil {
+		return nil, invalidConfig("无法访问配置文件链接目标 " + path + ": " + err.Error())
+	}
+	if info.IsDir() {
+		return info, nil
+	}
 	// 相对路径为 .. 或以 ../ 开头表示目标越过真实根边界。
 	relative, err := filepath.Rel(resolvedRoot, absoluteTarget)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return nil, invalidConfig("配置文件链接越出配置目录: " + path)
 	}
-	// 最终目标必须存在，并且只能是普通文件或可被忽略的目录。
-	info, err := os.Stat(absoluteTarget)
-	if err != nil {
-		return nil, invalidConfig("无法访问配置文件链接目标 " + path + ": " + err.Error())
-	}
-	if !info.Mode().IsRegular() && !info.IsDir() {
+	// 非目录链接仍必须指向根目录内的普通文件，设备和管道不能进入解析层。
+	if !info.Mode().IsRegular() {
 		return nil, invalidConfig("配置文件链接目标不是普通文件: " + path)
 	}
 	// 返回目标信息供调用方区分文件链接和目录链接。

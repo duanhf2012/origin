@@ -1,0 +1,18 @@
+log:
+  mode: async
+  console:
+    enabled: true
+    level: info
+    format: text
+
+buffer_pool:
+  track_usage: false
+
+nodes:
+  - id: gateway-1
+    services:
+      - GatewayService
+  - id: game-1
+    services:
+      - PlayerService
+      - scene-1001:PlayerService
