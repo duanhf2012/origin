@@ -2,7 +2,7 @@
 
 > 文档状态：讨论中  
 > 创建日期：2026-07-27  
-> 最后更新：2026-07-27  
+> 最后更新：2026-07-28
 > 当前结论：已确认部分作为后续讨论基线；完成全部开工 Review 前不得实施
 
 ## 1. 文档目的
@@ -71,7 +71,7 @@ M11 必须同时遵守：
 - `//origin:rpc` 契约发现和完整签名校验；
 - ContractID、MethodID 和契约指纹生成；
 - 强类型客户端；
-- `rpc.Target`、`rpc.ToService` 和 `rpc.ToNodeService`；
+- `rpc.Target`、`rpc.ToService` 和 `rpc.ToServiceOnNode`；
 - Service 实现自动识别；
 - 静态 Dispatcher 和 Service 适配方法；
 - Node 内本地 Dispatcher 注册；
@@ -216,7 +216,7 @@ client := game.NewPlayerRPCClient(
 ```go
 client := game.NewPlayerRPCClient(
     s,
-    rpc.ToNodeService("player-2", "PlayerService"),
+    rpc.ToServiceOnNode("player-2", "PlayerService"),
 )
 ```
 
@@ -273,7 +273,7 @@ type Target struct {
 
 func ToService(serviceName string) Target
 
-func ToNodeService(
+func ToServiceOnNode(
     nodeID string,
     serviceName string,
 ) Target
@@ -302,7 +302,7 @@ Target 使用具体值类型，不使用接口、闭包或 `map[string]any`，�
 M11 尚未接入服务发现：
 
 - `ToService("PlayerService")` 只在调用方所属 Node 中按实际 ServiceName 精确查找；
-- `ToNodeService(nodeID, "PlayerService")` 只在 `nodeID` 等于调用方所属 NodeID 时继续
+- `ToServiceOnNode(nodeID, "PlayerService")` 只在 `nodeID` 等于调用方所属 NodeID 时继续
   本地查找；
 - 指定其他 NodeID 时返回 `CodeRPCNoRoute`；
 - 找到 Service 但其契约不匹配时返回明确的 RPC 契约错误；
@@ -864,8 +864,8 @@ rpc
 至少覆盖：
 
 1. ToService 调用同 Node Service；
-2. ToNodeService 指定当前 Node；
-3. ToNodeService 指定其他 Node 返回无路由；
+2. ToServiceOnNode 指定当前 Node 中的 Service；
+3. ToServiceOnNode 指定其他 Node 时返回无路由；
 4. 空 Target 和非法名称；
 5. 目标不存在；
 6. 目标契约不匹配；
