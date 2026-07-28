@@ -33,6 +33,20 @@ func TestStableCodes(t *testing.T) {
 		{name: "service queue full", code: errs.CodeServiceQueueFull, want: 1004},
 		{name: "graceful shutdown timeout", code: errs.CodeGracefulShutdownTimeout, want: 1005},
 		{name: "service not ready", code: errs.CodeServiceNotReady, want: 1006},
+		{name: "rpc no route", code: errs.CodeRPCNoRoute, want: 2001},
+		{name: "rpc invalid route key", code: errs.CodeRPCInvalidRouteKey, want: 2002},
+		{name: "rpc route selector failed", code: errs.CodeRPCRouteSelectorFailed, want: 2003},
+		{name: "rpc contract mismatch", code: errs.CodeRPCContractMismatch, want: 2004},
+		{name: "rpc method not found", code: errs.CodeRPCMethodNotFound, want: 2005},
+		{name: "rpc encode failed", code: errs.CodeRPCEncodeFailed, want: 2006},
+		{name: "rpc request decode failed", code: errs.CodeRPCRequestDecodeFailed, want: 2007},
+		{name: "rpc response decode failed", code: errs.CodeRPCResponseDecodeFailed, want: 2008},
+		{name: "rpc execution panic", code: errs.CodeRPCExecutionPanic, want: 2009},
+		{
+			name: "rpc broadcast partial failed",
+			code: errs.CodeRPCBroadcastPartialFailed,
+			want: 2010,
+		},
 		{name: "transport unavailable", code: errs.CodeTransportUnavailable, want: 3001},
 		{name: "transport closed", code: errs.CodeTransportClosed, want: 3002},
 		{name: "transport overloaded", code: errs.CodeTransportOverloaded, want: 3003},
@@ -46,6 +60,39 @@ func TestStableCodes(t *testing.T) {
 	for _, test := range tests {
 		if test.code != test.want {
 			t.Errorf("%s code = %d, want %d", test.name, test.code, test.want)
+		}
+	}
+}
+
+// TestRPCFixedErrors 验证 M11 新增错误码都复用固定哨兵，避免 RPC 高频失败动态分配。
+func TestRPCFixedErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		code errs.Code
+		want error
+	}{
+		{errs.CodeRPCNoRoute, errs.ErrRPCNoRoute},
+		{errs.CodeRPCInvalidRouteKey, errs.ErrRPCInvalidRouteKey},
+		{errs.CodeRPCRouteSelectorFailed, errs.ErrRPCRouteSelectorFailed},
+		{errs.CodeRPCContractMismatch, errs.ErrRPCContractMismatch},
+		{errs.CodeRPCMethodNotFound, errs.ErrRPCMethodNotFound},
+		{errs.CodeRPCEncodeFailed, errs.ErrRPCEncodeFailed},
+		{errs.CodeRPCRequestDecodeFailed, errs.ErrRPCRequestDecodeFailed},
+		{errs.CodeRPCResponseDecodeFailed, errs.ErrRPCResponseDecodeFailed},
+		{errs.CodeRPCExecutionPanic, errs.ErrRPCExecutionPanic},
+		{errs.CodeRPCBroadcastPartialFailed, errs.ErrRPCBroadcastPartialFailed},
+	}
+
+	// 每个固定码必须返回同一个只读对象，并且 CodeOf 能恢复原始数值。
+	for _, test := range tests {
+		first := errs.New(test.code)
+		second := errs.New(test.code)
+		if first != test.want || second != test.want || first != second {
+			t.Errorf("New(%d) 没有复用固定哨兵", test.code)
+		}
+		if got := errs.CodeOf(first); got != test.code {
+			t.Errorf("CodeOf(New(%d)) = %d", test.code, got)
 		}
 	}
 }

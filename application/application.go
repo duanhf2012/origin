@@ -449,6 +449,7 @@ func (app *Application) buildNodes(configs []node.Config) ([]*node.Node, error) 
 			node.Options{
 				MaxTimersPerNode: app.options.Timer.MaxTimersPerNode,
 				TimerLocation:    app.options.Timer.Location,
+				BufferPool:       app.bufferPool,
 			},
 		)
 		if err != nil {

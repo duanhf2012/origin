@@ -10,6 +10,23 @@ import (
 	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 )
 
+// managedDeadlineContext 为 M8 管理的默认超时补充标准 Context Deadline 语义。
+//
+// 内嵌 Context 只负责取消、Done、Err 和 Value；deadline 由 Service 在进入 Await 时一次
+// 计算并冻结。该类型不会创建 Go Runtime Timer，真正到期仍由唯一 M8 DeadlineQueue 驱动。
+type managedDeadlineContext struct {
+	context.Context
+	deadline time.Time
+}
+
+// Deadline 返回 M8 当前唯一管理的绝对截止时间。
+func (managed *managedDeadlineContext) Deadline() (time.Time, bool) {
+	if managed == nil || managed.deadline.IsZero() {
+		return time.Time{}, false
+	}
+	return managed.deadline, true
+}
+
 // await 释放当前 Task 的执行权、执行等待函数，并在恢复原 goroutine 后返回结果。
 func (scheduler *serviceScheduler) await(
 	ctx context.Context,
@@ -51,10 +68,11 @@ func (scheduler *serviceScheduler) await(
 		return errs.ErrServiceQueueFull
 	}
 
-	// 调用方显式 Deadline 优先；没有显式值时使用已经冻结的 Service/Node 默认值。
+	// 调用方显式 Deadline 已由父 Context 的 Go Runtime Timer 管理，不能再登记 M8。
+	// 没有显式值时才使用冻结的 Service/Node 默认值，并建立唯一一条 M8 Deadline。
 	now := time.Now()
-	deadlineAt, hasDeadline := ctx.Deadline()
-	if !hasDeadline {
+	deadlineAt, explicitDeadline := ctx.Deadline()
+	if !explicitDeadline {
 		deadlineAt = now.Add(scheduler.config.DefaultAwaitTimeout)
 	}
 	delay := time.Until(deadlineAt)
@@ -62,12 +80,24 @@ func (scheduler *serviceScheduler) await(
 		scheduler.mu.Unlock()
 		return errs.ErrDeadlineExceeded
 	}
-	waitContext, cancelWait := context.WithCancelCause(ctx)
-	deadlineID, err := scheduler.deadlineQueue.ScheduleAfter(delay)
-	if err != nil {
-		scheduler.mu.Unlock()
-		cancelWait(err)
-		return errs.Wrap(errs.CodeInternal, err)
+
+	// 先创建不带新 Timer 的可取消子 Context。默认超时路径再用轻量包装公开 Deadline，
+	// 使 Redis、数据库和后续 RPC 等下游仍能读取标准截止时间。
+	cancelContext, cancelWait := context.WithCancelCause(ctx)
+	var waitContext context.Context = cancelContext
+	deadlineID := timerwheel.InvalidDeadlineID
+	if !explicitDeadline {
+		waitContext = &managedDeadlineContext{
+			Context:  cancelContext,
+			deadline: deadlineAt,
+		}
+		var err error
+		deadlineID, err = scheduler.deadlineQueue.ScheduleAfter(delay)
+		if err != nil {
+			scheduler.mu.Unlock()
+			cancelWait(err)
+			return errs.Wrap(errs.CodeInternal, err)
+		}
 	}
 
 	// 每次 Await 增加代次并建立全新交接 Channel；同一 Task 连续 Await 时，旧 Deadline 和
@@ -83,11 +113,14 @@ func (scheduler *serviceScheduler) await(
 	task.awaitError = nil
 	task.awaitPanic = nil
 	task.awaitPanicStack = nil
-	scheduler.deadlineBindings[deadlineID] = deadlineBinding{
-		kind:       deadlineBindingAwait,
-		task:       task,
-		token:      token,
-		generation: generation,
+	if deadlineID != timerwheel.InvalidDeadlineID {
+		// 只有默认超时需要 watcher 绑定；显式 Deadline 直接由父 Context 取消 waitContext。
+		scheduler.deadlineBindings[deadlineID] = deadlineBinding{
+			kind:       deadlineBindingAwait,
+			task:       task,
+			token:      token,
+			generation: generation,
+		}
 	}
 
 	task.state = taskWaiting

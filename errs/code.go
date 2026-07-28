@@ -35,6 +35,27 @@ const (
 	// CodeServiceNotReady 表示 Service 尚未完成启动或调度器尚未开放。
 	CodeServiceNotReady Code = 1006
 
+	// CodeRPCNoRoute 表示当前 RPC Target 没有可用的 Service。
+	CodeRPCNoRoute Code = 2001
+	// CodeRPCInvalidRouteKey 表示 RPC 路由键类型无效。
+	CodeRPCInvalidRouteKey Code = 2002
+	// CodeRPCRouteSelectorFailed 表示自定义 RPC 路由选择失败。
+	CodeRPCRouteSelectorFailed Code = 2003
+	// CodeRPCContractMismatch 表示调用方和目标 Service 的完整 RPC 契约不一致。
+	CodeRPCContractMismatch Code = 2004
+	// CodeRPCMethodNotFound 表示目标契约不包含给定 MethodID。
+	CodeRPCMethodNotFound Code = 2005
+	// CodeRPCEncodeFailed 表示 RPC 请求或响应静态编码失败。
+	CodeRPCEncodeFailed Code = 2006
+	// CodeRPCRequestDecodeFailed 表示目标端无法按契约解码请求。
+	CodeRPCRequestDecodeFailed Code = 2007
+	// CodeRPCResponseDecodeFailed 表示调用端无法按契约解码响应。
+	CodeRPCResponseDecodeFailed Code = 2008
+	// CodeRPCExecutionPanic 表示目标 RPC 业务方法发生 panic。
+	CodeRPCExecutionPanic Code = 2009
+	// CodeRPCBroadcastPartialFailed 表示多目标广播只有部分目标完成本地提交。
+	CodeRPCBroadcastPartialFailed Code = 2010
+
 	// CodeTransportUnavailable 表示 Dial、Accept 或底层 I/O 导致传输不可用。
 	CodeTransportUnavailable Code = 3001
 	// CodeTransportClosed 表示本地 Transport 或连接已经关闭。
@@ -86,6 +107,26 @@ func codeText(code Code) string {
 		return "graceful shutdown timeout"
 	case CodeServiceNotReady:
 		return "service not ready"
+	case CodeRPCNoRoute:
+		return "rpc route not found"
+	case CodeRPCInvalidRouteKey:
+		return "invalid rpc route key"
+	case CodeRPCRouteSelectorFailed:
+		return "rpc route selector failed"
+	case CodeRPCContractMismatch:
+		return "rpc contract mismatch"
+	case CodeRPCMethodNotFound:
+		return "rpc method not found"
+	case CodeRPCEncodeFailed:
+		return "rpc encode failed"
+	case CodeRPCRequestDecodeFailed:
+		return "rpc request decode failed"
+	case CodeRPCResponseDecodeFailed:
+		return "rpc response decode failed"
+	case CodeRPCExecutionPanic:
+		return "rpc execution panic"
+	case CodeRPCBroadcastPartialFailed:
+		return "rpc broadcast partially failed"
 	case CodeTransportUnavailable:
 		return "transport unavailable"
 	case CodeTransportClosed:

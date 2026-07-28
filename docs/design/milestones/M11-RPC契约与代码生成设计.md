@@ -1,9 +1,9 @@
 # M11 RPC 契约与代码生成设计
 
-> 文档状态：已确认
+> 文档状态：已实现并验收
 > 创建日期：2026-07-27  
 > 最后更新：2026-07-28
-> 当前结论：M11 设计 Review 已完成；实施计划必须先修正 M9 唯一计时器差异
+> 当前结论：M11 已完成实现、测试、性能基线和 Windows/Linux 验收
 
 ## 1. 文档目的
 
@@ -764,7 +764,7 @@ Service 指针查找 Runtime。生成客户端只在构造时完成一次接口�
 
 ### 11.1 最小接口
 
-当前 Dispatcher 草案为：
+Dispatcher 最终接口为：
 
 ```go
 type ContractFingerprint [32]byte
@@ -785,8 +785,8 @@ type Dispatcher interface {
         methodID MethodID,
         kind CallKind,
         request []byte,
-        responseDst []byte,
-    ) ([]byte, error)
+        response ResponseWriter,
+    ) (ResponseWriter, error)
 }
 ```
 
@@ -798,14 +798,25 @@ Dispatcher 仍调用真实业务方法，但跳过业务结果和业务 `error` 
 
 - `ContractID` 和 `Fingerprint` 只读取生成期常量，不在调用热路径计算；
 - `request` 是只读的已编码业务载荷；
-- `responseDst` 由 `rpc.Runtime` 提供，Dispatcher 把响应追加到该 Slice；
-- 返回的 Slice 是本次完整响应，可以与 `responseDst` 共享底层数组；
-- Dispatcher 返回后不能继续持有 `ctx`、`request`、`responseDst` 或返回 Slice；
+- `ResponseWriter` 是 `rpc.Runtime` 在目标任务栈上创建的单次响应写入器，使用值传入和值
+  返回，避免把指针传给 Dispatcher 接口导致 Go 逃逸分析强制堆分配；
+- 生成 Dispatcher 在业务方法成功返回后先计算准确响应大小，再调用
+  `(&response).Allocate(size)` 一次取得最终可写 Slice，然后把更新后的值返回 Runtime；
+- `CallNotify` 传入零值 `ResponseWriter`，并且不能申请或编码响应；
+- Dispatcher 返回后不能继续持有 `ctx`、`request`、`ResponseWriter` 或已分配 Slice；
 - Runtime 管理请求和响应 Buffer 的最终释放，Dispatcher 不直接接触 BufferPool；
 - Notify 仍使用同一静态方法分派；即使原方法带返回值，也不得编码或保留业务响应，目标
   业务错误和 panic 只进入目标侧诊断；
 - Broadcast 到达每个目标后同样使用 `CallNotify`，不建立第三种 Dispatcher 分支；
 - 未知 MethodID、解码失败、业务错误、panic 和编码失败均返回统一错误。
+
+不使用原草案中的 `responseDst []byte`，原因是 Runtime 在业务方法执行前无法知道动态
+响应的准确大小。提前传入固定容量会造成大 Buffer 浪费，容量不足时又会触发隐藏的 Go
+堆扩容和二次复制。`ResponseWriter` 只保存当前 Runtime 和一个响应 Buffer 指针，不是
+通用 `io.Writer`，也不引入接口分派；它使生成代码可以在业务方法返回后保持“一次申请、
+一次写入、所有权明确”的低延迟路径。实现阶段的逃逸分析确认，原先传入
+`*ResponseWriter` 会因接口调用保守逃逸；值传入/值返回后该对象不再逃逸，并使完整同
+Node Await 每次调用减少一次分配。
 
 ### 11.2 静态分派
 
@@ -1561,6 +1572,7 @@ panic。客户端不持有独立 TCP/NATS 连接。
 | 14 | Broadcast 是否在 M11 生成 | 所有 RPC 都生成 `BroadcastXxx`；M11 对当前 Runtime 已知本地目标执行真实通知投递，后续只扩展发现快照来源 | 已确认 |
 | 15 | 不支持类型与自定义 Codec 扩展 | `origingen` 先验证完整类型图再原子生成；M11 不开放自定义 Codec，但保留生成期静态计划，M12 生成直接调用且 Codec 标识进入指纹 | 已确认 |
 | 16 | M11 池化和编码性能 | 复用 Buffer/Task/Deadline/Timer 池；业务对象不池化；`localCall` 数据决定；生成 Codec 直接写最终 Buffer，并保存跨平台分配和尾延迟基线 | 已确认 |
+| 17 | Dispatcher 如何在未知响应大小时取得最终 Buffer | 使用 Runtime 栈上的具体 `ResponseWriter` 值传入和值返回；生成代码先精确计算大小再一次 Allocate；Notify 传零值，不使用固定预留 Slice 或隐藏堆扩容，并避免接口指针参数导致堆逃逸 | 已确认 |
 
 此外，当前 M9 实现与已确认的唯一计时器设计仍有差异，必须作为 M11 实施前置修正，不属于
 可以跳过的后续优化。
@@ -1653,3 +1665,121 @@ Go RPC 接口
 这一闭环优先验证业务接口、生成结果、数据边界和 Service 单执行权，不提前加入网络、发现
 和复杂路由。M12～M14 只在该稳定基础上依次补齐自定义 Codec、TCP 和 NATS，不能重新
 发明客户端外观、Dispatcher 语义或 M11 已确定的数据表示。
+
+## 22. 实施与验收结果
+
+M11 于 2026-07-28 按本文范围完成实现，实际交付包括：
+
+1. `rpc` 公开包的 Target、稳定 ID、指纹、静态 Codec 基础、ResponseWriter、Client 和
+   每 Node 独立 Runtime；
+2. `cmd/origingen` 与 `internal/rpcgen`，支持 `origingen rpc ./...` 和
+   `origingen rpc --check ./...`；
+3. 生成前完整签名和类型图校验、SHA-256 截断碰撞检查、确定性文件内容、旧生成文件
+   Overlay、临时文件替换和多余文件清理；
+4. 基础类型、具名类型、普通指针、数组、Slice、Map、普通结构体、顶层 Protobuf 和嵌套
+   Protobuf 普通结构路径的静态编解码；
+5. Await、Async、Notify、Broadcast、同 Service 自调用、精确 Node + Service、本地错误、
+   panic、超时、取消、队列过载和 Buffer 所有权闭环；
+6. M9 唯一计时器差异修正：显式 Deadline 只使用调用方 Go Timer，无显式 Deadline 时只
+   使用一条 M8 Deadline，并由轻量 Context 正确公开 `Deadline()`。
+
+### 22.1 Async 回调预约的最终实现
+
+实施时没有向 Scheduler 增加新的 Reserved Task 状态或第二套 Future 调度器。最终采用更
+精简的方式：
+
+1. Async 在提交目标请求前，先向调用方 Service 的普通有界 FIFO 投递一个内部完成任务；
+2. 该任务与业务 `DispatchAsync` 共用 `max_tasks`、停止排空、panic 边界和统计；
+3. 目标提交成功后打开提交门闩，完成任务通过现有 `Service.Await` 等待唯一结果；
+4. 目标提交立即失败时打开中止门闩，内部任务自行结束且不调用业务 callback；
+5. 返回 nil 后 callback 在该完成任务恢复调用方 Service 执行权后严格执行一次；
+6. 显式 Context Deadline 继续只使用原 Go Timer；无 Deadline 时继续只使用调用方
+   Service 的 M8 默认 Deadline。
+
+这一实现既在目标提交前真正预约了回调容量，又没有复制 Scheduler 的任务状态、Deadline
+绑定和停止逻辑。
+
+### 22.2 panic 和日志的最终边界
+
+请求—响应 RPC 的业务 panic 在 RPC Dispatcher 外层转换为
+`CodeRPCExecutionPanic`，同时由目标 Runtime 记录一条带业务堆栈的错误日志，不再重新
+抛给 Service 根任务边界产生第二条重复日志。Notify/Broadcast 的业务 error 或 panic
+同样只进入目标侧诊断，不回传给已经完成接受阶段的调用方。
+
+### 22.3 Buffer 与 localCall 池化结论
+
+请求和响应 Buffer 复用 Application 共享的 M2 BufferPool；Service Task、Deadline 和
+Timer 继续复用现有池。普通业务结果不池化。
+
+`localCall` 保持不池化，原因不是遗漏，而是已测量后的明确决定：
+
+- Await 状态只需要一个完成 Channel，Windows 基线约 `131～140ns/op`、
+  `208B/op`、`2 allocs/op`；Linux 约 `73.6～75.5ns/op`、`208B/op`、`2 allocs/op`；
+- Async 还需要提交和中止门闩，Windows 约 `258～270ns/op`、`432B/op`、
+  `4 allocs/op`；Linux 约 `137.6～138.2ns/op`、`432B/op`、`4 allocs/op`；
+- Channel 到达终态后已经关闭，不能直接复用；仅池化外层小对象最多减少一次分配，却要
+  增加代次、晚到响应和 ABA 防护状态机；
+- 当前收益不足以抵消代码复杂度和错误风险，因此遵守开发原则保持未池化基线。M13 的
+  远程 `pendingCall` 有更长生命周期和真实并发表，再独立测量是否池化。
+
+### 22.4 性能基线
+
+Go 1.26.5、Windows amd64、AMD Ryzen 7 7840HS：
+
+| 项目 | 结果 |
+|---|---:|
+| Target 构造 | `约 12.3～12.6ns/op`，`0 B/op`，`0 allocs/op` |
+| 24B 基础 Codec 往返 | `约 34.5～35.9ns/op`，`0 B/op`，`0 allocs/op` |
+| 同 Node 生成 Await 闭环 | `约 4.1～4.4us/op`，`1243 B/op`，`23 allocs/op` |
+| 16B `[]byte` Codec 往返 | `约 51.9～54.0ns/op`，`16 B/op`，`1 allocs/op` |
+| 1KB `[]byte` Codec 往返 | `约 407～423ns/op`，`1024 B/op`，`1 allocs/op` |
+| 接近 4M `[]byte` Codec 往返 | `约 0.90～0.98ms/op`，`约 8.0 MiB/op`，`3 allocs/op` |
+
+Go 1.26.5、Ubuntu 26.04 linux/amd64、QEMU Virtual CPU：
+
+| 项目 | 结果 |
+|---|---:|
+| Target 构造 | `约 12.36～12.50ns/op`，`0 B/op`，`0 allocs/op` |
+| 24B 基础 Codec 往返 | `约 47.90～48.48ns/op`，`0 B/op`，`0 allocs/op` |
+| 同 Node 生成 Await 闭环 | `约 3.64～3.77us/op`，`1242 B/op`，`23 allocs/op` |
+| 同 Node Await P50 | `约 2.91～2.95us` |
+| 同 Node Await P95 | `约 6.08～6.37us` |
+| 同 Node Await P99 | `约 10.66～11.29us` |
+
+同 Node 闭环包含请求大小计算、BufferPool、编码、目标 Service FIFO、静态 Dispatcher、
+解码、业务方法、响应编码、调用方 Await 恢复和结果解码，不是直接函数调用数据。
+
+最终逃逸分析确认 `ResponseWriter` 值传入/值返回后不再逃逸。与最初的接口指针方案相比，
+完整闭环从 `24 allocs/op` 降至 `23 allocs/op`；业务结果、闭包、Task Context 和
+`localCall` 仍按其跨调度生命周期发生必要逃逸，不使用不安全技巧规避。
+
+### 22.5 质量门禁
+
+已通过：
+
+- `origingen rpc --check ./...`；
+- `gofmt` 与 `go vet ./...`；
+- Windows `go test ./...` 和 `go test -race ./...`；
+- Ubuntu 26.04、Go 1.26.5 离线固定依赖环境下的 `go test ./...`、
+  `go test -race ./...` 和上述 Benchmark；
+- `linux/amd64` 与 `darwin/arm64`、`CGO_ENABLED=0` 的全 Module 交叉编译；
+- Reader 随机截断、伪造长度和非法载荷 Fuzz；
+- RPC 单元与生成集成合并覆盖率约 `82.9%`；生成器包覆盖率约 `84.9%`；
+- 多 Node Runtime 隔离、队列满、晚到响应、Async 严格一次、超时、panic、自调用和
+  BufferPool 未归还统计测试。
+
+### 22.6 最终代码复核补充
+
+最终提交前的逐路径复核另外修正并锁定：
+
+1. Async 请求已经提交、但内部完成任务开始前 Context 取消时，显式放弃调用并归还已经
+   到达或之后到达的响应 Buffer；
+2. Async 目标提交失败优先于同时发生的 Context 取消，保证“返回非 nil error 后业务
+   callback 绝不执行”；
+3. 生成 Async 方法在编码前拒绝 nil callback，避免把使用错误推迟成工作任务 panic；
+4. RPC 契约与 Service 分包时，纯实现包不生成未使用的 `context` 导入；
+5. 类型别名和泛型 RPC 契约返回生成期错误，不会让生成器自身 panic；
+6. `--check` 不修改磁盘；正式生成只替换或删除带完整 origingen 标记的文件，并拒绝覆盖
+   同名手写文件；
+7. 生成 ABI 使用两个方向的无符号常量约束，只有 Runtime ABI 与生成版本严格相等时才能
+   编译，升级和降级都不会静默通过。

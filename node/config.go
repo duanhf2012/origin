@@ -3,6 +3,7 @@ package node
 import (
 	"time"
 
+	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -14,6 +15,11 @@ type Options struct {
 	MaxTimersPerNode int
 	// TimerLocation 是当前 Node 全部 Cron Timer 使用的统一只读时区。
 	TimerLocation *time.Location
+	// BufferPool 是 Application 进程级共享的网络与 RPC 字节缓冲区池。
+	//
+	// 测试或独立使用 node.New 时可以省略，Node 会创建关闭统计的私有 Pool；正式
+	// Application 始终传入同一个共享实例。
+	BufferPool *bufferpool.Pool
 }
 
 // Config 是一个 Node 在配置文件中的最小静态定义。

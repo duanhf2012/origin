@@ -606,6 +606,86 @@ func TestAwaitDeadlinePriorityAndPreCanceledContext(t *testing.T) {
 	fixture.stop(t)
 }
 
+// TestAwaitUsesExactlyOnePhysicalDeadline 验证显式超时不重复登记 M8，而默认超时既登记
+// 唯一 M8 Deadline，又向等待函数公开标准 Context Deadline。
+func TestAwaitUsesExactlyOnePhysicalDeadline(t *testing.T) {
+	fixture := newSchedulerFixture(t, SchedulerConfig{
+		MaxTasks:            8,
+		MaxAwaitTasks:       8,
+		DefaultAwaitTimeout: 300 * time.Millisecond,
+	})
+
+	type observation struct {
+		hasDeadline bool
+		remaining   time.Duration
+		m8Bindings  int
+		err         error
+	}
+	results := make(chan observation, 2)
+
+	// 第一项没有调用方 Deadline，应只由 M8 管理，同时让下游读取到约 300ms 的截止时间。
+	if err := fixture.service.DispatchAsync(func(ctx context.Context) {
+		err := fixture.service.Await(ctx, func(waitCtx context.Context) error {
+			deadline, ok := waitCtx.Deadline()
+			fixture.service.scheduler.Load().mu.Lock()
+			bindings := len(fixture.service.scheduler.Load().deadlineBindings)
+			fixture.service.scheduler.Load().mu.Unlock()
+			results <- observation{
+				hasDeadline: ok,
+				remaining:   time.Until(deadline),
+				m8Bindings:  bindings,
+			}
+			return nil
+		})
+		if err != nil {
+			results <- observation{err: err}
+		}
+	}); err != nil {
+		t.Fatalf("默认 Deadline DispatchAsync() error = %v", err)
+	}
+	defaultResult := receive(t, results)
+	if defaultResult.err != nil ||
+		!defaultResult.hasDeadline ||
+		defaultResult.remaining <= 0 ||
+		defaultResult.remaining > 300*time.Millisecond ||
+		defaultResult.m8Bindings != 1 {
+		t.Fatalf("默认 Deadline 观察结果 = %+v", defaultResult)
+	}
+
+	// 第二项显式使用 Go Context Timer。Await 必须原样继承它，并且 M8 绑定数量保持为零。
+	if err := fixture.service.DispatchAsync(func(ctx context.Context) {
+		explicit, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		defer cancel()
+		err := fixture.service.Await(explicit, func(waitCtx context.Context) error {
+			deadline, ok := waitCtx.Deadline()
+			fixture.service.scheduler.Load().mu.Lock()
+			bindings := len(fixture.service.scheduler.Load().deadlineBindings)
+			fixture.service.scheduler.Load().mu.Unlock()
+			results <- observation{
+				hasDeadline: ok,
+				remaining:   time.Until(deadline),
+				m8Bindings:  bindings,
+			}
+			return nil
+		})
+		if err != nil {
+			results <- observation{err: err}
+		}
+	}); err != nil {
+		t.Fatalf("显式 Deadline DispatchAsync() error = %v", err)
+	}
+	explicitResult := receive(t, results)
+	if explicitResult.err != nil ||
+		!explicitResult.hasDeadline ||
+		explicitResult.remaining <= 0 ||
+		explicitResult.remaining > 500*time.Millisecond ||
+		explicitResult.m8Bindings != 0 {
+		t.Fatalf("显式 Deadline 观察结果 = %+v", explicitResult)
+	}
+
+	fixture.stop(t)
+}
+
 func TestTaskCanAwaitRepeatedlyInSequence(t *testing.T) {
 	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
 

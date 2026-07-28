@@ -25,6 +25,21 @@ type Runtime interface {
 	TimerLocation() *time.Location
 }
 
+// RuntimeOf 返回框架绑定给 target 的只读 Runtime。
+//
+// 该入口只供 rpc 等框架包在生成客户端构造冷路径使用。业务代码应继续调用 Service 上的
+// Name、NodeID、Logger 和 LookupService，不应保存或替换 Runtime。
+func RuntimeOf(target IService) Runtime {
+	if target == nil || isNilService(target) {
+		return nil
+	}
+	base := target.baseService()
+	if base == nil {
+		return nil
+	}
+	return base.runtime
+}
+
 // BindRuntime 把一个尚未绑定的 Service 实例与唯一 Node 运行环境关联。
 //
 // 该方法是 node 包装配 Service 时使用的框架边界。重复绑定、nil 参数或无效基础对象都会

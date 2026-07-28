@@ -38,6 +38,26 @@ var (
 	ErrGracefulShutdownTimeout error = newCodeError(CodeGracefulShutdownTimeout)
 	// ErrServiceNotReady 表示 Service 尚未完成启动或调度器尚未开放。
 	ErrServiceNotReady error = newCodeError(CodeServiceNotReady)
+	// ErrRPCNoRoute 表示当前 RPC Target 没有可用目标。
+	ErrRPCNoRoute error = newCodeError(CodeRPCNoRoute)
+	// ErrRPCInvalidRouteKey 表示 RPC 路由键类型无效。
+	ErrRPCInvalidRouteKey error = newCodeError(CodeRPCInvalidRouteKey)
+	// ErrRPCRouteSelectorFailed 表示自定义 RPC 路由选择失败。
+	ErrRPCRouteSelectorFailed error = newCodeError(CodeRPCRouteSelectorFailed)
+	// ErrRPCContractMismatch 表示调用方与目标 Service 的 RPC 契约不一致。
+	ErrRPCContractMismatch error = newCodeError(CodeRPCContractMismatch)
+	// ErrRPCMethodNotFound 表示目标 Dispatcher 不认识给定 MethodID。
+	ErrRPCMethodNotFound error = newCodeError(CodeRPCMethodNotFound)
+	// ErrRPCEncodeFailed 表示 RPC 静态编码失败。
+	ErrRPCEncodeFailed error = newCodeError(CodeRPCEncodeFailed)
+	// ErrRPCRequestDecodeFailed 表示 RPC 请求载荷无法解码。
+	ErrRPCRequestDecodeFailed error = newCodeError(CodeRPCRequestDecodeFailed)
+	// ErrRPCResponseDecodeFailed 表示 RPC 响应载荷无法解码。
+	ErrRPCResponseDecodeFailed error = newCodeError(CodeRPCResponseDecodeFailed)
+	// ErrRPCExecutionPanic 表示目标 RPC 业务方法发生 panic。
+	ErrRPCExecutionPanic error = newCodeError(CodeRPCExecutionPanic)
+	// ErrRPCBroadcastPartialFailed 表示多目标广播只有部分目标完成提交。
+	ErrRPCBroadcastPartialFailed error = newCodeError(CodeRPCBroadcastPartialFailed)
 	// ErrTransportUnavailable 表示底层连接或 I/O 当前不可用。
 	ErrTransportUnavailable error = newCodeError(CodeTransportUnavailable)
 	// ErrTransportClosed 表示 Transport 或连接已经关闭。
@@ -155,6 +175,26 @@ func New(code Code) error {
 		return ErrGracefulShutdownTimeout
 	case CodeServiceNotReady:
 		return ErrServiceNotReady
+	case CodeRPCNoRoute:
+		return ErrRPCNoRoute
+	case CodeRPCInvalidRouteKey:
+		return ErrRPCInvalidRouteKey
+	case CodeRPCRouteSelectorFailed:
+		return ErrRPCRouteSelectorFailed
+	case CodeRPCContractMismatch:
+		return ErrRPCContractMismatch
+	case CodeRPCMethodNotFound:
+		return ErrRPCMethodNotFound
+	case CodeRPCEncodeFailed:
+		return ErrRPCEncodeFailed
+	case CodeRPCRequestDecodeFailed:
+		return ErrRPCRequestDecodeFailed
+	case CodeRPCResponseDecodeFailed:
+		return ErrRPCResponseDecodeFailed
+	case CodeRPCExecutionPanic:
+		return ErrRPCExecutionPanic
+	case CodeRPCBroadcastPartialFailed:
+		return ErrRPCBroadcastPartialFailed
 	case CodeTransportUnavailable:
 		return ErrTransportUnavailable
 	case CodeTransportClosed:

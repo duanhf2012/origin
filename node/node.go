@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
+	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -42,6 +44,8 @@ type Node struct {
 	timerEngine *timerwheel.Engine
 	// timerResources 只保存标量、原子计数和时区，不按最大额度预分配业务 Timer。
 	timerResources nodeTimerResources
+	// rpcRuntime 是当前 Node 独占的本地路由目录；BufferPool 仍由 Application 共享。
+	rpcRuntime *rpc.Runtime
 }
 
 // nodeTimerResources 管理当前 Node 生命周期内唯一 TimerID 和共享活跃额度。
@@ -70,6 +74,13 @@ type serviceRuntime struct {
 	entry *serviceEntry
 }
 
+// dispatcherProvider 是 origingen 为实现公开 RPC 契约的 Service 生成的装配适配接口。
+//
+// 接口留在 node 包内部，业务不需要手工注册 Dispatcher。
+type dispatcherProvider interface {
+	RPCDispatcher() rpc.Dispatcher
+}
+
 // New 校验绑定数据并创建尚未启动的 Node。
 func New(
 	config Config,
@@ -96,6 +107,19 @@ func New(
 			config.ID,
 		))
 	}
+	if options.BufferPool == nil {
+		// node.New 仍可用于独立单元测试；正式 Application 会传入进程级共享 Pool。
+		options.BufferPool = bufferpool.NewPool(bufferpool.Options{})
+	}
+
+	rpcRuntime, err := rpc.NewRuntime(
+		config.ID,
+		options.BufferPool,
+		logger.With(originlog.String("node_id", config.ID)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("创建 Node %q RPC Runtime: %w", config.ID, err)
+	}
 
 	// 按已知数量一次分配有序表和查询表，避免装配时重复扩容。
 	instance := &Node{
@@ -110,6 +134,7 @@ func New(
 			maxTimers:     int64(options.MaxTimersPerNode),
 			timerLocation: options.TimerLocation,
 		},
+		rpcRuntime: rpcRuntime,
 	}
 	instance.state.Store(uint32(StateCreated))
 
@@ -147,8 +172,34 @@ func New(
 				err,
 			)
 		}
+		var dispatcher rpc.Dispatcher
+		if provider, ok := binding.Service.(dispatcherProvider); ok {
+			dispatcher = provider.RPCDispatcher()
+			if dispatcher == nil {
+				return nil, invalidConfig(fmt.Sprintf(
+					"Node %q Service %q 返回空 RPC Dispatcher",
+					config.ID,
+					binding.Name,
+				))
+			}
+		}
+		if err := instance.rpcRuntime.RegisterService(
+			binding.Name,
+			binding.Service,
+			dispatcher,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"登记 Node %q Service %q RPC: %w",
+				config.ID,
+				binding.Name,
+				err,
+			)
+		}
 		instance.services = append(instance.services, entry)
 		instance.byName[binding.Name] = entry
+	}
+	if err := instance.rpcRuntime.Freeze(); err != nil {
+		return nil, fmt.Errorf("冻结 Node %q RPC Runtime: %w", config.ID, err)
 	}
 
 	// 所有 Service 绑定成功后再创建 Node 独占时间轮，避免前序校验失败时遗留底层 Timer。
@@ -387,6 +438,7 @@ func (node *Node) Rollback(ctx context.Context) error {
 		return invalidArgument(fmt.Sprintf("Node %q 的回滚 Context 不能为空", node.id))
 	}
 	// 失败实例仍先获得反序 OnStop，最后再关闭 Node 时间轮并等待其 goroutine 退出。
+	node.rpcRuntime.Close()
 	result := node.stopStarted(ctx, true)
 	result = errors.Join(result, node.timerEngine.Close())
 	node.state.Store(uint32(StateFailed))
@@ -416,6 +468,7 @@ func (node *Node) Stop(ctx context.Context) error {
 	// 正常停止会发布 Stopping/Stopped；失败回滚由 Rollback 保持 Failed。
 	node.state.Store(uint32(StateStopping))
 	node.logger.Info("node stopping")
+	node.rpcRuntime.Close()
 	// Service 清理阶段保留时间轮运行，全部 OnStop 返回后才回收 Node 最后的后台资源。
 	result := node.stopStarted(ctx, false)
 	result = errors.Join(result, node.timerEngine.Close())
@@ -511,6 +564,11 @@ func (runtime *serviceRuntime) TimerLimit() int {
 // TimerLocation 实现 service.Runtime，返回 Node 创建后保持只读的统一 Cron 时区。
 func (runtime *serviceRuntime) TimerLocation() *time.Location {
 	return runtime.node.timerResources.timerLocation
+}
+
+// RPC 实现 service.Runtime，返回当前 Node 独占且启动后只读的 RPC Runtime。
+func (runtime *serviceRuntime) RPC() any {
+	return runtime.node.rpcRuntime
 }
 
 // lifecycleContext 允许 Application 在不依赖具体错误类型时提取结构化失败位置。
