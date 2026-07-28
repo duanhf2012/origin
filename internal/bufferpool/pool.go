@@ -90,15 +90,29 @@ func NewPool(options Options) *Pool {
 // size 为负数表示框架内部违反不变量，因此直接 panic。大于 64 KiB 的
 // Buffer 按实际大小分配，并在释放时交还给 Go 垃圾回收器。
 func (p *Pool) Acquire(size int) *Buffer {
-	// 首先拒绝违反 API 不变量的 Pool 和长度，避免后续产生错误切片。
+	// 普通取得没有前置空间，复用统一实现避免两条档位和统计路径逐渐分叉。
+	return p.AcquireWithHeadroom(size, 0)
+}
+
+// AcquireWithHeadroom 取得一个有效长度为 size、前方至少保留 headroom 字节的 Buffer。
+//
+// headroom 不属于初始 Bytes 视图，只能通过 Buffer.Prepend 显式启用。两者之和超过 64 KiB
+// 时按真实总长度分配，释放时不进入固定档位池。
+func (p *Pool) AcquireWithHeadroom(size, headroom int) *Buffer {
+	// 首先拒绝违反 API 不变量的 Pool 和长度，避免整数溢出后产生错误切片。
 	if p == nil {
 		panic("bufferpool: 从 nil Pool 取得 Buffer")
 	}
-	if size < 0 {
-		panic("bufferpool: Buffer 长度不能为负数")
+	if size < 0 || headroom < 0 {
+		panic("bufferpool: Buffer 长度和 headroom 不能为负数")
 	}
-	// 零长度对象不分配底层数组，也不占用固定容量档位。
-	if size == 0 {
+	if headroom > int(^uint(0)>>1)-size {
+		panic("bufferpool: Buffer 长度和 headroom 之和溢出")
+	}
+	total := size + headroom
+
+	// 只有完全没有可见数据和前置空间的对象才使用零长度特殊路径。
+	if total == 0 {
 		buf := &Buffer{
 			owner:  p,
 			bucket: zeroSizeBucket,
@@ -110,11 +124,12 @@ func (p *Pool) Acquire(size int) *Buffer {
 		}
 		return buf
 	}
-	// 超出最大档位的请求按实际长度分配，避免池长期滞留大对象。
-	if size > maxPooledCapacity() {
+	// 超出最大档位的请求按实际总长度分配，避免池长期滞留大对象。
+	if total > maxPooledCapacity() {
 		buf := &Buffer{
-			data:   make([]byte, size),
+			data:   make([]byte, total),
 			owner:  p,
+			start:  headroom,
 			size:   size,
 			bucket: oversizeBucket,
 			active: true,
@@ -127,8 +142,8 @@ func (p *Pool) Acquire(size int) *Buffer {
 		return buf
 	}
 
-	// 池化请求向上选择能够容纳 size 的最小 2 次幂档位。
-	index := bucketIndex(size)
+	// 池化请求按“headroom + 有效数据”选择能够容纳完整视图的最小 2 次幂档位。
+	index := bucketIndex(total)
 	// 优先复用该档位对象；sync.Pool 为空时才分配新的底层数组。
 	item := p.buckets[index].pool.Get()
 	var buf *Buffer
@@ -146,6 +161,7 @@ func (p *Pool) Acquire(size int) *Buffer {
 
 	// 每次取得都重新建立所有权、有效长度和档位，覆盖上一任使用者状态。
 	buf.owner = p
+	buf.start = headroom
 	buf.size = size
 	buf.bucket = uint8(index)
 	buf.active = true

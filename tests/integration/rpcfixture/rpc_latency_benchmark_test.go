@@ -92,6 +92,45 @@ func BenchmarkGeneratedCustomTimeAwaitLatency(b *testing.B) {
 	b.ReportMetric(float64(percentile(samples, 99).Nanoseconds()), "ns/p99")
 }
 
+// BenchmarkGeneratedRemoteAwaitLatency 记录真实 loopback TCP、ORP1 和 Service 恢复的
+// P50/P95/P99。它只在非 Windows 平台构建，与本文件既有高精度计时规则一致。
+func BenchmarkGeneratedRemoteAwaitLatency(b *testing.B) {
+	fixture := newRemoteRPCFixture(b)
+	_ = awaitRemoteEcho(b, fixture, "latency-ready")
+
+	samples := make([]time.Duration, b.N)
+	done := make(chan struct{})
+	var benchmarkErr error
+	b.ResetTimer()
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		defer close(done)
+		client := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToServiceOnNode("player-1", "PlayerService"),
+		)
+		for index := range b.N {
+			startedAt := time.Now()
+			_, benchmarkErr = client.AwaitEchoName(ctx, "12345678901234567890123456789012")
+			samples[index] = time.Since(startedAt)
+			if benchmarkErr != nil {
+				return
+			}
+		}
+	}); err != nil {
+		b.Fatal(err)
+	}
+	<-done
+	b.StopTimer()
+	if benchmarkErr != nil {
+		b.Fatal(benchmarkErr)
+	}
+
+	slices.Sort(samples)
+	b.ReportMetric(float64(percentile(samples, 50).Nanoseconds()), "ns/p50")
+	b.ReportMetric(float64(percentile(samples, 95).Nanoseconds()), "ns/p95")
+	b.ReportMetric(float64(percentile(samples, 99).Nanoseconds()), "ns/p99")
+}
+
 // percentile 按最近秩规则返回已经升序排列的延迟样本。
 func percentile(samples []time.Duration, percent int) time.Duration {
 	if len(samples) == 0 {

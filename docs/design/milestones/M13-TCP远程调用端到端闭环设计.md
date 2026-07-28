@@ -1,6 +1,6 @@
 # Origin 第三版 M13 TCP 远程调用端到端闭环设计
 
-> 文档状态：已确认，允许编写实施计划
+> 文档状态：已实现并验收
 >
 > 创建日期：2026-07-28
 >
@@ -646,7 +646,7 @@ Notify 通过独立短头和相同目标校验后进入目标 Service FIFO，但
 每个 Ready 出站会话持有自己的 pending Map：
 
 ```text
-RequestID → *pendingCall
+RequestID → pendingCall
 ```
 
 不建立 v2 式全 Node 共享 CallSet。这样：
@@ -681,7 +681,7 @@ RequestID → *pendingCall
 - Node Runtime 关闭。
 
 只有从 pending 表成功删除记录的一方可以提交终态。任何迟到事件只能观察“记录不存在”，
-不得保存并直接调用一个可能已经复用的 `*pendingCall` 指针。
+不得保存并直接调用一个可能已经失效的 `pendingCall` 副本。
 
 ### 12.4 调用方出站断线清理
 
@@ -724,18 +724,25 @@ Exactly Once。
 
 ### 12.6 对象池决策
 
-M11 已证明只池化 `localCall` 外层对象收益不足，而 Channel 不能复用。M13 的远端
-pendingCall 生命周期更长，并进入真实并发表，因此重新做一次独立对照：
+M13 最终不为 `pendingCall` 增加对象池，采用最小值类型：
 
-1. 先完成未池化正确性基线；
-2. 对成功、超时、取消、断线和迟到响应保存 Benchmark 与分配数据；
-3. 只池化远端 pendingCall 外层对象，不池化 Context、Channel、error 或业务结果；
-4. RequestID 与会话查询保证迟到响应不能命中复用对象；
-5. 只有至少稳定减少一次分配、GC 或 p99，且 Reset/归还条件仍清晰时才启用；
-6. 数据不能证明净收益时保持未池化。
+```go
+type pendingCall struct {
+    complete func(*Buffer, error)
+}
+```
 
-同 Node 调用不通过 RequestID Map；为了避免本地目标迟到完成直接持有旧对象产生 ABA，
-同 Node 完成状态继续保持未池化。两条路径可以复用同一个一次性完成逻辑，但池化策略不同。
+1. `pendingCall` 直接以值存入会话 Map，不为每次调用单独 `new`；
+2. 响应、超时、取消和断线都先按 RequestID 从原会话 Map 删除，再调用取出的完成函数；
+3. 迟到事件只会观察到记录不存在，不持有可复用对象指针，因此没有对象池 ABA 和 Reset
+   状态遗漏；
+4. Windows 基准约为 `35.03 ns/op`，Linux 基准约为 `31.23 ns/op`，两端均为
+   `0 B/op`、`0 allocs/op`；
+5. 逃逸分析只保留长生命周期会话和 Map 的预期逃逸，没有每次 pendingCall 独立堆分配；
+6. 对象池不能再减少当前热路径分配，却会增加取得、归还、Reset 和所有权分支，因此不启用。
+
+同 Node `localCall` 继续保持 M11 已确认的未池化实现。两条路径共享一次性完成语义，但不为
+形式统一引入公共池或远程字段。
 
 ## 13. Context、Deadline 与取消
 
@@ -1017,7 +1024,7 @@ M13 至少保存：
 - 固定头编码/解析 `ns/op`、`B/op`、`allocs/op`；
 - headroom 原地封包与完整 payload 复制的对照；
 - pending 登记、响应、超时和断线批量完成；
-- pendingCall 不池化/池化对照；
+- pendingCall 值类型 Map 的分配基线与对象池必要性结论；
 - loopback 32B、1KB、64KB 和接近 `4M` payload；
 - 同 Node RPC 回归基线；
 - 单连接普通负载与突发过载的 P50/P95/P99；
@@ -1131,8 +1138,8 @@ M13 确认时已经同步以下细节：
    唯一所有权转移给 Service Task 或 pendingCall”，避免网络 goroutine 执行业务解码；
 2. 完整配置示例的 TCP RPC `read_timeout` 从 `0s` 调整为建议默认 `15s`；
 3. M5 的 RPC 线协议帧上限使用“业务 payload 上限 + 512B 包络余量”；
-4. M11 的 `localCall` 不与远端状态机长期复制：共享一次性完成语义，但同 Node保持未池化，
-   远端 pendingCall 独立做池化对照；
+4. M11 的 `localCall` 不与远端状态机长期复制：共享一次性完成语义，但同 Node 保持未池化；
+   远端 pendingCall 以值存入会话 Map，跨平台零分配基准证明不需要对象池；
 5. 内存复用文档补充 headroom 原地前置和接收端丢弃前缀规则；
 6. 服务发现文档继续保持无正式 static Provider，后续 Provider 驱动同一目标生命周期；
 7. 完整配置只公开 `send_queue_frames`，RPC Adapter 内部派生 M5 字节上限；
@@ -1156,7 +1163,7 @@ M13 确认时已经同步以下细节：
 | 9 | 目标端超时 | 使用 Node 共享 M8 DeadlineQueue，不为每个入站 Request 创建 Go Timer |
 | 10 | Cancel 包 | M13 不实现；本地立即取消，目标执行到原 Deadline；断线不取消已准入任务 |
 | 11 | pending 上限 | 每条出站会话固定最多 `65536`，不预分配、不增加配置 |
-| 12 | pendingCall 池化 | 先未池化，再用真实并发 Benchmark 决定；同 Node 保持未池化 |
+| 12 | pendingCall 池化 | 以值存入会话 Map；跨平台基准均为 `0 B/op`、`0 allocs/op`，不增加对象池 |
 | 13 | RPC 包长 | `max_message_size` 是业务 payload；M5 完整帧上限额外加固定 `512B` |
 | 14 | 低拷贝封包 | BufferPool 增加 headroom/Prepend/DiscardPrefix，不复制完整 payload |
 | 15 | 发送队列 | 配置只暴露 `send_queue_frames=16384`；内部字节上限至少 `8M`，任一满立即过载 |
@@ -1169,4 +1176,33 @@ M13 确认时已经同步以下细节：
 | 22 | TCP 连接事件 | 只做内部诊断，不冒充 Discovery Added/Lost 业务事件 |
 | 23 | M13 停止边界 | 完成当前 Runtime 关闭和 pending 清理；最终 `OnStop Await` 顺序留 M15 |
 
-M13 设计门禁已通过，允许下一步编写实施计划；本文件确认不等于已经实现。
+## 24. 实施与验收结果
+
+M13 已于 2026-07-28 完成实现和验收：
+
+1. 实现 `ORP1` Hello、HelloAck、Request、Notify、Response、Ping 和 Pong 最小协议；
+2. 实现每个 Node 独立 Listener、显式目标生命周期、契约指纹目录、重复 NodeID 拒绝、
+   RequestID、pending、重连、心跳和断线完成；
+3. Request 和 Notify 的网络 goroutine 只解析固定头和执行准入，业务解码及方法调用始终
+   回到目标 Service FIFO；
+4. 目标 Request 使用 Node 共享 M8 DeadlineQueue，调用方显式 Context 和默认
+   `15s` Await 均保持一次调用只有一个计时来源；
+5. 调用方断线不取消已经准入的目标任务，响应无法发送时按唯一 Buffer 所有权安全释放；
+6. 同一 Application 中的多个 Node 也通过真实 TCP 通信，没有进程内指针短路；
+7. BufferPool 已支持 headroom、原地 `Prepend` 和 `DiscardPrefix`，协议封装不再复制完整
+   业务 payload；
+8. 真实 TCP 集成测试覆盖 Await、Async、Notify、自定义 Codec、普通 Go 结构体、顶层
+   Protobuf、结构体嵌套 Protobuf、业务错误、panic、重连、重复 NodeID、私有 Service、
+   默认/显式 Deadline、调用方断线后的任务收尾和独立子进程调用；
+9. Windows 与 Linux 均通过全量测试和 Race；Windows 完成协议 Fuzz，共执行
+   `446230` 次输入且无失败；`linux/amd64`、`windows/amd64`、`darwin/arm64`
+   交叉构建通过；
+10. Linux 真实 loopback TCP 的 1000 次 Await 基线约为：平均 `21.399µs`、
+    P50 `20.527µs`、P95 `39.513µs`、P99 `52.797µs`。该数据只作为当前机器和提交的
+    回归基线，不作为跨硬件性能承诺；
+11. Linux 32B、1KB、64KB、接近 4M payload 的端到端基线分别约为 `65.347µs`、
+    `78.377µs`、`276.217µs`、`7.670ms`；
+12. `pendingCall` 值类型 Map 热路径在 Windows/Linux 均为零分配，最终不增加对象池。
+
+M13 已关闭。服务发现 Provider、NATS RPC、完整 Stop/OnStop Await、自动路由和跨 Node
+Broadcast 继续按路线图进入后续独立里程碑。

@@ -173,7 +173,13 @@ func renderEncode(
 		"// %s 计算并一次写入当前方法请求载荷。\n",
 		name,
 	)
-	fmt.Fprintf(body, "func %s(client %s.Client", name, rpcAlias)
+	fmt.Fprintf(
+		body,
+		"func %s(client %s.Client, kind %s.CallKind",
+		name,
+		rpcAlias,
+		rpcAlias,
+	)
 	for _, parameter := range parameters {
 		fmt.Fprintf(body, ", %s %s", parameter.name, imports.typeName(parameter.typ))
 	}
@@ -191,7 +197,7 @@ func renderEncode(
 	}
 	body.WriteString("\tsize, err := sizer.Size()\n")
 	body.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
-	body.WriteString("\tbuffer, err := client.AllocateRequest(size)\n")
+	body.WriteString("\tbuffer, err := client.AllocateRequest(size, kind)\n")
 	body.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
 	fmt.Fprintf(body, "\twriter := %s.NewWriter(buffer.Bytes())\n", rpcAlias)
 	writeRenderer := &renderer{
@@ -335,7 +341,13 @@ func renderClientMethods(
 			fmt.Fprintf(body, "%s %s, ", output.name, imports.typeName(output.typ))
 		}
 		body.WriteString("err error) {\n")
-		fmt.Fprintf(body, "\trequest, err := %s(client.client%s)\n", encodeName, inputNames)
+		fmt.Fprintf(
+			body,
+			"\trequest, err := %s(client.client, %s.CallRequest%s)\n",
+			encodeName,
+			rpcAlias,
+			inputNames,
+		)
 		body.WriteString("\tif err != nil {\n\t\treturn\n\t}\n")
 		fmt.Fprintf(
 			body,
@@ -378,7 +390,13 @@ func renderClientMethods(
 		// 生成闭包本身始终非 nil；必须在编码和提交前检查业务 callback，不能把 nil
 		// 延迟到 Service 工作任务中才形成 panic。
 		body.WriteString("\tif callback == nil {\n\t\treturn errs.ErrInvalidArgument\n\t}\n")
-		fmt.Fprintf(body, "\trequest, err := %s(client.client%s)\n", encodeName, inputNames)
+		fmt.Fprintf(
+			body,
+			"\trequest, err := %s(client.client, %s.CallRequest%s)\n",
+			encodeName,
+			rpcAlias,
+			inputNames,
+		)
 		body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
 		fmt.Fprintf(
 			body,
@@ -429,7 +447,13 @@ func renderClientMethods(
 			contextAlias,
 			inputDecl,
 		)
-		fmt.Fprintf(body, "\trequest, err := %s(client.client%s)\n", encodeName, inputNames)
+		fmt.Fprintf(
+			body,
+			"\trequest, err := %s(client.client, %s.CallNotify%s)\n",
+			encodeName,
+			rpcAlias,
+			inputNames,
+		)
 		body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
 		fmt.Fprintf(
 			body,

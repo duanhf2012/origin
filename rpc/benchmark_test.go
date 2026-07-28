@@ -218,3 +218,22 @@ func BenchmarkAsyncLocalCallBaselineAllocation(b *testing.B) {
 		_, _ = call.take()
 	}
 }
+
+func BenchmarkPendingMapValueLifecycle(b *testing.B) {
+	// pendingCall 以值存入 Map，不为每次调用单独 new 对象；该基线用于决定是否需要对象池。
+	session := &outboundSession{
+		pending: make(map[uint64]pendingCall),
+	}
+	complete := func(*Buffer, error) {}
+	var requestID uint64
+	b.ReportAllocs()
+	for b.Loop() {
+		requestID++
+		session.mu.Lock()
+		session.pending[requestID] = pendingCall{complete: complete}
+		call := session.pending[requestID]
+		delete(session.pending, requestID)
+		session.mu.Unlock()
+		call.complete(nil, nil)
+	}
+}

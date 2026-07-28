@@ -40,7 +40,7 @@ func NewPlayerRPCClient(owner service.IService, target rpc.Target) PlayerRPCClie
 }
 
 // encodePlayerRPCEchoNameRequest 计算并一次写入当前方法请求载荷。
-func encodePlayerRPCEchoNameRequest(client rpc.Client, arg1 string) (*rpc.Buffer, error) {
+func encodePlayerRPCEchoNameRequest(client rpc.Client, kind rpc.CallKind, arg1 string) (*rpc.Buffer, error) {
 	sizer := rpc.NewSizer()
 	if err := sizer.AddString(string(arg1)); err != nil {
 		return nil, err
@@ -49,7 +49,7 @@ func encodePlayerRPCEchoNameRequest(client rpc.Client, arg1 string) (*rpc.Buffer
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := client.AllocateRequest(size)
+	buffer, err := client.AllocateRequest(size, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func decodePlayerRPCEchoNameResponse(data []byte) (result1 string, decodeErr err
 
 // AwaitEchoName 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitEchoName(ctx context.Context, arg1 string) (result1 string, err error) {
-	request, err := encodePlayerRPCEchoNameRequest(client.client, arg1)
+	request, err := encodePlayerRPCEchoNameRequest(client.client, rpc.CallRequest, arg1)
 	if err != nil {
 		return
 	}
@@ -130,7 +130,7 @@ func (client PlayerRPCClient) AsyncEchoName(ctx context.Context, arg1 string, ca
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCEchoNameRequest(client.client, arg1)
+	request, err := encodePlayerRPCEchoNameRequest(client.client, rpc.CallRequest, arg1)
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func (client PlayerRPCClient) AsyncEchoName(ctx context.Context, arg1 string, ca
 
 // NotifyEchoName 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyEchoName(ctx context.Context, arg1 string) error {
-	request, err := encodePlayerRPCEchoNameRequest(client.client, arg1)
+	request, err := encodePlayerRPCEchoNameRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}
@@ -155,7 +155,7 @@ func (client PlayerRPCClient) NotifyEchoName(ctx context.Context, arg1 string) e
 
 // BroadcastEchoName 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastEchoName(ctx context.Context, arg1 string) error {
-	request, err := encodePlayerRPCEchoNameRequest(client.client, arg1)
+	request, err := encodePlayerRPCEchoNameRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (client PlayerRPCClient) BroadcastEchoName(ctx context.Context, arg1 string
 }
 
 // encodePlayerRPCGetPlayerRequest 计算并一次写入当前方法请求载荷。
-func encodePlayerRPCGetPlayerRequest(client rpc.Client, arg1 int64, arg2 PlayerData, arg3 *structpb.Struct) (*rpc.Buffer, error) {
+func encodePlayerRPCGetPlayerRequest(client rpc.Client, kind rpc.CallKind, arg1 int64, arg2 PlayerData, arg3 *structpb.Struct) (*rpc.Buffer, error) {
 	sizer := rpc.NewSizer()
 	if err := sizer.Add(8); err != nil {
 		return nil, err
@@ -222,7 +222,7 @@ func encodePlayerRPCGetPlayerRequest(client rpc.Client, arg1 int64, arg2 PlayerD
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := client.AllocateRequest(size)
+	buffer, err := client.AllocateRequest(size, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -646,7 +646,7 @@ func decodePlayerRPCGetPlayerResponse(data []byte) (result1 PlayerData, result2 
 
 // AwaitGetPlayer 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitGetPlayer(ctx context.Context, arg1 int64, arg2 PlayerData, arg3 *structpb.Struct) (result1 PlayerData, result2 *structpb.Struct, err error) {
-	request, err := encodePlayerRPCGetPlayerRequest(client.client, arg1, arg2, arg3)
+	request, err := encodePlayerRPCGetPlayerRequest(client.client, rpc.CallRequest, arg1, arg2, arg3)
 	if err != nil {
 		return
 	}
@@ -662,7 +662,7 @@ func (client PlayerRPCClient) AsyncGetPlayer(ctx context.Context, arg1 int64, ar
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCGetPlayerRequest(client.client, arg1, arg2, arg3)
+	request, err := encodePlayerRPCGetPlayerRequest(client.client, rpc.CallRequest, arg1, arg2, arg3)
 	if err != nil {
 		return err
 	}
@@ -678,7 +678,7 @@ func (client PlayerRPCClient) AsyncGetPlayer(ctx context.Context, arg1 int64, ar
 
 // NotifyGetPlayer 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyGetPlayer(ctx context.Context, arg1 int64, arg2 PlayerData, arg3 *structpb.Struct) error {
-	request, err := encodePlayerRPCGetPlayerRequest(client.client, arg1, arg2, arg3)
+	request, err := encodePlayerRPCGetPlayerRequest(client.client, rpc.CallNotify, arg1, arg2, arg3)
 	if err != nil {
 		return err
 	}
@@ -687,7 +687,7 @@ func (client PlayerRPCClient) NotifyGetPlayer(ctx context.Context, arg1 int64, a
 
 // BroadcastGetPlayer 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastGetPlayer(ctx context.Context, arg1 int64, arg2 PlayerData, arg3 *structpb.Struct) error {
-	request, err := encodePlayerRPCGetPlayerRequest(client.client, arg1, arg2, arg3)
+	request, err := encodePlayerRPCGetPlayerRequest(client.client, rpc.CallNotify, arg1, arg2, arg3)
 	if err != nil {
 		return err
 	}
@@ -695,7 +695,7 @@ func (client PlayerRPCClient) BroadcastGetPlayer(ctx context.Context, arg1 int64
 }
 
 // encodePlayerRPCPlayerOnlineRequest 计算并一次写入当前方法请求载荷。
-func encodePlayerRPCPlayerOnlineRequest(client rpc.Client, arg1 int64) (*rpc.Buffer, error) {
+func encodePlayerRPCPlayerOnlineRequest(client rpc.Client, kind rpc.CallKind, arg1 int64) (*rpc.Buffer, error) {
 	sizer := rpc.NewSizer()
 	if err := sizer.Add(8); err != nil {
 		return nil, err
@@ -704,7 +704,7 @@ func encodePlayerRPCPlayerOnlineRequest(client rpc.Client, arg1 int64) (*rpc.Buf
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := client.AllocateRequest(size)
+	buffer, err := client.AllocateRequest(size, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -735,7 +735,7 @@ func decodePlayerRPCPlayerOnlineRequest(data []byte) (arg1 int64, decodeErr erro
 
 // NotifyPlayerOnline 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyPlayerOnline(ctx context.Context, arg1 int64) error {
-	request, err := encodePlayerRPCPlayerOnlineRequest(client.client, arg1)
+	request, err := encodePlayerRPCPlayerOnlineRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}
@@ -744,7 +744,7 @@ func (client PlayerRPCClient) NotifyPlayerOnline(ctx context.Context, arg1 int64
 
 // BroadcastPlayerOnline 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastPlayerOnline(ctx context.Context, arg1 int64) error {
-	request, err := encodePlayerRPCPlayerOnlineRequest(client.client, arg1)
+	request, err := encodePlayerRPCPlayerOnlineRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}
@@ -752,7 +752,7 @@ func (client PlayerRPCClient) BroadcastPlayerOnline(ctx context.Context, arg1 in
 }
 
 // encodePlayerRPCRoundTripBlobRequest 计算并一次写入当前方法请求载荷。
-func encodePlayerRPCRoundTripBlobRequest(client rpc.Client, arg1 OwnedBlob) (*rpc.Buffer, error) {
+func encodePlayerRPCRoundTripBlobRequest(client rpc.Client, kind rpc.CallKind, arg1 OwnedBlob) (*rpc.Buffer, error) {
 	sizer := rpc.NewSizer()
 	customSize1, customErr2 := OwnedBlobCodec{}.Size(&(arg1))
 	if customErr2 != nil {
@@ -765,7 +765,7 @@ func encodePlayerRPCRoundTripBlobRequest(client rpc.Client, arg1 OwnedBlob) (*rp
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := client.AllocateRequest(size)
+	buffer, err := client.AllocateRequest(size, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -862,7 +862,7 @@ func decodePlayerRPCRoundTripBlobResponse(data []byte) (result1 OwnedBlob, decod
 
 // AwaitRoundTripBlob 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitRoundTripBlob(ctx context.Context, arg1 OwnedBlob) (result1 OwnedBlob, err error) {
-	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, arg1)
+	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, rpc.CallRequest, arg1)
 	if err != nil {
 		return
 	}
@@ -878,7 +878,7 @@ func (client PlayerRPCClient) AsyncRoundTripBlob(ctx context.Context, arg1 Owned
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, arg1)
+	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, rpc.CallRequest, arg1)
 	if err != nil {
 		return err
 	}
@@ -894,7 +894,7 @@ func (client PlayerRPCClient) AsyncRoundTripBlob(ctx context.Context, arg1 Owned
 
 // NotifyRoundTripBlob 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyRoundTripBlob(ctx context.Context, arg1 OwnedBlob) error {
-	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, arg1)
+	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}
@@ -903,7 +903,7 @@ func (client PlayerRPCClient) NotifyRoundTripBlob(ctx context.Context, arg1 Owne
 
 // BroadcastRoundTripBlob 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastRoundTripBlob(ctx context.Context, arg1 OwnedBlob) error {
-	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, arg1)
+	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}
@@ -911,7 +911,7 @@ func (client PlayerRPCClient) BroadcastRoundTripBlob(ctx context.Context, arg1 O
 }
 
 // encodePlayerRPCRoundTripPackedIDRequest 计算并一次写入当前方法请求载荷。
-func encodePlayerRPCRoundTripPackedIDRequest(client rpc.Client, arg1 PackedPlayerID) (*rpc.Buffer, error) {
+func encodePlayerRPCRoundTripPackedIDRequest(client rpc.Client, kind rpc.CallKind, arg1 PackedPlayerID) (*rpc.Buffer, error) {
 	sizer := rpc.NewSizer()
 	customSize1, customErr2 := PackedPlayerIDCodec{}.Size(&(arg1))
 	if customErr2 != nil {
@@ -924,7 +924,7 @@ func encodePlayerRPCRoundTripPackedIDRequest(client rpc.Client, arg1 PackedPlaye
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := client.AllocateRequest(size)
+	buffer, err := client.AllocateRequest(size, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -1021,7 +1021,7 @@ func decodePlayerRPCRoundTripPackedIDResponse(data []byte) (result1 PackedPlayer
 
 // AwaitRoundTripPackedID 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) (result1 PackedPlayerID, err error) {
-	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, arg1)
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, rpc.CallRequest, arg1)
 	if err != nil {
 		return
 	}
@@ -1037,7 +1037,7 @@ func (client PlayerRPCClient) AsyncRoundTripPackedID(ctx context.Context, arg1 P
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, arg1)
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, rpc.CallRequest, arg1)
 	if err != nil {
 		return err
 	}
@@ -1053,7 +1053,7 @@ func (client PlayerRPCClient) AsyncRoundTripPackedID(ctx context.Context, arg1 P
 
 // NotifyRoundTripPackedID 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) error {
-	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, arg1)
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}
@@ -1062,7 +1062,7 @@ func (client PlayerRPCClient) NotifyRoundTripPackedID(ctx context.Context, arg1 
 
 // BroadcastRoundTripPackedID 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) error {
-	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, arg1)
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}
@@ -1070,7 +1070,7 @@ func (client PlayerRPCClient) BroadcastRoundTripPackedID(ctx context.Context, ar
 }
 
 // encodePlayerRPCRoundTripTimeRequest 计算并一次写入当前方法请求载荷。
-func encodePlayerRPCRoundTripTimeRequest(client rpc.Client, arg1 TimeEnvelope, arg2 int) (*rpc.Buffer, error) {
+func encodePlayerRPCRoundTripTimeRequest(client rpc.Client, kind rpc.CallKind, arg1 TimeEnvelope, arg2 int) (*rpc.Buffer, error) {
 	sizer := rpc.NewSizer()
 	customSize1, customErr2 := TimeCodec{}.Size(&(arg1.At))
 	if customErr2 != nil {
@@ -1129,7 +1129,7 @@ func encodePlayerRPCRoundTripTimeRequest(client rpc.Client, arg1 TimeEnvelope, a
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := client.AllocateRequest(size)
+	buffer, err := client.AllocateRequest(size, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -1582,7 +1582,7 @@ func decodePlayerRPCRoundTripTimeResponse(data []byte) (result1 TimeEnvelope, de
 
 // AwaitRoundTripTime 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) (result1 TimeEnvelope, err error) {
-	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, arg1, arg2)
+	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, rpc.CallRequest, arg1, arg2)
 	if err != nil {
 		return
 	}
@@ -1598,7 +1598,7 @@ func (client PlayerRPCClient) AsyncRoundTripTime(ctx context.Context, arg1 TimeE
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, arg1, arg2)
+	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, rpc.CallRequest, arg1, arg2)
 	if err != nil {
 		return err
 	}
@@ -1614,7 +1614,7 @@ func (client PlayerRPCClient) AsyncRoundTripTime(ctx context.Context, arg1 TimeE
 
 // NotifyRoundTripTime 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) error {
-	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, arg1, arg2)
+	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, rpc.CallNotify, arg1, arg2)
 	if err != nil {
 		return err
 	}
@@ -1623,7 +1623,7 @@ func (client PlayerRPCClient) NotifyRoundTripTime(ctx context.Context, arg1 Time
 
 // BroadcastRoundTripTime 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) error {
-	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, arg1, arg2)
+	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, rpc.CallNotify, arg1, arg2)
 	if err != nil {
 		return err
 	}
@@ -1631,7 +1631,7 @@ func (client PlayerRPCClient) BroadcastRoundTripTime(ctx context.Context, arg1 T
 }
 
 // encodePlayerRPCSavePlayerRequest 计算并一次写入当前方法请求载荷。
-func encodePlayerRPCSavePlayerRequest(client rpc.Client, arg1 PlayerData) (*rpc.Buffer, error) {
+func encodePlayerRPCSavePlayerRequest(client rpc.Client, kind rpc.CallKind, arg1 PlayerData) (*rpc.Buffer, error) {
 	sizer := rpc.NewSizer()
 	if err := sizer.Add(8); err != nil {
 		return nil, err
@@ -1678,7 +1678,7 @@ func encodePlayerRPCSavePlayerRequest(client rpc.Client, arg1 PlayerData) (*rpc.
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := client.AllocateRequest(size)
+	buffer, err := client.AllocateRequest(size, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -1864,7 +1864,7 @@ func decodePlayerRPCSavePlayerResponse(data []byte) (decodeErr error) {
 
 // AwaitSavePlayer 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitSavePlayer(ctx context.Context, arg1 PlayerData) (err error) {
-	request, err := encodePlayerRPCSavePlayerRequest(client.client, arg1)
+	request, err := encodePlayerRPCSavePlayerRequest(client.client, rpc.CallRequest, arg1)
 	if err != nil {
 		return
 	}
@@ -1879,7 +1879,7 @@ func (client PlayerRPCClient) AsyncSavePlayer(ctx context.Context, arg1 PlayerDa
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCSavePlayerRequest(client.client, arg1)
+	request, err := encodePlayerRPCSavePlayerRequest(client.client, rpc.CallRequest, arg1)
 	if err != nil {
 		return err
 	}
@@ -1895,7 +1895,7 @@ func (client PlayerRPCClient) AsyncSavePlayer(ctx context.Context, arg1 PlayerDa
 
 // NotifySavePlayer 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifySavePlayer(ctx context.Context, arg1 PlayerData) error {
-	request, err := encodePlayerRPCSavePlayerRequest(client.client, arg1)
+	request, err := encodePlayerRPCSavePlayerRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}
@@ -1904,7 +1904,7 @@ func (client PlayerRPCClient) NotifySavePlayer(ctx context.Context, arg1 PlayerD
 
 // BroadcastSavePlayer 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastSavePlayer(ctx context.Context, arg1 PlayerData) error {
-	request, err := encodePlayerRPCSavePlayerRequest(client.client, arg1)
+	request, err := encodePlayerRPCSavePlayerRequest(client.client, rpc.CallNotify, arg1)
 	if err != nil {
 		return err
 	}

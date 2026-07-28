@@ -157,6 +157,7 @@ func TestRuntimeDirectDispatcherSuccessFailureAndPanic(t *testing.T) {
 		endpoint,
 		1,
 		nil,
+		0,
 	)
 	if err != nil || response == nil || response.Bytes()[0] != 7 {
 		t.Fatalf("dispatchRequest() response=%v error=%v", response, err)
@@ -169,6 +170,7 @@ func TestRuntimeDirectDispatcherSuccessFailureAndPanic(t *testing.T) {
 		endpoint,
 		1,
 		nil,
+		0,
 	); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("failed dispatchRequest() error = %v", err)
 	}
@@ -178,6 +180,7 @@ func TestRuntimeDirectDispatcherSuccessFailureAndPanic(t *testing.T) {
 		endpoint,
 		1,
 		nil,
+		0,
 	); !errors.Is(err, errs.ErrRPCExecutionPanic) {
 		t.Fatalf("panic dispatchRequest() error = %v", err)
 	}

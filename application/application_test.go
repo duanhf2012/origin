@@ -14,6 +14,7 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
+	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -328,6 +329,87 @@ nodes:
 		directory := writeApplicationConfig(t, content)
 		if _, err := loadConfig(directory); !errs.IsCode(err, errs.CodeInvalidConfig) {
 			t.Fatalf("非法 scheduler loadConfig() error = %v", err)
+		}
+	}
+}
+
+func TestLoadConfigNodeRPCDefaultsAndOverrides(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: local-1
+    services: [lifecycleTestService]
+  - id: tcp-1
+    rpc:
+      transport: tcp
+      max_message_size: 2M
+      tcp:
+        listen: 127.0.0.1:17001
+        advertise: 127.0.0.1:17001
+        send_queue_frames: 2048
+        read_timeout: 0s
+        write_timeout: 3s
+    services: [lifecycleTestService]
+`)
+	loaded, err := loadConfig(directory)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if loaded.nodes[0].RPC != nil {
+		t.Fatalf("省略 rpc 的 Node 错误创建了配置: %+v", loaded.nodes[0].RPC)
+	}
+	configured := loaded.nodes[1].RPC
+	if configured == nil ||
+		configured.Transport != rpc.TransportTCP ||
+		configured.MaxMessageSize != 2*1024*1024 ||
+		configured.TCP.Listen != "127.0.0.1:17001" ||
+		configured.TCP.Advertise != "127.0.0.1:17001" ||
+		configured.TCP.SendQueueFrames != 2048 ||
+		configured.TCP.ReadTimeout != 0 ||
+		configured.TCP.WriteTimeout != 3*time.Second {
+		t.Fatalf("Node RPC 配置 = %+v", configured)
+	}
+}
+
+func TestLoadConfigRejectsInvalidNodeRPC(t *testing.T) {
+	for _, content := range []string{
+		`nodes:
+  - id: game-1
+    rpc:
+      transport: nats
+      tcp: {listen: "127.0.0.1:17001", advertise: "127.0.0.1:17001"}
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    rpc:
+      transport: tcp
+      tcp: {listen: "127.0.0.1:17001", advertise: "0.0.0.0:17001"}
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    rpc:
+      transport: tcp
+      tcp:
+        listen: "127.0.0.1:17001"
+        advertise: "127.0.0.1:17001"
+        send_queue_frames: 70000
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    rpc:
+      transport: tcp
+      tcp:
+        listen: "127.0.0.1:17001"
+        advertise: "127.0.0.1:17001"
+        unknown: true
+    services: [lifecycleTestService]
+`,
+	} {
+		directory := writeApplicationConfig(t, content)
+		if _, err := loadConfig(directory); !errs.IsCode(err, errs.CodeInvalidConfig) {
+			t.Fatalf("非法 Node RPC loadConfig() error = %v", err)
 		}
 	}
 }

@@ -10,16 +10,22 @@ import (
 // Runtime 在目标任务栈上创建该值。生成代码只能调用一次 Allocate；Buffer 指针保持未导出，
 // Dispatcher 返回后由 Runtime 取得唯一所有权并负责交给调用方或释放。
 type ResponseWriter struct {
-	pool    *bufferpool.Pool
-	maxSize int
-	buffer  *bufferpool.Buffer
+	pool     *bufferpool.Pool
+	maxSize  int
+	headroom int
+	buffer   *bufferpool.Buffer
 }
 
 // newResponseWriter 创建只属于一次 CallRequest 的栈上响应写入器。
-func newResponseWriter(pool *bufferpool.Pool, maxSize int) ResponseWriter {
+func newResponseWriter(
+	pool *bufferpool.Pool,
+	maxSize int,
+	headroom int,
+) ResponseWriter {
 	return ResponseWriter{
-		pool:    pool,
-		maxSize: maxSize,
+		pool:     pool,
+		maxSize:  maxSize,
+		headroom: headroom,
 	}
 }
 
@@ -32,10 +38,17 @@ func (writer *ResponseWriter) Allocate(size int) ([]byte, error) {
 		writer.pool == nil ||
 		writer.buffer != nil ||
 		size < 0 ||
-		size > writer.maxSize {
+		size > writer.maxSize ||
+		writer.headroom < 0 {
 		return nil, errs.ErrRPCEncodeFailed
 	}
-	writer.buffer = writer.pool.Acquire(size)
+
+	// 本地响应不需要协议头；远端响应预留固定 ORP1 头后仍只申请一次最终 Buffer。
+	if writer.headroom == 0 {
+		writer.buffer = writer.pool.Acquire(size)
+	} else {
+		writer.buffer = writer.pool.AcquireWithHeadroom(size, writer.headroom)
+	}
 	return writer.buffer.Bytes(), nil
 }
 

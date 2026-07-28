@@ -47,12 +47,12 @@ func NewGeneratedClient(
 	return client
 }
 
-// AllocateRequest 为生成请求编码器取得准确大小的最终 Buffer。
-func (client Client) AllocateRequest(size int) (*Buffer, error) {
+// AllocateRequest 为生成请求编码器取得准确 payload 和调用类型所需 headroom 的最终 Buffer。
+func (client Client) AllocateRequest(size int, kind CallKind) (*Buffer, error) {
 	if err := client.validate(); err != nil {
 		return nil, err
 	}
-	return client.runtime.AllocateRequest(size)
+	return client.runtime.AllocateRequest(client.target, size, kind)
 }
 
 // Await 执行一次有响应本地调用，并在 owner 的原任务调用栈恢复后解码结果。
@@ -77,8 +77,9 @@ func (client Client) Await(
 	started := false
 	err := client.owner.Await(ctx, func(waitCtx context.Context) error {
 		started = true
-		if err := client.runtime.submit(
+		handle, err := client.runtime.submit(
 			waitCtx,
+			client.owner,
 			client.target,
 			client.contractID,
 			client.fingerprint,
@@ -86,12 +87,14 @@ func (client Client) Await(
 			CallRequest,
 			request,
 			call.complete,
-		); err != nil {
+		)
+		if err != nil {
 			request.Release()
 			return err
 		}
 
 		response, err := call.wait(waitCtx)
+		handle.cancel(err)
 		if response != nil {
 			defer response.Release()
 		}
@@ -130,6 +133,8 @@ func (client Client) Async(
 	}
 
 	call := newAsyncCall()
+	var handleMu sync.Mutex
+	var handle remoteRequestHandle
 	// completionStarted 只由同一个调用方完成任务按“wait 后 callback”的顺序访问。
 	// 它用于识别 Context 已取消或 Service 已停止导致 Await 根本没有进入等待函数的路径。
 	completionStarted := false
@@ -150,6 +155,10 @@ func (client Client) Async(
 			// select 可能随机选择取消并错误调用业务 callback，破坏“返回 error 就绝不
 			// 回调”的 API 契约。Runtime 的提交是有界非阻塞准入，不会长期占住该门闩。
 			response, err := call.wait(waitCtx)
+			handleMu.Lock()
+			currentHandle := handle
+			handleMu.Unlock()
+			currentHandle.cancel(err)
 			call.setCallbackResult(response, err)
 			return err
 		},
@@ -158,6 +167,10 @@ func (client Client) Async(
 			// 放弃 localCall，确保已经到达或之后到达的响应都由 localCall 归还。
 			if !completionStarted {
 				call.abandon()
+				handleMu.Lock()
+				currentHandle := handle
+				handleMu.Unlock()
+				currentHandle.cancel(waitErr)
 			}
 			response, resultErr := call.callbackResult()
 			if response != nil {
@@ -180,8 +193,9 @@ func (client Client) Async(
 		return err
 	}
 
-	if err := client.runtime.submit(
+	submittedHandle, err := client.runtime.submit(
 		ctx,
+		client.owner,
 		client.target,
 		client.contractID,
 		client.fingerprint,
@@ -189,11 +203,15 @@ func (client Client) Async(
 		CallRequest,
 		request,
 		call.complete,
-	); err != nil {
+	)
+	if err != nil {
 		request.Release()
 		call.abort()
 		return err
 	}
+	handleMu.Lock()
+	handle = submittedHandle
+	handleMu.Unlock()
 	call.commit()
 	return nil
 }
@@ -216,8 +234,9 @@ func (client Client) Notify(
 		request.Release()
 		return contextError(cause)
 	}
-	if err := client.runtime.submit(
+	if _, err := client.runtime.submit(
 		ctx,
+		client.owner,
 		client.target,
 		client.contractID,
 		client.fingerprint,

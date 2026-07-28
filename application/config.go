@@ -11,6 +11,7 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
+	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -32,7 +33,24 @@ type nodeConfig struct {
 	ID        string                 `json:"id"`
 	Private   bool                   `json:"private"`
 	Scheduler *schedulerConfigMirror `json:"scheduler"`
+	RPC       *rpcConfigMirror       `json:"rpc"`
 	Services  []string               `json:"services"`
+}
+
+// rpcConfigMirror 只负责把配置文本转换成 rpc.Config 的冻结值。
+type rpcConfigMirror struct {
+	Transport      string                 `json:"transport"`
+	MaxMessageSize *originconfig.ByteSize `json:"max_message_size"`
+	TCP            *rpcTCPConfigMirror    `json:"tcp"`
+}
+
+// rpcTCPConfigMirror 使用指针保留“省略字段沿用默认值”的明确语义。
+type rpcTCPConfigMirror struct {
+	Listen          string                 `json:"listen"`
+	Advertise       string                 `json:"advertise"`
+	SendQueueFrames *int                   `json:"send_queue_frames"`
+	ReadTimeout     *originconfig.Duration `json:"read_timeout"`
+	WriteTimeout    *originconfig.Duration `json:"write_timeout"`
 }
 
 // schedulerConfigMirror 使用指针区分“字段省略”和用户显式写入的零值。
@@ -165,14 +183,61 @@ func loadConfig(directory string) (loadedConfig, error) {
 				err,
 			)
 		}
+		rpcConfig, err := decodeNodeRPCConfig(configured.ID, configured.RPC)
+		if err != nil {
+			return loadedConfig{}, err
+		}
 		result.nodes[index] = node.Config{
 			ID:        configured.ID,
 			Private:   configured.Private,
 			Scheduler: schedulerConfig,
+			RPC:       rpcConfig,
 			Services:  append([]string(nil), configured.Services...),
 		}
 	}
 	return result, nil
+}
+
+// decodeNodeRPCConfig 从 RPC 默认值开始覆盖单个 Node 的显式字段。
+func decodeNodeRPCConfig(
+	nodeID string,
+	mirror *rpcConfigMirror,
+) (*rpc.Config, error) {
+	if mirror == nil {
+		return nil, nil
+	}
+	result := rpc.DefaultConfig()
+	if mirror.Transport != "" {
+		result.Transport = strings.ToLower(strings.TrimSpace(mirror.Transport))
+	}
+	if mirror.MaxMessageSize != nil {
+		size := mirror.MaxMessageSize.Bytes()
+		if size <= 0 || uint64(size) > uint64(^uint(0)>>1) {
+			return nil, invalidConfigf(
+				"Node %q 的 rpc.max_message_size 无法由当前平台 int 表达",
+				nodeID,
+			)
+		}
+		result.MaxMessageSize = int(size)
+	}
+	if mirror.TCP == nil {
+		return nil, invalidConfigf("Node %q 的 rpc.tcp 不能为空", nodeID)
+	}
+	result.TCP.Listen = strings.TrimSpace(mirror.TCP.Listen)
+	result.TCP.Advertise = strings.TrimSpace(mirror.TCP.Advertise)
+	if mirror.TCP.SendQueueFrames != nil {
+		result.TCP.SendQueueFrames = *mirror.TCP.SendQueueFrames
+	}
+	if mirror.TCP.ReadTimeout != nil {
+		result.TCP.ReadTimeout = mirror.TCP.ReadTimeout.Duration()
+	}
+	if mirror.TCP.WriteTimeout != nil {
+		result.TCP.WriteTimeout = mirror.TCP.WriteTimeout.Duration()
+	}
+	if err := result.Validate(); err != nil {
+		return nil, invalidConfigf("Node %q 的 rpc 配置无效: %v", nodeID, err)
+	}
+	return &result, nil
 }
 
 // decodeLogConfig 从公开默认值开始覆盖字段，未声明项自然沿用稳定默认。

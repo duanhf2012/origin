@@ -77,11 +77,16 @@ type PlayerService struct {
 	ShouldFail  bool
 	ShouldPanic bool
 	Wait        <-chan struct{}
-	LastTime    TimeEnvelope
-	LastPacked  PackedPlayerID
-	TimeCalls   int
-	PackedCalls int
-	LastBlob    OwnedBlob
+	// WaitStarted 仅用于测试确认请求已经进入业务方法。
+	WaitStarted chan<- struct{}
+	// IgnoreWaitContext 模拟已经准入且不能因调用方断线撤回的写操作。
+	IgnoreWaitContext bool
+	Completed         int
+	LastTime          TimeEnvelope
+	LastPacked        PackedPlayerID
+	TimeCalls         int
+	PackedCalls       int
+	LastBlob          OwnedBlob
 }
 
 // EchoName 覆盖普通类型业务输出不声明 error 的契约分类。
@@ -104,16 +109,24 @@ func (target *PlayerService) GetPlayer(
 		panic("player rpc test panic")
 	}
 	if target.Wait != nil {
-		select {
-		case <-target.Wait:
-		case <-ctx.Done():
-			return PlayerData{}, nil, ctx.Err()
+		if target.WaitStarted != nil {
+			target.WaitStarted <- struct{}{}
+		}
+		if target.IgnoreWaitContext {
+			<-target.Wait
+		} else {
+			select {
+			case <-target.Wait:
+			case <-ctx.Done():
+				return PlayerData{}, nil, ctx.Err()
+			}
 		}
 	}
 	if target.ShouldFail {
 		return PlayerData{}, nil, errs.ErrInvalidArgument
 	}
 	seed.ID = playerID
+	target.Completed++
 	return seed, options, nil
 }
 

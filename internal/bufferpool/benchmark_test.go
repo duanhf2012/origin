@@ -121,3 +121,41 @@ func forceByteSliceEscape(data []byte) {
 	// 保存首字节地址，迫使底层数组跨出当前调用栈。
 	benchmarkEscapeSink.Store(&data[0])
 }
+
+func BenchmarkProtocolHeadroomVersusCopy(b *testing.B) {
+	const headerSize = 64
+	for _, payloadSize := range []int{
+		32,
+		1024,
+		64 * 1024,
+		4*1024*1024 - headerSize,
+	} {
+		b.Run(strconv.Itoa(payloadSize)+"/headroom", func(b *testing.B) {
+			pool := NewPool(Options{})
+			b.ReportAllocs()
+			b.SetBytes(int64(payloadSize))
+			for b.Loop() {
+				buffer := pool.AcquireWithHeadroom(payloadSize, headerSize)
+				header, ok := buffer.Prepend(headerSize)
+				if !ok {
+					b.Fatal("Prepend 失败")
+				}
+				header[0] = 1
+				buffer.Release()
+			}
+		})
+		b.Run(strconv.Itoa(payloadSize)+"/copy", func(b *testing.B) {
+			pool := NewPool(Options{})
+			source := make([]byte, payloadSize)
+			b.ReportAllocs()
+			b.SetBytes(int64(payloadSize))
+			for b.Loop() {
+				buffer := pool.Acquire(headerSize + payloadSize)
+				data := buffer.Bytes()
+				data[0] = 1
+				copy(data[headerSize:], source)
+				buffer.Release()
+			}
+		})
+	}
+}

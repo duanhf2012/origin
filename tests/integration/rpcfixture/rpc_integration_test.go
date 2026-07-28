@@ -713,7 +713,7 @@ func TestGeneratedErrorsPanicAndSelfCall(t *testing.T) {
 			PlayerData{Name: "x"},
 			nil,
 		)
-		if !errors.Is(err, errs.ErrRPCNoRoute) {
+		if !errors.Is(err, errs.ErrTransportUnavailable) {
 			t.Errorf("wrong-node error = %v", err)
 		}
 		mismatch := NewPlayerRPCClient(
@@ -844,7 +844,7 @@ func TestGeneratedTimeoutAndAsyncImmediateFailure(t *testing.T) {
 				callbackCalled <- struct{}{}
 			},
 		)
-		if !errors.Is(err, errs.ErrRPCNoRoute) {
+		if !errors.Is(err, errs.ErrTransportUnavailable) {
 			t.Errorf("Async immediate error = %v", err)
 		}
 	}); err != nil {

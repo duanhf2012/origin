@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -32,6 +33,8 @@ type Config struct {
 	//
 	// 完全零值表示使用 service.DefaultSchedulerConfig；部分非零配置必须自身完整有效。
 	Scheduler service.SchedulerConfig
+	// RPC 为 nil 时当前 Node 只支持本地调用；非 nil 时启用 M13 TCP 监听与出站连接。
+	RPC *rpc.Config
 	// Services 按声明顺序保存当前 Node 实际启用的 Service。
 	Services []string
 }

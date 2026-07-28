@@ -100,6 +100,33 @@ func (conn *Conn) RemoteAddr() net.Addr {
 	return conn.remoteAddr
 }
 
+// Done 返回连接全部读写循环和 Handler.OnClose 完成后关闭的 Channel。
+//
+// 上层连接管理器可以把它与重连 Context、心跳 Timer 放在同一个 select 中，不需要为
+// Conn.Wait 额外创建 goroutine。Listener 注销紧随 Done 发布之后完成，不属于该信号的
+// 对外保证；调用方不能关闭或向该 Channel 发送数据。
+func (conn *Conn) Done() <-chan struct{} {
+	if conn == nil {
+		return nil
+	}
+	return conn.done
+}
+
+// Cause 返回连接已经完成后的首个关闭原因。
+//
+// Done 尚未关闭时返回 nil，避免上层把仍在运行的连接误判为 CodeTransportClosed。
+func (conn *Conn) Cause() error {
+	if conn == nil {
+		return errs.ErrTransportClosed
+	}
+	select {
+	case <-conn.done:
+		return conn.closeCause()
+	default:
+		return nil
+	}
+}
+
 // Send 非阻塞地把 payload Buffer 提交给当前连接。
 //
 // 返回 nil 时 Buffer 所有权已经转移给 Conn；返回 error 时所有权仍属于调用方。

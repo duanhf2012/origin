@@ -293,6 +293,9 @@ func (app *Application) run(
 	if err != nil {
 		return app.report(err)
 	}
+	if err := wireRPCTargets(nodes); err != nil {
+		return app.report(rollbackBuiltNodes(nodes, err))
+	}
 	app.mu.Lock()
 	app.nodes = nodes
 	app.mu.Unlock()
@@ -327,6 +330,36 @@ func (app *Application) run(
 	app.logger.Info("application running")
 	<-lifecycleCtx.Done()
 	return app.stopStartedNodes()
+}
+
+// wireRPCTargets 把同一 Application 已选择的 TCP Node 按真实地址互相登记。
+//
+// 这里只提供 M13 的显式地址来源；调用仍经真实 TCP 连接，不使用进程内 Runtime 指针
+// 短路。未来 Discovery 复用 Node.AddRPCTarget 即可，无需改变生成客户端。
+func wireRPCTargets(nodes []*node.Node) error {
+	for _, source := range nodes {
+		if _, enabled := source.RPCAdvertiseAddress(); !enabled {
+			continue
+		}
+		for _, target := range nodes {
+			if source == target {
+				continue
+			}
+			address, enabled := target.RPCAdvertiseAddress()
+			if !enabled {
+				continue
+			}
+			if err := source.AddRPCTarget(target.ID(), address); err != nil {
+				return fmt.Errorf(
+					"登记 Node %q 到 Node %q 的 RPC 目标: %w",
+					source.ID(),
+					target.ID(),
+					err,
+				)
+			}
+		}
+	}
+	return nil
 }
 
 // Stop 请求当前 Application 停止，并等待唯一生命周期路径完成清理。

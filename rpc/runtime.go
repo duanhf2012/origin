@@ -19,6 +19,7 @@ type serviceEndpoint struct {
 	serviceName string
 	target      service.IService
 	dispatcher  Dispatcher
+	public      bool
 }
 
 // Runtime 管理一个 Node 内的本地 RPC 路由、共享 BufferPool 和调用提交。
@@ -34,6 +35,11 @@ type Runtime struct {
 	endpoints map[string]serviceEndpoint
 	frozen    atomic.Bool
 	closed    atomic.Bool
+	requestID atomic.Uint64
+
+	// remote 在配置启用 TCP 时保存连接、监听和 Deadline 资源；未配置时保持 nil，
+	// 本地调用热路径只需一次 nil 判断。
+	remote *remoteRuntime
 }
 
 // NewRuntime 创建尚未发布的 Node RPC Runtime。
@@ -62,6 +68,23 @@ func (runtime *Runtime) RegisterService(
 	target service.IService,
 	dispatcher Dispatcher,
 ) error {
+	return runtime.RegisterServiceVisibility(
+		serviceName,
+		target,
+		dispatcher,
+		true,
+	)
+}
+
+// RegisterServiceVisibility 登记本地端点，并显式决定它是否进入远端握手目录。
+//
+// 私有 Node 或 `_ServiceName` 仍可被同 Node 客户端调用，但不会通过 TCP 暴露。
+func (runtime *Runtime) RegisterServiceVisibility(
+	serviceName string,
+	target service.IService,
+	dispatcher Dispatcher,
+	public bool,
+) error {
 	if runtime == nil || serviceName == "" || target == nil {
 		return errs.ErrInvalidArgument
 	}
@@ -77,7 +100,30 @@ func (runtime *Runtime) RegisterService(
 		serviceName: serviceName,
 		target:      target,
 		dispatcher:  dispatcher,
+		public:      public,
 	}
+	return nil
+}
+
+// Configure 在 Freeze 前装配当前 Node 的远端 RPC 运行配置。
+//
+// nil 表示当前 Node 只提供本地 RPC。配置只允许写入一次，防止启动阶段发生地址或上限漂移。
+func (runtime *Runtime) Configure(config *Config) error {
+	if runtime == nil {
+		return errs.ErrInvalidArgument
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.frozen.Load() || runtime.closed.Load() || runtime.remote != nil {
+		return errs.ErrInvalidArgument
+	}
+	if config == nil {
+		return nil
+	}
+	if err := config.Validate(); err != nil {
+		return err
+	}
+	runtime.remote = newRemoteRuntime(runtime, *config)
 	return nil
 }
 
@@ -100,16 +146,45 @@ func (runtime *Runtime) Close() {
 	if runtime == nil {
 		return
 	}
-	runtime.closed.Store(true)
+	runtime.BeginStop(context.Background())
+	if runtime.remote != nil {
+		runtime.remote.closeDeadlines()
+	}
 }
 
-// AllocateRequest 为生成代码取得一次准确大小的请求 Buffer。
-func (runtime *Runtime) AllocateRequest(size int) (*Buffer, error) {
+// maxMessageSize 返回当前 Node 冻结的业务 payload 上限。
+func (runtime *Runtime) maxMessageSize() int {
+	if runtime != nil && runtime.remote != nil {
+		return runtime.remote.config.MaxMessageSize
+	}
+	return DefaultMaxMessageSize
+}
+
+// AllocateRequest 为生成代码取得准确 payload，并只为远端目标保留对应调用头空间。
+func (runtime *Runtime) AllocateRequest(
+	target Target,
+	size int,
+	kind CallKind,
+) (*Buffer, error) {
 	if runtime == nil || runtime.pool == nil || size < 0 ||
-		size > DefaultMaxMessageSize {
+		size > runtime.maxMessageSize() ||
+		(kind != CallRequest && kind != CallNotify) ||
+		!target.valid() {
 		return nil, errs.ErrRPCEncodeFailed
 	}
-	return runtime.pool.Acquire(size), nil
+
+	// 同 Node 调用不承担网络头容量；只有显式选择其他 Node 时按准确 Kind 保留 headroom。
+	if target.mode != targetServiceOnNode || target.nodeID == runtime.nodeID {
+		return runtime.pool.Acquire(size), nil
+	}
+	headroom := wireNotifyFixedSize + len(target.serviceName)
+	if kind == CallRequest {
+		headroom = wireRequestFixedSize + len(target.serviceName)
+	}
+	if headroom > wireEnvelopeSize || !validWireName(target.serviceName) {
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	return runtime.pool.AcquireWithHeadroom(size, headroom), nil
 }
 
 // resolve 把逻辑 Target 解析为当前 Node 内唯一端点，并校验完整契约。
@@ -148,6 +223,7 @@ func (runtime *Runtime) resolve(
 // 提交失败时所有权仍属于调用方；提交成功后目标任务无论正常、错误或 panic 都会释放请求。
 func (runtime *Runtime) submit(
 	ctx context.Context,
+	owner service.IService,
 	target Target,
 	contractID ContractID,
 	fingerprint ContractFingerprint,
@@ -155,16 +231,59 @@ func (runtime *Runtime) submit(
 	kind CallKind,
 	request *Buffer,
 	complete func(*Buffer, error),
-) error {
-	if ctx == nil || request == nil || methodID == 0 ||
+) (remoteRequestHandle, error) {
+	if ctx == nil || owner == nil || request == nil || methodID == 0 ||
+		contractID == 0 || fingerprint == (ContractFingerprint{}) ||
 		(kind != CallRequest && kind != CallNotify) ||
 		(kind == CallRequest && complete == nil) ||
 		(kind == CallNotify && complete != nil) {
-		return errs.ErrInvalidArgument
+		return remoteRequestHandle{}, errs.ErrInvalidArgument
+	}
+	if !runtime.frozen.Load() {
+		return remoteRequestHandle{}, errs.ErrServiceNotReady
+	}
+	if runtime.closed.Load() {
+		return remoteRequestHandle{}, errs.ErrServiceStopped
+	}
+
+	// 指定其他 Node 时只走真实 TCP 会话；同进程 Runtime 之间也不做指针短路。
+	if target.mode == targetServiceOnNode && target.nodeID != runtime.nodeID {
+		if runtime.remote == nil {
+			return remoteRequestHandle{}, errs.ErrTransportUnavailable
+		}
+		session := runtime.remote.targetSession(target.nodeID)
+		if session == nil {
+			return remoteRequestHandle{}, errs.ErrTransportUnavailable
+		}
+		if kind == CallNotify {
+			err := session.sendNotify(
+				target.serviceName,
+				fingerprint,
+				methodID,
+				request,
+			)
+			return remoteRequestHandle{}, err
+		}
+		timeout, err := service.AwaitTimeoutOf(owner)
+		if err != nil {
+			return remoteRequestHandle{}, err
+		}
+		remaining, err := remoteRemainingTimeout(timeout, ctx)
+		if err != nil {
+			return remoteRequestHandle{}, err
+		}
+		return session.sendRequest(
+			target.serviceName,
+			fingerprint,
+			methodID,
+			remaining,
+			request,
+			complete,
+		)
 	}
 	endpoint, err := runtime.resolve(target, contractID, fingerprint)
 	if err != nil {
-		return err
+		return remoteRequestHandle{}, err
 	}
 
 	// caller Context 只提供业务值；目标任务自身的生命周期和执行令牌由目标 Scheduler
@@ -198,10 +317,11 @@ func (runtime *Runtime) submit(
 			endpoint,
 			methodID,
 			request.Bytes(),
+			0,
 		)
 		complete(response, dispatchErr)
 	})
-	return err
+	return remoteRequestHandle{}, err
 }
 
 // dispatchRequest 执行请求—响应 Dispatcher，并取得其一次分配的最终响应。
@@ -210,8 +330,13 @@ func (runtime *Runtime) dispatchRequest(
 	endpoint serviceEndpoint,
 	methodID MethodID,
 	request []byte,
+	responseHeadroom int,
 ) (response *Buffer, result error) {
-	writer := newResponseWriter(runtime.pool, DefaultMaxMessageSize)
+	writer := newResponseWriter(
+		runtime.pool,
+		runtime.maxMessageSize(),
+		responseHeadroom,
+	)
 	defer func() {
 		if value := recover(); value != nil {
 			writer.release()

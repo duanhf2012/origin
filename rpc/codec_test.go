@@ -200,7 +200,7 @@ func TestResponseWriterAllocatesOnceAndReleases(t *testing.T) {
 	t.Parallel()
 
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
-	writer := newResponseWriter(pool, DefaultMaxMessageSize)
+	writer := newResponseWriter(pool, DefaultMaxMessageSize, 0)
 	data, err := writer.Allocate(32)
 	if err != nil || len(data) != 32 {
 		t.Fatalf("Allocate() = (%d, %v)", len(data), err)
@@ -217,7 +217,7 @@ func TestResponseWriterAllocatesOnceAndReleases(t *testing.T) {
 		t.Fatalf("released stats = %+v", stats)
 	}
 
-	failed := newResponseWriter(pool, DefaultMaxMessageSize)
+	failed := newResponseWriter(pool, DefaultMaxMessageSize, 0)
 	if _, err := failed.Allocate(DefaultMaxMessageSize + 1); !errors.Is(
 		err,
 		errs.ErrRPCEncodeFailed,

@@ -1222,8 +1222,8 @@ Await 和 Async 仍需要一个最小本地完成状态，用于：
 - 管理请求和响应 Buffer 所有权。
 
 该对象只在一次本地调用的直接参与方之间传递，不进入全局 Map。M11 暂称 `localCall`，
-只负责同 Node 最小闭环；M13 引入 RequestID 和远程请求—响应状态时，以最终池化
-`pendingCall` 取代它，不长期并存两套重复状态机。
+只负责同 Node 最小闭环；M13 的远程请求—响应路径使用按值存入会话 Map 的
+`pendingCall`，两者共享一次性完成语义，但不强行合并成携带全部本地和远程字段的大对象。
 
 是否池化 `localCall` 必须由 Benchmark、逃逸分析和失败路径复杂度决定。未证明稳定收益
 前不为了理论零分配引入难以验证的 ABA 防护。
@@ -1255,8 +1255,9 @@ M11 不自动池化：
    收益时才启用；
 5. 数据不能证明收益或状态机明显变复杂时，M11 保持不池化。
 
-M13 最终 `pendingCall` 仍按既有设计使用专用池和 RequestID 防 ABA。不能为了提前复用
-M13 代码，把 RequestID、远程 pending Map 或连接状态塞入 M11 `localCall`。
+M13 最终 `pendingCall` 以值存入原物理会话 Map，跨平台 Benchmark 均为零分配，因此没有
+增加专用池。RequestID 与会话 Map 仍负责隔离迟到事件。不能为了形式复用 M13 代码，把
+RequestID、远程 pending Map 或连接状态塞入 M11 `localCall`。
 
 ## 15. 错误语义
 
@@ -1561,7 +1562,7 @@ panic。客户端不持有独立 TCP/NATS 连接。
 | 3 | RPC 契约可见性、泛型和跨包实现桥接 | RPC 接口和方法要求导出、首版禁止泛型契约；契约包生成 `New<Contract>Dispatcher(impl Contract)`，Service 包只生成 `RPCDispatcher()` 薄适配，避免重复 Codec | 已确认 |
 | 4 | Dispatcher 如何区分请求—响应与 Notify | 使用两个有效值的轻量 `rpc.CallKind`；Await/Async 使用 `CallRequest`，Notify/Broadcast 使用 `CallNotify`；零值非法 | 已确认 |
 | 5 | Await/Async Deadline 与 M8 接入 | 调用方显式 Deadline 原样使用；无 Deadline 时由 M8 默认链提供唯一计时；Async 共享每 Node DeadlineQueue，不为每次调用建立第二个 Timer | 已确认 |
-| 6 | `localCall` 字段、完成同步和池化 | M11 只保留一个私有一次性完成状态；先实现不池化基线和池化对照，仅在收益明确且状态机仍简单时启用；M13 使用最终池化 `pendingCall` | 已确认 |
+| 6 | `localCall` 字段、完成同步和池化 | M11 只保留一个私有一次性完成状态并保持未池化；M13 `pendingCall` 以值存入会话 Map，零分配基线证明无需对象池 | 已确认 |
 | 7 | RPC 错误码、业务错误编码、panic 和本地/远端一致性 | 固定 `2004–2010` 契约、方法、编解码、执行 panic 和广播部分失败错误；同 Node 也按相同错误语义处理，不直接传 Go error 指针 | 已确认 |
 | 8 | ContractID、MethodID 和完整指纹的规范化字节 | MethodID 只包含契约名和方法名；完整指纹精确检查签名、Schema、Codec 标识和格式版本；规范化字节必须由 golden test 锁定 | 已确认 |
 | 9 | Go 包加载和 Protobuf 依赖 | 固定 `golang.org/x/tools/go/packages` 与 `google.golang.org/protobuf` 版本；Protobuf 优先使用官方 Append/Options API；具体固定版本在实施计划前查验 | 已确认 |
@@ -1719,8 +1720,8 @@ Timer 继续复用现有池。普通业务结果不池化。
   `4 allocs/op`；Linux 约 `137.6～138.2ns/op`、`432B/op`、`4 allocs/op`；
 - Channel 到达终态后已经关闭，不能直接复用；仅池化外层小对象最多减少一次分配，却要
   增加代次、晚到响应和 ABA 防护状态机；
-- 当前收益不足以抵消代码复杂度和错误风险，因此遵守开发原则保持未池化基线。M13 的
-  远程 `pendingCall` 有更长生命周期和真实并发表，再独立测量是否池化。
+- 当前收益不足以抵消代码复杂度和错误风险，因此遵守开发原则保持未池化基线。M13 已对
+  真实并发表中的远程 `pendingCall` 独立测量；值类型 Map 基线为零分配，最终同样不池化。
 
 ### 22.4 性能基线
 

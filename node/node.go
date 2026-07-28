@@ -120,6 +120,9 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("创建 Node %q RPC Runtime: %w", config.ID, err)
 	}
+	if err := rpcRuntime.Configure(config.RPC); err != nil {
+		return nil, fmt.Errorf("配置 Node %q RPC Runtime: %w", config.ID, err)
+	}
 
 	// 按已知数量一次分配有序表和查询表，避免装配时重复扩容。
 	instance := &Node{
@@ -183,10 +186,11 @@ func New(
 				))
 			}
 		}
-		if err := instance.rpcRuntime.RegisterService(
+		if err := instance.rpcRuntime.RegisterServiceVisibility(
 			binding.Name,
 			binding.Service,
 			dispatcher,
+			!config.Private && !binding.Private,
 		); err != nil {
 			return nil, fmt.Errorf(
 				"登记 Node %q Service %q RPC: %w",
@@ -352,6 +356,16 @@ func (node *Node) Start(ctx context.Context) error {
 			cause:  err,
 		}
 	}
+	// TCP Listener 和出站连接依赖已经运行的 M8 DeadlineQueue，并且必须先于 OnStart
+	// 建立，使启动逻辑可以调用已经可达的远端 Service。
+	if err := node.rpcRuntime.StartNetwork(node.timerEngine); err != nil {
+		node.state.Store(uint32(StateFailed))
+		return &lifecycleContext{
+			nodeID: node.id,
+			phase:  "rpc_network_start",
+			cause:  err,
+		}
+	}
 
 	// 时间轮运行后再进入启动阶段。每个 Scheduler 先 Prepare，使 OnStart 可以登记 Timer，
 	// 但不启动任何用户任务；Prepare 失败的 Service 尚未进入 OnStart，因此不加入停止序列。
@@ -438,8 +452,9 @@ func (node *Node) Rollback(ctx context.Context) error {
 		return invalidArgument(fmt.Sprintf("Node %q 的回滚 Context 不能为空", node.id))
 	}
 	// 失败实例仍先获得反序 OnStop，最后再关闭 Node 时间轮并等待其 goroutine 退出。
+	result := node.rpcRuntime.BeginStop(ctx)
+	result = errors.Join(result, node.stopStarted(ctx, true))
 	node.rpcRuntime.Close()
-	result := node.stopStarted(ctx, true)
 	result = errors.Join(result, node.timerEngine.Close())
 	node.state.Store(uint32(StateFailed))
 	return result
@@ -468,13 +483,32 @@ func (node *Node) Stop(ctx context.Context) error {
 	// 正常停止会发布 Stopping/Stopped；失败回滚由 Rollback 保持 Failed。
 	node.state.Store(uint32(StateStopping))
 	node.logger.Info("node stopping")
-	node.rpcRuntime.Close()
+	result := node.rpcRuntime.BeginStop(ctx)
 	// Service 清理阶段保留时间轮运行，全部 OnStop 返回后才回收 Node 最后的后台资源。
-	result := node.stopStarted(ctx, false)
+	result = errors.Join(result, node.stopStarted(ctx, false))
+	node.rpcRuntime.Close()
 	result = errors.Join(result, node.timerEngine.Close())
 	node.state.Store(uint32(StateStopped))
 	node.logger.Info("node stopped")
 	return result
+}
+
+// RPCAdvertiseAddress 返回当前 Node 对其他 Node 公开的 TCP RPC 地址。
+//
+// 该方法只供 Application 和未来 Discovery 装配连接目标；业务客户端仍只保存逻辑 Target。
+func (node *Node) RPCAdvertiseAddress() (string, bool) {
+	if node == nil || node.rpcRuntime == nil {
+		return "", false
+	}
+	return node.rpcRuntime.AdvertiseAddress()
+}
+
+// AddRPCTarget 把一个明确 Node 地址交给当前 Node 的连接管理器。
+func (node *Node) AddRPCTarget(nodeID, address string) error {
+	if node == nil || node.rpcRuntime == nil {
+		return errs.ErrInvalidArgument
+	}
+	return node.rpcRuntime.AddTarget(nodeID, address)
 }
 
 // stopStarted 按 started 的严格反序执行唯一一次清理。

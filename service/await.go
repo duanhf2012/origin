@@ -19,6 +19,25 @@ type managedDeadlineContext struct {
 	deadline time.Time
 }
 
+// AwaitTimeoutOf 返回 target 当前已经冻结的默认 Await 超时。
+//
+// 该接口供 RPC 等框架组件在投递异步远端调用时复用同一套超时配置。它不会创建 Timer、
+// Context 或 goroutine；业务代码仍应直接使用 Service.Await。
+func AwaitTimeoutOf(target IService) (time.Duration, error) {
+	if target == nil || isNilService(target) {
+		return 0, errs.ErrInvalidArgument
+	}
+	base := target.baseService()
+	if base == nil {
+		return 0, errs.ErrInvalidArgument
+	}
+	scheduler := base.scheduler.Load()
+	if scheduler == nil {
+		return 0, errs.ErrServiceNotReady
+	}
+	return scheduler.config.DefaultAwaitTimeout, nil
+}
+
 // Deadline 返回 M8 当前唯一管理的绝对截止时间。
 func (managed *managedDeadlineContext) Deadline() (time.Time, bool) {
 	if managed == nil || managed.deadline.IsZero() {
