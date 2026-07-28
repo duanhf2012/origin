@@ -53,15 +53,25 @@ M11 必须同时遵守：
 9. M11 同 Node 调用也必须经过编码、队列、Dispatcher 和解码；
 10. M11 生成 `AsyncXxx`、`AwaitXxx` 和 `NotifyXxx`，Broadcast 延后；
 11. 所有生成调用最终都具有统一 `error` 语义；
-12. 未显式提供 Deadline 时最终使用 Origin 内置 `15s`；
-13. 客户端不持有 TCP/NATS 连接，目标只描述逻辑路由；
-14. 客户端统一使用一个构造函数和一个具体 `rpc.Target` 值对象；
-15. ContractID 和 MethodID 使用生成期 SHA-256 截断值，发现碰撞时生成失败；
-16. 完整 SHA-256 契约指纹保留给兼容性检查和后续 Node 握手；
-17. 不允许手工覆盖 ContractID 或 MethodID。
-18. 每个 Node 创建并独占一个 `rpc.Runtime`，但 RPC 的业务目标始终是 Service；
-19. 生成客户端只在构造冷路径取得一次 Runtime，不在调用热路径查询或断言；
-20. Dispatcher 使用静态方法分派和静态编解码函数，不建立公共 Codec 接口。
+12. RPC 与通用 Await 共用唯一默认超时配置，不再增加 `rpc.default_timeout`；
+13. 超时优先级固定为：
+    `调用方显式 Deadline > Service.SetDefaultAwaitTimeout > Node scheduler.default_await_timeout > Origin 内置 15s`；
+14. 一次 Await 或 RPC 调用只计算一个有效 Context、一个有效 Deadline，并且只登记一个
+    逻辑计时器；生成的 `AwaitXxx` 不重复附加 RPC 默认超时；
+15. Async 只使用 Context 取消，不额外公开取消句柄；
+16. Notify 只在编码、路由和本地发送接受前检查 Context；接受后不创建 pending 或超时项，
+    也不能撤回已经接受的消息；
+17. 客户端不持有 TCP/NATS 连接，目标只描述逻辑路由；
+18. 客户端统一使用一个构造函数和一个具体 `rpc.Target` 值对象；
+19. ContractID 和 MethodID 使用生成期 SHA-256 截断值，发现碰撞时生成失败；
+20. 完整 SHA-256 契约指纹保留给兼容性检查和后续 Node 握手；
+21. 不允许手工覆盖 ContractID 或 MethodID。
+22. 每个 Node 创建并独占一个 `rpc.Runtime`，但 RPC 的业务目标始终是 Service；
+23. 生成客户端只在构造冷路径取得一次 Runtime，不在调用热路径查询或断言；
+24. Dispatcher 使用静态方法分派和静态编解码函数，不建立公共 Codec 接口；
+25. M11 只支持 Running 阶段的本地 RPC；`OnStart`、`OnStop` 的生命周期 Await 基础进入
+    M15，`AwaitService`、`AwaitNodeService` 随后在服务发现里程碑接入；
+26. 首版不公开 `AwaitManaged` 或第二套 Await API。
 
 ## 4. M11 交付范围
 
@@ -91,7 +101,7 @@ M11 必须同时遵守：
 | 稳定结构体字段 ID、自定义静态 Codec 和结构体兼容性 | M12 |
 | RPC 线协议、RequestID、pendingCall、连接管理和 TCP | M13 |
 | NATS RPC Transport | M14 |
-| 完整 Stop 排空、OnStop Await RPC 和异常进程收尾 | M15 |
+| 生命周期 Await 基础、完整 Stop 排空、OnStop Await RPC 和异常进程收尾 | M15 |
 | Origin/etcd 服务发现、关注筛选和退休状态 | M15 后独立里程碑 |
 | RoundRobin、Rand、ModKey、自定义路由和 Broadcast | 服务发现之后独立里程碑 |
 | 外部 gRPC 插件 | M15 后独立里程碑 |
@@ -756,8 +766,12 @@ Protobuf 空消息、空字符串和空 `[]byte` 可以编码为零字节业务�
 
 ### 13.2 Context 边界
 
-调用方的 Service Task Context 只能由调用方当前任务使用，不能直接传给目标 Service 或
-其他 goroutine。
+调用方的 Service Task Context 可以沿当前调用栈向下传递，也可以派生取消、Deadline 和
+不可变元数据。它携带的 Service 执行权令牌只能由所属当前任务使用，不得交给其他
+goroutine 调用 `Await` 等需要当前 Service 执行权的 API。
+
+其他 goroutine 可以观察派生 Context 的取消状态和不可变元数据，但不能把该 Context
+当作自身的 Service Task Context，也不能借此访问调用方 Service 状态。
 
 本地 RPC 必须：
 
@@ -767,8 +781,18 @@ Protobuf 空消息、空字符串和空 `[]byte` 可以编码为零字节业务�
 4. Async 回调使用调用方 Scheduler 新建的回调任务 Context；
 5. 不让目标任务持有调用方 Task Context 的私有执行权令牌。
 
-如何在不创建每调用 goroutine、标准库 Runtime Timer 或第二套 Deadline 系统的情况下
-传播本地 RPC Deadline 和取消，仍属于 M11 后续必须确认的实现细节。
+有效超时只计算一次。生成调用复用 Service Await 已确定的默认链：
+
+```text
+调用方显式 Deadline
+    > Service.SetDefaultAwaitTimeout
+    > Node scheduler.default_await_timeout
+    > Origin 内置 15s
+```
+
+当前仅保留一个实现细节待确认：调用方已经显式建立 Deadline 的 Context 是继续使用 Go
+Runtime Timer，还是由 Origin M8 接管。无论最终选择哪种机制，同一次调用都不能同时登记
+Go Timer 和 M8 Deadline。
 
 ### 13.3 Await
 
@@ -786,6 +810,9 @@ Protobuf 空消息、空字符串和空 `[]byte` 可以编码为零字节业务�
 不为每次 Await 创建辅助 goroutine。同一个 Service Await 调用自身 RPC 时也按上述流程
 释放执行槽，因此目标任务可以正常执行，不形成直接递归或执行权死锁。
 
+`AwaitXxx` 只接收并传递一个有效 Context，内部直接复用 Service Await 原语，不再次套用
+RPC 默认超时，也不公开 `AwaitManaged` 等重复入口。
+
 ### 13.4 Async
 
 `AsyncXxx`：
@@ -797,6 +824,9 @@ Protobuf 空消息、空字符串和空 `[]byte` 可以编码为零字节业务�
 5. 即使目标立即失败或立即完成，回调也不能在当前调用栈内执行；
 6. 回调取得调用方 Service 执行权后才能访问 Service 状态；
 7. 每次调用最多发布一次回调。
+
+Async pending 使用与 Await 相同的有效 Deadline。调用方需要主动取消时使用
+`context.WithCancel` 派生 Context 并调用 `cancel()`；生成方法不再返回另一种取消句柄。
 
 M11 只处理 Running 期间的基本回调。Draining、停止期间的新调用和回调排空由 M15 完整
 实现。
@@ -813,7 +843,9 @@ M11 只处理 Running 期间的基本回调。Draining、停止期间的新调�
 6. 目标业务错误或 panic 只在目标侧记录；
 7. 编码失败、无目标、契约不匹配、Service 非 Running 或队列满直接返回相应错误。
 
-M11 Notify 的“发送成功”表示目标本地队列已经接受，不表示业务成功。
+M11 Notify 的“发送成功”表示目标本地队列已经接受，不表示业务成功。Context 只约束
+接受前的编码、路由和投递过程；目标队列接受后不能撤回，不创建 pending 或超时项，目标
+业务执行也不再受调用方 Deadline 约束。
 
 ### 13.6 Buffer 所有权
 
@@ -838,8 +870,9 @@ Await 和 Async 仍需要一个最小本地完成状态，用于：
 - 投递 Async 回调；
 - 管理请求和响应 Buffer 所有权。
 
-该对象只在一次本地调用的直接参与方之间传递，不进入全局 Map。暂称 `localCall` 仅用于
-讨论，不提前锁定最终类型名。
+该对象只在一次本地调用的直接参与方之间传递，不进入全局 Map。M11 暂称 `localCall`，
+只负责同 Node 最小闭环；M13 引入 RequestID 和远程请求—响应状态时，以最终池化
+`pendingCall` 取代它，不长期并存两套重复状态机。
 
 是否池化 `localCall` 必须由 Benchmark、逃逸分析和失败路径复杂度决定。未证明稳定收益
 前不为了理论零分配引入难以验证的 ABA 防护。
@@ -1086,16 +1119,69 @@ panic。客户端不持有独立 TCP/NATS 连接。
 
 以下问题已经定位，但尚未最终确认。每次只讨论一个问题，确认后立即回写本文：
 
-1. 本地 RPC Deadline 和取消如何复用 M8 TimerEngine，且不传递调用方 Task Context；
-2. Async 是否只使用 Context 取消，还是额外返回公开取消句柄；
-3. M11 基础类型的精确线布局、`int`/`uint` 跨平台规则和具名别名；
-4. `localCall` 的字段、完成同步原语以及是否池化；
-5. M11 新增错误码的名称、编号和 panic 映射；
-6. Go 包加载是否固定使用 `golang.org/x/tools/go/packages` 及具体版本；
-7. Protobuf 依赖版本和高性能 Marshal/Unmarshal API；
-8. 接口标记被删除后，旧 `origin_rpc.gen.go` 的安全清理规则；
-9. 完整契约指纹的精确规范化字节布局；
-10. M11 是否需要公开只读 Descriptor 诊断接口。
+1. 调用方显式建立 Deadline 的 Context 使用 Go Runtime Timer，还是由 M8 TimerEngine
+   接管；无论选择哪一种，一次调用只能登记一个逻辑计时器；
+2. M11 基础类型的精确线布局、`int`/`uint` 跨平台规则和具名别名；
+3. `localCall` 的字段、完成同步原语以及是否池化；
+4. M11 新增错误码的名称、编号和 panic 映射；
+5. Go 包加载是否固定使用 `golang.org/x/tools/go/packages` 及具体版本；
+6. Protobuf 依赖版本和高性能 Marshal/Unmarshal API；
+7. 接口标记被删除后，旧 `origin_rpc.gen.go` 的安全清理规则；
+8. 完整契约指纹的精确规范化字节布局；
+9. M11 是否需要公开只读 Descriptor 诊断接口。
+
+### 20.1 显式 Context 定时器调研（待确认）
+
+截至 2026-07-28 的官方源码和项目实践：
+
+1. Go `context.WithDeadline` 内部创建 `timerCtx` 并调用 `time.AfterFunc`；
+   `WithTimeout` 直接委托给 `WithDeadline`。Go Runtime 把 Timer 保存在每个 P 的最小堆中，
+   近年持续优化锁竞争、回收和 Stop/Reset 语义，但每个新 Deadline Context 仍有对象分配
+   和 Runtime Timer 维护成本：
+   [Go Context 源码](https://go.dev/src/context/context.go#L625)、
+   [Go Runtime Timer 源码](https://go.dev/src/runtime/time.go#L130)、
+   [Go 1.14 Timer 优化](https://go.dev/doc/go1.14#runtime)；
+2. gRPC 明确让调用方通过 Context 设置 Deadline，默认不替调用创建 Deadline；Go 的
+   Deadline 还会沿后续调用传播：
+   [gRPC Deadline 指南](https://grpc.io/docs/guides/deadlines/)；
+3. NATS Go 的 `RequestWithContext` 直接等待响应或 `ctx.Done()`，不会在已有 Context
+   之外再创建第二个 Timer：
+   [NATS Context 请求源码](https://github.com/nats-io/nats.go/blob/main/context.go)；
+4. 高性能 RPC 框架 Kitex 在客户端没有直接叠加 `context.WithTimeout`，而是建立自定义
+   timeout Context，并使用 `sync.Pool` 复用 `time.Timer`；服务端普通路径仍使用
+   `context.WithTimeout`。这说明极端热路径确实会优化 Timer 分配，但代价是一套明显更复杂
+   的超时任务、Worker 和回收状态机：
+   [Kitex 客户端超时池](https://github.com/cloudwego/kitex/blob/develop/client/rpctimeout_pool.go)、
+   [Kitex 服务端超时中间件](https://github.com/cloudwego/kitex/blob/develop/server/middlewares.go)；
+5. fasthttp 也公开 `AcquireTimer`/`ReleaseTimer`，通过 `sync.Pool` 复用 Go Timer，
+   目标明确是降低 GC 压力，而不是声称 Go Timer 不能使用：
+   [fasthttp Timer 池](https://github.com/valyala/fasthttp/blob/master/timer.go)。
+
+在当前 Windows 开发机、Go 1.26.5 上运行 Go 官方 `BenchmarkWithTimeout`，每个 Benchmark
+操作创建并取消 10 个一小时 Context。40～4000 个预存活 Context 场景的代表结果约为
+`1.65～2.69us/op`、`2720 B/op`、`40 allocs/op`，折算每个 Context 约
+`0.17～0.27us`、`272 B`、`4 allocs`。这不是线上 RPC Benchmark，但能够说明 Go Timer
+单次 CPU 成本不高，大量活跃或高频创建时主要风险是堆对象和 GC。
+
+M8 已有对照基线：Windows 登记长 Deadline 约 `320.4ns/op`、首次 `1 alloc/op`，稳定
+登记后取消约 `264.5ns/op`、`0 allocs/op`；Linux 一百万活跃 Deadline 约
+`101.7 B/条`。两组 Benchmark 的语义不同，不能只按 `ns/op` 直接判输赢；M8 的主要收益是
+统一管理海量框架默认 Deadline、稳定复用和降低 GC，而 Go Timer 的优势是标准 Context
+兼容和高于 M8 `10ms` Tick 的显式短 Deadline 精度。
+
+当前推荐但尚未确认的方案：
+
+1. 调用方传入已经带 Deadline 的 Context 时，Origin 原样使用其 Go Timer，不再登记 M8；
+2. 调用方没有显式 Deadline 时，Origin 按统一默认链计算 Deadline，使用无 Timer 的可取消
+   Context 加一条 M8 Deadline；
+3. Await 与 RPC 只消费同一个有效 Context；Async 对显式 Context 的取消监听可使用
+   `context.AfterFunc` 或等价一次性挂接，不再创建第二个 Timer，具体热路径必须 Benchmark；
+4. 不在首版增加 `service.WithTimeout`、`rpc.WithTimeout` 或 CallOptions 等 Origin 专用
+   超时外观。若真实项目证明显式短超时是高频 GC 热点，再以相同负载对比专用 M8 Context；
+5. 任一路径都必须在完成、取消和停止时解除监听或取消 M8 Deadline，并保持一次性终态。
+
+该方案保留标准 Go 使用习惯，同时把数量最大、配置统一的默认超时交给 M8。其实现复杂度
+明显低于全面接管用户 Context，也不会出现同一次调用同时拥有 Go Timer 和 M8 Deadline。
 
 在以上内容完成确认、本文状态改为“已确认”并在复核清单记录“允许实施”之前，不创建 M11
 实施计划，不编写 M11 代码。

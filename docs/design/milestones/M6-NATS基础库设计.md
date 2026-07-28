@@ -237,9 +237,10 @@ type SubscriptionDefaults struct {
 ```yaml
 nodes:
   - id: chat-1
+    scheduler:
+      default_await_timeout: 15s
     rpc:
       transport: nats
-      default_timeout: 15s
       max_message_size: 4M
       nats:
         name: game-dev.chat-1
