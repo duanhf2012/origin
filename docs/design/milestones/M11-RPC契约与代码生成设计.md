@@ -1,9 +1,9 @@
 # M11 RPC 契约与代码生成设计
 
-> 文档状态：讨论中  
+> 文档状态：已确认
 > 创建日期：2026-07-27  
 > 最后更新：2026-07-28
-> 当前结论：已确认部分作为后续讨论基线；完成全部开工 Review 前不得实施
+> 当前结论：M11 设计 Review 已完成；实施计划必须先修正 M9 唯一计时器差异
 
 ## 1. 文档目的
 
@@ -52,8 +52,8 @@ M11 必须同时遵守：
 7. RPC 接口首版不支持嵌入其他接口，也不支持跨 Service 聚合；
 8. 运行热路径不使用反射、字符串方法查找或通用 `[]any` 参数；
 9. M11 同 Node 调用也必须经过编码、队列、Dispatcher 和解码；
-10. 完全无返回值的方法在 M11 只生成 `NotifyXxx`；带任意返回值的方法生成
-    `AsyncXxx`、`AwaitXxx` 和 `NotifyXxx`；所有方法的 `BroadcastXxx` 延后；
+10. 完全无返回值的方法在 M11 生成 `NotifyXxx` 和 `BroadcastXxx`；带任意返回值的方法
+    生成 `AsyncXxx`、`AwaitXxx`、`NotifyXxx` 和 `BroadcastXxx`；
 11. 所有生成调用最终都具有统一 `error` 语义；
 12. RPC 与通用 Await 共用唯一默认超时配置，不再增加 `rpc.default_timeout`；
 13. 超时优先级固定为：
@@ -79,7 +79,11 @@ M11 必须同时遵守：
 28. Map Key 只使用 M11 已支持的基础类型及其具名类型，不为 Map Key 单独扩展
     `uintptr`、复数、指针、接口或其他未支持类型；
 29. `origingen` 必须在生成阶段拒绝所有未支持类型，并报告 RPC 契约、方法、参数、容器和
-    字段的完整路径，不能延迟到运行时失败。
+    字段的完整路径，不能延迟到运行时失败；
+30. M11 不开放运行时自定义 Codec 注册表，但生成器内部必须保留可替换的静态编解码计划；
+    M12 自定义 Codec 由生成器静态选择并生成直接函数调用，不在 RPC 热路径查表；
+31. 普通 Go 结构体按导出字段声明顺序编码，不写字段 Tag 或稳定字段 ID；Map 不排序；
+    完整契约指纹负责在解码前拒绝不一致 Schema。
 
 ## 4. M11 交付范围
 
@@ -97,7 +101,7 @@ M11 必须同时遵守：
 - Service 实现自动识别；
 - 静态 Dispatcher 和 Service 适配方法；
 - Node 内本地 Dispatcher 注册；
-- 同 Node Async、Await 和 Notify；
+- 同 Node Async、Await、Notify 和当前 Runtime 已知目标范围内的 Broadcast；
 - 顶层 Protobuf、基础标量、字符串、`[]byte`、指针、数组、Slice、Map、普通结构体和
   嵌套 Protobuf 的静态编解码；
 - 生成确定性、碰撞、非法声明、调度、错误和性能测试。
@@ -111,7 +115,7 @@ M11 必须同时遵守：
 | NATS RPC Transport | M14 |
 | 生命周期 Await 基础、完整 Stop 排空、OnStop Await RPC 和异常进程收尾 | M15 |
 | Origin/etcd 服务发现、关注筛选和退休状态 | M15 后独立里程碑 |
-| RoundRobin、Rand、ModKey、自定义路由和 Broadcast | 服务发现之后独立里程碑 |
+| RoundRobin、Rand、ModKey、自定义路由和多 Node 发现范围 Broadcast | 服务发现之后独立里程碑 |
 | 外部 gRPC 插件 | M15 后独立里程碑 |
 | 流式 RPC | 首版不支持，有真实需求后重新设计 |
 | RPC 压缩 | 基准证明有净收益后单独立项 |
@@ -282,14 +286,27 @@ M11 不生成：
 
 - `AwaitNodeGetPlayer`；
 - `AsyncNodeGetPlayer`；
-- `NotifyNodePlayerOnline`；
-- `BroadcastPlayerOnline`。
+- `NotifyNodePlayerOnline`。
 
 目标由 `rpc.Target` 决定，不能把 NodeID、ServiceName 重复加入每个 RPC 方法。
 
-Broadcast 不在 M11 生成，但后续为所有 RPC 方法生成 `BroadcastXxx`。它和 Notify 一样
-主动放弃远端业务结果，只返回本地发现、编码和投递阶段的 `error`。标准广播使用客户端
-Target 的基础范围：
+M11 为所有 RPC 方法生成 `BroadcastXxx`。它和 Notify 一样主动放弃业务结果，只返回本地
+目标计算、编码和投递阶段的 `error`。例如：
+
+```go
+err := client.BroadcastPlayerOnline(ctx, playerID)
+```
+
+M11 尚未接入服务发现，因此标准广播只使用当前 Node `rpc.Runtime` 已注册的本地目标：
+
+- `ToService("AService")` 广播给当前 Runtime 中全部同名、契约匹配且处于 Running 的本地
+  `AService`；由于同一 Node 内 ServiceName 唯一，M11 中最多一个；
+- `ToServiceOnNode(currentNodeID, "AService")` 使用相同本地规则；
+- 指定其他 NodeID 或没有本地目标时返回 `CodeRPCNoRoute`；
+- 编码或目标队列准入失败时返回对应错误；投递成功后不等待业务执行结果；
+- 参数只编码一次，本地目标任务取得请求 Buffer 的唯一所有权。
+
+服务发现和多 Node 路由接入后，生成方法及签名保持不变，标准广播范围扩展为：
 
 - `ToService("AService")` 表示当前发现快照中全部同名、契约匹配且可路由的
   `AService`；
@@ -394,13 +411,13 @@ M13/M14 接入远端 Transport 后，继续使用同一个 Target 和生成客�
 
 | 服务端签名 | M11 生成 |
 |---|---|
-| 一个或多个业务结果 | `AsyncXxx`、`AwaitXxx`、`NotifyXxx`，请求—响应外观追加最终 `error` |
-| 业务结果加末尾 `error` | `AsyncXxx`、`AwaitXxx`、`NotifyXxx`，请求—响应外观复用最终 `error` |
-| 只返回 `error` | `AsyncXxx`、`AwaitXxx`、`NotifyXxx` |
-| 完全无返回值 | `NotifyXxx` |
+| 一个或多个业务结果 | `AsyncXxx`、`AwaitXxx`、`NotifyXxx`、`BroadcastXxx`，请求—响应外观追加最终 `error` |
+| 业务结果加末尾 `error` | `AsyncXxx`、`AwaitXxx`、`NotifyXxx`、`BroadcastXxx`，请求—响应外观复用最终 `error` |
+| 只返回 `error` | `AsyncXxx`、`AwaitXxx`、`NotifyXxx`、`BroadcastXxx` |
+| 完全无返回值 | `NotifyXxx`、`BroadcastXxx` |
 
-后续为以上全部分类生成 `BroadcastXxx`，但 M11 不生成 Broadcast 方法，避免在没有服务
-发现目标快照时建立不完整实现。
+`BroadcastXxx` 只复用原方法输入并返回一个本地接受阶段 `error`，不生成业务结果集合。
+M11 先对当前 Runtime 已知的本地目标实现真实行为，后续只扩展候选快照来源。
 
 ### 7.4 输入与输出位置规则
 
@@ -441,6 +458,12 @@ rpc/                 公开稳定类型与生成代码调用边界，package rpc
 origingen rpc ./...
 ```
 
+只检查、不修改文件的 CI 入口：
+
+```text
+origingen rpc --check ./...
+```
+
 也允许：
 
 ```go
@@ -451,17 +474,54 @@ origingen rpc ./...
 
 1. 按当前 Go Build Context 加载目标包；
 2. 找出全部 `//origin:rpc` 接口；
-3. 构建接口、方法、参数和返回值模型；
+3. 构建接口、方法、参数、返回值及其全部可达字段和容器元素的完整类型图；
 4. 找出同一 Go Module 内实现 `service.IService` 的具名 Service 类型；
 5. 建立 Service 到 RPC 契约的实现关系；
 6. 全局计算并检查 ContractID、MethodID；
-7. 完成全部签名、类型、名称和碰撞校验；
-8. 所有校验通过后才生成文件；
-9. 使用临时文件和同目录原子替换提交结果。
+7. 在渲染任何文件前完成全部签名、类型图、名称、Schema、Codec 计划和碰撞校验；
+8. 所有校验通过后才在内存中生成完整文件；
+9. 普通模式使用临时文件和同目录原子替换提交结果；
+10. `--check` 模式逐字节比较应生成内容与工作树，发现缺失、过期或多余生成文件时返回
+    非零状态，但不得修改文件。
 
 任何包失败时，本次执行不允许先写一部分生成文件再失败。
 
-### 8.3 生成文件
+### 8.3 生成前完整类型验证
+
+`origingen` 必须递归验证每个 RPC 输入、输出及其全部可达类型。验证和生成是严格分离的
+两个阶段；只有整个扫描范围没有错误时才允许渲染和写入。
+
+至少检查：
+
+- 顶层基础类型、Protobuf 和普通 Go 类型是否属于 M11 支持集合；
+- 指针、数组、Slice、Map 的元素、Key 和 Value；
+- 普通结构体的全部导出字段和嵌套路径；
+- Map Key 是否与 M11 基础类型集合对齐；
+- 循环类型、接口、函数、Channel、`uintptr`、复数和 `unsafe.Pointer`；
+- 嵌套 Protobuf 是否使用不支持的 `oneof` 或 Opaque API；
+- 具名结构体是否至少具有一个可序列化导出字段；显式 `struct{}` 除外；
+- 静态 Schema、Codec 标识及版本是否能稳定进入完整契约指纹。
+
+发现任一错误时，生成器立即使整次执行失败，不得生成“不完整但可编译”的 Codec。诊断必须
+包含契约、方法、输入或输出位置、容器和字段组成的完整路径。例如：
+
+```text
+cannot generate Origin RPC codec:
+  game.PlayerRPC.SavePlayer
+  -> input 1
+  -> Players
+  -> map value
+  -> Profile
+  -> Data
+
+unsupported type: interface{}
+```
+
+禁止把无法编码的字段静默忽略，禁止编码为空结构体，禁止切换到反射或 JSON，禁止延迟到
+业务运行时才报错。旧生成文件无法单靠 `go build` 感知新增嵌套字段，因此项目构建和 CI
+必须执行 `origingen rpc --check ./...`。
+
+### 8.4 生成文件
 
 每个受影响包最多生成一个：
 
@@ -709,6 +769,13 @@ Service 指针查找 Runtime。生成客户端只在构造时完成一次接口�
 ```go
 type ContractFingerprint [32]byte
 
+type CallKind uint8
+
+const (
+    CallRequest CallKind = iota + 1
+    CallNotify
+)
+
 type Dispatcher interface {
     ContractID() ContractID
     Fingerprint() ContractFingerprint
@@ -716,15 +783,16 @@ type Dispatcher interface {
     Dispatch(
         ctx context.Context,
         methodID MethodID,
+        kind CallKind,
         request []byte,
         responseDst []byte,
     ) ([]byte, error)
 }
 ```
 
-由于已确认“带返回值方法也生成 Notify”，Dispatcher 必须知道本次调用是否需要响应，否则
-Notify 会无意义地编码随后被丢弃的业务结果。第 20 节需要在开工前确认是在 `Dispatch`
-增加轻量 `CallKind`，还是使用同等清晰且无歧义的最小入口；确认前本节签名不视为最终 ABI。
+`CallRequest` 表示需要编码响应的 Await/Async；`CallNotify` 表示 Notify 或 Broadcast，
+Dispatcher 仍调用真实业务方法，但跳过业务结果和业务 `error` 的响应编码。零值和未知
+`CallKind` 返回 `CodeInvalidArgument`。
 
 语义固定为：
 
@@ -736,6 +804,7 @@ Notify 会无意义地编码随后被丢弃的业务结果。第 20 节需要在
 - Runtime 管理请求和响应 Buffer 的最终释放，Dispatcher 不直接接触 BufferPool；
 - Notify 仍使用同一静态方法分派；即使原方法带返回值，也不得编码或保留业务响应，目标
   业务错误和 panic 只进入目标侧诊断；
+- Broadcast 到达每个目标后同样使用 `CallNotify`，不建立第三种 Dispatcher 分支；
 - 未知 MethodID、解码失败、业务错误、panic 和编码失败均返回统一错误。
 
 ### 11.2 静态分派
@@ -800,6 +869,25 @@ func encodeGetPlayerResponse(
 生成客户端和 Dispatcher 直接调用这些函数。这样不需要 `any`、运行时反射、Codec 查找
 或接口动态分派；M11 中普通结构体同样生成静态函数，不改变 Dispatcher 接口。
 
+### 11.5 编译期 Codec 扩展接缝
+
+M11 不允许业务注册或替换自定义 Codec，但生成器内部不能把类型判断、线布局和 Go 代码
+拼接成无法替换的一段逻辑。内部类型模型至少区分：
+
+- 类型 Schema；
+- 大小计算计划；
+- 编码计划；
+- 解码计划；
+- Codec 稳定标识和版本。
+
+M11 只安装 Origin 内置计划。M12 增加自定义 Codec 时，由 `origingen` 在生成阶段为目标
+类型选择自定义计划，并在生成代码中直接调用其静态函数。RPC Runtime 不建立按类型查找的
+Codec Map，不在每次调用中做接口断言或动态分派。
+
+Codec 稳定标识和版本必须进入包含该类型的完整契约指纹。相同 Go 类型切换 Codec 后，旧
+节点与新节点在业务载荷解码前得到契约不匹配，不能让两种线格式静默互通。M12 可以扩展
+生成器输入和公开接口，但不得改变 M11 内置 Codec 的既有线格式。
+
 ## 12. M11 数据类型
 
 ### 12.1 本里程碑支持
@@ -825,6 +913,10 @@ Open、Hybrid、Opaque API 语义。
 Map Key 与 M11 已支持的基础类型对齐，只支持 `bool`、有符号整数、无符号整数、
 `float32`、`float64`、`string` 及其具名定义类型和别名。Protobuf Enum 属于具名整数，
 因此可以作为 Map Key。Map Key 不单独扩展 M11 尚未支持的类型。
+
+显式匿名空结构体 `struct{}` 可以编码为零字节。具名结构体如果没有任何可序列化导出字段，
+必须由 `origingen` 报错；禁止把 `time.Time` 等依赖非导出字段表达逻辑状态的类型静默编码
+为空。后续只能通过 M12 自定义静态 Codec 支持这类特殊类型。
 
 ### 12.2 M11 固定顺序线格式
 
@@ -895,7 +987,46 @@ Protobuf 请求或响应。Protobuf 官方线格式通过 Tag/WireType 支持跳
 Benchmark，记录耗时、分配和载荷大小。若结果表明性能与可维护性发生明显冲突，必须按
 开发指导原则重新确认，不能由实现者静默更换线格式。
 
-### 12.3 不支持类型与生成期失败
+### 12.3 普通 Go 结构体和容器布局
+
+普通 Go 类型继续使用固定顺序、小端、无运行时类型信息的线格式：
+
+- 指针使用一字节 presence：`0` 表示 nil，`1` 表示后面紧跟所指向值，其他值非法；
+- 普通 Slice 和 Map 使用四字节 `uint32` presence/元素数量：
+  `0xFFFFFFFF` 表示 nil，`0` 表示非 nil 空容器，其余值表示元素数量；
+- 数组长度由静态类型确定，不在线上重复编码；
+- 普通结构体只编码导出字段，严格按 Go 声明顺序递归编码；
+- 导出的匿名嵌入字段作为一个普通声明字段递归编码，不执行 JSON 风格扁平化；
+- 小写非导出字段完全不进入 Schema 和线格式；
+- Map 先编码元素数量，再按当前 Go Map 遍历顺序依次编码 Key 和 Value，不排序；
+- 普通结构体或容器中的 Protobuf 生成类型按普通导出字段递归处理，不调用
+  `proto.Marshal`。
+
+普通结构体不要求 Tag，不维护字段 ID，也不在每条消息中写字段名、Tag、类型或长度。
+结构体导出字段的追加、插入、删除、重排、重命名或类型修改都会改变完整契约指纹，并属于
+不兼容修改。需要字段级兼容演进时，应改用顶层 Protobuf 请求或响应；普通 Go 结构体的不
+兼容演进使用新版本 RPC 契约，或者协调新旧节点更新顺序。
+
+Map 的编码字节不承诺跨进程或跨调用逐字节一致，只保证解码后的 Key/Value 语义一致。
+契约指纹、生成文件和 golden test 不依赖运行时 Map 遍历顺序。该选择避免为每次编码创建
+Key Slice、排序和产生额外分配。
+
+### 12.4 解码安全上限
+
+M11 在现有 RPC 最大消息长度之外增加不可配置的首版内部防护：
+
+- 单个 Slice 或 Map 最多声明 `1048576` 个元素；
+- 静态类型图最多嵌套 `64` 层；
+- 循环或自引用类型在生成阶段拒绝，因此运行时不建立对象引用表或循环检测 Map；
+- 所有字符串长度、字节长度和容器元素数量都必须先与剩余 payload、最大消息长度和元素
+  上限交叉校验，再执行分配；
+- 计算目标容量时必须检查整数加法、乘法和目标架构 `int` 溢出；
+- 任一位置非法时终止本次解码，不向业务方法提交半初始化参数。
+
+`1048576` 只限制单个容器，不改变 RPC 默认 `4M` 最大消息限制；绝大多数非零宽度元素会
+先受消息长度约束。该内部上限主要阻止 `[]struct{}` 等极小元素声明制造超大循环或分配。
+
+### 12.5 不支持类型与生成期失败
 
 M11 首版不支持：
 
@@ -918,7 +1049,7 @@ Map Key 同样只能使用第 12.1 节已经支持的基础类型及其具名类
 到一半才失败，禁止延迟到运行时失败，也禁止使用反射、JSON、空结构体或静默忽略作为回退。
 自定义静态 Codec 属于 M12 的阶段性能力边界；其余本节类型属于首版明确不支持。
 
-### 12.4 空载荷
+### 12.6 空载荷
 
 没有业务输入或业务输出的方法可以使用零字节方法载荷。存在参数位置时，空字符串、
 空 `[]byte` 和空 Protobuf 消息仍按第 12.2 节写入四字节长度或 presence 标记。M11 内部
@@ -1028,7 +1159,24 @@ M11 Notify 的“发送成功”表示目标本地队列已经接受，不表示
 接受前的编码、路由和投递过程；目标队列接受后不能撤回，不创建 pending 或超时项，目标
 业务执行也不再受调用方 Deadline 约束。
 
-### 13.6 Buffer 所有权
+### 13.6 Broadcast
+
+`BroadcastXxx`：
+
+1. 校验 Context、owner、Target 和输入参数；
+2. 从当前 `rpc.Runtime` 的不可变本地注册快照取得全部同名、契约匹配且 Running 的目标；
+3. 没有目标时返回 `CodeRPCNoRoute`；
+4. 参数只编码一次；
+5. M11 中同一 Node 的 ServiceName 唯一，因此本地候选最多一个，按 `CallNotify` 投递；
+6. 队列接受后立即返回，不创建响应、Future、RequestID 或 pendingCall；
+7. 目标业务错误、返回值和 panic 不回传，只在目标侧记录；
+8. 服务发现接入后继续使用同一生成方法，把候选来源扩展为稳定发现快照，并按目标 Node
+   复用同一编码结果。
+
+M11 不建立“伪广播成功”或返回“不支持”的空壳方法。当前只有本地候选时也必须走真实
+编码、准入、Dispatcher 和业务调用路径，以锁定后续多 Node 广播复用的 API 和语义。
+
+### 13.7 Buffer 所有权
 
 - 编码优先向 Application 已有 BufferPool 取得的 Buffer 追加；
 - 提交成功后，请求 Buffer 所有权转移给目标任务；
@@ -1040,6 +1188,8 @@ M11 Notify 的“发送成功”表示目标本地队列已经接受，不表示
 - Await/Async 响应由完成状态持有；生成解码器必须先把业务可见的 `[]byte` 复制为独立
   Slice，再释放响应 Buffer 和投递返回值或回调；
 - Notify 目标任务处理完成后释放；
+- Broadcast 在 M11 本地范围内与 Notify 使用相同单一所有权；后续多目标广播必须对同一
+  只读编码结果建立明确的目标投递所有权，不能把一个可释放 Buffer 同时交给多个所有者；
 - Protobuf 解码结果不能引用即将释放的输入 Buffer；
 - 不因为本地调用而直接共享可变业务对象指针。
 
@@ -1067,6 +1217,36 @@ Await 和 Async 仍需要一个最小本地完成状态，用于：
 是否池化 `localCall` 必须由 Benchmark、逃逸分析和失败路径复杂度决定。未证明稳定收益
 前不为了理论零分配引入难以验证的 ABA 防护。
 
+### 14.1 M11 对象池边界
+
+M11 直接复用已经实现并验证的内部池：
+
+- M2 `bufferpool`：请求和响应字节；
+- M9 Service 私有 Task Pool：目标 RPC 任务和 Async 回调任务；
+- M8 Deadline 条目池：默认超时与取消；
+- M10 业务 Timer 池：RPC 不建立第二套 Timer 对象。
+
+M11 不自动池化：
+
+- 业务普通结构体、Map、Slice 和业务可见 `[]byte`；
+- Protobuf Request、Response 和嵌套消息；
+- Context、error、回调闭包；
+- `rpc.Target` 和生成客户端值；
+- 编码 Reader/Writer 小对象，它们应保持栈上值语义；
+- 只读 Descriptor 和生成常量，它们与 Runtime 同生命周期。
+
+`localCall` 是 M11 唯一新增的池化候选。实施顺序固定为：
+
+1. 先实现不池化且生命周期清晰的正确性基线；
+2. 保存成功、超时、取消、目标 panic 和停止竞争场景的逃逸分析与 Benchmark；
+3. 再实现 Node 私有 `sync.Pool` 对照；
+4. 只有完整 Reset、防迟到完成和消费者结束条件保持清晰，并且分配、GC 或尾延迟存在稳定
+   收益时才启用；
+5. 数据不能证明收益或状态机明显变复杂时，M11 保持不池化。
+
+M13 最终 `pendingCall` 仍按既有设计使用专用池和 RequestID 防 ABA。不能为了提前复用
+M13 代码，把 RequestID、远程 pending Map 或连接状态塞入 M11 `localCall`。
+
 ## 15. 错误语义
 
 M11 复用现有通用和 Service 错误：
@@ -1083,14 +1263,16 @@ M11 复用现有通用和 Service 错误：
 
 M11 还需要在 RPC 与编解码编号区间补充最小错误：
 
-- 契约不匹配；
-- MethodID 不存在；
-- 请求解码失败；
-- 响应解码失败；
-- 远端或目标业务方法 panic。
+- `CodeRPCContractMismatch = 2004`；
+- `CodeRPCMethodNotFound = 2005`；
+- `CodeRPCEncodeFailed = 2006`；
+- `CodeRPCRequestDecodeFailed = 2007`；
+- `CodeRPCResponseDecodeFailed = 2008`；
+- `CodeRPCExecutionPanic = 2009`；
+- `CodeRPCBroadcastPartialFailed = 2010`。
 
-具体错误码名称和编号必须在后续 M11 Review 中与
-[统一错误码设计](../details/2026-07-24-统一错误码设计.md)一起确认，不在实现中临时添加。
+完整语义见[统一错误码设计](../details/2026-07-24-统一错误码设计.md)。M11 本地 Broadcast
+候选最多一个，不会产生部分成功；`2010` 先固定编号，供后续多 Node 广播聚合错误复用。
 
 固定错误优先复用只读哨兵。具体 NodeID、ServiceName、契约名、方法名和生成字段路径只
 进入结构化日志或生成期诊断，不为高频失败构造通用 Details Map。
@@ -1100,7 +1282,7 @@ M11 还需要在 RPC 与编解码编号区间补充最小错误：
 - `AwaitXxx` 的最后一个返回值是业务或框架 `error`；
 - `AsyncXxx` 自身返回立即提交 `error`，强类型回调的最后一个参数返回提交成功后的最终
   业务或框架 `error`；
-- `NotifyXxx` 和后续 `BroadcastXxx` 直接返回本地接受阶段的框架 `error`，不返回远端
+- `NotifyXxx` 和 `BroadcastXxx` 直接返回本地接受阶段的框架 `error`，不返回远端
   业务错误。
 
 nil Context、Async 的 nil callback、零值客户端、无效 owner 和无效 Target 都必须返回
@@ -1176,6 +1358,19 @@ rpc
 - 不必要的锁、Channel 跳转和闭包逃逸；
 - 为固定框架错误动态格式化字符串。
 
+生成编解码器必须：
+
+- 为每个受支持类型生成静态大小计算、编码和解码路径；
+- 先计算最终 payload 大小，再从 BufferPool 取得目标 Buffer，一次写入最终位置；
+- 顶层 Protobuf 使用 `proto.Size` 和官方 Append API 直接追加到最终 Buffer；
+- 普通结构体和容器直接写入最终 Buffer，不生成隐藏 Request/Response 包装对象；
+- `string` 直接复制到目标 Buffer，不先构造临时 `[]byte`；
+- 固定宽度数字使用可内联的小端写入，具体使用标准库函数还是生成位运算由 Benchmark
+  决定，禁止无数据引入 `unsafe`；
+- 解码先校验长度、元素数量和整数溢出，再分配 Slice、Map 或 Protobuf；
+- Notify 不创建响应 Buffer，Broadcast 的同一参数集合只执行一次编码；
+- 业务可见 `[]byte` 的一次安全复制属于已确认所有权成本，不能为了表面零拷贝破坏生命周期。
+
 允许的必要调度边界：
 
 - 调用方 Service 到目标 Service Ready FIFO；
@@ -1205,8 +1400,10 @@ rpc
 13. 任一包校验失败时没有部分写入；
 14. 生成文件格式和标准头；
 15. 所有不支持类型均在生成期得到包含完整字段路径的清晰错误；
-16. 四类返回签名严格生成第 7.3 节规定的方法集合；
-17. M11 的 Async、Await 和 Notify 最终 `error` 位置不会遗漏。
+16. 任一可达字段不支持时整次生成失败且没有部分写入；
+17. `--check` 能发现缺失、过期和多余生成文件且不修改工作树；
+18. 四类返回签名严格生成第 7.3 节规定的方法集合；
+19. M11 的 Async、Await、Notify 和 Broadcast 最终 `error` 位置不会遗漏。
 
 ### 18.2 本地 RPC
 
@@ -1232,7 +1429,10 @@ rpc
 18. 停止后没有 goroutine、Timer 或 Buffer 泄漏；
 19. 同一进程中的多个 Node 使用完全隔离的 RPC Runtime 注册目录；
 20. nil、未绑定或缺少 RPC Runtime 的 owner 不 panic，并返回统一错误；
-21. nil Context、Async nil callback 和零值客户端直接返回错误且不产生调用或回调。
+21. nil Context、Async nil callback 和零值客户端直接返回错误且不产生调用或回调；
+22. Broadcast 对本地匹配目标真实投递且不等待业务结果；
+23. Broadcast 没有目标、指定其他 Node、目标队列满和目标 panic 的既定语义；
+24. Broadcast 参数只编码一次且所有 Buffer 在成功、失败和停止路径恰好释放一次。
 
 ### 18.3 数据类型
 
@@ -1253,7 +1453,10 @@ rpc
 - `map[int64]pb.PlayerProfile`、`map[int64]*pb.PlayerProfile`、Protobuf Slice 和指针；
 - 嵌套 Protobuf 只处理导出字段且不调用 Protobuf 编解码；
 - `uintptr`、复数、`unsafe.Pointer`、接口、函数、Channel、循环对象图以及非法 Map Key
-  均在生成阶段失败，并包含完整类型路径。
+  均在生成阶段失败，并包含完整类型路径；
+- `struct{}`、无导出字段具名结构体、匿名嵌入字段和 `time.Time` 拒绝规则；
+- Slice/Map 元素数量上限、64 层类型深度、截断、整数溢出和分配前校验；
+- Map 多次编码可以具有不同字节顺序，但往返语义一致且生成文件保持确定。
 
 ### 18.4 性能
 
@@ -1265,14 +1468,21 @@ rpc
 - Dispatcher 命中；
 - 生成客户端构造时取得 Runtime 的成本和分配；
 - 同 Node Await、Async、Notify；
+- 同 Node Broadcast；
 - 自调用和跨 Service 调用；
+- 基础类型、普通结构体、Slice、Map、嵌套 Protobuf 的大小计算、编码和解码；
+- 小消息、普通消息和接近 `4M` 上限消息；
+- Map 不排序与排序对照，确认正式实现没有隐藏 Key Slice 和排序分配；
 - 目标不存在和队列满失败路径；
 - 不池化与池化 `localCall` 的对照；
 - P50、P95、P99 延迟；
+- GC 次数、暂停和突发负载结束后的堆回落；
 - Windows 与 Linux 的可复现环境和结果。
 
 性能验收重点不是追求脱离业务的绝对 QPS，而是确认热路径没有运行时反射、每调用辅助
-goroutine、隐藏 Timer 和可避免的多次 payload 复制。
+goroutine、隐藏 Timer、运行时 Codec 查找和可避免的多次 payload 复制。任何为了性能加入
+的对象池、额外缓存、手写位运算或特殊分支都必须由对照 Benchmark 证明净收益，并且不能
+破坏代码清晰度、所有权和失败路径正确性。
 
 ## 19. 生成代码示意
 
@@ -1310,8 +1520,8 @@ func (c PlayerRPCClient) AwaitGetPlayer(
 ```
 
 业务不直接依赖 `rpc.Client` 或 Dispatcher 的低层调用方法。公开这些类型只为生成代码
-和 Node 装配，不能把它们扩张成另一套手写 RPC API。是否额外公开只读 Descriptor 仍由
-后续 Review 决定。
+和 Node 装配，不能把它们扩张成另一套手写 RPC API。M11 不公开只读 Descriptor；等监控、
+调试或插件出现真实消费者后再单独 Review。
 
 `rpc.Client` 是值语义的生成代码底座，概念字段为：
 
@@ -1328,26 +1538,29 @@ type Client struct {
 RPC Runtime 时构造出不可调用的安全 Client，真正调用返回统一参数或未就绪错误，不发生
 panic。客户端不持有独立 TCP/NATS 连接。
 
-## 20. 后续 M11 Review 项
+## 20. M11 Review 已确认
 
-2026-07-28 按开发指导原则完成一次逐节 Review。已确认的调用生成和广播规则已经回写；
-以下问题会直接影响生成 ABI、线格式、所有权或低延迟实现，必须在开工前逐项确认：
+2026-07-28 按开发指导原则完成逐节 Review。以下影响生成 ABI、线格式、所有权和低延迟
+实现的结论均已确认并回写：
 
 | 顺序 | Review 问题 | 当前结论或建议 | 状态 |
 |---|---|---|---|
 | 1 | 基础类型线布局、位置字段、`int`/`uint`、具名类型、nil/空值和顶层 Protobuf presence | 采用第 12.2 节固定顺序格式；参数位置只进入指纹；`int`/`uint` 为 64 位线值；具名定义类型保留身份；`[]byte` 和 Protobuf 明确区分 nil 与空值 | 已确认 |
 | 2 | `[]byte` 输入解码后是借用请求 Buffer 还是复制为业务独立内存 | 普通 `[]byte` 输入、Await 返回值和 Async 回调值全部复制为业务独立 Slice；nil/空语义保持；不使用 BufferPool 承载业务 Slice；M11 不公开借用类型 | 已确认 |
-| 3 | RPC 契约可见性、泛型和跨包实现桥接 | RPC 接口和方法要求导出、首版禁止泛型契约；契约包生成 `New<Contract>Dispatcher(impl Contract)`，Service 包只生成 `RPCDispatcher()` 薄适配，避免重复 Codec | 待确认 |
-| 4 | Dispatcher 如何区分请求—响应与 Notify | 增加两个值的轻量 `rpc.CallKind`；Notify 调用真实方法但跳过响应编码，避免用 nil Slice 暗示模式 | 待确认 |
-| 5 | Await/Async Deadline 与 M8 接入 | Await 复用 Service M8 Deadline；Async 使用每 Node RPC Runtime 的一条共享 `DeadlineQueue`，不为每次调用建立 Go Timer | 待确认 |
-| 6 | `localCall` 字段、完成同步和池化 | M11 只保留一个私有一次性完成状态；先实现清晰基线并 Benchmark，M13 用最终池化 `pendingCall` 替换，避免为短期对象维护复杂 ABA 防护 | 待确认 |
-| 7 | RPC 错误码、业务错误编码、panic 和本地/远端一致性 | 在 2000 区间补充契约不匹配、方法不存在、请求解码、响应解码和执行 panic；同 Node 也经过相同错误编码/解码，不直接传 Go error 指针 | 待确认 |
-| 8 | ContractID、MethodID 和完整指纹的规范化字节 | 已确认 MethodID 继续只包含契约名和方法名，不包含签名；完整指纹负责精确契约检查；域前缀、UTF-8 名称、分隔符、大端 ID、方法排序、类型描述和生成格式版本仍需以 golden test 锁定 | 部分确认 |
-| 9 | Go 包加载和 Protobuf 依赖 | 使用固定版本 `golang.org/x/tools/go/packages` 与 `google.golang.org/protobuf`；Protobuf 优先使用官方 Append/Options API，具体版本在实施计划前查验最新固定版 | 待确认 |
-| 10 | 旧生成文件清理和生成 ABI 版本 | 只删除包含完整 origingen 标记且本轮确认不再需要的文件；生成代码加入编译期 ABI 版本校验，手写或标记异常文件绝不删除 | 待确认 |
-| 11 | 是否公开只读 Descriptor | M11 不公开；生成代码和 Runtime 内部保留最小描述，等监控、调试或插件出现真实消费者后再公开 | 待确认 |
+| 3 | RPC 契约可见性、泛型和跨包实现桥接 | RPC 接口和方法要求导出、首版禁止泛型契约；契约包生成 `New<Contract>Dispatcher(impl Contract)`，Service 包只生成 `RPCDispatcher()` 薄适配，避免重复 Codec | 已确认 |
+| 4 | Dispatcher 如何区分请求—响应与 Notify | 使用两个有效值的轻量 `rpc.CallKind`；Await/Async 使用 `CallRequest`，Notify/Broadcast 使用 `CallNotify`；零值非法 | 已确认 |
+| 5 | Await/Async Deadline 与 M8 接入 | 调用方显式 Deadline 原样使用；无 Deadline 时由 M8 默认链提供唯一计时；Async 共享每 Node DeadlineQueue，不为每次调用建立第二个 Timer | 已确认 |
+| 6 | `localCall` 字段、完成同步和池化 | M11 只保留一个私有一次性完成状态；先实现不池化基线和池化对照，仅在收益明确且状态机仍简单时启用；M13 使用最终池化 `pendingCall` | 已确认 |
+| 7 | RPC 错误码、业务错误编码、panic 和本地/远端一致性 | 固定 `2004–2010` 契约、方法、编解码、执行 panic 和广播部分失败错误；同 Node 也按相同错误语义处理，不直接传 Go error 指针 | 已确认 |
+| 8 | ContractID、MethodID 和完整指纹的规范化字节 | MethodID 只包含契约名和方法名；完整指纹精确检查签名、Schema、Codec 标识和格式版本；规范化字节必须由 golden test 锁定 | 已确认 |
+| 9 | Go 包加载和 Protobuf 依赖 | 固定 `golang.org/x/tools/go/packages` 与 `google.golang.org/protobuf` 版本；Protobuf 优先使用官方 Append/Options API；具体固定版本在实施计划前查验 | 已确认 |
+| 10 | 旧生成文件清理和生成 ABI 版本 | 只删除完整标记且本轮确认不再需要的文件；生成代码加入 ABI 校验；增加 `origingen rpc --check ./...` 检查缺失、过期和多余文件 | 已确认 |
+| 11 | 是否公开只读 Descriptor | M11 不公开；生成代码和 Runtime 内部只保留最小描述，出现监控、调试或插件真实消费者后再 Review | 已确认 |
 | 12 | 普通 Go 类型、Map Key 和嵌套 Protobuf 的 M11 范围 | M11 一并支持普通指针、数组、Slice、Map、普通结构体和嵌套 Protobuf；Map Key 与已支持基础类型对齐；`uintptr`、复数、`unsafe.Pointer`、接口、函数和 Channel 在 `origingen` 生成期失败 | 已确认 |
-| 13 | 普通结构体字段协议、Map 顺序和解码安全上限 | 仍需确认稳定字段 ID、删除与重命名、Map 是否排序、递归类型、最大元素数和最大嵌套深度；必须在 M11 编码前锁定 | 待确认 |
+| 13 | 普通结构体字段协议、Map 顺序和解码安全上限 | 导出字段固定声明顺序，无 Tag/字段 ID；Map 不排序；循环类型生成期拒绝；单容器最多 `1048576` 个元素，类型图最多 64 层 | 已确认 |
+| 14 | Broadcast 是否在 M11 生成 | 所有 RPC 都生成 `BroadcastXxx`；M11 对当前 Runtime 已知本地目标执行真实通知投递，后续只扩展发现快照来源 | 已确认 |
+| 15 | 不支持类型与自定义 Codec 扩展 | `origingen` 先验证完整类型图再原子生成；M11 不开放自定义 Codec，但保留生成期静态计划，M12 生成直接调用且 Codec 标识进入指纹 | 已确认 |
+| 16 | M11 池化和编码性能 | 复用 Buffer/Task/Deadline/Timer 池；业务对象不池化；`localCall` 数据决定；生成 Codec 直接写最终 Buffer，并保存跨平台分配和尾延迟基线 | 已确认 |
 
 此外，当前 M9 实现与已确认的唯一计时器设计仍有差异，必须作为 M11 实施前置修正，不属于
 可以跳过的后续优化。
@@ -1419,8 +1632,8 @@ Deadline 语义的普通取消 Context。该对象为框架私有的轻量包装
 
 当前 M9 实现仍会把显式 Deadline 同时登记到 M8，且默认超时派生 Context 尚未公开
 `Deadline()`；这是已识别的实现差异。进入 M11 编码前必须修正 M9 并补充回归与 Benchmark，
-使两条路径都只保留一个物理计时器。其余第 20 节 Review 项确认、本文状态改为“已确认”并
-在复核清单记录“允许实施”之前，不创建 M11 实施计划，不编写 M11 代码。
+使两条路径都只保留一个物理计时器。M11 实施计划必须把该修正列为第一个前置步骤；该步骤
+通过回归与 Benchmark 前，不得开始 RPC 生成器或 Runtime 编码。
 
 ## 21. 当前结论
 
@@ -1434,7 +1647,7 @@ Go RPC 接口
     -> 同 Node Service Ready FIFO
     -> 静态解码和业务方法
     -> 静态编码
-    -> Await 恢复 / Async 回调 / Notify 完成
+    -> Await 恢复 / Async 回调 / Notify 或 Broadcast 完成
 ```
 
 这一闭环优先验证业务接口、生成结果、数据边界和 Service 单执行权，不提前加入网络、发现
