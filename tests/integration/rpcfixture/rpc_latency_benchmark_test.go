@@ -54,6 +54,44 @@ func BenchmarkGeneratedLocalAwaitLatency(b *testing.B) {
 	b.ReportMetric(float64(percentile(samples, 99).Nanoseconds()), "ns/p99")
 }
 
+// BenchmarkGeneratedCustomTimeAwaitLatency 记录自定义 time.Time Codec 完整闭环的尾延迟。
+func BenchmarkGeneratedCustomTimeAwaitLatency(b *testing.B) {
+	instance, caller := newBenchmarkNode(b)
+	defer stopBenchmarkNode(b, instance)
+
+	samples := make([]time.Duration, b.N)
+	value := TimeEnvelope{
+		At: time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC),
+	}
+	done := make(chan struct{})
+	var benchmarkErr error
+	b.ResetTimer()
+	if err := caller.DispatchAsync(func(ctx context.Context) {
+		defer close(done)
+		client := NewPlayerRPCClient(caller, rpc.ToService("PlayerService"))
+		for index := range b.N {
+			startedAt := time.Now()
+			_, benchmarkErr = client.AwaitRoundTripTime(ctx, value, 0)
+			samples[index] = time.Since(startedAt)
+			if benchmarkErr != nil {
+				return
+			}
+		}
+	}); err != nil {
+		b.Fatal(err)
+	}
+	<-done
+	b.StopTimer()
+	if benchmarkErr != nil {
+		b.Fatal(benchmarkErr)
+	}
+
+	slices.Sort(samples)
+	b.ReportMetric(float64(percentile(samples, 50).Nanoseconds()), "ns/p50")
+	b.ReportMetric(float64(percentile(samples, 95).Nanoseconds()), "ns/p95")
+	b.ReportMetric(float64(percentile(samples, 99).Nanoseconds()), "ns/p99")
+}
+
 // percentile 按最近秩规则返回已经升序排列的延迟样本。
 func percentile(samples []time.Duration, percent int) time.Duration {
 	if len(samples) == 0 {

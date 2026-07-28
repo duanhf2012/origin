@@ -29,5 +29,9 @@ func FuzzReaderRejectsArbitraryPayloadWithoutPanic(f *testing.F) {
 
 		protoReader := NewResponseReader(payload)
 		_, _, _ = protoReader.ReadProtoPayload()
+
+		// 自定义 Codec 使用独立的非 nil 长度边界；任意伪造长度只能返回固定错误。
+		customReader := NewRequestReader(payload)
+		_, _ = customReader.ReadCustomPayload()
 	})
 }

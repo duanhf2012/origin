@@ -26,6 +26,7 @@ type contract struct {
 	name        string
 	named       *types.Named
 	iface       *types.Interface
+	codecs      *codecRegistry
 	fullName    string
 	id          uint64
 	fingerprint [32]byte
@@ -64,7 +65,10 @@ type packageOutput struct {
 }
 
 // collectContracts 从语法标记定位具名接口，并在任何生成动作前完成全部验证。
-func collectContracts(packagesToScan []*packages.Package) ([]*contract, error) {
+func collectContracts(
+	packagesToScan []*packages.Package,
+	codecs *codecRegistry,
+) ([]*contract, error) {
 	var result []*contract
 	for _, pkg := range packagesToScan {
 		if pkg.Types == nil || len(pkg.Syntax) == 0 {
@@ -122,7 +126,13 @@ func collectContracts(packagesToScan []*packages.Package) ([]*contract, error) {
 							typeSpec.Name.Name,
 						)
 					}
-					current, err := buildContract(pkg, typeSpec.Name.Name, named, iface)
+					current, err := buildContract(
+						pkg,
+						typeSpec.Name.Name,
+						named,
+						iface,
+						codecs,
+					)
 					if err != nil {
 						return nil, err
 					}
@@ -158,6 +168,7 @@ func buildContract(
 	name string,
 	named *types.Named,
 	iface *types.Interface,
+	codecs *codecRegistry,
 ) (*contract, error) {
 	// Go 泛型接口需要在使用点实例化，不具备单一稳定 Schema；首版在扫描期直接拒绝。
 	if named.TypeParams() != nil && named.TypeParams().Len() != 0 {
@@ -179,6 +190,7 @@ func buildContract(
 		name:     name,
 		named:    named,
 		iface:    iface,
+		codecs:   codecs,
 		fullName: pkg.PkgPath + "." + name,
 	}
 	current.id = stableID("contract\x00" + current.fullName)
@@ -232,7 +244,14 @@ func buildMethod(owner *contract, name string, signature *types.Signature) (*met
 			return nil, fmt.Errorf("%s: 只能声明一个 context.Context", path)
 		}
 		fieldPath := fmt.Sprintf("%s.input[%d]", path, index)
-		if err := validateType(typ, true, fieldPath, nil, 0); err != nil {
+		if err := validateTypeWithCodecs(
+			typ,
+			true,
+			fieldPath,
+			nil,
+			0,
+			owner.codecs,
+		); err != nil {
 			return nil, err
 		}
 		current.inputs = append(current.inputs, parameter{
@@ -252,7 +271,14 @@ func buildMethod(owner *contract, name string, signature *types.Signature) (*met
 			continue
 		}
 		fieldPath := fmt.Sprintf("%s.output[%d]", path, index+1)
-		if err := validateType(typ, true, fieldPath, nil, 0); err != nil {
+		if err := validateTypeWithCodecs(
+			typ,
+			true,
+			fieldPath,
+			nil,
+			0,
+			owner.codecs,
+		); err != nil {
 			return nil, err
 		}
 		current.outputs = append(current.outputs, parameter{
@@ -311,14 +337,24 @@ func contractSchema(item *contract) string {
 			if index > 0 {
 				builder.WriteByte(',')
 			}
-			builder.WriteString(schemaType(input.typ, true, nil))
+			builder.WriteString(schemaTypeWithCodecs(
+				input.typ,
+				true,
+				nil,
+				item.codecs,
+			))
 		}
 		builder.WriteString(")->(")
 		for index, output := range candidate.outputs {
 			if index > 0 {
 				builder.WriteByte(',')
 			}
-			builder.WriteString(schemaType(output.typ, true, nil))
+			builder.WriteString(schemaTypeWithCodecs(
+				output.typ,
+				true,
+				nil,
+				item.codecs,
+			))
 		}
 		if candidate.hasError {
 			if len(candidate.outputs) > 0 {

@@ -3,6 +3,7 @@ package rpc
 import (
 	"errors"
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/duanhf2012/origin/v3/errs"
@@ -259,6 +260,173 @@ func TestCodecMessageSizeBoundary(t *testing.T) {
 		errs.ErrRPCEncodeFailed,
 	) {
 		t.Fatalf("oversize AddBytes() error = %v", err)
+	}
+}
+
+// TestCustomPayloadBoundaryRoundTrip 验证自定义 Codec 共用的长度边界支持零长度和普通
+// payload，并严格拒绝保留 nil 标记、截断数据和消息上限溢出。
+func TestCustomPayloadBoundaryRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	// 先计算两个相邻自定义值，第二个值故意使用零长度，锁定它不是 nil。
+	sizer := NewSizer()
+	if err := sizer.AddCustom(3); err != nil {
+		t.Fatalf("AddCustom(3) error = %v", err)
+	}
+	if err := sizer.AddCustom(0); err != nil {
+		t.Fatalf("AddCustom(0) error = %v", err)
+	}
+	size, err := sizer.Size()
+	if err != nil || size != 11 {
+		t.Fatalf("Size() = %d, error = %v", size, err)
+	}
+
+	// Writer 直接返回最终 Buffer 中的准确区域，不建立中间 payload。
+	data := make([]byte, size)
+	writer := NewWriter(data)
+	payload, err := writer.ReserveCustom(3)
+	if err != nil {
+		t.Fatalf("ReserveCustom(3) error = %v", err)
+	}
+	copy(payload, []byte{1, 2, 3})
+	empty, err := writer.ReserveCustom(0)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("ReserveCustom(0) = %#v, error = %v", empty, err)
+	}
+	if err := writer.Done(); err != nil {
+		t.Fatalf("Writer.Done() error = %v", err)
+	}
+
+	// Reader 返回借用 Slice，并允许调用方在当前解码阶段验证全部内容。
+	reader := NewRequestReader(data)
+	decoded, err := reader.ReadCustomPayload()
+	if err != nil || len(decoded) != 3 || decoded[2] != 3 {
+		t.Fatalf("ReadCustomPayload() = %#v, error = %v", decoded, err)
+	}
+	decodedEmpty, err := reader.ReadCustomPayload()
+	if err != nil || decodedEmpty == nil || len(decodedEmpty) != 0 {
+		t.Fatalf("empty ReadCustomPayload() = %#v, error = %v", decodedEmpty, err)
+	}
+	if err := reader.Done(); err != nil {
+		t.Fatalf("Reader.Done() error = %v", err)
+	}
+
+	// nilLength 是协议保留值，不能被 Size 或 Writer 当成普通自定义 payload。
+	invalidSizer := NewSizer()
+	if err := invalidSizer.AddCustom(-1); !errors.Is(
+		err,
+		errs.ErrRPCEncodeFailed,
+	) {
+		t.Fatalf("negative AddCustom() error = %v", err)
+	}
+	invalidWriter := NewWriter(make([]byte, 4))
+	if _, err := invalidWriter.ReserveCustom(-1); !errors.Is(
+		err,
+		errs.ErrRPCEncodeFailed,
+	) {
+		t.Fatalf("negative ReserveCustom() error = %v", err)
+	}
+	if strconv.IntSize == 64 {
+		// 64 位平台可以表达 uint32 nil 保留值，必须显式证明它不会被当成 payload 长度。
+		reservedLength := uint64(nilLength)
+		reservedSizer := NewSizer()
+		if err := reservedSizer.AddCustom(int(reservedLength)); !errors.Is(
+			err,
+			errs.ErrRPCEncodeFailed,
+		) {
+			t.Fatalf("reserved AddCustom() error = %v", err)
+		}
+		reservedWriter := NewWriter(make([]byte, 4))
+		if _, err := reservedWriter.ReserveCustom(
+			int(reservedLength),
+		); !errors.Is(err, errs.ErrRPCEncodeFailed) {
+			t.Fatalf("reserved ReserveCustom() error = %v", err)
+		}
+	}
+	shortWriter := NewWriter(make([]byte, 4))
+	if _, err := shortWriter.ReserveCustom(1); !errors.Is(
+		err,
+		errs.ErrRPCEncodeFailed,
+	) {
+		t.Fatalf("overflow ReserveCustom() error = %v", err)
+	}
+	headerWriter := NewWriter(make([]byte, 3))
+	if _, err := headerWriter.ReserveCustom(0); !errors.Is(
+		err,
+		errs.ErrRPCEncodeFailed,
+	) {
+		t.Fatalf("short-header ReserveCustom() error = %v", err)
+	}
+	fullSizer := NewSizer()
+	if err := fullSizer.Add(DefaultMaxMessageSize); err != nil {
+		t.Fatalf("full Sizer.Add() error = %v", err)
+	}
+	if err := fullSizer.AddCustom(0); !errors.Is(
+		err,
+		errs.ErrRPCEncodeFailed,
+	) {
+		t.Fatalf("full AddCustom() error = %v", err)
+	}
+
+	// 声明三字节但只携带一字节时必须在进入自定义 Unmarshal 前失败。
+	truncated := NewRequestReader([]byte{3, 0, 0, 0, 1})
+	if _, err := truncated.ReadCustomPayload(); !errors.Is(
+		err,
+		errs.ErrRPCRequestDecodeFailed,
+	) {
+		t.Fatalf("truncated ReadCustomPayload() error = %v", err)
+	}
+	nilMarked := NewRequestReader([]byte{0xff, 0xff, 0xff, 0xff})
+	if _, err := nilMarked.ReadCustomPayload(); !errors.Is(
+		err,
+		errs.ErrRPCRequestDecodeFailed,
+	) {
+		t.Fatalf("nil-marked ReadCustomPayload() error = %v", err)
+	}
+
+	// Reject 保留 Reader 创建时的请求/响应错误分类。
+	response := NewResponseReader(nil)
+	if err := response.Reject(); !errors.Is(err, errs.ErrRPCResponseDecodeFailed) {
+		t.Fatalf("response Reject() error = %v", err)
+	}
+
+	maximum := NewSizer()
+	if err := maximum.AddCustom(DefaultMaxMessageSize - 4); err != nil {
+		t.Fatalf("maximum AddCustom() error = %v", err)
+	}
+	maximumData := make([]byte, DefaultMaxMessageSize)
+	maximumWriter := NewWriter(maximumData)
+	maximumPayload, err := maximumWriter.ReserveCustom(
+		DefaultMaxMessageSize - 4,
+	)
+	if err != nil || len(maximumPayload) != DefaultMaxMessageSize-4 {
+		t.Fatalf(
+			"maximum ReserveCustom() length = %d, error = %v",
+			len(maximumPayload),
+			err,
+		)
+	}
+	if err := maximumWriter.Done(); err != nil {
+		t.Fatalf("maximum Writer.Done() error = %v", err)
+	}
+	maximumReader := NewResponseReader(maximumData)
+	maximumDecoded, err := maximumReader.ReadCustomPayload()
+	if err != nil || len(maximumDecoded) != DefaultMaxMessageSize-4 {
+		t.Fatalf(
+			"maximum ReadCustomPayload() length = %d, error = %v",
+			len(maximumDecoded),
+			err,
+		)
+	}
+	if err := maximumReader.Done(); err != nil {
+		t.Fatalf("maximum Reader.Done() error = %v", err)
+	}
+	oversize := NewSizer()
+	if err := oversize.AddCustom(DefaultMaxMessageSize - 3); !errors.Is(
+		err,
+		errs.ErrRPCEncodeFailed,
+	) {
+		t.Fatalf("oversize AddCustom() error = %v", err)
 	}
 }
 

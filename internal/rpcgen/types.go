@@ -3,6 +3,7 @@ package rpcgen
 import (
 	"fmt"
 	"go/types"
+	"strconv"
 	"strings"
 )
 
@@ -30,11 +31,35 @@ func validateType(
 	stack map[types.Type]bool,
 	depth int,
 ) error {
+	return validateTypeWithCodecs(
+		typ,
+		topLevel,
+		path,
+		stack,
+		depth,
+		nil,
+	)
+}
+
+// validateTypeWithCodecs 在 M11 内置规则前选择精确具名自定义 Codec。
+func validateTypeWithCodecs(
+	typ types.Type,
+	topLevel bool,
+	path string,
+	stack map[types.Type]bool,
+	depth int,
+	codecs *codecRegistry,
+) error {
 	if depth > maxTypeDepth {
 		return fmt.Errorf("%s: 类型嵌套超过 %d 层", path, maxTypeDepth)
 	}
 	if stack == nil {
 		stack = make(map[types.Type]bool)
+	}
+	// 自定义 Codec 把目标具名值视为一个完整叶子，不再检查其内部未导出字段或
+	// Protobuf Opaque 表示；外层指针和容器会先在递归调用处保持 M11 语义。
+	if codecs.lookup(typ) != nil {
+		return nil
 	}
 	if topLevel && isProtoType(typ) {
 		return nil
@@ -52,23 +77,55 @@ func validateType(
 		}
 		return fmt.Errorf("%s: 不支持类型 %s", path, types.TypeString(typ, nil))
 	case *types.Pointer:
-		return validateNested(value.Elem(), path+"*", stack, depth)
+		return validateNested(
+			value.Elem(),
+			path+"*",
+			stack,
+			depth,
+			codecs,
+		)
 	case *types.Array:
-		return validateNested(value.Elem(), path+"[]", stack, depth)
+		return validateNested(
+			value.Elem(),
+			path+"[]",
+			stack,
+			depth,
+			codecs,
+		)
 	case *types.Slice:
-		return validateNested(value.Elem(), path+"[]", stack, depth)
+		return validateNested(
+			value.Elem(),
+			path+"[]",
+			stack,
+			depth,
+			codecs,
+		)
 	case *types.Map:
-		if !supportedMapKey(value.Key()) {
+		keyCodec := codecs.lookup(value.Key())
+		if (keyCodec == nil && !supportedMapKey(value.Key())) ||
+			(keyCodec != nil && !types.Comparable(value.Key())) {
 			return fmt.Errorf(
 				"%s.key: Map Key 不支持类型 %s",
 				path,
 				types.TypeString(value.Key(), nil),
 			)
 		}
-		if err := validateNested(value.Key(), path+".key", stack, depth); err != nil {
+		if err := validateNested(
+			value.Key(),
+			path+".key",
+			stack,
+			depth,
+			codecs,
+		); err != nil {
 			return err
 		}
-		return validateNested(value.Elem(), path+".value", stack, depth)
+		return validateNested(
+			value.Elem(),
+			path+".value",
+			stack,
+			depth,
+			codecs,
+		)
 	case *types.Struct:
 		if stack[typ] {
 			return fmt.Errorf("%s: 不支持循环对象图 %s", path, types.TypeString(typ, nil))
@@ -89,12 +146,13 @@ func validateType(
 				)
 			}
 			exported++
-			if err := validateType(
+			if err := validateTypeWithCodecs(
 				field.Type(),
 				false,
 				path+"."+field.Name(),
 				stack,
 				depth+1,
+				codecs,
 			); err != nil {
 				return err
 			}
@@ -117,8 +175,16 @@ func validateNested(
 	path string,
 	stack map[types.Type]bool,
 	depth int,
+	codecs *codecRegistry,
 ) error {
-	return validateType(typ, false, path, stack, depth+1)
+	return validateTypeWithCodecs(
+		typ,
+		false,
+		path,
+		stack,
+		depth+1,
+		codecs,
+	)
 }
 
 // supportedBasic 列出 M11 具有固定线值的全部 Go 基础类型。
@@ -190,6 +256,21 @@ func protoReflectMethod(typ types.Type) bool {
 
 // schemaType 为完整契约指纹建立包含包路径、字段顺序和容器结构的稳定描述。
 func schemaType(typ types.Type, topLevel bool, stack map[types.Type]bool) string {
+	return schemaTypeWithCodecs(typ, topLevel, stack, nil)
+}
+
+// schemaTypeWithCodecs 把自定义 Codec 协议身份写入完整契约 Schema。
+func schemaTypeWithCodecs(
+	typ types.Type,
+	topLevel bool,
+	stack map[types.Type]bool,
+	codecs *codecRegistry,
+) string {
+	if codec := codecs.lookup(typ); codec != nil {
+		return customCodecFormat + ":" + codec.id + "@" +
+			strconv.FormatUint(uint64(codec.version), 10) + ":" +
+			codec.targetName
+	}
 	if topLevel && isProtoType(typ) {
 		return "proto:" + canonicalTypeName(typ)
 	}
@@ -204,20 +285,30 @@ func schemaType(typ types.Type, topLevel bool, stack map[types.Type]bool) string
 	case *types.Basic:
 		return prefix + value.Name()
 	case *types.Pointer:
-		return prefix + "*" + schemaType(value.Elem(), false, stack)
+		return prefix + "*" + schemaTypeWithCodecs(
+			value.Elem(),
+			false,
+			stack,
+			codecs,
+		)
 	case *types.Array:
 		return fmt.Sprintf(
 			"%s[%d]%s",
 			prefix,
 			value.Len(),
-			schemaType(value.Elem(), false, stack),
+			schemaTypeWithCodecs(value.Elem(), false, stack, codecs),
 		)
 	case *types.Slice:
-		return prefix + "[]" + schemaType(value.Elem(), false, stack)
+		return prefix + "[]" + schemaTypeWithCodecs(
+			value.Elem(),
+			false,
+			stack,
+			codecs,
+		)
 	case *types.Map:
 		return prefix + "map[" +
-			schemaType(value.Key(), false, stack) + "]" +
-			schemaType(value.Elem(), false, stack)
+			schemaTypeWithCodecs(value.Key(), false, stack, codecs) + "]" +
+			schemaTypeWithCodecs(value.Elem(), false, stack, codecs)
 	case *types.Struct:
 		if stack[typ] {
 			return prefix + "<cycle>"
@@ -232,7 +323,12 @@ func schemaType(typ types.Type, topLevel bool, stack map[types.Type]bool) string
 			}
 			fields = append(
 				fields,
-				field.Name()+":"+schemaType(field.Type(), false, stack),
+				field.Name()+":"+schemaTypeWithCodecs(
+					field.Type(),
+					false,
+					stack,
+					codecs,
+				),
 			)
 		}
 		return prefix + "struct{" + strings.Join(fields, ";") + "}"
@@ -266,6 +362,18 @@ func packagePathQualifier(pkg *types.Package) string {
 
 // minEncodedSize 返回一个值在普通 Go Codec 中必然占用的最小字节数。
 func minEncodedSize(typ types.Type, topLevel bool) int {
+	return minEncodedSizeWithCodecs(typ, topLevel, nil)
+}
+
+// minEncodedSizeWithCodecs 返回包含自定义长度前缀后的最小线格式尺寸。
+func minEncodedSizeWithCodecs(
+	typ types.Type,
+	topLevel bool,
+	codecs *codecRegistry,
+) int {
+	if codecs.lookup(typ) != nil {
+		return 4
+	}
 	if topLevel && isProtoType(typ) {
 		return 4
 	}
@@ -286,7 +394,7 @@ func minEncodedSize(typ types.Type, topLevel bool) int {
 	case *types.Pointer:
 		return 1
 	case *types.Array:
-		element := minEncodedSize(value.Elem(), false)
+		element := minEncodedSizeWithCodecs(value.Elem(), false, codecs)
 		if element == 0 || value.Len() > int64(^uint(0)>>1)/int64(element) {
 			return 0
 		}
@@ -298,7 +406,11 @@ func minEncodedSize(typ types.Type, topLevel bool) int {
 		for index := 0; index < value.NumFields(); index++ {
 			field := value.Field(index)
 			if field.Exported() {
-				total += minEncodedSize(field.Type(), false)
+				total += minEncodedSizeWithCodecs(
+					field.Type(),
+					false,
+					codecs,
+				)
 			}
 		}
 		return total

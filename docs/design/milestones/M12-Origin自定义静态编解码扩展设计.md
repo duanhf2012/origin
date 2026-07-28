@@ -1,6 +1,6 @@
 # Origin 第三版 M12 Origin 自定义静态编解码扩展设计
 
-> 文档状态：已确认，允许实施
+> 文档状态：已实现，Windows/Linux 验收通过
 >
 > 创建日期：2026-07-28
 >
@@ -156,7 +156,7 @@ type PlayerRPC interface {
 
 - `unsafe.Pointer` 或以它为底层类型的类型；
 - 函数和 Channel；
-- 未实例化泛型或包含类型参数的类型；
+- 泛型具名类型，无论是否已经实例化；
 - 匿名类型；
 - `interface{}`、`any` 和具名接口。
 
@@ -299,7 +299,7 @@ Provider 必须以返回 error 表达数据错误，不得使用 panic。M12 不
 完整 Schema 中每个自定义类型位置必须加入：
 
 ```text
-custom:<codec-id>@<version>:<canonical-target-type>
+custom-v1:<codec-id>@<version>:<canonical-target-type>
 ```
 
 其中：
@@ -415,3 +415,69 @@ M12 完成必须同时满足：
 10. M12 不接入 TCP/NATS 或其他后续能力。
 
 该 Review 已完成，允许创建 M12 实施计划并按本文范围编码。
+
+## 18. 实施结果
+
+M12 已于 2026-07-28 按方案 A 完成实现：
+
+1. `rpc.StaticCodec[T]` 已作为公开方法形状和编译期断言入口；
+2. `origingen` 会扫描当前 Module 内的 `//origin:rpc-codec` Provider，并在修改任何生成
+   文件前完成标记、空结构体、值接收者、签名、目标、ID 和版本冲突校验；
+3. 自定义目标在类型图中作为精确具名叶子处理，外层指针、数组、Slice、Map 和普通结构体
+   继续沿用 M11 组合规则；
+4. 完整契约 Schema 使用
+   `custom-v1:<codec-id>@<version>:<canonical-target-type>`，Provider 的 Go 名称和所在包
+   不进入指纹；
+5. 生成代码直接调用具体 Provider 的 `Size`、`MarshalTo` 和 `Unmarshal`，没有运行时
+   Codec 表、反射、接口分派、中间 payload Buffer 或辅助 goroutine；
+6. 自定义 payload 使用四字节长度边界，Reader 在调用 Provider 前完成 nil 保留值、
+   截断和消息上限检查；
+7. 请求 Buffer 在 Size、Reserve、Marshal 和短写错误路径均按 M11 所有权归还；响应
+   Buffer 继续由 `ResponseWriter` 和 Runtime 统一回收；
+8. `time.Time`、具名 `uint64` 和具名变长 `[]byte` 三类真实 Codec 已覆盖普通字段、
+   指针、Slice、Map Key/Value、内置类型覆盖、nil/空值及业务独立所有权；
+9. M11 没有自定义 Codec 时的 Schema 文本和内置线格式保持不变；
+10. M12 未接入 TCP、NATS、RequestID、pendingCall、服务发现或路由。
+
+### 18.1 正确性与质量验收
+
+- Windows 11、Go 1.26.5：`origingen rpc --check ./...`、`go vet ./...`、
+  `go test ./...` 和 `go test -race ./...` 全部通过；
+- Ubuntu Linux/amd64、Go 1.26.5：使用完整 Vendor 依赖执行同一组生成检查、Vet、全仓
+  测试和竞态检测，全部通过；
+- Windows Fuzz：基础 Reader 约执行 53 万次，生成自定义解码器约执行 49 万次，无
+  panic、越界或异常分配；
+- Linux Fuzz：基础 Reader 约执行 58 万次，生成自定义解码器约执行 51 万次，无失败；
+- Windows 覆盖率：`rpc` 59.8%、`internal/rpcgen` 86.4%、真实生成夹具 66.0%；
+  自定义代码渲染的 Size、Write、Read 和错误分支均为 100%；
+- 完成 `linux/amd64` 与 `darwin/arm64` 的纯 Go 交叉构建；
+- 逃逸分析确认固定宽度具体 Provider 不产生每次调用分配；变长 `OwnedBlob` 只有建立
+  业务独立所有权所必需的 Slice 分配。Await 闭包和业务容器分配属于 M11/M9 已确认
+  Runtime 边界，不是运行时 Codec 查找或 Provider 对象分配。
+
+### 18.2 性能结果
+
+以下结果取三次运行中位数。Windows 主机为 AMD Ryzen 7 7840HS，Linux 主机为
+QEMU Virtual CPU：
+
+| 场景 | Windows/amd64 | Linux/amd64 | 分配 |
+|---|---:|---:|---:|
+| 内置 `int64` 完整边界 | 27.34 ns/op | 31.07 ns/op | 0 B/op，0 allocs/op |
+| 固定 `time.Time` 自定义边界 | 63.81 ns/op | 78.44 ns/op | 0 B/op，0 allocs/op |
+| 16B 变长自定义 payload | 64.80 ns/op | 75.56 ns/op | 16 B/op，1 alloc/op |
+| 1KB 变长自定义 payload | 497.0 ns/op | 199.3 ns/op | 1024 B/op，1 alloc/op |
+| 接近 4M 变长自定义 payload | 1.045 ms/op | 1.680 ms/op | 约 8.39 MB/op，3 allocs/op |
+| 生成代码同 Node `time.Time` Await | 4.140 μs/op | 3.490 μs/op | 约 1.10 KB/op，18 allocs/op |
+
+接近 4M 的测试包含最终 Origin Buffer 和业务独立副本；该分配是已确认所有权语义，不是
+额外中间 payload。固定自定义 Codec 相比内置八字节值多出约 36～47ns，但仍为零分配，
+成本来自两次具体 Provider 调用和四字节长度边界。
+
+Linux 同 Node 自定义 `time.Time` Await 的尾延迟中位结果为：
+
+- P50：2.785 μs；
+- P95：5.961 μs；
+- P99：10.559 μs。
+
+以上数据锁定当前实现基线，不把虚拟机数据当作生产容量承诺。后续 M13/M14 接入网络时
+应分别测量 Transport 成本，不得重新引入动态 Codec 分派。

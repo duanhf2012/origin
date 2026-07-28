@@ -3,6 +3,7 @@ package rpcfixture
 
 import (
 	"context"
+	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/service"
@@ -23,6 +24,14 @@ type PlayerData struct {
 	Payload  []byte
 }
 
+// TimeEnvelope 覆盖自定义 Codec 在结构体、指针、Slice、Map Key 和 Map Value 中的组合。
+type TimeEnvelope struct {
+	At       time.Time
+	Optional *time.Time
+	History  []time.Time
+	ByTime   map[time.Time]time.Time
+}
+
 //origin:rpc
 type PlayerRPC interface {
 	EchoName(
@@ -40,6 +49,22 @@ type PlayerRPC interface {
 	SavePlayer(ctx context.Context, player PlayerData) error
 
 	PlayerOnline(ctx context.Context, playerID int64)
+
+	RoundTripPackedID(
+		ctx context.Context,
+		playerID PackedPlayerID,
+	) PackedPlayerID
+
+	RoundTripBlob(
+		ctx context.Context,
+		value OwnedBlob,
+	) OwnedBlob
+
+	RoundTripTime(
+		ctx context.Context,
+		value TimeEnvelope,
+		responseYear int,
+	) (TimeEnvelope, error)
 }
 
 // PlayerService 是集成测试的目标 RPC Service。
@@ -52,6 +77,11 @@ type PlayerService struct {
 	ShouldFail  bool
 	ShouldPanic bool
 	Wait        <-chan struct{}
+	LastTime    TimeEnvelope
+	LastPacked  PackedPlayerID
+	TimeCalls   int
+	PackedCalls int
+	LastBlob    OwnedBlob
 }
 
 // EchoName 覆盖普通类型业务输出不声明 error 的契约分类。
@@ -99,6 +129,39 @@ func (target *PlayerService) SavePlayer(
 // PlayerOnline 接收完全无返回值的通知。
 func (target *PlayerService) PlayerOnline(_ context.Context, playerID int64) {
 	target.OnlineID = playerID
+}
+
+// RoundTripPackedID 回显由自定义 Codec 替换内置 uint64 表示的具名类型。
+func (target *PlayerService) RoundTripPackedID(
+	_ context.Context,
+	playerID PackedPlayerID,
+) PackedPlayerID {
+	target.LastPacked = playerID
+	target.PackedCalls++
+	return playerID
+}
+
+// RoundTripBlob 保存并回显自定义 Codec 解码后的业务独立 Slice。
+func (target *PlayerService) RoundTripBlob(
+	_ context.Context,
+	value OwnedBlob,
+) OwnedBlob {
+	target.LastBlob = value
+	return value
+}
+
+// RoundTripTime 回显全部 time.Time 组合；测试需要时返回可触发响应解码错误的时间。
+func (target *PlayerService) RoundTripTime(
+	_ context.Context,
+	value TimeEnvelope,
+	responseYear int,
+) (TimeEnvelope, error) {
+	target.LastTime = value
+	target.TimeCalls++
+	if responseYear != 0 {
+		value.At = time.Date(responseYear, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	return value, nil
 }
 
 // CallerService 为生成客户端提供独立的 Service 执行上下文。

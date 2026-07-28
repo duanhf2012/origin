@@ -11,7 +11,9 @@ type renderer struct {
 	body       *bytes.Buffer
 	imports    *importSet
 	rpcAlias   string
+	errsAlias  string
 	protoAlias string
+	codecs     *codecRegistry
 	counter    int
 	response   bool
 }
@@ -32,7 +34,7 @@ func renderContract(
 	)
 	// 生成体内多处直接使用 errs。先于业务类型导入保留别名，确保契约恰好引用一个
 	// 包名为 errs 的业务类型时，该业务包自动获得 errs2，而不会破坏生成代码。
-	imports.add("github.com/duanhf2012/origin/v3/errs", "errs")
+	errsAlias := imports.add("github.com/duanhf2012/origin/v3/errs", "errs")
 	fmt.Fprintf(
 		body,
 		"const %sContractID %s.ContractID = 0x%016x\n\n"+
@@ -80,7 +82,14 @@ func renderContract(
 		contractPrefix,
 	)
 	for _, candidate := range item.methods {
-		renderCodecFunctions(body, imports, rpcAlias, item, candidate)
+		renderCodecFunctions(
+			body,
+			imports,
+			rpcAlias,
+			errsAlias,
+			item,
+			candidate,
+		)
 		renderClientMethods(
 			body,
 			imports,
@@ -100,6 +109,7 @@ func renderCodecFunctions(
 	body *bytes.Buffer,
 	imports *importSet,
 	rpcAlias string,
+	errsAlias string,
 	item *contract,
 	candidate *method,
 ) {
@@ -111,6 +121,8 @@ func renderCodecFunctions(
 		"encode"+upperFirst(prefix)+"Request",
 		candidate.inputs,
 		true,
+		item.codecs,
+		errsAlias,
 	)
 	renderDecode(
 		body,
@@ -119,6 +131,8 @@ func renderCodecFunctions(
 		"decode"+upperFirst(prefix)+"Request",
 		candidate.inputs,
 		true,
+		item.codecs,
+		errsAlias,
 	)
 	if !candidate.notifyOnly {
 		renderResponseEncode(
@@ -127,6 +141,8 @@ func renderCodecFunctions(
 			rpcAlias,
 			"encode"+upperFirst(prefix)+"Response",
 			candidate.outputs,
+			item.codecs,
+			errsAlias,
 		)
 		renderDecode(
 			body,
@@ -135,6 +151,8 @@ func renderCodecFunctions(
 			"decode"+upperFirst(prefix)+"Response",
 			candidate.outputs,
 			false,
+			item.codecs,
+			errsAlias,
 		)
 	}
 }
@@ -147,6 +165,8 @@ func renderEncode(
 	name string,
 	parameters []parameter,
 	request bool,
+	codecs *codecRegistry,
+	errsAlias string,
 ) {
 	fmt.Fprintf(
 		body,
@@ -159,7 +179,13 @@ func renderEncode(
 	}
 	fmt.Fprintf(body, ") (*%s.Buffer, error) {\n", rpcAlias)
 	fmt.Fprintf(body, "\tsizer := %s.NewSizer()\n", rpcAlias)
-	sizeRenderer := &renderer{body: body, imports: imports, rpcAlias: rpcAlias}
+	sizeRenderer := &renderer{
+		body:      body,
+		imports:   imports,
+		rpcAlias:  rpcAlias,
+		errsAlias: errsAlias,
+		codecs:    codecs,
+	}
 	for _, parameter := range parameters {
 		sizeRenderer.emitSize(parameter.name, parameter.typ, true, "\t")
 	}
@@ -168,7 +194,14 @@ func renderEncode(
 	body.WriteString("\tbuffer, err := client.AllocateRequest(size)\n")
 	body.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
 	fmt.Fprintf(body, "\twriter := %s.NewWriter(buffer.Bytes())\n", rpcAlias)
-	writeRenderer := &renderer{body: body, imports: imports, rpcAlias: rpcAlias}
+	writeRenderer := &renderer{
+		body:      body,
+		imports:   imports,
+		rpcAlias:  rpcAlias,
+		errsAlias: errsAlias,
+		codecs:    codecs,
+		counter:   sizeRenderer.counter,
+	}
 	for _, parameter := range parameters {
 		writeRenderer.emitWrite(parameter.name, parameter.typ, true, "\t")
 	}
@@ -185,6 +218,8 @@ func renderResponseEncode(
 	rpcAlias string,
 	name string,
 	parameters []parameter,
+	codecs *codecRegistry,
+	errsAlias string,
 ) {
 	fmt.Fprintf(
 		body,
@@ -198,7 +233,12 @@ func renderResponseEncode(
 	body.WriteString(") error {\n")
 	fmt.Fprintf(body, "\tsizer := %s.NewSizer()\n", rpcAlias)
 	sizeRenderer := &renderer{
-		body: body, imports: imports, rpcAlias: rpcAlias, response: true,
+		body:      body,
+		imports:   imports,
+		rpcAlias:  rpcAlias,
+		errsAlias: errsAlias,
+		codecs:    codecs,
+		response:  true,
 	}
 	for _, parameter := range parameters {
 		sizeRenderer.emitSize(parameter.name, parameter.typ, true, "\t")
@@ -209,7 +249,13 @@ func renderResponseEncode(
 	body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
 	fmt.Fprintf(body, "\twriter := %s.NewWriter(target)\n", rpcAlias)
 	writeRenderer := &renderer{
-		body: body, imports: imports, rpcAlias: rpcAlias, response: true,
+		body:      body,
+		imports:   imports,
+		rpcAlias:  rpcAlias,
+		errsAlias: errsAlias,
+		codecs:    codecs,
+		counter:   sizeRenderer.counter,
+		response:  true,
 	}
 	for _, parameter := range parameters {
 		writeRenderer.emitWrite(parameter.name, parameter.typ, true, "\t")
@@ -224,6 +270,8 @@ func renderDecode(
 	name string,
 	parameters []parameter,
 	request bool,
+	codecs *codecRegistry,
+	errsAlias string,
 ) {
 	fmt.Fprintf(
 		body,
@@ -240,7 +288,13 @@ func renderDecode(
 	} else {
 		fmt.Fprintf(body, "\treader := %s.NewResponseReader(data)\n", rpcAlias)
 	}
-	decodeRenderer := &renderer{body: body, imports: imports, rpcAlias: rpcAlias}
+	decodeRenderer := &renderer{
+		body:      body,
+		imports:   imports,
+		rpcAlias:  rpcAlias,
+		errsAlias: errsAlias,
+		codecs:    codecs,
+	}
 	for _, parameter := range parameters {
 		decodeRenderer.emitRead(parameter.name, parameter.typ, true, !request, "\t")
 	}

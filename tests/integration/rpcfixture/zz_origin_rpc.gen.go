@@ -9,6 +9,7 @@ import (
 	service "github.com/duanhf2012/origin/v3/service"
 	structpb "google.golang.org/protobuf/types/known/structpb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
+	time "time"
 )
 
 const (
@@ -18,11 +19,14 @@ const (
 
 const playerRPCContractID rpc.ContractID = 0xb3ca21d38db4b2fc
 
-var playerRPCFingerprint = rpc.ContractFingerprint{0x4b, 0x53, 0x82, 0x35, 0xbd, 0x64, 0x38, 0xc8, 0x06, 0x3d, 0x04, 0x8a, 0x12, 0x0b, 0x81, 0x14, 0xb5, 0x4b, 0x39, 0x8b, 0x7f, 0xab, 0xe1, 0xd6, 0xfa, 0xd5, 0x34, 0x10, 0xfb, 0x25, 0xeb, 0xf8}
+var playerRPCFingerprint = rpc.ContractFingerprint{0x4a, 0x2d, 0x6b, 0x81, 0x4c, 0xdb, 0xba, 0x84, 0xb1, 0xff, 0xbe, 0xd6, 0x89, 0x8a, 0xd5, 0x4a, 0x8a, 0x8e, 0xd4, 0x46, 0xb0, 0xee, 0x45, 0x13, 0x36, 0x35, 0xe0, 0x5c, 0xc9, 0xa8, 0x1d, 0x1b}
 
 const playerRPCEchoNameMethodID rpc.MethodID = 0xb441ccb1960cd3b9
 const playerRPCGetPlayerMethodID rpc.MethodID = 0x0612b3cda06ad14b
 const playerRPCPlayerOnlineMethodID rpc.MethodID = 0xafc4908eabe03c37
+const playerRPCRoundTripBlobMethodID rpc.MethodID = 0x28b2541698611f17
+const playerRPCRoundTripPackedIDMethodID rpc.MethodID = 0xbb4af7338fe6f3a4
+const playerRPCRoundTripTimeMethodID rpc.MethodID = 0x78c2194a36266c4e
 const playerRPCSavePlayerMethodID rpc.MethodID = 0x5f67ae07657409b1
 
 // PlayerRPCClient 是 github.com/duanhf2012/origin/v3/tests/integration/rpcfixture.PlayerRPC 的强类型生成客户端。
@@ -249,8 +253,8 @@ func encodePlayerRPCGetPlayerRequest(client rpc.Client, arg1 int64, arg2 PlayerD
 		buffer.Release()
 		return nil, err
 	}
-	for index1 := range arg2.Tags {
-		if err := writer.WriteString(string(arg2.Tags[index1])); err != nil {
+	for index4 := range arg2.Tags {
+		if err := writer.WriteString(string(arg2.Tags[index4])); err != nil {
 			buffer.Release()
 			return nil, err
 		}
@@ -259,17 +263,17 @@ func encodePlayerRPCGetPlayerRequest(client rpc.Client, arg1 int64, arg2 PlayerD
 		buffer.Release()
 		return nil, err
 	}
-	for key2, value3 := range arg2.Metadata {
-		if err := writer.WriteString(string(key2)); err != nil {
+	for key5, value6 := range arg2.Metadata {
+		if err := writer.WriteString(string(key5)); err != nil {
 			buffer.Release()
 			return nil, err
 		}
-		if err := writer.WritePresence(value3 != nil); err != nil {
+		if err := writer.WritePresence(value6 != nil); err != nil {
 			buffer.Release()
 			return nil, err
 		}
-		if value3 != nil {
-			if err := writer.WriteString(string((*value3).Value)); err != nil {
+		if value6 != nil {
+			if err := writer.WriteString(string((*value6).Value)); err != nil {
 				buffer.Release()
 				return nil, err
 			}
@@ -493,23 +497,23 @@ func encodePlayerRPCGetPlayerResponse(response *rpc.ResponseWriter, result1 Play
 	if err := writer.WriteContainer(len(result1.Tags), result1.Tags == nil); err != nil {
 		return err
 	}
-	for index1 := range result1.Tags {
-		if err := writer.WriteString(string(result1.Tags[index1])); err != nil {
+	for index4 := range result1.Tags {
+		if err := writer.WriteString(string(result1.Tags[index4])); err != nil {
 			return err
 		}
 	}
 	if err := writer.WriteContainer(len(result1.Metadata), result1.Metadata == nil); err != nil {
 		return err
 	}
-	for key2, value3 := range result1.Metadata {
-		if err := writer.WriteString(string(key2)); err != nil {
+	for key5, value6 := range result1.Metadata {
+		if err := writer.WriteString(string(key5)); err != nil {
 			return err
 		}
-		if err := writer.WritePresence(value3 != nil); err != nil {
+		if err := writer.WritePresence(value6 != nil); err != nil {
 			return err
 		}
-		if value3 != nil {
-			if err := writer.WriteString(string((*value3).Value)); err != nil {
+		if value6 != nil {
+			if err := writer.WriteString(string((*value6).Value)); err != nil {
 				return err
 			}
 		}
@@ -747,6 +751,885 @@ func (client PlayerRPCClient) BroadcastPlayerOnline(ctx context.Context, arg1 in
 	return client.client.Broadcast(ctx, playerRPCPlayerOnlineMethodID, request)
 }
 
+// encodePlayerRPCRoundTripBlobRequest 计算并一次写入当前方法请求载荷。
+func encodePlayerRPCRoundTripBlobRequest(client rpc.Client, arg1 OwnedBlob) (*rpc.Buffer, error) {
+	sizer := rpc.NewSizer()
+	customSize1, customErr2 := OwnedBlobCodec{}.Size(&(arg1))
+	if customErr2 != nil {
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	if err := sizer.AddCustom(customSize1); err != nil {
+		return nil, err
+	}
+	size, err := sizer.Size()
+	if err != nil {
+		return nil, err
+	}
+	buffer, err := client.AllocateRequest(size)
+	if err != nil {
+		return nil, err
+	}
+	writer := rpc.NewWriter(buffer.Bytes())
+	customSize3, customErr4 := OwnedBlobCodec{}.Size(&(arg1))
+	if customErr4 != nil {
+		buffer.Release()
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	customPayload5, reserveErr6 := writer.ReserveCustom(customSize3)
+	if reserveErr6 != nil {
+		buffer.Release()
+		return nil, reserveErr6
+	}
+	customWritten7, customErr8 := OwnedBlobCodec{}.MarshalTo(customPayload5, &(arg1))
+	if customErr8 != nil || customWritten7 != len(customPayload5) {
+		buffer.Release()
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	if err := writer.Done(); err != nil {
+		buffer.Release()
+		return nil, err
+	}
+	return buffer, nil
+}
+
+// decodePlayerRPCRoundTripBlobRequest 按固定契约顺序解码并校验完整载荷。
+func decodePlayerRPCRoundTripBlobRequest(data []byte) (arg1 OwnedBlob, decodeErr error) {
+	reader := rpc.NewRequestReader(data)
+	var customPayload1 []byte
+	customPayload1, decodeErr = reader.ReadCustomPayload()
+	if decodeErr != nil {
+		return
+	}
+	customErr2 := OwnedBlobCodec{}.Unmarshal(customPayload1, &(arg1))
+	if customErr2 != nil {
+		decodeErr = reader.Reject()
+		return
+	}
+	decodeErr = reader.Done()
+	return
+}
+
+// encodePlayerRPCRoundTripBlobResponse 计算并一次写入当前方法响应载荷。
+func encodePlayerRPCRoundTripBlobResponse(response *rpc.ResponseWriter, result1 OwnedBlob) error {
+	sizer := rpc.NewSizer()
+	customSize1, customErr2 := OwnedBlobCodec{}.Size(&(result1))
+	if customErr2 != nil {
+		return errs.ErrRPCEncodeFailed
+	}
+	if err := sizer.AddCustom(customSize1); err != nil {
+		return err
+	}
+	size, err := sizer.Size()
+	if err != nil {
+		return err
+	}
+	target, err := response.Allocate(size)
+	if err != nil {
+		return err
+	}
+	writer := rpc.NewWriter(target)
+	customSize3, customErr4 := OwnedBlobCodec{}.Size(&(result1))
+	if customErr4 != nil {
+		return errs.ErrRPCEncodeFailed
+	}
+	customPayload5, reserveErr6 := writer.ReserveCustom(customSize3)
+	if reserveErr6 != nil {
+		return reserveErr6
+	}
+	customWritten7, customErr8 := OwnedBlobCodec{}.MarshalTo(customPayload5, &(result1))
+	if customErr8 != nil || customWritten7 != len(customPayload5) {
+		return errs.ErrRPCEncodeFailed
+	}
+	return writer.Done()
+}
+
+// decodePlayerRPCRoundTripBlobResponse 按固定契约顺序解码并校验完整载荷。
+func decodePlayerRPCRoundTripBlobResponse(data []byte) (result1 OwnedBlob, decodeErr error) {
+	reader := rpc.NewResponseReader(data)
+	var customPayload1 []byte
+	customPayload1, decodeErr = reader.ReadCustomPayload()
+	if decodeErr != nil {
+		return
+	}
+	customErr2 := OwnedBlobCodec{}.Unmarshal(customPayload1, &(result1))
+	if customErr2 != nil {
+		decodeErr = reader.Reject()
+		return
+	}
+	decodeErr = reader.Done()
+	return
+}
+
+// AwaitRoundTripBlob 以顺序编程外观等待 RPC 结果。
+func (client PlayerRPCClient) AwaitRoundTripBlob(ctx context.Context, arg1 OwnedBlob) (result1 OwnedBlob, err error) {
+	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, arg1)
+	if err != nil {
+		return
+	}
+	err = client.client.Await(ctx, playerRPCRoundTripBlobMethodID, request, func(data []byte) error {
+		result1, err = decodePlayerRPCRoundTripBlobResponse(data)
+		return err
+	})
+	return
+}
+
+// AsyncRoundTripBlob 提交请求，并在 owner 的后续串行任务中执行一次回调。
+func (client PlayerRPCClient) AsyncRoundTripBlob(ctx context.Context, arg1 OwnedBlob, callback func(context.Context, OwnedBlob, error)) error {
+	if callback == nil {
+		return errs.ErrInvalidArgument
+	}
+	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, arg1)
+	if err != nil {
+		return err
+	}
+	return client.client.Async(ctx, playerRPCRoundTripBlobMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
+		if callErr != nil {
+			callback(callbackCtx, *new(OwnedBlob), callErr)
+			return
+		}
+		result1, decodeErr := decodePlayerRPCRoundTripBlobResponse(data)
+		callback(callbackCtx, result1, decodeErr)
+	})
+}
+
+// NotifyRoundTripBlob 提交通知并主动放弃业务结果。
+func (client PlayerRPCClient) NotifyRoundTripBlob(ctx context.Context, arg1 OwnedBlob) error {
+	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, arg1)
+	if err != nil {
+		return err
+	}
+	return client.client.Notify(ctx, playerRPCRoundTripBlobMethodID, request)
+}
+
+// BroadcastRoundTripBlob 提交通知并主动放弃业务结果。
+func (client PlayerRPCClient) BroadcastRoundTripBlob(ctx context.Context, arg1 OwnedBlob) error {
+	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, arg1)
+	if err != nil {
+		return err
+	}
+	return client.client.Broadcast(ctx, playerRPCRoundTripBlobMethodID, request)
+}
+
+// encodePlayerRPCRoundTripPackedIDRequest 计算并一次写入当前方法请求载荷。
+func encodePlayerRPCRoundTripPackedIDRequest(client rpc.Client, arg1 PackedPlayerID) (*rpc.Buffer, error) {
+	sizer := rpc.NewSizer()
+	customSize1, customErr2 := PackedPlayerIDCodec{}.Size(&(arg1))
+	if customErr2 != nil {
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	if err := sizer.AddCustom(customSize1); err != nil {
+		return nil, err
+	}
+	size, err := sizer.Size()
+	if err != nil {
+		return nil, err
+	}
+	buffer, err := client.AllocateRequest(size)
+	if err != nil {
+		return nil, err
+	}
+	writer := rpc.NewWriter(buffer.Bytes())
+	customSize3, customErr4 := PackedPlayerIDCodec{}.Size(&(arg1))
+	if customErr4 != nil {
+		buffer.Release()
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	customPayload5, reserveErr6 := writer.ReserveCustom(customSize3)
+	if reserveErr6 != nil {
+		buffer.Release()
+		return nil, reserveErr6
+	}
+	customWritten7, customErr8 := PackedPlayerIDCodec{}.MarshalTo(customPayload5, &(arg1))
+	if customErr8 != nil || customWritten7 != len(customPayload5) {
+		buffer.Release()
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	if err := writer.Done(); err != nil {
+		buffer.Release()
+		return nil, err
+	}
+	return buffer, nil
+}
+
+// decodePlayerRPCRoundTripPackedIDRequest 按固定契约顺序解码并校验完整载荷。
+func decodePlayerRPCRoundTripPackedIDRequest(data []byte) (arg1 PackedPlayerID, decodeErr error) {
+	reader := rpc.NewRequestReader(data)
+	var customPayload1 []byte
+	customPayload1, decodeErr = reader.ReadCustomPayload()
+	if decodeErr != nil {
+		return
+	}
+	customErr2 := PackedPlayerIDCodec{}.Unmarshal(customPayload1, &(arg1))
+	if customErr2 != nil {
+		decodeErr = reader.Reject()
+		return
+	}
+	decodeErr = reader.Done()
+	return
+}
+
+// encodePlayerRPCRoundTripPackedIDResponse 计算并一次写入当前方法响应载荷。
+func encodePlayerRPCRoundTripPackedIDResponse(response *rpc.ResponseWriter, result1 PackedPlayerID) error {
+	sizer := rpc.NewSizer()
+	customSize1, customErr2 := PackedPlayerIDCodec{}.Size(&(result1))
+	if customErr2 != nil {
+		return errs.ErrRPCEncodeFailed
+	}
+	if err := sizer.AddCustom(customSize1); err != nil {
+		return err
+	}
+	size, err := sizer.Size()
+	if err != nil {
+		return err
+	}
+	target, err := response.Allocate(size)
+	if err != nil {
+		return err
+	}
+	writer := rpc.NewWriter(target)
+	customSize3, customErr4 := PackedPlayerIDCodec{}.Size(&(result1))
+	if customErr4 != nil {
+		return errs.ErrRPCEncodeFailed
+	}
+	customPayload5, reserveErr6 := writer.ReserveCustom(customSize3)
+	if reserveErr6 != nil {
+		return reserveErr6
+	}
+	customWritten7, customErr8 := PackedPlayerIDCodec{}.MarshalTo(customPayload5, &(result1))
+	if customErr8 != nil || customWritten7 != len(customPayload5) {
+		return errs.ErrRPCEncodeFailed
+	}
+	return writer.Done()
+}
+
+// decodePlayerRPCRoundTripPackedIDResponse 按固定契约顺序解码并校验完整载荷。
+func decodePlayerRPCRoundTripPackedIDResponse(data []byte) (result1 PackedPlayerID, decodeErr error) {
+	reader := rpc.NewResponseReader(data)
+	var customPayload1 []byte
+	customPayload1, decodeErr = reader.ReadCustomPayload()
+	if decodeErr != nil {
+		return
+	}
+	customErr2 := PackedPlayerIDCodec{}.Unmarshal(customPayload1, &(result1))
+	if customErr2 != nil {
+		decodeErr = reader.Reject()
+		return
+	}
+	decodeErr = reader.Done()
+	return
+}
+
+// AwaitRoundTripPackedID 以顺序编程外观等待 RPC 结果。
+func (client PlayerRPCClient) AwaitRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) (result1 PackedPlayerID, err error) {
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, arg1)
+	if err != nil {
+		return
+	}
+	err = client.client.Await(ctx, playerRPCRoundTripPackedIDMethodID, request, func(data []byte) error {
+		result1, err = decodePlayerRPCRoundTripPackedIDResponse(data)
+		return err
+	})
+	return
+}
+
+// AsyncRoundTripPackedID 提交请求，并在 owner 的后续串行任务中执行一次回调。
+func (client PlayerRPCClient) AsyncRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID, callback func(context.Context, PackedPlayerID, error)) error {
+	if callback == nil {
+		return errs.ErrInvalidArgument
+	}
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, arg1)
+	if err != nil {
+		return err
+	}
+	return client.client.Async(ctx, playerRPCRoundTripPackedIDMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
+		if callErr != nil {
+			callback(callbackCtx, *new(PackedPlayerID), callErr)
+			return
+		}
+		result1, decodeErr := decodePlayerRPCRoundTripPackedIDResponse(data)
+		callback(callbackCtx, result1, decodeErr)
+	})
+}
+
+// NotifyRoundTripPackedID 提交通知并主动放弃业务结果。
+func (client PlayerRPCClient) NotifyRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) error {
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, arg1)
+	if err != nil {
+		return err
+	}
+	return client.client.Notify(ctx, playerRPCRoundTripPackedIDMethodID, request)
+}
+
+// BroadcastRoundTripPackedID 提交通知并主动放弃业务结果。
+func (client PlayerRPCClient) BroadcastRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) error {
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, arg1)
+	if err != nil {
+		return err
+	}
+	return client.client.Broadcast(ctx, playerRPCRoundTripPackedIDMethodID, request)
+}
+
+// encodePlayerRPCRoundTripTimeRequest 计算并一次写入当前方法请求载荷。
+func encodePlayerRPCRoundTripTimeRequest(client rpc.Client, arg1 TimeEnvelope, arg2 int) (*rpc.Buffer, error) {
+	sizer := rpc.NewSizer()
+	customSize1, customErr2 := TimeCodec{}.Size(&(arg1.At))
+	if customErr2 != nil {
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	if err := sizer.AddCustom(customSize1); err != nil {
+		return nil, err
+	}
+	if err := sizer.Add(1); err != nil {
+		return nil, err
+	}
+	if arg1.Optional != nil {
+		customSize3, customErr4 := TimeCodec{}.Size(&(*arg1.Optional))
+		if customErr4 != nil {
+			return nil, errs.ErrRPCEncodeFailed
+		}
+		if err := sizer.AddCustom(customSize3); err != nil {
+			return nil, err
+		}
+	}
+	if err := sizer.AddContainer(len(arg1.History), arg1.History == nil); err != nil {
+		return nil, err
+	}
+	for index5 := range arg1.History {
+		customSize6, customErr7 := TimeCodec{}.Size(&(arg1.History[index5]))
+		if customErr7 != nil {
+			return nil, errs.ErrRPCEncodeFailed
+		}
+		if err := sizer.AddCustom(customSize6); err != nil {
+			return nil, err
+		}
+	}
+	if err := sizer.AddContainer(len(arg1.ByTime), arg1.ByTime == nil); err != nil {
+		return nil, err
+	}
+	for key8, value9 := range arg1.ByTime {
+		customSize10, customErr11 := TimeCodec{}.Size(&(key8))
+		if customErr11 != nil {
+			return nil, errs.ErrRPCEncodeFailed
+		}
+		if err := sizer.AddCustom(customSize10); err != nil {
+			return nil, err
+		}
+		customSize12, customErr13 := TimeCodec{}.Size(&(value9))
+		if customErr13 != nil {
+			return nil, errs.ErrRPCEncodeFailed
+		}
+		if err := sizer.AddCustom(customSize12); err != nil {
+			return nil, err
+		}
+	}
+	if err := sizer.Add(8); err != nil {
+		return nil, err
+	}
+	size, err := sizer.Size()
+	if err != nil {
+		return nil, err
+	}
+	buffer, err := client.AllocateRequest(size)
+	if err != nil {
+		return nil, err
+	}
+	writer := rpc.NewWriter(buffer.Bytes())
+	customSize14, customErr15 := TimeCodec{}.Size(&(arg1.At))
+	if customErr15 != nil {
+		buffer.Release()
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	customPayload16, reserveErr17 := writer.ReserveCustom(customSize14)
+	if reserveErr17 != nil {
+		buffer.Release()
+		return nil, reserveErr17
+	}
+	customWritten18, customErr19 := TimeCodec{}.MarshalTo(customPayload16, &(arg1.At))
+	if customErr19 != nil || customWritten18 != len(customPayload16) {
+		buffer.Release()
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	if err := writer.WritePresence(arg1.Optional != nil); err != nil {
+		buffer.Release()
+		return nil, err
+	}
+	if arg1.Optional != nil {
+		customSize20, customErr21 := TimeCodec{}.Size(&(*arg1.Optional))
+		if customErr21 != nil {
+			buffer.Release()
+			return nil, errs.ErrRPCEncodeFailed
+		}
+		customPayload22, reserveErr23 := writer.ReserveCustom(customSize20)
+		if reserveErr23 != nil {
+			buffer.Release()
+			return nil, reserveErr23
+		}
+		customWritten24, customErr25 := TimeCodec{}.MarshalTo(customPayload22, &(*arg1.Optional))
+		if customErr25 != nil || customWritten24 != len(customPayload22) {
+			buffer.Release()
+			return nil, errs.ErrRPCEncodeFailed
+		}
+	}
+	if err := writer.WriteContainer(len(arg1.History), arg1.History == nil); err != nil {
+		buffer.Release()
+		return nil, err
+	}
+	for index26 := range arg1.History {
+		customSize27, customErr28 := TimeCodec{}.Size(&(arg1.History[index26]))
+		if customErr28 != nil {
+			buffer.Release()
+			return nil, errs.ErrRPCEncodeFailed
+		}
+		customPayload29, reserveErr30 := writer.ReserveCustom(customSize27)
+		if reserveErr30 != nil {
+			buffer.Release()
+			return nil, reserveErr30
+		}
+		customWritten31, customErr32 := TimeCodec{}.MarshalTo(customPayload29, &(arg1.History[index26]))
+		if customErr32 != nil || customWritten31 != len(customPayload29) {
+			buffer.Release()
+			return nil, errs.ErrRPCEncodeFailed
+		}
+	}
+	if err := writer.WriteContainer(len(arg1.ByTime), arg1.ByTime == nil); err != nil {
+		buffer.Release()
+		return nil, err
+	}
+	for key33, value34 := range arg1.ByTime {
+		customSize35, customErr36 := TimeCodec{}.Size(&(key33))
+		if customErr36 != nil {
+			buffer.Release()
+			return nil, errs.ErrRPCEncodeFailed
+		}
+		customPayload37, reserveErr38 := writer.ReserveCustom(customSize35)
+		if reserveErr38 != nil {
+			buffer.Release()
+			return nil, reserveErr38
+		}
+		customWritten39, customErr40 := TimeCodec{}.MarshalTo(customPayload37, &(key33))
+		if customErr40 != nil || customWritten39 != len(customPayload37) {
+			buffer.Release()
+			return nil, errs.ErrRPCEncodeFailed
+		}
+		customSize41, customErr42 := TimeCodec{}.Size(&(value34))
+		if customErr42 != nil {
+			buffer.Release()
+			return nil, errs.ErrRPCEncodeFailed
+		}
+		customPayload43, reserveErr44 := writer.ReserveCustom(customSize41)
+		if reserveErr44 != nil {
+			buffer.Release()
+			return nil, reserveErr44
+		}
+		customWritten45, customErr46 := TimeCodec{}.MarshalTo(customPayload43, &(value34))
+		if customErr46 != nil || customWritten45 != len(customPayload43) {
+			buffer.Release()
+			return nil, errs.ErrRPCEncodeFailed
+		}
+	}
+	if err := writer.WriteInt(int(arg2)); err != nil {
+		buffer.Release()
+		return nil, err
+	}
+	if err := writer.Done(); err != nil {
+		buffer.Release()
+		return nil, err
+	}
+	return buffer, nil
+}
+
+// decodePlayerRPCRoundTripTimeRequest 按固定契约顺序解码并校验完整载荷。
+func decodePlayerRPCRoundTripTimeRequest(data []byte) (arg1 TimeEnvelope, arg2 int, decodeErr error) {
+	reader := rpc.NewRequestReader(data)
+	var customPayload1 []byte
+	customPayload1, decodeErr = reader.ReadCustomPayload()
+	if decodeErr != nil {
+		return
+	}
+	customErr2 := TimeCodec{}.Unmarshal(customPayload1, &(arg1.At))
+	if customErr2 != nil {
+		decodeErr = reader.Reject()
+		return
+	}
+	var present3 bool
+	present3, decodeErr = reader.ReadPresence()
+	if decodeErr != nil {
+		return
+	}
+	if present3 {
+		arg1.Optional = (*time.Time)(new(time.Time))
+		var customPayload4 []byte
+		customPayload4, decodeErr = reader.ReadCustomPayload()
+		if decodeErr != nil {
+			return
+		}
+		customErr5 := TimeCodec{}.Unmarshal(customPayload4, &(*arg1.Optional))
+		if customErr5 != nil {
+			decodeErr = reader.Reject()
+			return
+		}
+	}
+	var length6 int
+	var isNil7 bool
+	length6, isNil7, decodeErr = reader.ReadContainer()
+	if decodeErr != nil {
+		return
+	}
+	decodeErr = reader.CheckElements(length6, 4)
+	if decodeErr != nil {
+		return
+	}
+	if !isNil7 {
+		arg1.History = make([]time.Time, length6)
+		for index8 := 0; index8 < length6; index8++ {
+			var customPayload9 []byte
+			customPayload9, decodeErr = reader.ReadCustomPayload()
+			if decodeErr != nil {
+				return
+			}
+			customErr10 := TimeCodec{}.Unmarshal(customPayload9, &(arg1.History[index8]))
+			if customErr10 != nil {
+				decodeErr = reader.Reject()
+				return
+			}
+		}
+	}
+	var length11 int
+	var isNil12 bool
+	length11, isNil12, decodeErr = reader.ReadContainer()
+	if decodeErr != nil {
+		return
+	}
+	decodeErr = reader.CheckElements(length11, 8)
+	if decodeErr != nil {
+		return
+	}
+	if !isNil12 {
+		arg1.ByTime = make(map[time.Time]time.Time, length11)
+		for index13 := 0; index13 < length11; index13++ {
+			var key14 time.Time
+			var value15 time.Time
+			var customPayload16 []byte
+			customPayload16, decodeErr = reader.ReadCustomPayload()
+			if decodeErr != nil {
+				return
+			}
+			customErr17 := TimeCodec{}.Unmarshal(customPayload16, &(key14))
+			if customErr17 != nil {
+				decodeErr = reader.Reject()
+				return
+			}
+			var customPayload18 []byte
+			customPayload18, decodeErr = reader.ReadCustomPayload()
+			if decodeErr != nil {
+				return
+			}
+			customErr19 := TimeCodec{}.Unmarshal(customPayload18, &(value15))
+			if customErr19 != nil {
+				decodeErr = reader.Reject()
+				return
+			}
+			arg1.ByTime[key14] = value15
+		}
+	}
+	var decoded20 int
+	decoded20, decodeErr = reader.ReadInt()
+	if decodeErr != nil {
+		return
+	}
+	arg2 = int(decoded20)
+	decodeErr = reader.Done()
+	return
+}
+
+// encodePlayerRPCRoundTripTimeResponse 计算并一次写入当前方法响应载荷。
+func encodePlayerRPCRoundTripTimeResponse(response *rpc.ResponseWriter, result1 TimeEnvelope) error {
+	sizer := rpc.NewSizer()
+	customSize1, customErr2 := TimeCodec{}.Size(&(result1.At))
+	if customErr2 != nil {
+		return errs.ErrRPCEncodeFailed
+	}
+	if err := sizer.AddCustom(customSize1); err != nil {
+		return err
+	}
+	if err := sizer.Add(1); err != nil {
+		return err
+	}
+	if result1.Optional != nil {
+		customSize3, customErr4 := TimeCodec{}.Size(&(*result1.Optional))
+		if customErr4 != nil {
+			return errs.ErrRPCEncodeFailed
+		}
+		if err := sizer.AddCustom(customSize3); err != nil {
+			return err
+		}
+	}
+	if err := sizer.AddContainer(len(result1.History), result1.History == nil); err != nil {
+		return err
+	}
+	for index5 := range result1.History {
+		customSize6, customErr7 := TimeCodec{}.Size(&(result1.History[index5]))
+		if customErr7 != nil {
+			return errs.ErrRPCEncodeFailed
+		}
+		if err := sizer.AddCustom(customSize6); err != nil {
+			return err
+		}
+	}
+	if err := sizer.AddContainer(len(result1.ByTime), result1.ByTime == nil); err != nil {
+		return err
+	}
+	for key8, value9 := range result1.ByTime {
+		customSize10, customErr11 := TimeCodec{}.Size(&(key8))
+		if customErr11 != nil {
+			return errs.ErrRPCEncodeFailed
+		}
+		if err := sizer.AddCustom(customSize10); err != nil {
+			return err
+		}
+		customSize12, customErr13 := TimeCodec{}.Size(&(value9))
+		if customErr13 != nil {
+			return errs.ErrRPCEncodeFailed
+		}
+		if err := sizer.AddCustom(customSize12); err != nil {
+			return err
+		}
+	}
+	size, err := sizer.Size()
+	if err != nil {
+		return err
+	}
+	target, err := response.Allocate(size)
+	if err != nil {
+		return err
+	}
+	writer := rpc.NewWriter(target)
+	customSize14, customErr15 := TimeCodec{}.Size(&(result1.At))
+	if customErr15 != nil {
+		return errs.ErrRPCEncodeFailed
+	}
+	customPayload16, reserveErr17 := writer.ReserveCustom(customSize14)
+	if reserveErr17 != nil {
+		return reserveErr17
+	}
+	customWritten18, customErr19 := TimeCodec{}.MarshalTo(customPayload16, &(result1.At))
+	if customErr19 != nil || customWritten18 != len(customPayload16) {
+		return errs.ErrRPCEncodeFailed
+	}
+	if err := writer.WritePresence(result1.Optional != nil); err != nil {
+		return err
+	}
+	if result1.Optional != nil {
+		customSize20, customErr21 := TimeCodec{}.Size(&(*result1.Optional))
+		if customErr21 != nil {
+			return errs.ErrRPCEncodeFailed
+		}
+		customPayload22, reserveErr23 := writer.ReserveCustom(customSize20)
+		if reserveErr23 != nil {
+			return reserveErr23
+		}
+		customWritten24, customErr25 := TimeCodec{}.MarshalTo(customPayload22, &(*result1.Optional))
+		if customErr25 != nil || customWritten24 != len(customPayload22) {
+			return errs.ErrRPCEncodeFailed
+		}
+	}
+	if err := writer.WriteContainer(len(result1.History), result1.History == nil); err != nil {
+		return err
+	}
+	for index26 := range result1.History {
+		customSize27, customErr28 := TimeCodec{}.Size(&(result1.History[index26]))
+		if customErr28 != nil {
+			return errs.ErrRPCEncodeFailed
+		}
+		customPayload29, reserveErr30 := writer.ReserveCustom(customSize27)
+		if reserveErr30 != nil {
+			return reserveErr30
+		}
+		customWritten31, customErr32 := TimeCodec{}.MarshalTo(customPayload29, &(result1.History[index26]))
+		if customErr32 != nil || customWritten31 != len(customPayload29) {
+			return errs.ErrRPCEncodeFailed
+		}
+	}
+	if err := writer.WriteContainer(len(result1.ByTime), result1.ByTime == nil); err != nil {
+		return err
+	}
+	for key33, value34 := range result1.ByTime {
+		customSize35, customErr36 := TimeCodec{}.Size(&(key33))
+		if customErr36 != nil {
+			return errs.ErrRPCEncodeFailed
+		}
+		customPayload37, reserveErr38 := writer.ReserveCustom(customSize35)
+		if reserveErr38 != nil {
+			return reserveErr38
+		}
+		customWritten39, customErr40 := TimeCodec{}.MarshalTo(customPayload37, &(key33))
+		if customErr40 != nil || customWritten39 != len(customPayload37) {
+			return errs.ErrRPCEncodeFailed
+		}
+		customSize41, customErr42 := TimeCodec{}.Size(&(value34))
+		if customErr42 != nil {
+			return errs.ErrRPCEncodeFailed
+		}
+		customPayload43, reserveErr44 := writer.ReserveCustom(customSize41)
+		if reserveErr44 != nil {
+			return reserveErr44
+		}
+		customWritten45, customErr46 := TimeCodec{}.MarshalTo(customPayload43, &(value34))
+		if customErr46 != nil || customWritten45 != len(customPayload43) {
+			return errs.ErrRPCEncodeFailed
+		}
+	}
+	return writer.Done()
+}
+
+// decodePlayerRPCRoundTripTimeResponse 按固定契约顺序解码并校验完整载荷。
+func decodePlayerRPCRoundTripTimeResponse(data []byte) (result1 TimeEnvelope, decodeErr error) {
+	reader := rpc.NewResponseReader(data)
+	var customPayload1 []byte
+	customPayload1, decodeErr = reader.ReadCustomPayload()
+	if decodeErr != nil {
+		return
+	}
+	customErr2 := TimeCodec{}.Unmarshal(customPayload1, &(result1.At))
+	if customErr2 != nil {
+		decodeErr = reader.Reject()
+		return
+	}
+	var present3 bool
+	present3, decodeErr = reader.ReadPresence()
+	if decodeErr != nil {
+		return
+	}
+	if present3 {
+		result1.Optional = (*time.Time)(new(time.Time))
+		var customPayload4 []byte
+		customPayload4, decodeErr = reader.ReadCustomPayload()
+		if decodeErr != nil {
+			return
+		}
+		customErr5 := TimeCodec{}.Unmarshal(customPayload4, &(*result1.Optional))
+		if customErr5 != nil {
+			decodeErr = reader.Reject()
+			return
+		}
+	}
+	var length6 int
+	var isNil7 bool
+	length6, isNil7, decodeErr = reader.ReadContainer()
+	if decodeErr != nil {
+		return
+	}
+	decodeErr = reader.CheckElements(length6, 4)
+	if decodeErr != nil {
+		return
+	}
+	if !isNil7 {
+		result1.History = make([]time.Time, length6)
+		for index8 := 0; index8 < length6; index8++ {
+			var customPayload9 []byte
+			customPayload9, decodeErr = reader.ReadCustomPayload()
+			if decodeErr != nil {
+				return
+			}
+			customErr10 := TimeCodec{}.Unmarshal(customPayload9, &(result1.History[index8]))
+			if customErr10 != nil {
+				decodeErr = reader.Reject()
+				return
+			}
+		}
+	}
+	var length11 int
+	var isNil12 bool
+	length11, isNil12, decodeErr = reader.ReadContainer()
+	if decodeErr != nil {
+		return
+	}
+	decodeErr = reader.CheckElements(length11, 8)
+	if decodeErr != nil {
+		return
+	}
+	if !isNil12 {
+		result1.ByTime = make(map[time.Time]time.Time, length11)
+		for index13 := 0; index13 < length11; index13++ {
+			var key14 time.Time
+			var value15 time.Time
+			var customPayload16 []byte
+			customPayload16, decodeErr = reader.ReadCustomPayload()
+			if decodeErr != nil {
+				return
+			}
+			customErr17 := TimeCodec{}.Unmarshal(customPayload16, &(key14))
+			if customErr17 != nil {
+				decodeErr = reader.Reject()
+				return
+			}
+			var customPayload18 []byte
+			customPayload18, decodeErr = reader.ReadCustomPayload()
+			if decodeErr != nil {
+				return
+			}
+			customErr19 := TimeCodec{}.Unmarshal(customPayload18, &(value15))
+			if customErr19 != nil {
+				decodeErr = reader.Reject()
+				return
+			}
+			result1.ByTime[key14] = value15
+		}
+	}
+	decodeErr = reader.Done()
+	return
+}
+
+// AwaitRoundTripTime 以顺序编程外观等待 RPC 结果。
+func (client PlayerRPCClient) AwaitRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) (result1 TimeEnvelope, err error) {
+	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, arg1, arg2)
+	if err != nil {
+		return
+	}
+	err = client.client.Await(ctx, playerRPCRoundTripTimeMethodID, request, func(data []byte) error {
+		result1, err = decodePlayerRPCRoundTripTimeResponse(data)
+		return err
+	})
+	return
+}
+
+// AsyncRoundTripTime 提交请求，并在 owner 的后续串行任务中执行一次回调。
+func (client PlayerRPCClient) AsyncRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int, callback func(context.Context, TimeEnvelope, error)) error {
+	if callback == nil {
+		return errs.ErrInvalidArgument
+	}
+	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, arg1, arg2)
+	if err != nil {
+		return err
+	}
+	return client.client.Async(ctx, playerRPCRoundTripTimeMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
+		if callErr != nil {
+			callback(callbackCtx, *new(TimeEnvelope), callErr)
+			return
+		}
+		result1, decodeErr := decodePlayerRPCRoundTripTimeResponse(data)
+		callback(callbackCtx, result1, decodeErr)
+	})
+}
+
+// NotifyRoundTripTime 提交通知并主动放弃业务结果。
+func (client PlayerRPCClient) NotifyRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) error {
+	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, arg1, arg2)
+	if err != nil {
+		return err
+	}
+	return client.client.Notify(ctx, playerRPCRoundTripTimeMethodID, request)
+}
+
+// BroadcastRoundTripTime 提交通知并主动放弃业务结果。
+func (client PlayerRPCClient) BroadcastRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) error {
+	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, arg1, arg2)
+	if err != nil {
+		return err
+	}
+	return client.client.Broadcast(ctx, playerRPCRoundTripTimeMethodID, request)
+}
+
 // encodePlayerRPCSavePlayerRequest 计算并一次写入当前方法请求载荷。
 func encodePlayerRPCSavePlayerRequest(client rpc.Client, arg1 PlayerData) (*rpc.Buffer, error) {
 	sizer := rpc.NewSizer()
@@ -822,8 +1705,8 @@ func encodePlayerRPCSavePlayerRequest(client rpc.Client, arg1 PlayerData) (*rpc.
 		buffer.Release()
 		return nil, err
 	}
-	for index1 := range arg1.Tags {
-		if err := writer.WriteString(string(arg1.Tags[index1])); err != nil {
+	for index4 := range arg1.Tags {
+		if err := writer.WriteString(string(arg1.Tags[index4])); err != nil {
 			buffer.Release()
 			return nil, err
 		}
@@ -832,17 +1715,17 @@ func encodePlayerRPCSavePlayerRequest(client rpc.Client, arg1 PlayerData) (*rpc.
 		buffer.Release()
 		return nil, err
 	}
-	for key2, value3 := range arg1.Metadata {
-		if err := writer.WriteString(string(key2)); err != nil {
+	for key5, value6 := range arg1.Metadata {
+		if err := writer.WriteString(string(key5)); err != nil {
 			buffer.Release()
 			return nil, err
 		}
-		if err := writer.WritePresence(value3 != nil); err != nil {
+		if err := writer.WritePresence(value6 != nil); err != nil {
 			buffer.Release()
 			return nil, err
 		}
-		if value3 != nil {
-			if err := writer.WriteString(string((*value3).Value)); err != nil {
+		if value6 != nil {
+			if err := writer.WriteString(string((*value6).Value)); err != nil {
 				buffer.Release()
 				return nil, err
 			}
@@ -1100,6 +1983,63 @@ func (dispatcher *playerRPCDispatcher) Dispatch(ctx context.Context, methodID rp
 			return response, errs.ErrInvalidArgument
 		}
 		return response, errs.ErrInvalidArgument
+	case playerRPCRoundTripBlobMethodID:
+		arg1, err := decodePlayerRPCRoundTripBlobRequest(request)
+		if err != nil {
+			return response, err
+		}
+		if kind == rpc.CallNotify {
+			dispatcher.impl.RoundTripBlob(ctx, arg1)
+			return response, nil
+		}
+		if kind != rpc.CallRequest {
+			return response, errs.ErrInvalidArgument
+		}
+		result1 := dispatcher.impl.RoundTripBlob(ctx, arg1)
+		if err := encodePlayerRPCRoundTripBlobResponse(&response, result1); err != nil {
+			return response, err
+		}
+		return response, nil
+	case playerRPCRoundTripPackedIDMethodID:
+		arg1, err := decodePlayerRPCRoundTripPackedIDRequest(request)
+		if err != nil {
+			return response, err
+		}
+		if kind == rpc.CallNotify {
+			dispatcher.impl.RoundTripPackedID(ctx, arg1)
+			return response, nil
+		}
+		if kind != rpc.CallRequest {
+			return response, errs.ErrInvalidArgument
+		}
+		result1 := dispatcher.impl.RoundTripPackedID(ctx, arg1)
+		if err := encodePlayerRPCRoundTripPackedIDResponse(&response, result1); err != nil {
+			return response, err
+		}
+		return response, nil
+	case playerRPCRoundTripTimeMethodID:
+		arg1, arg2, err := decodePlayerRPCRoundTripTimeRequest(request)
+		if err != nil {
+			return response, err
+		}
+		if kind == rpc.CallNotify {
+			_, callErr := dispatcher.impl.RoundTripTime(ctx, arg1, arg2)
+			if callErr != nil {
+				return response, callErr
+			}
+			return response, nil
+		}
+		if kind != rpc.CallRequest {
+			return response, errs.ErrInvalidArgument
+		}
+		result1, callErr := dispatcher.impl.RoundTripTime(ctx, arg1, arg2)
+		if callErr != nil {
+			return response, callErr
+		}
+		if err := encodePlayerRPCRoundTripTimeResponse(&response, result1); err != nil {
+			return response, err
+		}
+		return response, nil
 	case playerRPCSavePlayerMethodID:
 		arg1, err := decodePlayerRPCSavePlayerRequest(request)
 		if err != nil {

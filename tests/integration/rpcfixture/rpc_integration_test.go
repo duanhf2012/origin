@@ -256,6 +256,309 @@ func TestGeneratedAwaitRoundTripAndOwnership(t *testing.T) {
 	}
 }
 
+// TestGeneratedCustomCodecAllCallStyles 验证自定义 time.Time 和具名整数 Codec 经过真实
+// Await、Async、Notify、Broadcast 路径，并覆盖结构体、指针、Slice、Map Key/Value。
+func TestGeneratedCustomCodecAllCallStyles(t *testing.T) {
+	fixture := newRPCFixture(t)
+	at := time.Date(2026, 7, 28, 10, 11, 12, 345, time.UTC)
+	optional := at.Add(time.Minute)
+	history := []time.Time{at.Add(-time.Hour), at.Add(-time.Minute)}
+	mapKey := at.Add(time.Hour)
+	mapValue := at.Add(2 * time.Hour)
+	envelope := TimeEnvelope{
+		At:       at,
+		Optional: &optional,
+		History:  history,
+		ByTime:   map[time.Time]time.Time{mapKey: mapValue},
+	}
+
+	awaitDone := make(chan struct{})
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		defer close(awaitDone)
+		client := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToService("PlayerService"),
+		)
+		result, err := client.AwaitRoundTripTime(ctx, envelope, 0)
+		if err != nil {
+			t.Errorf("AwaitRoundTripTime() error = %v", err)
+			return
+		}
+		if !result.At.Equal(at) || result.Optional == nil ||
+			!result.Optional.Equal(optional) || result.Optional == envelope.Optional {
+			t.Errorf("time value/pointer round trip = %+v", result)
+		}
+		if len(result.History) != len(history) ||
+			!result.History[0].Equal(history[0]) ||
+			&result.History[0] == &history[0] {
+			t.Errorf("time slice round trip = %+v", result.History)
+		}
+		gotMapValue, exists := result.ByTime[mapKey]
+		if !exists || !gotMapValue.Equal(mapValue) {
+			t.Errorf("time map round trip = %+v", result.ByTime)
+		}
+
+		packed, err := client.AwaitRoundTripPackedID(
+			ctx,
+			PackedPlayerID(123456),
+		)
+		if err != nil || packed != PackedPlayerID(123456) {
+			t.Errorf("AwaitRoundTripPackedID() = %d, %v", packed, err)
+		}
+	}); err != nil {
+		t.Fatalf("DispatchAsync(Await custom codec) error = %v", err)
+	}
+	awaitSignal(t, awaitDone)
+
+	asyncDone := make(chan struct{})
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		client := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToService("PlayerService"),
+		)
+		if err := client.AsyncRoundTripTime(
+			ctx,
+			envelope,
+			0,
+			func(_ context.Context, result TimeEnvelope, err error) {
+				defer close(asyncDone)
+				if err != nil || !result.At.Equal(at) {
+					t.Errorf("AsyncRoundTripTime() = %+v, %v", result, err)
+				}
+			},
+		); err != nil {
+			t.Errorf("AsyncRoundTripTime() immediate error = %v", err)
+			close(asyncDone)
+		}
+	}); err != nil {
+		t.Fatalf("DispatchAsync(Async custom codec) error = %v", err)
+	}
+	awaitSignal(t, asyncDone)
+
+	notifyDone := make(chan struct{})
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		defer close(notifyDone)
+		client := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToService("PlayerService"),
+		)
+		if err := client.NotifyRoundTripTime(ctx, envelope, 0); err != nil {
+			t.Errorf("NotifyRoundTripTime() error = %v", err)
+		}
+		if err := client.BroadcastRoundTripPackedID(
+			ctx,
+			PackedPlayerID(654321),
+		); err != nil {
+			t.Errorf("BroadcastRoundTripPackedID() error = %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("DispatchAsync(Notify custom codec) error = %v", err)
+	}
+	awaitSignal(t, notifyDone)
+
+	// 目标 Service FIFO 中追加屏障，确保前面的 Notify/Broadcast 都已经执行。
+	targetDrained := make(chan struct{})
+	if err := fixture.player.DispatchAsync(func(context.Context) {
+		close(targetDrained)
+	}); err != nil {
+		t.Fatalf("PlayerService barrier error = %v", err)
+	}
+	awaitSignal(t, targetDrained)
+	if fixture.player.TimeCalls < 3 ||
+		fixture.player.PackedCalls < 2 ||
+		fixture.player.LastPacked != PackedPlayerID(654321) {
+		t.Fatalf(
+			"custom codec call counts: time=%d packed=%d last=%d",
+			fixture.player.TimeCalls,
+			fixture.player.PackedCalls,
+			fixture.player.LastPacked,
+		)
+	}
+}
+
+// TestGeneratedCustomCodecErrors 验证 Provider 的 Size、Marshal、写入长度、请求解码和
+// 响应解码失败都映射为 M11 已有固定错误，并由调用路径自动归还 Buffer。
+func TestGeneratedCustomCodecErrors(t *testing.T) {
+	fixture := newRPCFixture(t)
+	tests := []struct {
+		name         string
+		requestYear  int
+		responseYear int
+		want         error
+	}{
+		{
+			name:        "request size",
+			requestYear: 2200,
+			want:        errs.ErrRPCEncodeFailed,
+		},
+		{
+			name:        "request marshal",
+			requestYear: 2201,
+			want:        errs.ErrRPCEncodeFailed,
+		},
+		{
+			name:        "request short marshal",
+			requestYear: 2202,
+			want:        errs.ErrRPCEncodeFailed,
+		},
+		{
+			name:        "request unmarshal",
+			requestYear: 2203,
+			want:        errs.ErrRPCRequestDecodeFailed,
+		},
+		{
+			name:         "response size",
+			requestYear:  2026,
+			responseYear: 2200,
+			want:         errs.ErrRPCEncodeFailed,
+		},
+		{
+			name:         "response marshal",
+			requestYear:  2026,
+			responseYear: 2201,
+			want:         errs.ErrRPCEncodeFailed,
+		},
+		{
+			name:         "response short marshal",
+			requestYear:  2026,
+			responseYear: 2202,
+			want:         errs.ErrRPCEncodeFailed,
+		},
+		{
+			name:         "response unmarshal",
+			requestYear:  2026,
+			responseYear: 2203,
+			want:         errs.ErrRPCResponseDecodeFailed,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			done := make(chan struct{})
+			if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+				defer close(done)
+				client := NewPlayerRPCClient(
+					fixture.caller,
+					rpc.ToService("PlayerService"),
+				)
+				_, err := client.AwaitRoundTripTime(
+					ctx,
+					TimeEnvelope{
+						At: time.Date(
+							test.requestYear,
+							1,
+							1,
+							0,
+							0,
+							0,
+							0,
+							time.UTC,
+						),
+					},
+					test.responseYear,
+				)
+				if !errors.Is(err, test.want) {
+					t.Errorf(
+						"AwaitRoundTripTime() error = %v, want %v",
+						err,
+						test.want,
+					)
+				}
+			}); err != nil {
+				t.Fatalf("DispatchAsync() error = %v", err)
+			}
+			awaitSignal(t, done)
+		})
+	}
+
+	overflowDone := make(chan struct{})
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		defer close(overflowDone)
+		client := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToService("PlayerService"),
+		)
+		_, err := client.AwaitRoundTripPackedID(
+			ctx,
+			PackedPlayerID(uint64(^uint32(0))+1),
+		)
+		if !errors.Is(err, errs.ErrRPCEncodeFailed) {
+			t.Errorf("overflow PackedPlayerID error = %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("DispatchAsync(PackedPlayerID overflow) error = %v", err)
+	}
+	awaitSignal(t, overflowDone)
+}
+
+// TestGeneratedCustomCodecBusinessOwnership 验证变长自定义 Codec 自行复制请求和响应数据，
+// 并准确保留 nil 与非 nil 空 Slice，Origin Buffer 释放后业务数据仍然有效。
+func TestGeneratedCustomCodecBusinessOwnership(t *testing.T) {
+	fixture := newRPCFixture(t)
+	source := OwnedBlob{1, 2, 3, 4}
+	var result OwnedBlob
+	done := make(chan struct{})
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		defer close(done)
+		client := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToService("PlayerService"),
+		)
+		var err error
+		result, err = client.AwaitRoundTripBlob(ctx, source)
+		if err != nil {
+			t.Errorf("AwaitRoundTripBlob() error = %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("DispatchAsync(OwnedBlob) error = %v", err)
+	}
+	awaitSignal(t, done)
+
+	// 请求、目标 Service 与响应各自持有独立 Slice，调用完成后可安全地分别修改。
+	if len(result) != len(source) ||
+		len(fixture.player.LastBlob) != len(source) ||
+		&result[0] == &source[0] ||
+		&result[0] == &fixture.player.LastBlob[0] ||
+		&source[0] == &fixture.player.LastBlob[0] {
+		t.Fatalf(
+			"OwnedBlob 未建立请求/响应独立所有权: source=%p target=%p result=%p",
+			&source[0],
+			&fixture.player.LastBlob[0],
+			&result[0],
+		)
+	}
+	source[1] = 8
+	result[0] = 9
+	if fixture.player.LastBlob[0] != 1 || fixture.player.LastBlob[1] != 2 {
+		t.Fatalf("修改调用方或响应污染目标业务值: %+v", fixture.player.LastBlob)
+	}
+
+	// 再分别验证 nil 与非 nil 空 Slice，确保 Provider 能表达两种不同业务语义。
+	emptyDone := make(chan struct{})
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		defer close(emptyDone)
+		client := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToService("PlayerService"),
+		)
+		nilResult, err := client.AwaitRoundTripBlob(ctx, nil)
+		if err != nil || nilResult != nil {
+			t.Errorf("nil OwnedBlob = %#v, %v", nilResult, err)
+			return
+		}
+		emptyResult, err := client.AwaitRoundTripBlob(ctx, OwnedBlob{})
+		if err != nil || emptyResult == nil || len(emptyResult) != 0 {
+			t.Errorf("empty OwnedBlob = %#v, %v", emptyResult, err)
+		}
+	}); err != nil {
+		t.Fatalf("DispatchAsync(empty OwnedBlob) error = %v", err)
+	}
+	awaitSignal(t, emptyDone)
+	if fixture.player.LastBlob == nil || len(fixture.player.LastBlob) != 0 {
+		t.Fatalf("target empty OwnedBlob = %#v", fixture.player.LastBlob)
+	}
+}
+
 func TestGeneratedAsyncNotifyBroadcastAndExactTarget(t *testing.T) {
 	fixture := newRPCFixture(t)
 	callbackDone := make(chan struct{})

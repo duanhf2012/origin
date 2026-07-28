@@ -56,6 +56,12 @@ func (render *renderer) emitSize(
 	topLevel bool,
 	indent string,
 ) {
+	// 自定义 Codec 对精确具名值具有最高优先级；外层指针和容器会在各自递归分支
+	// 先写入 M11 的 presence 或数量，再到达这里选择元素 Codec。
+	if codec := render.codecs.lookup(typ); codec != nil {
+		render.emitCustomSize(expression, codec, indent)
+		return
+	}
 	if topLevel && isProtoType(typ) {
 		render.emitProtoSize(expression, typ, indent)
 		return
@@ -159,6 +165,30 @@ func (render *renderer) emitSize(
 	}
 }
 
+// emitCustomSize 生成具体 Provider 的 Size 直接调用和统一编码错误映射。
+func (render *renderer) emitCustomSize(
+	expression string,
+	codec *customCodec,
+	indent string,
+) {
+	size := render.next("customSize")
+	codecErr := render.next("customErr")
+	fmt.Fprintf(
+		render.body,
+		"%s%s, %s := %s{}.Size(&(%s))\n",
+		indent,
+		size,
+		codecErr,
+		render.imports.typeName(codec.provider),
+		expression,
+	)
+	render.emitCustomEncodeFailure(indent, codecErr+" != nil", false)
+	render.emitCodecError(
+		indent,
+		fmt.Sprintf("sizer.AddCustom(%s)", size),
+	)
+}
+
 func (render *renderer) emitProtoSize(
 	expression string,
 	typ types.Type,
@@ -190,6 +220,10 @@ func (render *renderer) emitWrite(
 	topLevel bool,
 	indent string,
 ) {
+	if codec := render.codecs.lookup(typ); codec != nil {
+		render.emitCustomWrite(expression, codec, indent)
+		return
+	}
 	if topLevel && isProtoType(typ) {
 		if _, pointer := typ.(*types.Pointer); pointer {
 			fmt.Fprintf(render.body, "%sif %s == nil {\n", indent, expression)
@@ -293,6 +327,112 @@ func (render *renderer) emitWrite(
 	}
 }
 
+// emitCustomWrite 再次取得当前值准确长度，并让 Provider 直接覆盖最终 Buffer 区域。
+func (render *renderer) emitCustomWrite(
+	expression string,
+	codec *customCodec,
+	indent string,
+) {
+	provider := render.imports.typeName(codec.provider) + "{}"
+	size := render.next("customSize")
+	codecErr := render.next("customErr")
+	fmt.Fprintf(
+		render.body,
+		"%s%s, %s := %s.Size(&(%s))\n",
+		indent,
+		size,
+		codecErr,
+		provider,
+		expression,
+	)
+	render.emitCustomEncodeFailure(indent, codecErr+" != nil", true)
+
+	payload := render.next("customPayload")
+	reserveErr := render.next("reserveErr")
+	fmt.Fprintf(
+		render.body,
+		"%s%s, %s := writer.ReserveCustom(%s)\n",
+		indent,
+		payload,
+		reserveErr,
+		size,
+	)
+	render.emitCustomWriteError(indent, reserveErr)
+
+	written := render.next("customWritten")
+	marshalErr := render.next("customErr")
+	fmt.Fprintf(
+		render.body,
+		"%s%s, %s := %s.MarshalTo(%s, &(%s))\n",
+		indent,
+		written,
+		marshalErr,
+		provider,
+		payload,
+		expression,
+	)
+	render.emitCustomEncodeFailure(
+		indent,
+		fmt.Sprintf(
+			"%s != nil || %s != len(%s)",
+			marshalErr,
+			written,
+			payload,
+		),
+		true,
+	)
+}
+
+// emitCustomEncodeFailure 生成固定 CodeRPCEncodeFailed，并按请求所有权决定是否释放 Buffer。
+func (render *renderer) emitCustomEncodeFailure(
+	indent string,
+	condition string,
+	bufferAllocated bool,
+) {
+	fmt.Fprintf(render.body, "%sif %s {\n", indent, condition)
+	if render.response {
+		fmt.Fprintf(
+			render.body,
+			"%s\treturn %s.ErrRPCEncodeFailed\n",
+			indent,
+			render.errsAlias,
+		)
+	} else if bufferAllocated {
+		fmt.Fprintf(
+			render.body,
+			"%s\tbuffer.Release()\n%s\treturn nil, %s.ErrRPCEncodeFailed\n",
+			indent,
+			indent,
+			render.errsAlias,
+		)
+	} else {
+		fmt.Fprintf(
+			render.body,
+			"%s\treturn nil, %s.ErrRPCEncodeFailed\n",
+			indent,
+			render.errsAlias,
+		)
+	}
+	fmt.Fprintf(render.body, "%s}\n", indent)
+}
+
+// emitCustomWriteError 处理已经取得请求 Buffer 后的 Writer 长度失败。
+func (render *renderer) emitCustomWriteError(indent, errName string) {
+	fmt.Fprintf(render.body, "%sif %s != nil {\n", indent, errName)
+	if render.response {
+		fmt.Fprintf(render.body, "%s\treturn %s\n", indent, errName)
+	} else {
+		fmt.Fprintf(
+			render.body,
+			"%s\tbuffer.Release()\n%s\treturn nil, %s\n",
+			indent,
+			indent,
+			errName,
+		)
+	}
+	fmt.Fprintf(render.body, "%s}\n", indent)
+}
+
 // emitRead 把 Reader 结果写入已经声明的目标表达式。
 func (render *renderer) emitRead(
 	target string,
@@ -305,6 +445,10 @@ func (render *renderer) emitRead(
 	readerKind := "false"
 	if response {
 		readerKind = "true"
+	}
+	if codec := render.codecs.lookup(typ); codec != nil {
+		render.emitCustomRead(target, codec, indent)
+		return
 	}
 	if topLevel && isProtoType(typ) {
 		payload := render.next("payload")
@@ -531,6 +675,42 @@ func (render *renderer) emitRead(
 	}
 }
 
+// emitCustomRead 读取准确边界，并把 Provider error 映射成 Reader 固定的请求或响应错误。
+func (render *renderer) emitCustomRead(
+	target string,
+	codec *customCodec,
+	indent string,
+) {
+	payload := render.next("customPayload")
+	fmt.Fprintf(
+		render.body,
+		"%svar %s []byte\n%s%s, decodeErr = reader.ReadCustomPayload()\n",
+		indent,
+		payload,
+		indent,
+		payload,
+	)
+	fmt.Fprintf(render.body, "%sif decodeErr != nil { return }\n", indent)
+	codecErr := render.next("customErr")
+	fmt.Fprintf(
+		render.body,
+		"%s%s := %s{}.Unmarshal(%s, &(%s))\n",
+		indent,
+		codecErr,
+		render.imports.typeName(codec.provider),
+		payload,
+		target,
+	)
+	fmt.Fprintf(render.body, "%sif %s != nil {\n", indent, codecErr)
+	fmt.Fprintf(
+		render.body,
+		"%s\tdecodeErr = reader.Reject()\n%s\treturn\n%s}\n",
+		indent,
+		indent,
+		indent,
+	)
+}
+
 // emitContainerHeader 生成容器数量、nil 语义和分配前最小载荷检查。
 func (render *renderer) emitContainerHeader(
 	target string,
@@ -558,7 +738,7 @@ func (render *renderer) emitContainerHeader(
 		"%sdecodeErr = reader.CheckElements(%s, %d)\n",
 		indent,
 		length,
-		containerMinimumSize(typ),
+		containerMinimumSize(typ, render.codecs),
 	)
 	fmt.Fprintf(render.body, "%sif decodeErr != nil { return }\n", indent)
 	_ = target
@@ -567,13 +747,16 @@ func (render *renderer) emitContainerHeader(
 }
 
 // containerMinimumSize 返回 Slice 元素或 Map 键值对不可能低于的线格式大小。
-func containerMinimumSize(typ types.Type) int {
+func containerMinimumSize(
+	typ types.Type,
+	codecs *codecRegistry,
+) int {
 	switch value := typ.Underlying().(type) {
 	case *types.Slice:
-		return minEncodedSize(value.Elem(), false)
+		return minEncodedSizeWithCodecs(value.Elem(), false, codecs)
 	case *types.Map:
-		return minEncodedSize(value.Key(), false) +
-			minEncodedSize(value.Elem(), false)
+		return minEncodedSizeWithCodecs(value.Key(), false, codecs) +
+			minEncodedSizeWithCodecs(value.Elem(), false, codecs)
 	default:
 		panic("rpcgen: container element requested for non-container")
 	}

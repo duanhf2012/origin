@@ -55,7 +55,12 @@ func Run(options Options) error {
 	}
 
 	scanned := rootAndModulePackages(loaded)
-	contracts, err := collectContracts(scanned)
+	// 自定义 Codec 必须先于契约收集完成冻结，使后续全类型图验证和指纹使用同一目录。
+	codecs, err := collectCustomCodecs(scanned)
+	if err != nil {
+		return err
+	}
+	contracts, err := collectContracts(scanned, codecs)
 	if err != nil {
 		return err
 	}

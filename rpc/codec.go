@@ -79,6 +79,20 @@ func (sizer *Sizer) AddContainer(length int, isNil bool) error {
 	return sizer.Add(4)
 }
 
+// AddCustom 增加自定义 Codec 的四字节长度边界和准确 payload 长度。
+//
+// 自定义值自身不使用 nil 标记；外层指针的 nil 语义由生成代码使用 WritePresence 独立
+// 表示。该入口在任何状态改变前拒绝负数和保留值，再复用 Add 完成整条消息上限检查。
+func (sizer *Sizer) AddCustom(size int) error {
+	if size < 0 || uint64(size) >= uint64(nilLength) {
+		return sizer.fail()
+	}
+	if err := sizer.Add(4); err != nil {
+		return err
+	}
+	return sizer.Add(size)
+}
+
 // AddProto 增加非 nil 顶层 Protobuf 消息的 presence/长度和标准 Protobuf 内容。
 //
 // nil 判断由生成代码按声明类型静态完成，避免这里使用反射识别有类型 nil。
@@ -271,6 +285,20 @@ func (writer *Writer) WriteContainer(length int, isNil bool) error {
 		return writer.WriteUint32(nilLength)
 	}
 	return writer.WriteUint32(uint32(length))
+}
+
+// ReserveCustom 写入自定义 payload 长度，并返回其准确大小的最终可写区域。
+//
+// 返回 Slice 只在当前 Writer 生命周期内有效。生成代码必须立即调用具体 Provider 的
+// MarshalTo，并验证其返回长度；Provider 不能保存该 Slice。
+func (writer *Writer) ReserveCustom(size int) ([]byte, error) {
+	if size < 0 || uint64(size) >= uint64(nilLength) {
+		return nil, writer.fail()
+	}
+	if err := writer.WriteUint32(uint32(size)); err != nil {
+		return nil, err
+	}
+	return writer.reserve(size)
 }
 
 // WriteProto 直接把非 nil 顶层 Protobuf 消息追加到最终 Buffer。
@@ -524,6 +552,18 @@ func (reader *Reader) ReadContainer() (length int, isNil bool, err error) {
 	return int(encoded), false, nil
 }
 
+// ReadCustomPayload 读取一个非 nil 自定义值的长度边界和只读 payload。
+//
+// 长度在返回前已经按剩余数据和单消息上限校验。返回 Slice 只借给当前生成的 Unmarshal
+// 调用，业务结果不得继续引用它。
+func (reader *Reader) ReadCustomPayload() ([]byte, error) {
+	length, isNil, err := reader.readLength(false)
+	if err != nil || isNil {
+		return nil, reader.fail()
+	}
+	return reader.take(length)
+}
+
 // CheckElements 在分配容器前按元素最小编码大小检查剩余载荷。
 func (reader *Reader) CheckElements(count, minimumSize int) error {
 	if reader == nil || count < 0 || count > MaxContainerElements || minimumSize < 0 {
@@ -568,6 +608,14 @@ func (reader *Reader) Done() error {
 		return reader.fail()
 	}
 	return nil
+}
+
+// Reject 把自定义 Codec 报告的任意解码失败映射成 Reader 已冻结的请求或响应错误。
+//
+// 该方法供 origingen 生成代码使用，不保留 Provider 的动态 error，确保本地和后续远端
+// RPC 使用相同稳定错误码。
+func (reader *Reader) Reject() error {
+	return reader.fail()
 }
 
 // readLength 读取四字节长度，并根据 nullable 决定是否允许 nil 标记。

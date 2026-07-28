@@ -96,6 +96,107 @@ func BenchmarkBytePayloadCodec(b *testing.B) {
 	}
 }
 
+// benchmarkBlobCodec 模拟遵守 M12 所有权规则的变长自定义 Codec。
+//
+// MarshalTo 直接写最终 Buffer；Unmarshal 必须复制为业务独立 Slice，因此 Benchmark
+// 会真实记录大 payload 的必要业务分配。
+type benchmarkBlob []byte
+
+type benchmarkBlobCodec struct{}
+
+func (benchmarkBlobCodec) Size(value *benchmarkBlob) (int, error) {
+	return len(*value), nil
+}
+
+func (benchmarkBlobCodec) MarshalTo(
+	dst []byte,
+	value *benchmarkBlob,
+) (int, error) {
+	return copy(dst, *value), nil
+}
+
+func (benchmarkBlobCodec) Unmarshal(
+	src []byte,
+	value *benchmarkBlob,
+) error {
+	*value = append((*value)[:0], src...)
+	return nil
+}
+
+// 编译期断言锁定 Benchmark 与公开 StaticCodec 形状一致。
+var _ StaticCodec[benchmarkBlob] = benchmarkBlobCodec{}
+
+// BenchmarkCustomPayloadCodec 保存 16B、1KB 和接近 4M 自定义 payload 的完整边界基线。
+func BenchmarkCustomPayloadCodec(b *testing.B) {
+	for _, payloadSize := range []int{
+		16,
+		1024,
+		DefaultMaxMessageSize - 4,
+	} {
+		b.Run(fmt.Sprintf("%dB", payloadSize), func(b *testing.B) {
+			source := make(benchmarkBlob, payloadSize)
+			pool := bufferpool.NewPool(bufferpool.Options{})
+			codec := benchmarkBlobCodec{}
+			b.ReportAllocs()
+			b.SetBytes(int64(payloadSize))
+			b.ResetTimer()
+			for b.Loop() {
+				// Size 和 MarshalTo 都是具体静态调用，payload 只写入一个最终 Buffer。
+				customSize, err := codec.Size(&source)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sizer := NewSizer()
+				if err := sizer.AddCustom(customSize); err != nil {
+					b.Fatal(err)
+				}
+				total, err := sizer.Size()
+				if err != nil {
+					b.Fatal(err)
+				}
+				buffer := pool.Acquire(total)
+				writer := NewWriter(buffer.Bytes())
+				target, err := writer.ReserveCustom(customSize)
+				if err != nil {
+					buffer.Release()
+					b.Fatal(err)
+				}
+				written, err := codec.MarshalTo(target, &source)
+				if err != nil || written != len(target) {
+					buffer.Release()
+					b.Fatalf("MarshalTo() = %d, %v", written, err)
+				}
+				if err := writer.Done(); err != nil {
+					buffer.Release()
+					b.Fatal(err)
+				}
+
+				// Unmarshal 建立业务独立所有权，不把 Buffer 借用扩散到循环之外。
+				reader := NewResponseReader(buffer.Bytes())
+				payload, err := reader.ReadCustomPayload()
+				if err != nil {
+					buffer.Release()
+					b.Fatal(err)
+				}
+				var decoded benchmarkBlob
+				if err := codec.Unmarshal(payload, &decoded); err != nil {
+					buffer.Release()
+					b.Fatal(err)
+				}
+				if err := reader.Done(); err != nil {
+					buffer.Release()
+					b.Fatal(err)
+				}
+				if len(decoded) != payloadSize {
+					buffer.Release()
+					b.Fatalf("decoded size = %d", len(decoded))
+				}
+				buffer.Release()
+			}
+		})
+	}
+}
+
 func BenchmarkAwaitLocalCallBaselineAllocation(b *testing.B) {
 	// Await localCall 的完成 Channel 会关闭，不能安全复用。该基线用于判断仅池化
 	// 外层对象能否抵消代次、晚到响应和 ABA 状态机的维护成本。
