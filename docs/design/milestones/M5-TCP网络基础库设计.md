@@ -197,8 +197,9 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions
 Node 配置改变；后续 TcpModule 可以按已有客户端线协议选择一、二、四字节和大小端。
 
 M5 将发送帧数和待发送字节数都作为上层可设置的 Go Options，不把某个业务场景写死在
-TCP 库中。M13 内部 RPC 的首版默认值覆盖为 `16384` 帧和 `8M`，以承受可信 Node 连接上
-大量小 RPC 的瞬时突发；后续 TcpModule 按外部客户端数量、消息大小和慢客户端策略单独
+TCP 库中。M13 内部 RPC 的首版使用 `16384` 帧，并在 Adapter 内把字节上限派生为
+`max(8M, max_message_size + 512B)`，以承受可信 Node 连接上大量小 RPC 的瞬时突发，同时
+不增加第二个 RPC 配置；后续 TcpModule 按外部客户端数量、消息大小和慢客户端策略单独
 配置。`SendQueueFrames` 和 `SendQueueBytes` 都必须大于零，任意一个达到上限都拒绝新帧。
 队列上限表示准入边界，不代表建立连接时预先申请对应 payload 内存。
 
@@ -317,7 +318,8 @@ M5 支持这些选项是为了复用同一 TCP 核心并保持 v2 TcpModule 已�
 Origin RPC 也允许自由配置。M13 固定四字节 Big Endian，配置不一致必须在 Node 启动前
 拒绝；TcpModule 的字段值由它自己的配置显式给出。
 
-M5 帧内没有版本、压缩标志、RequestID 或错误码。它们属于 M13 RPC payload 的线协议。
+M5 帧内没有 RPC 协议代次、RequestID 或错误码。M13 RPC payload 也不为尚未实现的压缩
+保留字段；未来若增加压缩，必须由新的 RPC 协议 Magic 明确区分。
 
 ## 8. Buffer 所有权
 
@@ -330,7 +332,7 @@ ReadLoop
   → Pool.Acquire(payloadLength)
   → payloadLength > 0 时直接 io.ReadFull 到最终 Buffer
   → 将 Buffer 所有权转移给 Handler
-      ├── RPC Adapter：同步解码后 Release
+      ├── RPC Adapter：同步解析固定头后转移给 Service Task 或 pendingCall
       └── TcpModule Adapter：转移给 Service 事件，事件结束后 Release
 ```
 
@@ -339,7 +341,8 @@ ReadLoop
 - ReadLoop 在完整读取前拥有 Buffer，完整读取后把唯一所有权交给 Handler；
 - `io.ReadFull` 失败时尚未转移，ReadLoop 必须释放；
 - Handler 一进入就安装本地所有权清理保护，只有成功转移后才能解除；
-- M13 在 Handler 中完成 RPC 帧头解析及 Protobuf 解码，随后释放；
+- M13 在 Handler 中只完成 RPC 固定头和准入校验；业务解码由目标 Service Task 执行，
+  Response payload 由调用完成状态转移回原 Service 后解码；
 - TcpModule 投递异步事件成功后，由事件对象持有；队列拒绝、Service 停止和回调异常都
   必须释放；
 - 解码结果不能引用已经释放的输入 Buffer；
@@ -463,7 +466,7 @@ Benchmark 决定。
 | 使用场景 | `SendQueueFrames` | `SendQueueBytes` |
 |---|---:|---:|
 | M5 通用 TCP | `4096` | `8M` |
-| M13 内部 RPC | `16384` | `8M` |
+| M13 内部 RPC | `16384`，RPC 配置可调整 | Adapter 派生，不公开 RPC 配置 |
 | 后续 TcpModule | 按业务显式配置 | 按业务显式配置 |
 
 [nats.go Pending Limits](https://pkg.go.dev/github.com/nats-io/nats.go) 默认采用 `65536` 条与
