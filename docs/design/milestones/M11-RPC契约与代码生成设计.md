@@ -1119,18 +1119,16 @@ panic。客户端不持有独立 TCP/NATS 连接。
 
 以下问题已经定位，但尚未最终确认。每次只讨论一个问题，确认后立即回写本文：
 
-1. 调用方显式建立 Deadline 的 Context 使用 Go Runtime Timer，还是由 M8 TimerEngine
-   接管；无论选择哪一种，一次调用只能登记一个逻辑计时器；
-2. M11 基础类型的精确线布局、`int`/`uint` 跨平台规则和具名别名；
-3. `localCall` 的字段、完成同步原语以及是否池化；
-4. M11 新增错误码的名称、编号和 panic 映射；
-5. Go 包加载是否固定使用 `golang.org/x/tools/go/packages` 及具体版本；
-6. Protobuf 依赖版本和高性能 Marshal/Unmarshal API；
-7. 接口标记被删除后，旧 `origin_rpc.gen.go` 的安全清理规则；
-8. 完整契约指纹的精确规范化字节布局；
-9. M11 是否需要公开只读 Descriptor 诊断接口。
+1. M11 基础类型的精确线布局、`int`/`uint` 跨平台规则和具名别名；
+2. `localCall` 的字段、完成同步原语以及是否池化；
+3. M11 新增错误码的名称、编号和 panic 映射；
+4. Go 包加载是否固定使用 `golang.org/x/tools/go/packages` 及具体版本；
+5. Protobuf 依赖版本和高性能 Marshal/Unmarshal API；
+6. 接口标记被删除后，旧 `origin_rpc.gen.go` 的安全清理规则；
+7. 完整契约指纹的精确规范化字节布局；
+8. M11 是否需要公开只读 Descriptor 诊断接口。
 
-### 20.1 显式 Context 定时器调研（待确认）
+### 20.1 Context 定时器调研与已确认结论
 
 截至 2026-07-28 的官方源码和项目实践：
 
@@ -1169,22 +1167,36 @@ M8 已有对照基线：Windows 登记长 Deadline 约 `320.4ns/op`、首次 `1 
 统一管理海量框架默认 Deadline、稳定复用和降低 GC，而 Go Timer 的优势是标准 Context
 兼容和高于 M8 `10ms` Tick 的显式短 Deadline 精度。
 
-当前推荐但尚未确认的方案：
+开发者于 2026-07-28 确认采用以下方案：
 
 1. 调用方传入已经带 Deadline 的 Context 时，Origin 原样使用其 Go Timer，不再登记 M8；
-2. 调用方没有显式 Deadline 时，Origin 按统一默认链计算 Deadline，使用无 Timer 的可取消
-   Context 加一条 M8 Deadline；
+2. 调用方 Context 没有 Deadline 时，Origin 按统一默认链计算 Deadline，使用无 Go Timer
+   的内部可取消 Context 加一条 M8 Deadline；`context.Background()` 和
+   `context.TODO()` 在超时选择层都属于这一类；
 3. Await 与 RPC 只消费同一个有效 Context；Async 对显式 Context 的取消监听可使用
    `context.AfterFunc` 或等价一次性挂接，不再创建第二个 Timer，具体热路径必须 Benchmark；
 4. 不在首版增加 `service.WithTimeout`、`rpc.WithTimeout` 或 CallOptions 等 Origin 专用
    超时外观。若真实项目证明显式短超时是高频 GC 热点，再以相同负载对比专用 M8 Context；
 5. 任一路径都必须在完成、取消和停止时解除监听或取消 M8 Deadline，并保持一次性终态。
 
+“无 Deadline”只决定计时方式，不绕过 API 自身的 Context 合法性校验。`Service.Await` 和
+生成的 `AwaitXxx` 仍要求外层 Context 携带当前 Origin Task 执行权令牌；业务应传入事件、
+RPC 或 Timer 回调收到的 Task Context，不能用裸 `context.Background()` 伪造执行权。
+合法 Task Context 没有显式 Deadline 时同样使用 M8 默认超时。允许普通 Context 的框架
+控制入口或后续独立客户端若收到 `context.Background()`/`context.TODO()`，也按相同默认链
+使用 M8。
+
+M8 管理的派生 Context 必须向下游正确暴露计算出的 `Deadline()`，到期后
+`context.Cause` 和 Origin 最终错误均为 `context.DeadlineExceeded`；不能只关闭一个没有
+Deadline 语义的普通取消 Context。该对象为框架私有的轻量包装，不创建 Go Runtime Timer。
+
 该方案保留标准 Go 使用习惯，同时把数量最大、配置统一的默认超时交给 M8。其实现复杂度
 明显低于全面接管用户 Context，也不会出现同一次调用同时拥有 Go Timer 和 M8 Deadline。
 
-在以上内容完成确认、本文状态改为“已确认”并在复核清单记录“允许实施”之前，不创建 M11
-实施计划，不编写 M11 代码。
+当前 M9 实现仍会把显式 Deadline 同时登记到 M8，且默认超时派生 Context 尚未公开
+`Deadline()`；这是已识别的实现差异。进入 M11 编码前必须修正 M9 并补充回归与 Benchmark，
+使两条路径都只保留一个物理计时器。其余第 20 节 Review 项确认、本文状态改为“已确认”并
+在复核清单记录“允许实施”之前，不创建 M11 实施计划，不编写 M11 代码。
 
 ## 21. 当前结论
 
