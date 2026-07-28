@@ -951,11 +951,20 @@ M11 Notify 的“发送成功”表示目标本地队列已经接受，不表示
 - 编码优先向 Application 已有 BufferPool 取得的 Buffer 追加；
 - 提交成功后，请求 Buffer 所有权转移给目标任务；
 - 提交失败时，调用方立即释放；
-- Dispatcher 返回后不得继续引用输入 Buffer；
-- Await/Async 响应由完成状态持有，消费者复制出结果后释放；
+- Dispatcher 解码业务输入时，所有业务可见的 `[]byte` 都按实际长度复制为独立 Slice；
+- nil `[]byte` 保持 nil，非 nil 空 `[]byte` 保持非 nil 空 Slice；
+- 目标业务可以保存或修改收到的 `[]byte`，不会引用或污染请求 Buffer；
+- Dispatcher 返回后，任何业务参数都不得继续引用输入 Buffer；
+- Await/Async 响应由完成状态持有；生成解码器必须先把业务可见的 `[]byte` 复制为独立
+  Slice，再释放响应 Buffer 和投递返回值或回调；
 - Notify 目标任务处理完成后释放；
 - Protobuf 解码结果不能引用即将释放的输入 Buffer；
 - 不因为本地调用而直接共享可变业务对象指针。
+
+普通 `[]byte` 不使用 BufferPool 承载其业务可见结果，因为业务没有明确、可靠的归还时机。
+这部分内存由正常 Go GC 管理。M11 不公开借用 Slice、Release 方法或 `BorrowedBytes` 类型；
+只有真实性能 Benchmark 证明复制成为显著热点时，后续里程碑才单独设计显式零拷贝类型，
+不能改变普通 `[]byte` 已确认的安全语义。
 
 ## 14. M11 本地调用状态
 
@@ -1150,6 +1159,9 @@ rpc
 - 每种基础标量；
 - 空和非空 string；
 - nil、空和非空 `[]byte` 的既定边界；
+- Service 保存或修改输入 `[]byte` 后，请求 Buffer 释放和复用不会改变该 Slice；
+- Await 返回值和 Async 回调保存或修改 `[]byte` 后，响应 Buffer 释放和复用不会改变该
+  Slice；
 - 顶层 Protobuf 空消息；
 - 顶层 Protobuf unknown fields、optional、oneof 和 Opaque API；
 - 多输入、多输出和混合基础类型/Protobuf；
@@ -1236,7 +1248,7 @@ panic。客户端不持有独立 TCP/NATS 连接。
 | 顺序 | Review 问题 | 当前结论或建议 | 状态 |
 |---|---|---|---|
 | 1 | 基础类型线布局、位置字段、`int`/`uint`、具名类型、nil/空值和顶层 Protobuf presence | 采用第 12.2 节固定顺序格式；参数位置只进入指纹；`int`/`uint` 为 64 位线值；具名定义类型保留身份；`[]byte` 和 Protobuf 明确区分 nil 与空值 | 已确认 |
-| 2 | `[]byte` 输入解码后是借用请求 Buffer 还是复制为业务独立内存 | 按规则由开发者确认：借用延迟和分配更低但业务不能长期持有，复制使用自由且更安全但增加大消息成本 | 待确认 |
+| 2 | `[]byte` 输入解码后是借用请求 Buffer 还是复制为业务独立内存 | 普通 `[]byte` 输入、Await 返回值和 Async 回调值全部复制为业务独立 Slice；nil/空语义保持；不使用 BufferPool 承载业务 Slice；M11 不公开借用类型 | 已确认 |
 | 3 | RPC 契约可见性、泛型和跨包实现桥接 | RPC 接口和方法要求导出、首版禁止泛型契约；契约包生成 `New<Contract>Dispatcher(impl Contract)`，Service 包只生成 `RPCDispatcher()` 薄适配，避免重复 Codec | 待确认 |
 | 4 | Dispatcher 如何区分请求—响应与 Notify | 增加两个值的轻量 `rpc.CallKind`；Notify 调用真实方法但跳过响应编码，避免用 nil Slice 暗示模式 | 待确认 |
 | 5 | Await/Async Deadline 与 M8 接入 | Await 复用 Service M8 Deadline；Async 使用每 Node RPC Runtime 的一条共享 `DeadlineQueue`，不为每次调用建立 Go Timer | 待确认 |
