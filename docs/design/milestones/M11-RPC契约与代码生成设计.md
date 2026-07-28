@@ -51,7 +51,8 @@ M11 必须同时遵守：
 7. RPC 接口首版不支持嵌入其他接口，也不支持跨 Service 聚合；
 8. 运行热路径不使用反射、字符串方法查找或通用 `[]any` 参数；
 9. M11 同 Node 调用也必须经过编码、队列、Dispatcher 和解码；
-10. M11 生成 `AsyncXxx`、`AwaitXxx` 和 `NotifyXxx`，Broadcast 延后；
+10. 完全无返回值的方法在 M11 只生成 `NotifyXxx`；带任意返回值的方法生成
+    `AsyncXxx`、`AwaitXxx` 和 `NotifyXxx`；所有方法的 `BroadcastXxx` 延后；
 11. 所有生成调用最终都具有统一 `error` 语义；
 12. RPC 与通用 Await 共用唯一默认超时配置，不再增加 `rpc.default_timeout`；
 13. 超时优先级固定为：
@@ -197,7 +198,7 @@ func (s *PlayerService) PlayerOnline(
 - RPC 注册函数；
 - ContractID 或 MethodID；
 - Dispatcher；
-- `AsyncGetPlayer`、`AwaitGetPlayer`、`NotifyPlayerOnline`；
+- `AsyncGetPlayer`、`AwaitGetPlayer`、`NotifyGetPlayer`、`NotifyPlayerOnline`；
 - `RPCDispatcher()` 适配方法；
 - `init()` 注册代码。
 
@@ -239,12 +240,12 @@ client := game.NewPlayerRPCClient(
 
 ### 5.4 生成调用方法
 
-请求—响应方法生成：
+带返回值的方法生成 Await、Async 和 Notify 三种调用外观：
 
 ```go
 player, err := client.AwaitGetPlayer(ctx, playerID)
 
-client.AsyncGetPlayer(
+err = client.AsyncGetPlayer(
     ctx,
     playerID,
     func(
@@ -255,9 +256,16 @@ client.AsyncGetPlayer(
         // 回调取得调用方 Service 执行权后才会运行。
     },
 )
+
+err = client.NotifyGetPlayer(ctx, playerID)
 ```
 
-完全没有返回值的方法生成：
+`AsyncGetPlayer` 的直接返回 `error` 只表达编码、目标校验、路由和队列准入等立即提交失败；
+直接返回非 nil 时不创建本地完成状态，也不再投递回调。直接返回 nil 后，回调必须且只能
+执行一次，并通过回调末尾 `error` 表达业务错误、超时、取消和后续框架错误。
+
+`NotifyGetPlayer` 明确表示调用方主动放弃 `GetPlayer` 的业务结果和远端业务错误，只保留
+本地接受阶段的最终 `error`。完全没有返回值的方法只生成 Notify：
 
 ```go
 err := client.NotifyPlayerOnline(ctx, playerID)
@@ -271,6 +279,19 @@ M11 不生成：
 - `BroadcastPlayerOnline`。
 
 目标由 `rpc.Target` 决定，不能把 NodeID、ServiceName 重复加入每个 RPC 方法。
+
+Broadcast 不在 M11 生成，但后续为所有 RPC 方法生成 `BroadcastXxx`。它和 Notify 一样
+主动放弃远端业务结果，只返回本地发现、编码和投递阶段的 `error`。标准广播使用客户端
+Target 的基础范围：
+
+- `ToService("AService")` 表示当前发现快照中全部同名、契约匹配且可路由的
+  `AService`；
+- `ToServiceOnNode("node1", "AService")` 的范围最多只有该 Node 上的一个实例；
+- 单目标 `RouteRoundRobin`、`RouteRandom`、`Route(key)` 和自定义 Selector 不缩小广播
+  范围；
+- 同一契约由其他 ServiceName 实现时不属于本次广播目标；
+- 业务需要按区服、标签或其他业务条件广播子集时，可以读取稳定发现快照后逐个使用精确
+  Target 调用 `NotifyXxx`，但标准全范围广播不要求业务重复实现目标筛选和投递。
 
 ## 6. 单客户端与 Target 设计
 
@@ -358,20 +379,21 @@ M13/M14 接入远端 Transport 后，继续使用同一个 Target 和生成客�
 3. 存在 `error` 时最多一个并且必须位于最后；
 4. 生成客户端始终保留一个最终 `error`；
 5. 服务端未声明 `error` 时，最终错误只能表达框架失败；
-6. 完全没有返回值的方法被识别为 Notify；
-7. 只返回 `error` 的方法仍是请求—响应 RPC。
+6. 完全没有返回值的方法只有通知调用语义；
+7. 只返回 `error` 的方法仍具有请求—响应语义，但客户端也允许显式选择 Notify 并放弃
+   远端错误。
 
 ### 7.3 生成分类
 
 | 服务端签名 | M11 生成 |
 |---|---|
-| 一个或多个业务结果 | `AsyncXxx`、`AwaitXxx`，追加最终 `error` |
-| 业务结果加末尾 `error` | `AsyncXxx`、`AwaitXxx`，复用最终 `error` |
-| 只返回 `error` | `AsyncXxx`、`AwaitXxx` |
+| 一个或多个业务结果 | `AsyncXxx`、`AwaitXxx`、`NotifyXxx`，请求—响应外观追加最终 `error` |
+| 业务结果加末尾 `error` | `AsyncXxx`、`AwaitXxx`、`NotifyXxx`，请求—响应外观复用最终 `error` |
+| 只返回 `error` | `AsyncXxx`、`AwaitXxx`、`NotifyXxx` |
 | 完全无返回值 | `NotifyXxx` |
 
-Broadcast 的契约语义已经保留，但 M11 不生成 Broadcast 方法，避免在没有服务发现目标
-快照时建立不完整实现。
+后续为以上全部分类生成 `BroadcastXxx`，但 M11 不生成 Broadcast 方法，避免在没有服务
+发现目标快照时建立不完整实现。
 
 ## 8. origingen 工具
 
@@ -619,7 +641,7 @@ Service 指针查找 Runtime。生成客户端只在构造时完成一次接口�
 
 ### 11.1 最小接口
 
-M11 固定以下最小 Dispatcher 外观：
+当前 Dispatcher 草案为：
 
 ```go
 type ContractFingerprint [32]byte
@@ -637,6 +659,10 @@ type Dispatcher interface {
 }
 ```
 
+由于已确认“带返回值方法也生成 Notify”，Dispatcher 必须知道本次调用是否需要响应，否则
+Notify 会无意义地编码随后被丢弃的业务结果。第 20 节需要在开工前确认是在 `Dispatch`
+增加轻量 `CallKind`，还是使用同等清晰且无歧义的最小入口；确认前本节签名不视为最终 ABI。
+
 语义固定为：
 
 - `ContractID` 和 `Fingerprint` 只读取生成期常量，不在调用热路径计算；
@@ -645,7 +671,8 @@ type Dispatcher interface {
 - 返回的 Slice 是本次完整响应，可以与 `responseDst` 共享底层数组；
 - Dispatcher 返回后不能继续持有 `ctx`、`request`、`responseDst` 或返回 Slice；
 - Runtime 管理请求和响应 Buffer 的最终释放，Dispatcher 不直接接触 BufferPool；
-- Notify 仍走同一 Dispatch 入口，但 Runtime 不消费业务响应；
+- Notify 仍使用同一静态方法分派；即使原方法带返回值，也不得编码或保留业务响应，目标
+  业务错误和 panic 只进入目标侧诊断；
 - 未知 MethodID、解码失败、业务错误、panic 和编码失败均返回统一错误。
 
 ### 11.2 静态分派
@@ -790,40 +817,43 @@ goroutine 调用 `Await` 等需要当前 Service 执行权的 API。
     > Origin 内置 15s
 ```
 
-当前仅保留一个实现细节待确认：调用方已经显式建立 Deadline 的 Context 是继续使用 Go
-Runtime Timer，还是由 Origin M8 接管。无论最终选择哪种机制，同一次调用都不能同时登记
-Go Timer 和 M8 Deadline。
+调用方 Context 已有显式 Deadline 时沿用其 Go Runtime Timer，不再登记 M8；没有
+Deadline 的合法 Context 使用统一默认值和一条 M8 Deadline。M8 派生 Context 必须公开
+计算后的 `Deadline()`，同一次调用不能同时登记 Go Timer 和 M8 Deadline。
 
 ### 13.3 Await
 
 `AwaitXxx`：
 
-1. 校验 Target 并编码请求；
-2. 把请求投递到目标 Service Ready FIFO；
-3. 使用调用方 Service 已有 `Await` 原语释放执行槽；
-4. 当前任务 goroutine 等待本地调用完成；
-5. 目标 Service 取得执行槽后解码并调用业务方法；
-6. 目标编码结果或错误并完成本地调用；
-7. 原任务进入调用方 Ready FIFO；
-8. 原任务重新取得执行权后解码结果并返回。
+1. 完成不需要等待的静态参数、owner 和 Task Context 校验；
+2. 进入调用方 Service 已有 `Await` 原语，计算唯一有效 Deadline 并释放执行槽；
+3. 原任务 goroutine 在 Await 等待函数内编码请求、读取路由并提交目标 Service Ready FIFO；
+4. 提交失败时保存错误并进入正常 FIFO 恢复，不在未持有执行权时直接返回业务代码；
+5. 提交成功后，原任务 goroutine 等待本地调用完成；
+6. 目标 Service 取得执行槽后解码并调用业务方法；
+7. 目标按调用模式编码结果或记录通知错误，并完成本地调用；
+8. 原任务进入调用方 Ready FIFO；
+9. 原任务重新取得执行权后解码结果并返回。
 
 不为每次 Await 创建辅助 goroutine。同一个 Service Await 调用自身 RPC 时也按上述流程
 释放执行槽，因此目标任务可以正常执行，不形成直接递归或执行权死锁。
 
 `AwaitXxx` 只接收并传递一个有效 Context，内部直接复用 Service Await 原语，不再次套用
-RPC 默认超时，也不公开 `AwaitManaged` 等重复入口。
+RPC 默认超时，也不公开 `AwaitManaged` 等重复入口。Deadline 从进入 Await 原语开始覆盖
+编码、路由、目标队列排队、业务执行、响应和恢复排队全过程。
 
 ### 13.4 Async
 
 `AsyncXxx`：
 
-1. 编码并提交目标任务；
+1. 校验参数、编码并尝试提交目标任务；
 2. 不释放调用方当前执行槽；
-3. 生成方法立即返回；
-4. 目标完成后把强类型回调投递到调用方 Service Ready FIFO；
-5. 即使目标立即失败或立即完成，回调也不能在当前调用栈内执行；
-6. 回调取得调用方 Service 执行权后才能访问 Service 状态；
-7. 每次调用最多发布一次回调。
+3. 编码、目标、路由或队列准入立即失败时直接返回 `error`，不创建完成状态且不投递回调；
+4. 提交成功后生成方法立即返回 nil；
+5. 目标完成后把强类型回调投递到调用方 Service Ready FIFO；
+6. 即使目标立即完成，回调也不能在当前调用栈内执行；
+7. 回调取得调用方 Service 执行权后才能访问 Service 状态；
+8. 返回 nil 的调用必须且只能发布一次回调。
 
 Async pending 使用与 Await 相同的有效 Deadline。调用方需要主动取消时使用
 `context.WithCancel` 派生 Context 并调用 `cancel()`；生成方法不再返回另一种取消句柄。
@@ -835,12 +865,12 @@ M11 只处理 Running 期间的基本回调。Draining、停止期间的新调�
 
 `NotifyXxx`：
 
-1. 编码请求；
+1. 编码请求；原始方法带返回值时调用方显式放弃全部业务结果；
 2. 提交目标 Service Ready FIFO；
 3. 队列接受后立即返回 `nil`；
 4. 不等待目标业务开始或结束；
 5. 不创建响应、Future、RequestID 或 pendingCall；
-6. 目标业务错误或 panic 只在目标侧记录；
+6. 目标业务返回值不编码，业务错误或 panic 只在目标侧记录；
 7. 编码失败、无目标、契约不匹配、Service 非 Running 或队列满直接返回相应错误。
 
 M11 Notify 的“发送成功”表示目标本地队列已经接受，不表示业务成功。Context 只约束
@@ -904,6 +934,17 @@ M11 还需要在 RPC 与编解码编号区间补充最小错误：
 
 固定错误优先复用只读哨兵。具体 NodeID、ServiceName、契约名、方法名和生成字段路径只
 进入结构化日志或生成期诊断，不为高频失败构造通用 Details Map。
+
+所有生成调用都必须保留最终 `error`：
+
+- `AwaitXxx` 的最后一个返回值是业务或框架 `error`；
+- `AsyncXxx` 自身返回立即提交 `error`，强类型回调的最后一个参数返回提交成功后的最终
+  业务或框架 `error`；
+- `NotifyXxx` 和后续 `BroadcastXxx` 直接返回本地接受阶段的框架 `error`，不返回远端
+  业务错误。
+
+nil Context、Async 的 nil callback、零值客户端、无效 owner 和无效 Target 都必须返回
+稳定参数或未就绪错误，不得 panic。Async 在这些校验失败时不创建调用状态且不投递回调。
 
 ## 16. 包依赖与可见性
 
@@ -1003,7 +1044,9 @@ rpc
 12. 相同输入重复生成逐字节一致；
 13. 任一包校验失败时没有部分写入；
 14. 生成文件格式和标准头；
-15. M12 类型得到清晰的阶段性错误。
+15. M12 类型得到清晰的阶段性错误；
+16. 四类返回签名严格生成第 7.3 节规定的方法集合；
+17. M11 的 Async、Await 和 Notify 最终 `error` 位置不会遗漏。
 
 ### 18.2 本地 RPC
 
@@ -1021,14 +1064,15 @@ rpc
 10. Await 释放和恢复调用方执行槽；
 11. Service Await 调用自身 RPC 不死锁；
 12. Async 回调不抢占当前任务且最多一次；
-13. Async 立即失败也异步投递回调；
-14. Notify 只等待队列接受；
+13. Async 立即失败直接返回错误且不投递回调，返回 nil 后回调严格一次；
+14. Notify 覆盖完全无返回值、只返回 error 和带业务返回值的方法，并且只等待队列接受；
 15. 请求—响应业务方法 panic 返回统一错误；
 16. Notify panic 只产生目标侧诊断；
 17. 输入、响应和失败路径 Buffer 全部释放；
 18. 停止后没有 goroutine、Timer 或 Buffer 泄漏；
 19. 同一进程中的多个 Node 使用完全隔离的 RPC Runtime 注册目录；
-20. nil、未绑定或缺少 RPC Runtime 的 owner 不 panic，并返回统一错误。
+20. nil、未绑定或缺少 RPC Runtime 的 owner 不 panic，并返回统一错误；
+21. nil Context、Async nil callback 和零值客户端直接返回错误且不产生调用或回调。
 
 ### 18.3 数据类型
 
@@ -1117,16 +1161,25 @@ panic。客户端不持有独立 TCP/NATS 连接。
 
 ## 20. 后续 M11 Review 项
 
-以下问题已经定位，但尚未最终确认。每次只讨论一个问题，确认后立即回写本文：
+2026-07-28 按开发指导原则完成一次逐节 Review。已确认的调用生成和广播规则已经回写；
+以下问题会直接影响生成 ABI、线格式、所有权或低延迟实现，必须在开工前逐项确认：
 
-1. M11 基础类型的精确线布局、`int`/`uint` 跨平台规则和具名别名；
-2. `localCall` 的字段、完成同步原语以及是否池化；
-3. M11 新增错误码的名称、编号和 panic 映射；
-4. Go 包加载是否固定使用 `golang.org/x/tools/go/packages` 及具体版本；
-5. Protobuf 依赖版本和高性能 Marshal/Unmarshal API；
-6. 接口标记被删除后，旧 `origin_rpc.gen.go` 的安全清理规则；
-7. 完整契约指纹的精确规范化字节布局；
-8. M11 是否需要公开只读 Descriptor 诊断接口。
+| 顺序 | 待确认问题 | 当前建议 |
+|---|---|---|
+| 1 | 基础类型线布局、位置字段、`int`/`uint`、具名类型、nil/空值和顶层 Protobuf presence | 建立一套版本化静态线格式；`int`/`uint` 按 64 位线值编码并在目标架构做范围校验；具名基础类型按底层类型处理；nil 与空值是否保持区分必须在本项明确 |
+| 2 | `[]byte` 输入解码后是借用请求 Buffer 还是复制为业务独立内存 | 按规则由开发者确认：借用延迟和分配更低但业务不能长期持有，复制使用自由且更安全但增加大消息成本 |
+| 3 | RPC 契约可见性、泛型和跨包实现桥接 | RPC 接口和方法要求导出、首版禁止泛型契约；契约包生成 `New<Contract>Dispatcher(impl Contract)`，Service 包只生成 `RPCDispatcher()` 薄适配，避免重复 Codec |
+| 4 | Dispatcher 如何区分请求—响应与 Notify | 增加两个值的轻量 `rpc.CallKind`；Notify 调用真实方法但跳过响应编码，避免用 nil Slice 暗示模式 |
+| 5 | Await/Async Deadline 与 M8 接入 | Await 复用 Service M8 Deadline；Async 使用每 Node RPC Runtime 的一条共享 `DeadlineQueue`，不为每次调用建立 Go Timer |
+| 6 | `localCall` 字段、完成同步和池化 | M11 只保留一个私有一次性完成状态；先实现清晰基线并 Benchmark，M13 用最终池化 `pendingCall` 替换，避免为短期对象维护复杂 ABA 防护 |
+| 7 | RPC 错误码、业务错误编码、panic 和本地/远端一致性 | 在 2000 区间补充契约不匹配、方法不存在、请求解码、响应解码和执行 panic；同 Node 也经过相同错误编码/解码，不直接传 Go error 指针 |
+| 8 | ContractID、MethodID 和完整指纹的规范化字节 | 一次性固定域前缀、UTF-8 名称、分隔符、大端 ID、方法排序、类型描述和生成格式版本，并以 golden test 锁定 |
+| 9 | Go 包加载和 Protobuf 依赖 | 使用固定版本 `golang.org/x/tools/go/packages` 与 `google.golang.org/protobuf`；Protobuf 优先使用官方 Append/Options API，具体版本在实施计划前查验最新固定版 |
+| 10 | 旧生成文件清理和生成 ABI 版本 | 只删除包含完整 origingen 标记且本轮确认不再需要的文件；生成代码加入编译期 ABI 版本校验，手写或标记异常文件绝不删除 |
+| 11 | 是否公开只读 Descriptor | M11 不公开；生成代码和 Runtime 内部保留最小描述，等监控、调试或插件出现真实消费者后再公开 |
+
+此外，当前 M9 实现与已确认的唯一计时器设计仍有差异，必须作为 M11 实施前置修正，不属于
+可以跳过的后续优化。
 
 ### 20.1 Context 定时器调研与已确认结论
 
