@@ -629,7 +629,7 @@ type sender interface {
 | 内容 | 唯一归属 |
 |---|---|
 | RPC 契约与顶层 Protobuf | M11 RPC Runtime |
-| 普通 Go 类型静态编解码 | M12 Codec |
+| 普通 Go 类型静态编解码 | M11 生成静态 Codec |
 | RPC 线协议、RequestID 与 pendingCall | M13 RPC Runtime |
 | RequestID 与 pendingCall | M13/M14 RPC Runtime |
 | 默认 `15s` Deadline | RPC Runtime |

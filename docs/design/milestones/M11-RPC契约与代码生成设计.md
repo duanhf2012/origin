@@ -19,8 +19,9 @@ M11 建立 Origin v3 第一套可实际调用的 RPC 契约、代码生成和同
 6. 同一 Node 中的 RPC 如何经过真实编解码、Service 调度和 Dispatcher 完成闭环；
 7. M11 支持的数据类型、错误、性能和测试边界。
 
-M11 不是完整网络 RPC 里程碑。普通 Go 结构体静态编解码、TCP、NATS、服务发现和完整
-停止分别由 M12～M15 及后续独立里程碑实现。
+M11 不是完整网络 RPC 里程碑。M11 一并完成普通 Go 类型、结构体、容器和嵌套
+Protobuf 的静态编解码；自定义静态 Codec、TCP、NATS、服务发现和完整停止分别由
+M12～M15 及后续独立里程碑实现。
 
 ## 2. 设计依据
 
@@ -37,7 +38,7 @@ M11 必须同时遵守：
 - [内存复用与对象池设计](../details/2026-07-25-内存复用与对象池设计.md)。
 
 详细设计描述完整目标能力；本文负责裁剪 M11 实际实施范围。两者发生范围歧义时，以本文
-和最新路线图规定的当前里程碑边界为准，不把 M12 之后的能力提前带入 M11。
+和最新路线图规定的当前里程碑边界为准。
 
 ## 3. 已确认的核心原则
 
@@ -72,7 +73,13 @@ M11 必须同时遵守：
 24. Dispatcher 使用静态方法分派和静态编解码函数，不建立公共 Codec 接口；
 25. M11 只支持 Running 阶段的本地 RPC；`OnStart`、`OnStop` 的生命周期 Await 基础进入
     M15，`AwaitService`、`AwaitNodeService` 随后在服务发现里程碑接入；
-26. 首版不公开 `AwaitManaged` 或第二套 Await API。
+26. 首版不公开 `AwaitManaged` 或第二套 Await API；
+27. M11 一并支持普通 Go 结构体、指针、数组、Slice、Map 和其中嵌套的 Protobuf
+    生成结构体，不使用反射或 JSON 回退；
+28. Map Key 只使用 M11 已支持的基础类型及其具名类型，不为 Map Key 单独扩展
+    `uintptr`、复数、指针、接口或其他未支持类型；
+29. `origingen` 必须在生成阶段拒绝所有未支持类型，并报告 RPC 契约、方法、参数、容器和
+    字段的完整路径，不能延迟到运行时失败。
 
 ## 4. M11 交付范围
 
@@ -91,15 +98,15 @@ M11 必须同时遵守：
 - 静态 Dispatcher 和 Service 适配方法；
 - Node 内本地 Dispatcher 注册；
 - 同 Node Async、Await 和 Notify；
-- 顶层 Protobuf、基础标量、字符串和 `[]byte` 编解码；
+- 顶层 Protobuf、基础标量、字符串、`[]byte`、指针、数组、Slice、Map、普通结构体和
+  嵌套 Protobuf 的静态编解码；
 - 生成确定性、碰撞、非法声明、调度、错误和性能测试。
 
 ### 4.2 明确延后
 
 | 能力 | 归属 |
 |---|---|
-| 普通指针、数组、Slice、Map、普通结构体和嵌套 Protobuf | M12 |
-| 稳定结构体字段 ID、自定义静态 Codec 和结构体兼容性 | M12 |
+| 自定义静态 Codec 和特殊类型扩展 | M12 |
 | RPC 线协议、RequestID、pendingCall、连接管理和 TCP | M13 |
 | NATS RPC Transport | M14 |
 | 生命周期 Await 基础、完整 Stop 排空、OnStop Await RPC 和异常进程收尾 | M15 |
@@ -550,7 +557,7 @@ Schema 进入契约指纹；不兼容修改由指纹和兼容性检查拒绝。
 - 每个位置的数据类型描述；
 - error 声明方式；
 - M11 Protobuf 消息全名和基础类型布局；
-- 以后由 M12 补充的普通结构体 Schema。
+- M11 同时生成的普通结构体 Schema。
 
 完整指纹不进入每次调用热路径。M13 Node 握手和后续发现元数据可以使用它快速拒绝契约
 不一致的实例。
@@ -791,7 +798,7 @@ func encodeGetPlayerResponse(
 ```
 
 生成客户端和 Dispatcher 直接调用这些函数。这样不需要 `any`、运行时反射、Codec 查找
-或接口动态分派；M12 扩展普通结构体时继续生成静态函数，不改变 Dispatcher 接口。
+或接口动态分派；M11 中普通结构体同样生成静态函数，不改变 Dispatcher 接口。
 
 ## 12. M11 数据类型
 
@@ -804,11 +811,20 @@ func encodeGetPlayerResponse(
 - `float32`、`float64`；
 - `string`；
 - `[]byte` 原始字节快速路径；
+- 指向受支持类型的普通指针，并保留 nil 与非 nil 零值的区别；
+- 元素类型受支持的数组和 Slice；
+- Key 与 Value 均受支持的 Map；
+- 只递归处理导出字段的普通 Go 结构体；
+- 普通结构体或容器中嵌套的 Protobuf 生成结构体；
 - 顶层 Protobuf 生成消息；
 - 以上基础类型的具名定义类型和别名。
 
 顶层 Protobuf 使用标准 Protobuf 编解码，保留 unknown fields、`optional`、`oneof` 和
 Open、Hybrid、Opaque API 语义。
+
+Map Key 与 M11 已支持的基础类型对齐，只支持 `bool`、有符号整数、无符号整数、
+`float32`、`float64`、`string` 及其具名定义类型和别名。Protobuf Enum 属于具名整数，
+因此可以作为 Map Key。Map Key 不单独扩展 M11 尚未支持的类型。
 
 ### 12.2 M11 固定顺序线格式
 
@@ -879,19 +895,28 @@ Protobuf 请求或响应。Protobuf 官方线格式通过 Tag/WireType 支持跳
 Benchmark，记录耗时、分配和载荷大小。若结果表明性能与可维护性发生明显冲突，必须按
 开发指导原则重新确认，不能由实现者静默更换线格式。
 
-### 12.3 M12 范围的阶段性失败
+### 12.3 不支持类型与生成期失败
 
-以下合法目标能力在 M11 暂不生成：
+M11 首版不支持：
 
-- `*int` 等普通指针；
-- 普通 Slice 和数组；
-- Map；
-- 普通 Go 结构体；
-- 容器和结构体中嵌套的 Protobuf 类型；
+- `uintptr`；
+- `complex64`、`complex128`；
+- `unsafe.Pointer`；
+- `interface{}`、`any` 以及其他接口类型；
+- 函数和 Channel；
+- 包含上述类型的指针、数组、Slice、Map 或普通结构体路径；
+- 循环对象图；
+- 嵌套在普通结构体或容器路径中的 Protobuf `oneof` 和 Opaque API；
 - 自定义静态 Codec。
 
-生成错误必须明确说明“该类型属于 M12，当前 M11 尚未实现”，并列出接口、方法、参数或
-返回位置。不得误报为永久禁止，也不得使用反射或 JSON 临时回退。
+Map Key 同样只能使用第 12.1 节已经支持的基础类型及其具名类型。即使某种类型满足 Go
+语言的 `comparable` 约束，只要它不在 M11 基础类型支持集合中，仍不得作为 Map Key。
+因此 Map Key 不支持 `uintptr`、复数、指针、接口、Channel、数组或结构体。
+
+`origingen` 扫描到不支持类型时必须在生成阶段终止，并列出 RPC 契约、方法、参数或返回
+位置、容器以及具体字段组成的完整路径，同时说明不支持原因和可执行的修改建议。禁止生成
+到一半才失败，禁止延迟到运行时失败，也禁止使用反射、JSON、空结构体或静默忽略作为回退。
+自定义静态 Codec 属于 M12 的阶段性能力边界；其余本节类型属于首版明确不支持。
 
 ### 12.4 空载荷
 
@@ -1179,7 +1204,7 @@ rpc
 12. 相同输入重复生成逐字节一致；
 13. 任一包校验失败时没有部分写入；
 14. 生成文件格式和标准头；
-15. M12 类型得到清晰的阶段性错误；
+15. 所有不支持类型均在生成期得到包含完整字段路径的清晰错误；
 16. 四类返回签名严格生成第 7.3 节规定的方法集合；
 17. M11 的 Async、Await 和 Notify 最终 `error` 位置不会遗漏。
 
@@ -1222,7 +1247,13 @@ rpc
 - 顶层 Protobuf 空消息；
 - 顶层 Protobuf unknown fields、optional、oneof 和 Opaque API；
 - 多输入、多输出和混合基础类型/Protobuf；
-- M12 普通指针、容器、结构体和嵌套 Protobuf 的阶段性失败。
+- 普通指针的 nil/零值语义；
+- 空、nil 和非空 Slice、Map；
+- 数组、普通结构体和多层嵌套结构体；
+- `map[int64]pb.PlayerProfile`、`map[int64]*pb.PlayerProfile`、Protobuf Slice 和指针；
+- 嵌套 Protobuf 只处理导出字段且不调用 Protobuf 编解码；
+- `uintptr`、复数、`unsafe.Pointer`、接口、函数、Channel、循环对象图以及非法 Map Key
+  均在生成阶段失败，并包含完整类型路径。
 
 ### 18.4 性能
 
@@ -1315,6 +1346,8 @@ panic。客户端不持有独立 TCP/NATS 连接。
 | 9 | Go 包加载和 Protobuf 依赖 | 使用固定版本 `golang.org/x/tools/go/packages` 与 `google.golang.org/protobuf`；Protobuf 优先使用官方 Append/Options API，具体版本在实施计划前查验最新固定版 | 待确认 |
 | 10 | 旧生成文件清理和生成 ABI 版本 | 只删除包含完整 origingen 标记且本轮确认不再需要的文件；生成代码加入编译期 ABI 版本校验，手写或标记异常文件绝不删除 | 待确认 |
 | 11 | 是否公开只读 Descriptor | M11 不公开；生成代码和 Runtime 内部保留最小描述，等监控、调试或插件出现真实消费者后再公开 | 待确认 |
+| 12 | 普通 Go 类型、Map Key 和嵌套 Protobuf 的 M11 范围 | M11 一并支持普通指针、数组、Slice、Map、普通结构体和嵌套 Protobuf；Map Key 与已支持基础类型对齐；`uintptr`、复数、`unsafe.Pointer`、接口、函数和 Channel 在 `origingen` 生成期失败 | 已确认 |
+| 13 | 普通结构体字段协议、Map 顺序和解码安全上限 | 仍需确认稳定字段 ID、删除与重命名、Map 是否排序、递归类型、最大元素数和最大嵌套深度；必须在 M11 编码前锁定 | 待确认 |
 
 此外，当前 M9 实现与已确认的唯一计时器设计仍有差异，必须作为 M11 实施前置修正，不属于
 可以跳过的后续优化。
@@ -1405,5 +1438,5 @@ Go RPC 接口
 ```
 
 这一闭环优先验证业务接口、生成结果、数据边界和 Service 单执行权，不提前加入网络、发现
-和复杂路由。M12～M14 只在该稳定基础上依次补齐数据类型、TCP 和 NATS，不能重新发明
-客户端外观或 Dispatcher 语义。
+和复杂路由。M12～M14 只在该稳定基础上依次补齐自定义 Codec、TCP 和 NATS，不能重新
+发明客户端外观、Dispatcher 语义或 M11 已确定的数据表示。

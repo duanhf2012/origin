@@ -832,7 +832,8 @@ Origin RPC 首版不这样处理。普通 RPC 已经通过服务发现、`RouteR
 
 “不建立共同大接口”不等于 TCP 和 NATS 各自实现一套 RPC。适配边界固定如下：
 
-- M11 拥有生成客户端、同 Node 调用和 Dispatcher 语义，M12 拥有普通 Go 静态编解码；
+- M11 拥有生成客户端、普通 Go 静态编解码、同 Node 调用和 Dispatcher 语义，M12 只补充
+  自定义静态 Codec；
 - M13 在统一 RPC Runtime 中补齐 RequestID、pendingCall、默认 `15s` Deadline、远端取消、
   统一错误码和响应完成；
 - M13 TCP Adapter 只负责把统一 RPC 帧发送到选定 TCP Connection，并把入站帧交给统一
