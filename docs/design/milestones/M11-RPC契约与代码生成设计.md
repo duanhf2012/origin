@@ -749,12 +749,80 @@ func encodeGetPlayerResponse(
 - `string`；
 - `[]byte` 原始字节快速路径；
 - 顶层 Protobuf 生成消息；
-- 上述类型的具名别名是否直接支持，留在开工 Review 确认。
+- 以上基础类型的具名定义类型和别名。
 
 顶层 Protobuf 使用标准 Protobuf 编解码，保留 unknown fields、`optional`、`oneof` 和
 Open、Hybrid、Opaque API 语义。
 
-### 12.2 M12 范围的阶段性失败
+### 12.2 M11 固定顺序线格式
+
+M11 使用 Origin 自有的版本化固定顺序二进制格式，不为顶层输入或输出生成隐藏的
+Protobuf 包装消息，也不在每次调用中重复写入参数 Tag、类型、数量或格式版本：
+
+1. MethodID 已经唯一确定方法；
+2. ContractFingerprint 已经精确约束输入和输出的数量、位置及声明类型；
+3. 生成的静态编解码器已经知道每个位置的固定布局；
+4. 逻辑参数位置号继续进入契约规范化字节和指纹，但不进入每次业务载荷；
+5. 线格式版本进入 ContractFingerprint，版本不匹配在调用前失败。
+
+所有固定宽度数值均使用小端序。M11 基础布局固定如下：
+
+| Go 声明类型 | 线格式 |
+|---|---|
+| `bool` | 1 Byte，只接受 `0` 或 `1` |
+| `int8`、`uint8` | 固定 1 Byte |
+| `int16`、`uint16` | 固定 2 Byte |
+| `int32`、`uint32` | 固定 4 Byte |
+| `int64`、`uint64` | 固定 8 Byte |
+| `int`、`uint` | 固定 8 Byte；目标架构解码时执行范围校验 |
+| `float32` | IEEE 754 固定 4 Byte |
+| `float64` | IEEE 754 固定 8 Byte |
+| `string` | `uint32` 长度后紧跟 Go 字符串的原始字节 |
+| `[]byte` | `uint32` presence/长度后紧跟原始字节 |
+| 顶层 Protobuf | `uint32` presence/长度后紧跟标准 Protobuf 字节 |
+
+有符号整数采用对应宽度的二进制补码，不使用 Varint 或 ZigZag。`int` 和 `uint` 在线上
+统一为 64 位，避免 32 位和 64 位进程产生不同协议；32 位目标收到超出本机范围的值时返回
+解码错误，不能截断。`uintptr` 与进程地址宽度和语义相关，M11 永久不支持。
+
+`string` 不可为 nil，长度 `0` 表示空字符串；Origin 不额外校验 UTF-8，保持 Go string
+可以承载任意字节的语义。`[]byte` 和可空的顶层 Protobuf 消息使用
+下列 presence/长度规则：
+
+- `0xFFFFFFFF`：nil；
+- `0`：非 nil，内容长度为零；
+- `1`～`0xFFFFFFFE`：后面紧跟对应长度的内容。
+
+因此 nil `[]byte` 与非 nil 空 `[]byte`、nil Protobuf 指针与非 nil 空 Protobuf 消息都能
+准确往返。顶层 Protobuf 的四字节 presence/长度属于 Origin 方法载荷，不属于 Protobuf
+消息本身；非 nil 内容仍使用标准 `proto.MarshalAppend`/`proto.Unmarshal` 语义。编码器可以
+先在目标 Buffer 中保留四字节，随后把 Protobuf 结果直接追加到同一 Buffer 并回填长度，
+禁止为了增加外层长度再强制创建一份完整临时消息。
+
+具名类型规则固定如下：
+
+- `type PlayerID int64` 按 `int64` 布局编码，但契约规范化字节保留完整包路径、类型名和
+  底层类型，不能与另一个具名 `int64` 类型意外匹配；
+- `type PlayerID = int64` 属于别名，规范化为 `int64`；
+- 预声明别名 `byte`、`rune` 分别规范化为 `uint8`、`int32`。
+
+解码器必须在切片、分配和调用 Protobuf 解码前检查剩余长度及消息上限；必须拒绝截断、
+非法 bool、长度越界、整数范围溢出和解完后的多余尾部字节。方法没有业务输入或没有业务
+输出时，对应载荷可以为零字节；只要存在 `string`、`[]byte` 或顶层 Protobuf 位置，即使
+内容为空也仍有四字节长度或 presence 标记。
+
+本方案不追求在 Native RPC 中复刻 Protobuf 的可跳过未知字段能力。Origin 方法签名发生
+变化时 ContractFingerprint 本来就会变化；需要独立演进多个字段时，应优先使用一个顶层
+Protobuf 请求或响应。Protobuf 官方线格式通过 Tag/WireType 支持跳过未知字段，Varint
+对小整数节省空间，但会增加变长解析路径：
+[Protobuf Encoding](https://protobuf.dev/programming-guides/encoding/)。
+外部 gRPC 插件负责协议适配，不要求 gRPC 与 Origin Native RPC 共用完整线格式。
+
+编码 ABI 冻结前必须使用代表性的小整数、多参数和 Protobuf RPC 对固定顺序方案执行
+Benchmark，记录耗时、分配和载荷大小。若结果表明性能与可维护性发生明显冲突，必须按
+开发指导原则重新确认，不能由实现者静默更换线格式。
+
+### 12.3 M12 范围的阶段性失败
 
 以下合法目标能力在 M11 暂不生成：
 
@@ -768,10 +836,11 @@ Open、Hybrid、Opaque API 语义。
 生成错误必须明确说明“该类型属于 M12，当前 M11 尚未实现”，并列出接口、方法、参数或
 返回位置。不得误报为永久禁止，也不得使用反射或 JSON 临时回退。
 
-### 12.3 空载荷
+### 12.4 空载荷
 
-Protobuf 空消息、空字符串和空 `[]byte` 可以编码为零字节业务载荷。M11 内部调用描述仍
-包含 MethodID、参数位置和调用分类，不能把零字节业务载荷解释为缺少 RPC 请求。
+没有业务输入或业务输出的方法可以使用零字节方法载荷。存在参数位置时，空字符串、
+空 `[]byte` 和空 Protobuf 消息仍按第 12.2 节写入四字节长度或 presence 标记。M11 内部
+调用描述始终包含 MethodID 和调用分类，不能把合法零字节方法载荷解释为缺少 RPC 请求。
 
 ## 13. 同 Node RPC 执行流程
 
@@ -1164,19 +1233,19 @@ panic。客户端不持有独立 TCP/NATS 连接。
 2026-07-28 按开发指导原则完成一次逐节 Review。已确认的调用生成和广播规则已经回写；
 以下问题会直接影响生成 ABI、线格式、所有权或低延迟实现，必须在开工前逐项确认：
 
-| 顺序 | 待确认问题 | 当前建议 |
-|---|---|---|
-| 1 | 基础类型线布局、位置字段、`int`/`uint`、具名类型、nil/空值和顶层 Protobuf presence | 建立一套版本化静态线格式；`int`/`uint` 按 64 位线值编码并在目标架构做范围校验；具名基础类型按底层类型处理；nil 与空值是否保持区分必须在本项明确 |
-| 2 | `[]byte` 输入解码后是借用请求 Buffer 还是复制为业务独立内存 | 按规则由开发者确认：借用延迟和分配更低但业务不能长期持有，复制使用自由且更安全但增加大消息成本 |
-| 3 | RPC 契约可见性、泛型和跨包实现桥接 | RPC 接口和方法要求导出、首版禁止泛型契约；契约包生成 `New<Contract>Dispatcher(impl Contract)`，Service 包只生成 `RPCDispatcher()` 薄适配，避免重复 Codec |
-| 4 | Dispatcher 如何区分请求—响应与 Notify | 增加两个值的轻量 `rpc.CallKind`；Notify 调用真实方法但跳过响应编码，避免用 nil Slice 暗示模式 |
-| 5 | Await/Async Deadline 与 M8 接入 | Await 复用 Service M8 Deadline；Async 使用每 Node RPC Runtime 的一条共享 `DeadlineQueue`，不为每次调用建立 Go Timer |
-| 6 | `localCall` 字段、完成同步和池化 | M11 只保留一个私有一次性完成状态；先实现清晰基线并 Benchmark，M13 用最终池化 `pendingCall` 替换，避免为短期对象维护复杂 ABA 防护 |
-| 7 | RPC 错误码、业务错误编码、panic 和本地/远端一致性 | 在 2000 区间补充契约不匹配、方法不存在、请求解码、响应解码和执行 panic；同 Node 也经过相同错误编码/解码，不直接传 Go error 指针 |
-| 8 | ContractID、MethodID 和完整指纹的规范化字节 | 一次性固定域前缀、UTF-8 名称、分隔符、大端 ID、方法排序、类型描述和生成格式版本，并以 golden test 锁定 |
-| 9 | Go 包加载和 Protobuf 依赖 | 使用固定版本 `golang.org/x/tools/go/packages` 与 `google.golang.org/protobuf`；Protobuf 优先使用官方 Append/Options API，具体版本在实施计划前查验最新固定版 |
-| 10 | 旧生成文件清理和生成 ABI 版本 | 只删除包含完整 origingen 标记且本轮确认不再需要的文件；生成代码加入编译期 ABI 版本校验，手写或标记异常文件绝不删除 |
-| 11 | 是否公开只读 Descriptor | M11 不公开；生成代码和 Runtime 内部保留最小描述，等监控、调试或插件出现真实消费者后再公开 |
+| 顺序 | Review 问题 | 当前结论或建议 | 状态 |
+|---|---|---|---|
+| 1 | 基础类型线布局、位置字段、`int`/`uint`、具名类型、nil/空值和顶层 Protobuf presence | 采用第 12.2 节固定顺序格式；参数位置只进入指纹；`int`/`uint` 为 64 位线值；具名定义类型保留身份；`[]byte` 和 Protobuf 明确区分 nil 与空值 | 已确认 |
+| 2 | `[]byte` 输入解码后是借用请求 Buffer 还是复制为业务独立内存 | 按规则由开发者确认：借用延迟和分配更低但业务不能长期持有，复制使用自由且更安全但增加大消息成本 | 待确认 |
+| 3 | RPC 契约可见性、泛型和跨包实现桥接 | RPC 接口和方法要求导出、首版禁止泛型契约；契约包生成 `New<Contract>Dispatcher(impl Contract)`，Service 包只生成 `RPCDispatcher()` 薄适配，避免重复 Codec | 待确认 |
+| 4 | Dispatcher 如何区分请求—响应与 Notify | 增加两个值的轻量 `rpc.CallKind`；Notify 调用真实方法但跳过响应编码，避免用 nil Slice 暗示模式 | 待确认 |
+| 5 | Await/Async Deadline 与 M8 接入 | Await 复用 Service M8 Deadline；Async 使用每 Node RPC Runtime 的一条共享 `DeadlineQueue`，不为每次调用建立 Go Timer | 待确认 |
+| 6 | `localCall` 字段、完成同步和池化 | M11 只保留一个私有一次性完成状态；先实现清晰基线并 Benchmark，M13 用最终池化 `pendingCall` 替换，避免为短期对象维护复杂 ABA 防护 | 待确认 |
+| 7 | RPC 错误码、业务错误编码、panic 和本地/远端一致性 | 在 2000 区间补充契约不匹配、方法不存在、请求解码、响应解码和执行 panic；同 Node 也经过相同错误编码/解码，不直接传 Go error 指针 | 待确认 |
+| 8 | ContractID、MethodID 和完整指纹的规范化字节 | 一次性固定域前缀、UTF-8 名称、分隔符、大端 ID、方法排序、类型描述和生成格式版本，并以 golden test 锁定 | 待确认 |
+| 9 | Go 包加载和 Protobuf 依赖 | 使用固定版本 `golang.org/x/tools/go/packages` 与 `google.golang.org/protobuf`；Protobuf 优先使用官方 Append/Options API，具体版本在实施计划前查验最新固定版 | 待确认 |
+| 10 | 旧生成文件清理和生成 ABI 版本 | 只删除包含完整 origingen 标记且本轮确认不再需要的文件；生成代码加入编译期 ABI 版本校验，手写或标记异常文件绝不删除 | 待确认 |
+| 11 | 是否公开只读 Descriptor | M11 不公开；生成代码和 Runtime 内部保留最小描述，等监控、调试或插件出现真实消费者后再公开 | 待确认 |
 
 此外，当前 M9 实现与已确认的唯一计时器设计仍有差异，必须作为 M11 实施前置修正，不属于
 可以跳过的后续优化。
