@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/command"
+	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
@@ -27,6 +29,32 @@ type lifecycleTestService struct {
 }
 
 var startupStopEntered chan struct{}
+
+type customDiscoveryProvider struct {
+	context publicprovider.Context
+}
+
+func (provider *customDiscoveryProvider) Start(context.Context) error {
+	if err := provider.context.Host.SetTTL(3 * time.Second); err != nil {
+		return err
+	}
+	if err := provider.context.Host.ReplaceSnapshot(publicprovider.Snapshot{}); err != nil {
+		return err
+	}
+	provider.context.Host.Report(publicprovider.Report{State: publicprovider.StateReady})
+	return nil
+}
+
+func (*customDiscoveryProvider) Publish(context.Context, publicprovider.Node) error {
+	return nil
+}
+
+func (*customDiscoveryProvider) Withdraw(context.Context) error { return nil }
+
+func (provider *customDiscoveryProvider) Close(context.Context) error {
+	provider.context.Host.Report(publicprovider.Report{State: publicprovider.StateStopped})
+	return nil
+}
 
 // startupStopService 让测试在 OnStart 内观察正式停止信号。
 type startupStopService struct {
@@ -175,6 +203,144 @@ nodes:
 	}
 	if !handler.closed.Load() {
 		t.Fatal("日志 Handler 没有关闭")
+	}
+}
+
+func TestApplicationOriginDiscoveryLifecycle(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve discovery address: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close reserved listener: %v", err)
+	}
+	directory := writeApplicationConfig(t, `
+discovery:
+  type: origin
+  origin:
+    ttl: 3s
+    server:
+      node: discovery-1
+      listen: `+address+`
+      address: `+address+`
+nodes:
+  - id: discovery-1
+    services: [DiscoveryService]
+  - id: game-1
+    services: [lifecycleTestService]
+`)
+	app := newSilentApplication()
+	app.Setup(&lifecycleTestService{})
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- app.run(runCtx, command.StartRequest{
+			AppName:   "origin-discovery-test",
+			ConfigDir: directory,
+		})
+	}()
+	waitForState(t, app, StateRunning)
+
+	for _, nodeID := range []string{"discovery-1", "game-1"} {
+		current, exists := app.Node(nodeID)
+		if !exists {
+			t.Fatalf("Node %q 不存在", nodeID)
+		}
+		status := current.DiscoveryStatus()
+		expectedPublication := node.PublicationPublished
+		if nodeID == "discovery-1" {
+			expectedPublication = node.PublicationNotRequired
+		}
+		if status.Kind != "origin" || status.State != node.DiscoveryReady ||
+			!status.Synchronized || status.Publication != expectedPublication {
+			t.Fatalf("Node %q DiscoveryStatus = %+v", nodeID, status)
+		}
+	}
+
+	cancelRun()
+	if err := <-result; err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if stats := app.bufferPool.Stats(); stats.Enabled && stats.InUseBuffers != 0 {
+		t.Fatalf("Origin Discovery 遗留 Buffer = %+v", stats)
+	}
+}
+
+func TestApplicationCustomDiscoveryProviderUsesOnlyPublicSPI(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+discovery:
+  type: consul
+  consul:
+    address: 127.0.0.1:8500
+nodes:
+  - id: game-1
+    services: [lifecycleTestService]
+`)
+	app := newSilentApplication()
+	app.Setup(&lifecycleTestService{})
+	err := app.RegisterDiscoveryProvider(
+		"consul",
+		func(context publicprovider.Context) (publicprovider.Provider, error) {
+			var config struct {
+				Address string `json:"address"`
+			}
+			if err := context.Config.Decode(&config); err != nil {
+				return nil, err
+			}
+			if config.Address == "" {
+				return nil, errs.ErrInvalidConfig
+			}
+			return &customDiscoveryProvider{context: context}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("RegisterDiscoveryProvider() error = %v", err)
+	}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- app.run(runCtx, command.StartRequest{
+			AppName:   "custom-discovery-test",
+			ConfigDir: directory,
+		})
+	}()
+	waitForState(t, app, StateRunning)
+	current, _ := app.Node("game-1")
+	status := current.DiscoveryStatus()
+	if status.Kind != "consul" || status.State != node.DiscoveryReady ||
+		status.Publication != node.PublicationPublished {
+		t.Fatalf("DiscoveryStatus = %+v", status)
+	}
+	cancelRun()
+	if err := <-result; err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+}
+
+func TestOriginAndRPCListenConflictIncludesWildcardAliases(t *testing.T) {
+	tests := []struct {
+		left  string
+		right string
+		want  bool
+	}{
+		{left: ":7100", right: "127.0.0.1:7100", want: true},
+		{left: "0.0.0.0:7100", right: "10.0.0.1:7100", want: true},
+		{left: "[::]:7100", right: "[::1]:7100", want: true},
+		{left: "127.0.0.1:7100", right: "127.0.0.1:7100", want: true},
+		{left: "127.0.0.1:7100", right: "127.0.0.1:7200", want: false},
+		{left: "127.0.0.1:7100", right: "127.0.0.2:7100", want: false},
+	}
+	for _, test := range tests {
+		if got := listenAddressesConflict(test.left, test.right); got != test.want {
+			t.Errorf(
+				"listenAddressesConflict(%q, %q) = %v, want %v",
+				test.left,
+				test.right,
+				got,
+				test.want,
+			)
+		}
 	}
 }
 

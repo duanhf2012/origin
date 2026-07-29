@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
@@ -61,10 +62,13 @@ type Node struct {
 	discoverySource       *internaldiscovery.Source
 	discoverySubscription *internaldiscovery.Subscription
 	discoveryPublished    atomic.Bool
+	discoveryProvider     *providerRuntime
+	discoveryServer       discoveryServer
 	// discoveryAvailable 和三个原子快照只在生命周期、恢复和故障冷路径更新。
 	discoveryAvailable atomic.Bool
 	transportStatus    atomic.Pointer[transportStatusSnapshot]
 	healthStatus       atomic.Pointer[healthStatusSnapshot]
+	discoveryStatus    atomic.Pointer[discoveryStatusSnapshot]
 	// publicServices 在静态装配后冻结，用于区分“没有公开 Service”和“全部公开 Service 失败”。
 	publicServices int
 	// serviceFailure 把真正隔离的 Service 摘要交给 Application，但不触发 Stop。
@@ -189,6 +193,28 @@ func New(
 		serviceFailure:  options.ServiceFailure,
 	}
 	discoveryRuntime.bindNode(instance)
+	if options.DiscoveryFactory != nil {
+		if options.DiscoverySource != nil {
+			return nil, invalidConfig(fmt.Sprintf(
+				"Node %q 不能同时配置正式 Provider 与过渡 Source",
+				config.ID,
+			))
+		}
+		discoveryProvider, providerErr := newProviderRuntime(
+			instance,
+			options.DiscoveryKind,
+			options.DiscoveryConfig,
+			options.DiscoveryFactory,
+		)
+		if providerErr != nil {
+			return nil, fmt.Errorf(
+				"创建 Node %q Discovery Provider: %w",
+				config.ID,
+				providerErr,
+			)
+		}
+		instance.discoveryProvider = discoveryProvider
+	}
 	if err := rpcRuntime.BindSessionID(sessionID); err != nil {
 		return nil, fmt.Errorf("绑定 Node %q RPC SessionID: %w", config.ID, err)
 	}
@@ -223,6 +249,15 @@ func New(
 			logger: instance.logger.With(
 				originlog.String("service_name", binding.Name),
 			),
+		}
+		if server, ok := binding.Service.(discoveryServer); ok {
+			if instance.discoveryServer != nil {
+				return nil, invalidConfig(fmt.Sprintf(
+					"Node %q 配置了多个 DiscoveryService",
+					config.ID,
+				))
+			}
+			instance.discoveryServer = server
 		}
 		entry.discoveryRun = func(ctx context.Context) {
 			instance.discovery.deliver(ctx, entry)
@@ -492,6 +527,32 @@ func (node *Node) Start(ctx context.Context) error {
 			cause:  err,
 		}
 	}
+	// 共置 DiscoveryService 必须先准备控制 Listener，使当前 Node 自己的 Provider 可以完成
+	// 首次同步；Prepare 不执行用户回调，也不开放业务 RPC。
+	if node.discoveryServer != nil {
+		if err := node.discoveryServer.PrepareDiscovery(ctx); err != nil {
+			node.state.Store(uint32(StateFailed))
+			node.refreshHealth()
+			return &lifecycleContext{
+				nodeID: node.id,
+				phase:  "discovery_server_prepare",
+				cause:  err,
+			}
+		}
+	}
+	// 正式 Provider 的首次权威快照必须先于全部业务 OnStart。未配置 Provider 的本地应用
+	// 保持空远端目录；底层测试仍可显式注入 M14 Source。
+	if node.discoveryProvider != nil {
+		if err := node.discoveryProvider.startProvider(ctx); err != nil {
+			node.state.Store(uint32(StateFailed))
+			node.updateDiscoveryAvailable(false)
+			return &lifecycleContext{
+				nodeID: node.id,
+				phase:  "discovery_start",
+				cause:  err,
+			}
+		}
+	}
 
 	// 时间轮运行后再进入启动阶段。每个 Scheduler 先 Prepare，使 OnStart 可以登记 Timer，
 	// 但不启动任何用户任务；Prepare 失败的 Service 尚未进入 OnStart，因此不加入停止序列。
@@ -629,9 +690,13 @@ func (node *Node) Rollback(ctx context.Context) error {
 		return node.stopResult
 	}
 	// 失败实例仍先获得反序 OnStop，最后再关闭 Node 时间轮并等待其 goroutine 退出。
-	node.withdrawDiscovery()
-	result := node.rpcRuntime.BeginStop(ctx)
+	result := node.withdrawDiscovery(ctx)
+	result = errors.Join(result, node.rpcRuntime.BeginStop(ctx))
 	result = errors.Join(result, node.stopStarted(ctx, true))
+	result = joinProviderClose(result, node.discoveryProvider, ctx)
+	if node.discoveryServer != nil {
+		result = errors.Join(result, node.discoveryServer.CloseDiscovery(ctx))
+	}
 	result = errors.Join(result, node.rpcRuntime.Close(ctx))
 	result = errors.Join(result, node.timerEngine.Close())
 	node.closeDiscoverySubscription()
@@ -671,10 +736,14 @@ func (node *Node) Stop(ctx context.Context) error {
 	node.state.Store(uint32(StateStopping))
 	node.refreshHealth()
 	node.logger.Info("node stopping")
-	node.withdrawDiscovery()
-	result := node.rpcRuntime.BeginStop(ctx)
+	result := node.withdrawDiscovery(ctx)
+	result = errors.Join(result, node.rpcRuntime.BeginStop(ctx))
 	// Service 清理阶段保留时间轮运行，全部 OnStop 返回后才回收 Node 最后的后台资源。
 	result = errors.Join(result, node.stopStarted(ctx, false))
+	result = joinProviderClose(result, node.discoveryProvider, ctx)
+	if node.discoveryServer != nil {
+		result = errors.Join(result, node.discoveryServer.CloseDiscovery(ctx))
+	}
 	result = errors.Join(result, node.rpcRuntime.Close(ctx))
 	result = errors.Join(result, node.timerEngine.Close())
 	node.closeDiscoverySubscription()
@@ -706,7 +775,7 @@ func (node *Node) Stop(ctx context.Context) error {
 
 // publishDiscovery 在全部 OnStart 和 Runner 激活成功后整体发布当前 Node 的公开 Service。
 func (node *Node) publishDiscovery() error {
-	if node.discoverySource == nil || node.private {
+	if node.private {
 		return nil
 	}
 	services := make([]internaldiscovery.RawService, 0, len(node.services))
@@ -727,8 +796,9 @@ func (node *Node) publishDiscovery() error {
 	}
 	// 全部 Service 均为私有时没有远端可见事实，不发布空 Node 记录。
 	if len(services) == 0 {
-		node.withdrawDiscovery()
-		return nil
+		operationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return node.withdrawDiscovery(operationCtx)
 	}
 	transport := internaldiscovery.TransportNone
 	address := ""
@@ -741,27 +811,70 @@ func (node *Node) publishDiscovery() error {
 			transport = internaldiscovery.TransportNATS
 		}
 	}
-	if err := node.discoverySource.Publish(internaldiscovery.RawNode{
+	raw := internaldiscovery.RawNode{
 		NodeID:    node.id,
 		SessionID: node.sessionID,
 		Labels:    cloneLabels(node.labels),
 		Transport: transport,
 		Address:   address,
 		Services:  services,
-	}); err != nil {
-		return err
+	}
+	if node.discoveryProvider != nil {
+		providerNode := publicProviderNode(raw)
+		operationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := node.discoveryProvider.publish(operationCtx, providerNode); err != nil {
+			return err
+		}
+	} else if node.discoverySource != nil {
+		if err := node.discoverySource.Publish(raw); err != nil {
+			return err
+		}
+	} else {
+		return nil
 	}
 	node.discoveryPublished.Store(true)
 	return nil
 }
 
 // withdrawDiscovery 在正式停止新业务准入前撤销当前精确 Node 会话。
-func (node *Node) withdrawDiscovery() {
-	if node == nil || node.discoverySource == nil ||
-		!node.discoveryPublished.Swap(false) {
-		return
+func (node *Node) withdrawDiscovery(ctx context.Context) error {
+	if node == nil || !node.discoveryPublished.Load() {
+		return nil
 	}
-	node.discoverySource.Withdraw(node.id, node.sessionID)
+	if node.discoveryProvider != nil {
+		if err := node.discoveryProvider.withdraw(ctx); err != nil {
+			return err
+		}
+		node.discoveryPublished.Store(false)
+		return nil
+	}
+	if node.discoverySource != nil {
+		node.discoverySource.Withdraw(node.id, node.sessionID)
+	}
+	node.discoveryPublished.Store(false)
+	return nil
+}
+
+// publicProviderNode 把内部发布 DTO 转换成后端无关公共 DTO。
+func publicProviderNode(raw internaldiscovery.RawNode) publicprovider.Node {
+	result := publicprovider.Node{
+		NodeID:    raw.NodeID,
+		SessionID: raw.SessionID,
+		Labels:    cloneLabels(raw.Labels),
+		Transport: publicprovider.Transport(raw.Transport + 1),
+		Address:   raw.Address,
+		Services:  make([]publicprovider.Service, len(raw.Services)),
+	}
+	for index, service := range raw.Services {
+		result.Services[index] = publicprovider.Service{
+			ServiceName:         service.ServiceName,
+			State:               publicprovider.ServiceState(service.State),
+			ContractID:          service.ContractID,
+			ContractFingerprint: service.ContractFingerprint,
+		}
+	}
+	return result
 }
 
 // closeDiscoverySubscription 幂等关闭当前 Node 对过渡完整快照源的订阅。

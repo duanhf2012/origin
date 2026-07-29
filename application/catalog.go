@@ -69,6 +69,13 @@ func (catalog *serviceCatalog) setup(samples ...service.IService) {
 			catalog.err = err
 			return
 		}
+		if template.name == "DiscoveryService" {
+			catalog.err = errs.NewMessage(
+				errs.CodeInvalidArgument,
+				"DiscoveryService 是框架保留名称，业务不能注册同名 Service",
+			)
+			return
+		}
 		if registered, exists := catalog.templates[template.name]; exists {
 			// 同一 Go 类型的重复 Setup 按 v2 使用习惯保持幂等。
 			if registered.pointerType == template.pointerType {

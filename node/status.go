@@ -1,8 +1,10 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
@@ -59,6 +61,43 @@ type HealthStatus struct {
 	ErrorCode errs.Code
 }
 
+// DiscoveryState 表示当前 Node 的 Provider 同步状态。
+type DiscoveryState uint8
+
+const (
+	// DiscoveryStarting 表示正在完成首次同步。
+	DiscoveryStarting DiscoveryState = iota
+	// DiscoveryReady 表示当前拥有可用权威快照。
+	DiscoveryReady
+	// DiscoveryRecovering 表示失去权威来源且正在持续恢复。
+	DiscoveryRecovering
+	// DiscoveryStopped 表示 Provider 已经退出。
+	DiscoveryStopped
+)
+
+// PublicationState 表示当前 Node 的公开记录发布屏障。
+type PublicationState uint8
+
+const (
+	// PublicationNotRequired 表示私有或没有公开 Service，无需发布。
+	PublicationNotRequired PublicationState = iota
+	// PublicationPending 表示完整本地记录尚未被后端确认。
+	PublicationPending
+	// PublicationPublished 表示当前完整本地记录已经确认发布。
+	PublicationPublished
+)
+
+// DiscoveryStatus 是 Node 当前服务发现状态的无锁只读快照。
+type DiscoveryStatus struct {
+	Kind                string
+	State               DiscoveryState
+	Synchronized        bool
+	Publication         PublicationState
+	Reconnects          uint64
+	ConsecutiveFailures uint32
+	ErrorCode           errs.Code
+}
+
 // ServiceStatus 是本地管理代码查询单个 Service 时取得的冷路径快照。
 type ServiceStatus struct {
 	State   service.State
@@ -74,6 +113,10 @@ type transportStatusSnapshot struct {
 
 type healthStatusSnapshot struct {
 	value HealthStatus
+}
+
+type discoveryStatusSnapshot struct {
+	value DiscoveryStatus
 }
 
 // serviceFailureSnapshot 保存本进程内第一个不可恢复根因。
@@ -111,6 +154,24 @@ func (node *Node) HealthStatus() HealthStatus {
 	return snapshot.value
 }
 
+// DiscoveryStatus 返回当前 Provider 同步和发布状态。
+func (node *Node) DiscoveryStatus() DiscoveryStatus {
+	if node == nil {
+		return DiscoveryStatus{
+			State:     DiscoveryStopped,
+			ErrorCode: errs.CodeInternal,
+		}
+	}
+	snapshot := node.discoveryStatus.Load()
+	if snapshot == nil {
+		return DiscoveryStatus{
+			State:       DiscoveryStopped,
+			Publication: PublicationNotRequired,
+		}
+	}
+	return snapshot.value
+}
+
 // ServiceStatus 按实际 ServiceName 返回本地生命周期和首个失败根因。
 func (node *Node) ServiceStatus(name string) (ServiceStatus, bool) {
 	if node == nil || name == "" {
@@ -135,6 +196,16 @@ func (node *Node) initializeStatus(kind rpc.TransportKind) {
 		},
 	})
 	node.discoveryAvailable.Store(true)
+	if node.discoveryProvider == nil {
+		node.discoveryStatus.Store(&discoveryStatusSnapshot{
+			value: DiscoveryStatus{
+				Kind:         "none",
+				State:        DiscoveryStopped,
+				Publication:  PublicationNotRequired,
+				Synchronized: true,
+			},
+		})
+	}
 	node.refreshHealth()
 }
 
@@ -155,7 +226,14 @@ func (node *Node) handleTransportEvent(event rpc.TransportEvent) {
 	// 整体入站能力不可用时立即撤销当前 Node；单目标 TCP 断线不会产生这里的整体事件。
 	switch status.State {
 	case TransportRecovering, TransportFailed:
-		node.withdrawDiscovery()
+		operationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := node.withdrawDiscovery(operationCtx); err != nil {
+			node.logger.Error(
+				"Transport 不可用时撤销服务发现失败",
+				originlog.Err(err),
+			)
+		}
+		cancel()
 	case TransportReady:
 		// 初次启动尚未越过统一就绪屏障，因此只在已经 Ready 的 Node 上重新发布。
 		if node.State() == StateReady {

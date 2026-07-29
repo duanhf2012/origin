@@ -3,6 +3,7 @@ package node
 import (
 	"time"
 
+	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	"github.com/duanhf2012/origin/v3/rpc"
@@ -26,6 +27,13 @@ type Options struct {
 	//
 	// 正式项目不直接设置该字段；省略时 Node 仍拥有空的本地目录，便于独立单元测试。
 	DiscoverySource *internaldiscovery.Source
+	// DiscoveryKind、DiscoveryConfig 和 DiscoveryFactory 共同启用正式远端 Provider。
+	//
+	// 三者只由 Application 配置层填充；DiscoverySource 仍保留给底层单元和 RPC 测试夹具，
+	// 正式 Application 不会同时设置两种来源。
+	DiscoveryKind    string
+	DiscoveryConfig  publicprovider.Config
+	DiscoveryFactory publicprovider.Factory
 	// ServiceFailure 接收当前 Node 中真正无法恢复并被隔离的 Service。
 	//
 	// 正式 Application 只记录稳定失败摘要；回调必须快速返回，不能直接执行 Stop。

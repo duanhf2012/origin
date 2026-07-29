@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/command"
+	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
-	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
+	origindiscovery "github.com/duanhf2012/origin/v3/internal/discovery/origin"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/log/zaplog"
 	"github.com/duanhf2012/origin/v3/node"
@@ -35,6 +36,7 @@ type Application struct {
 	commands     []command.Command
 	commandNames map[string]struct{}
 	commandRun   bool
+	providers    map[string]publicprovider.Factory
 
 	nodes         []*node.Node
 	started       []*node.Node
@@ -61,6 +63,7 @@ type Application struct {
 func New(supplied ...Options) *Application {
 	instance := &Application{
 		commandNames: make(map[string]struct{}),
+		providers:    make(map[string]publicprovider.Factory),
 		logger:       originlog.NewNop(),
 		done:         make(chan struct{}),
 	}
@@ -101,6 +104,50 @@ func New(supplied ...Options) *Application {
 		instance.options.Timer.Location = time.Local
 	}
 	return instance
+}
+
+// RegisterDiscoveryProvider 为当前 Application 登记一个自定义服务发现 Provider。
+//
+// 注册必须发生在首次执行命令前；内置 origin/etcd 名称不能覆盖。
+func (app *Application) RegisterDiscoveryProvider(
+	name string,
+	factory publicprovider.Factory,
+) error {
+	if app == nil || factory == nil {
+		return errs.NewMessage(
+			errs.CodeInvalidArgument,
+			"Application 和 Discovery Provider Factory 不能为空",
+		)
+	}
+	name = strings.TrimSpace(name)
+	if !validProviderName(name) {
+		return errs.NewMessage(
+			errs.CodeInvalidArgument,
+			"Discovery Provider 名称必须是 63 字节以内的小写 kebab-case",
+		)
+	}
+	if name == "origin" || name == "etcd" {
+		return errs.NewMessage(
+			errs.CodeInvalidArgument,
+			fmt.Sprintf("Discovery Provider 名称 %q 由框架保留", name),
+		)
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	if app.commandRun || app.State() != StateCreated {
+		return errs.NewMessage(
+			errs.CodeInvalidArgument,
+			"Discovery Provider 只能在配置加载或启动前注册",
+		)
+	}
+	if _, exists := app.providers[name]; exists {
+		return errs.NewMessage(
+			errs.CodeInvalidArgument,
+			fmt.Sprintf("Discovery Provider %q 重复", name),
+		)
+	}
+	app.providers[name] = factory
+	return nil
 }
 
 // Setup 把一个或多个零值 Service 样本登记为当前 Application 的类型模板。
@@ -312,9 +359,10 @@ func (app *Application) run(
 	if err != nil {
 		return app.report(err)
 	}
-	// M14 过渡数据源只覆盖本次实际启动的 Node；每个 Node 仍建立自己的可见目录和 TCP。
-	discoverySource := internaldiscovery.NewSource()
-	nodes, err := app.buildNodes(selected, discoverySource)
+	if err := validateSelectedDiscoveryOrder(configured.discovery, selected); err != nil {
+		return app.report(err)
+	}
+	nodes, err := app.buildNodes(selected, configured.discovery)
 	if err != nil {
 		return app.report(err)
 	}
@@ -372,6 +420,34 @@ func (app *Application) run(
 	}
 	app.state.Store(uint32(StateFailed))
 	return app.report(finalResult)
+}
+
+// validateSelectedDiscoveryOrder 保持同进程共置发现端先启动、最后停止的显式顺序。
+func validateSelectedDiscoveryOrder(
+	selection *discoverySelection,
+	selected []node.Config,
+) error {
+	if selection == nil || selection.kind != "origin" || len(selected) < 2 {
+		return nil
+	}
+	config, err := origindiscovery.DecodeConfig(selection.config)
+	if err != nil {
+		return err
+	}
+	serverIndex := -1
+	for index := range selected {
+		if selected[index].ID == config.Server.Node {
+			serverIndex = index
+			break
+		}
+	}
+	if serverIndex > 0 {
+		return invalidConfigf(
+			"同一进程选择多个 Node 时，DiscoveryService Node %q 必须位于显式启动顺序第一位",
+			config.Server.Node,
+		)
+	}
+	return nil
 }
 
 // Stop 请求当前 Application 停止，并等待唯一生命周期路径完成清理。
@@ -463,8 +539,37 @@ func (app *Application) initializeResources(
 // buildNodes 在启动任何回调前完成全部 Service 实例化和 Runtime 绑定。
 func (app *Application) buildNodes(
 	configs []node.Config,
-	discoverySource *internaldiscovery.Source,
+	discovery *discoverySelection,
 ) ([]*node.Node, error) {
+	var factory publicprovider.Factory
+	var originConfig origindiscovery.Config
+	var discoveryKind string
+	var discoveryConfig publicprovider.Config
+	if discovery != nil {
+		discoveryKind = discovery.kind
+		discoveryConfig = discovery.config
+		switch discovery.kind {
+		case "origin":
+			factory = origindiscovery.NewFactory(app.bufferPool)
+			var err error
+			originConfig, err = origindiscovery.DecodeConfig(discovery.config)
+			if err != nil {
+				return nil, err
+			}
+		case "etcd":
+			return nil, invalidConfigf("Discovery Provider %q 尚未在 M17 实现", discovery.kind)
+		default:
+			app.mu.Lock()
+			factory = app.providers[discovery.kind]
+			app.mu.Unlock()
+			if factory == nil {
+				return nil, invalidConfigf(
+					"Discovery Provider %q 未注册",
+					discovery.kind,
+				)
+			}
+		}
+	}
 	result := make([]*node.Node, 0, len(configs))
 	for _, configured := range configs {
 		bindings := make([]node.ServiceBinding, 0, len(configured.Services))
@@ -485,20 +590,39 @@ func (app *Application) buildNodes(
 					name,
 				))
 			}
-			instance, err := app.catalog.instantiate(template)
-			if err != nil {
-				return nil, rollbackBuiltNodes(result, fmt.Errorf(
-					"Node %q Service %q: %w",
-					configured.ID,
-					name,
-					err,
-				))
+			var instance service.IService
+			if template == "DiscoveryService" {
+				if discovery == nil || discovery.kind != "origin" ||
+					name != "DiscoveryService" || private ||
+					configured.ID != originConfig.Server.Node {
+					return nil, rollbackBuiltNodes(result, invalidConfigf(
+						"DiscoveryService 只能以公开原名配置在 discovery.origin.server.node",
+					))
+				}
+				instance = origindiscovery.NewService(
+					originConfig,
+					app.bufferPool,
+					app.logger.With(originlog.String("node_id", configured.ID)),
+				)
+			} else {
+				var err error
+				instance, err = app.catalog.instantiate(template)
+				if err != nil {
+					return nil, rollbackBuiltNodes(result, fmt.Errorf(
+						"Node %q Service %q: %w",
+						configured.ID,
+						name,
+						err,
+					))
+				}
 			}
 			bindings = append(bindings, node.ServiceBinding{
 				Name:     name,
 				Template: template,
-				Private:  private,
-				Service:  instance,
+				// DiscoveryService 是框架基础设施：它参与 Node 生命周期，
+				// 但不能作为业务 RPC Service 发布给其他 Node。
+				Private: private || template == "DiscoveryService",
+				Service: instance,
 			})
 			names[name] = struct{}{}
 		}
@@ -510,7 +634,9 @@ func (app *Application) buildNodes(
 				MaxTimersPerNode: app.options.Timer.MaxTimersPerNode,
 				TimerLocation:    app.options.Timer.Location,
 				BufferPool:       app.bufferPool,
-				DiscoverySource:  discoverySource,
+				DiscoveryKind:    discoveryKind,
+				DiscoveryConfig:  discoveryConfig,
+				DiscoveryFactory: factory,
 				ServiceFailure:   app.handleServiceFailure,
 			},
 		)

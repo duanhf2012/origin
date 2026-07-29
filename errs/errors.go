@@ -74,6 +74,12 @@ var (
 	ErrTransportMessageTooLarge error = newCodeError(CodeTransportMessageTooLarge)
 	// ErrDiscoveryUnavailable 表示必需服务发现当前不可用或尚未完成重新发布。
 	ErrDiscoveryUnavailable error = newCodeError(CodeDiscoveryUnavailable)
+	// ErrDiscoveryDuplicateNode 表示活跃 NodeID 已由其他 Session 占用。
+	ErrDiscoveryDuplicateNode error = newCodeError(CodeDiscoveryDuplicateNode)
+	// ErrDiscoveryCapacity 表示服务发现固定容量已经耗尽。
+	ErrDiscoveryCapacity error = newCodeError(CodeDiscoveryCapacity)
+	// ErrDiscoverySnapshotInvalid 表示 Provider 权威快照不合法。
+	ErrDiscoverySnapshotInvalid error = newCodeError(CodeDiscoverySnapshotInvalid)
 	// ErrLogClosed 表示日志运行时已经关闭。
 	ErrLogClosed error = newCodeError(CodeLogClosed)
 	// ErrLogOutputFailed 表示日志输出创建、刷新或关闭失败。
@@ -215,6 +221,12 @@ func New(code Code) error {
 		return ErrTransportMessageTooLarge
 	case CodeDiscoveryUnavailable:
 		return ErrDiscoveryUnavailable
+	case CodeDiscoveryDuplicateNode:
+		return ErrDiscoveryDuplicateNode
+	case CodeDiscoveryCapacity:
+		return ErrDiscoveryCapacity
+	case CodeDiscoverySnapshotInvalid:
+		return ErrDiscoverySnapshotInvalid
 	case CodeLogClosed:
 		return ErrLogClosed
 	case CodeLogOutputFailed:

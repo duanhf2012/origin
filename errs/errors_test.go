@@ -54,6 +54,9 @@ func TestStableCodes(t *testing.T) {
 		{name: "transport protocol", code: errs.CodeTransportProtocol, want: 3004},
 		{name: "transport message too large", code: errs.CodeTransportMessageTooLarge, want: 3005},
 		{name: "discovery unavailable", code: errs.CodeDiscoveryUnavailable, want: 5001},
+		{name: "discovery duplicate node", code: errs.CodeDiscoveryDuplicateNode, want: 5002},
+		{name: "discovery capacity", code: errs.CodeDiscoveryCapacity, want: 5003},
+		{name: "discovery snapshot invalid", code: errs.CodeDiscoverySnapshotInvalid, want: 5004},
 		{name: "log closed", code: errs.CodeLogClosed, want: 7001},
 		{name: "log output failed", code: errs.CodeLogOutputFailed, want: 7002},
 	}
@@ -172,6 +175,21 @@ func TestNew(t *testing.T) {
 			code: errs.CodeDiscoveryUnavailable,
 			want: errs.ErrDiscoveryUnavailable,
 			text: "discovery unavailable",
+		},
+		{
+			code: errs.CodeDiscoveryDuplicateNode,
+			want: errs.ErrDiscoveryDuplicateNode,
+			text: "discovery duplicate node",
+		},
+		{
+			code: errs.CodeDiscoveryCapacity,
+			want: errs.ErrDiscoveryCapacity,
+			text: "discovery capacity exceeded",
+		},
+		{
+			code: errs.CodeDiscoverySnapshotInvalid,
+			want: errs.ErrDiscoverySnapshotInvalid,
+			text: "discovery snapshot invalid",
 		},
 		{code: errs.CodeLogClosed, want: errs.ErrLogClosed, text: "log runtime closed"},
 		{code: errs.CodeLogOutputFailed, want: errs.ErrLogOutputFailed, text: "log output failed"},

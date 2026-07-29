@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
 	originconfig "github.com/duanhf2012/origin/v3/config"
+	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
+	origindiscovery "github.com/duanhf2012/origin/v3/internal/discovery/origin"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/rpc"
@@ -22,6 +25,13 @@ type loadedConfig struct {
 	log             originlog.Config
 	trackBufferPool bool
 	nodes           []node.Config
+	discovery       *discoverySelection
+}
+
+// discoverySelection 保存顶层严格联合已经选中的唯一 Provider 配置块。
+type discoverySelection struct {
+	kind   string
+	config publicprovider.Config
 }
 
 // bufferPoolConfig 只包含 M7 已实现的内存池开关。
@@ -163,7 +173,7 @@ func loadConfig(directory string) (loadedConfig, error) {
 	}
 
 	// 已经保留给后续里程碑的框架字段不能在 M7 被静默忽略。
-	for _, name := range []string{"rpc", "discovery", "timer"} {
+	for _, name := range []string{"rpc", "timer"} {
 		if _, exists := root[name]; exists {
 			return loadedConfig{}, invalidConfigf(
 				"配置字段 %q 尚未在 M7 实现",
@@ -175,6 +185,13 @@ func loadConfig(directory string) (loadedConfig, error) {
 	result := loadedConfig{
 		root: root,
 		log:  originlog.DefaultConfig(),
+	}
+	if raw, exists := root["discovery"]; exists {
+		selection, err := decodeDiscoverySelection(raw)
+		if err != nil {
+			return loadedConfig{}, err
+		}
+		result.discovery = selection
 	}
 	if raw, exists := root["log"]; exists {
 		logConfig, err := decodeLogConfig(raw)
@@ -208,6 +225,12 @@ func loadConfig(directory string) (loadedConfig, error) {
 		configured.ID = strings.TrimSpace(configured.ID)
 		if configured.ID == "" {
 			return loadedConfig{}, invalidConfigf("nodes[%d].id 不能为空", index)
+		}
+		if !validProviderName(configured.ID) {
+			return loadedConfig{}, invalidConfigf(
+				"nodes[%d].id 必须是 63 字节以内的小写 kebab-case",
+				index,
+			)
 		}
 		if _, duplicate := seen[configured.ID]; duplicate {
 			return loadedConfig{}, invalidConfigf("NodeID %q 重复", configured.ID)
@@ -270,7 +293,140 @@ func loadConfig(directory string) (loadedConfig, error) {
 			Services:        append([]string(nil), configured.Services...),
 		}
 	}
+	if err := validateOriginDiscovery(result.discovery, nodes, result.nodes); err != nil {
+		return loadedConfig{}, err
+	}
 	return result, nil
+}
+
+// decodeDiscoverySelection 严格解析 type 与唯一同名配置块。
+func decodeDiscoverySelection(raw any) (*discoverySelection, error) {
+	mapping, ok := raw.(map[string]any)
+	if !ok {
+		return nil, invalidConfigf("顶层 discovery 必须是 Mapping")
+	}
+	rawKind, exists := mapping["type"]
+	kind, ok := rawKind.(string)
+	kind = strings.TrimSpace(kind)
+	if !exists || !ok || !validProviderName(kind) {
+		return nil, invalidConfigf(
+			"discovery.type 必须是 63 字节以内的小写 kebab-case",
+		)
+	}
+	block, exists := mapping[kind]
+	if !exists {
+		return nil, invalidConfigf("discovery 缺少选中的 %q 配置块", kind)
+	}
+	for key := range mapping {
+		if key != "type" && key != kind {
+			return nil, invalidConfigf(
+				"discovery 不能同时配置未选中的 Provider 块 %q",
+				key,
+			)
+		}
+	}
+	config, err := publicprovider.NewConfig(block)
+	if err != nil {
+		return nil, err
+	}
+	return &discoverySelection{kind: kind, config: config}, nil
+}
+
+// validateOriginDiscovery 在创建任何 Node 前校验唯一保留 Service 和 server.node。
+func validateOriginDiscovery(
+	selection *discoverySelection,
+	nodes []nodeConfig,
+	decoded []node.Config,
+) error {
+	var originConfig origindiscovery.Config
+	if selection != nil && selection.kind == "origin" {
+		var err error
+		originConfig, err = origindiscovery.DecodeConfig(selection.config)
+		if err != nil {
+			return err
+		}
+	}
+	foundServer := false
+	foundService := false
+	for index, configured := range nodes {
+		if selection != nil && selection.kind == "origin" &&
+			configured.ID == originConfig.Server.Node {
+			foundServer = true
+			if decoded[index].RPC != nil &&
+				decoded[index].RPC.Transport == rpc.TransportTCP &&
+				listenAddressesConflict(
+					decoded[index].RPC.TCP.Listen,
+					originConfig.Server.Listen,
+				) {
+				return invalidConfigf(
+					"Node %q 的 rpc.tcp.listen 不能与 discovery.origin.server.listen 相同",
+					configured.ID,
+				)
+			}
+		}
+		for _, declaration := range configured.Services {
+			name, template, private, err := parseServiceDeclaration(declaration)
+			if err != nil {
+				return err
+			}
+			if template != "DiscoveryService" {
+				continue
+			}
+			if foundService || selection == nil || selection.kind != "origin" ||
+				configured.ID != originConfig.Server.Node ||
+				name != "DiscoveryService" || private {
+				return invalidConfigf(
+					"DiscoveryService 必须唯一且以公开原名配置在 discovery.origin.server.node",
+				)
+			}
+			foundService = true
+		}
+	}
+	if selection != nil && selection.kind == "origin" &&
+		(!foundServer || !foundService) {
+		return invalidConfigf(
+			"discovery.origin.server.node 必须存在并包含唯一 DiscoveryService",
+		)
+	}
+	return nil
+}
+
+func listenAddressesConflict(left, right string) bool {
+	leftHost, leftPort, leftErr := net.SplitHostPort(strings.TrimSpace(left))
+	rightHost, rightPort, rightErr := net.SplitHostPort(strings.TrimSpace(right))
+	if leftErr != nil || rightErr != nil || leftPort != rightPort {
+		return false
+	}
+	leftHost = strings.TrimSpace(leftHost)
+	rightHost = strings.TrimSpace(rightHost)
+	wildcard := func(host string) bool {
+		return host == "" || host == "0.0.0.0" || host == "::"
+	}
+	return wildcard(leftHost) || wildcard(rightHost) ||
+		strings.EqualFold(leftHost, rightHost)
+}
+
+func validProviderName(value string) bool {
+	if len(value) == 0 || len(value) > 63 ||
+		value[0] < 'a' || value[0] > 'z' ||
+		value[len(value)-1] == '-' {
+		return false
+	}
+	previousDash := false
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		switch {
+		case character >= 'a' && character <= 'z':
+			previousDash = false
+		case character >= '0' && character <= '9':
+			previousDash = false
+		case character == '-' && !previousDash:
+			previousDash = true
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // decodeDiscoveryFilter 区分字段省略、显式 null、空列表和非空规则，并完成冷路径预编译。

@@ -73,6 +73,12 @@ const (
 
 	// CodeDiscoveryUnavailable 表示必需服务发现当前不可用或尚未完成重新发布。
 	CodeDiscoveryUnavailable Code = 5001
+	// CodeDiscoveryDuplicateNode 表示活跃 NodeID 已由其他 Session 占用。
+	CodeDiscoveryDuplicateNode Code = 5002
+	// CodeDiscoveryCapacity 表示服务发现记录、快照、连接或队列达到固定上限。
+	CodeDiscoveryCapacity Code = 5003
+	// CodeDiscoverySnapshotInvalid 表示 Provider 提交的完整权威事实不合法。
+	CodeDiscoverySnapshotInvalid Code = 5004
 
 	// CodeLogClosed 表示日志运行时已经关闭。
 	CodeLogClosed Code = 7001
@@ -148,6 +154,12 @@ func codeText(code Code) string {
 		return "transport message too large"
 	case CodeDiscoveryUnavailable:
 		return "discovery unavailable"
+	case CodeDiscoveryDuplicateNode:
+		return "discovery duplicate node"
+	case CodeDiscoveryCapacity:
+		return "discovery capacity exceeded"
+	case CodeDiscoverySnapshotInvalid:
+		return "discovery snapshot invalid"
 	case CodeLogClosed:
 		return "log runtime closed"
 	case CodeLogOutputFailed:
