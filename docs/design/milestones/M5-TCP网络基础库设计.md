@@ -61,7 +61,7 @@ M5 不实现 RPC 方法、请求响应关联、Node 身份、TcpModule ClientID�
 - 面向业务使用者的通用 TCP Service。
 - TcpModule 的 ClientID、连接表、消息 Codec/Processor 和 Service 事件投递。
 
-这些能力分别属于 M6、M7～M15 或后续独立系统，不能因实现方便带入 M5。
+这些能力分别属于 M6、M7～M16 或后续独立系统，不能因实现方便带入 M5。
 
 ## 3. v2 参考结论
 
@@ -101,7 +101,7 @@ M11 RPC Runtime ── M13 TCP RPC Adapter ─┐
                                        ├── M5 TCP 基础库 ── net.TCPConn
 后续 TcpModule ── TcpModule Adapter ───┘
 
-M11 RPC Runtime ── M14 NATS RPC Adapter ─── M6 NATS 基础库 ── nats.Conn
+M11 RPC Runtime ── M15 NATS RPC Adapter ─── M6 NATS 基础库 ── nats.Conn
 ```
 
 分层规则：
@@ -109,7 +109,7 @@ M11 RPC Runtime ── M14 NATS RPC Adapter ─── M6 NATS 基础库 ── n
 1. M5 公开的是 TCP 原生连接能力，不假装 NATS 也存在 TCP Connection；
 2. M6 公开的是 NATS 原生发布订阅能力，不为兼容 TCP 增加假连接，也不包装原生
    Request/Reply；
-3. RPC 侧的小接口由 M13/M14 的使用方定义；
+3. RPC 侧的小接口由 M13/M15 的使用方定义；
 4. TCP Adapter 和 NATS Adapter 只转换目标、Buffer 所有权、入站来源和传输错误；
 5. 序列化、RequestID、pendingCall、路由和统一 RPC 错误只实现一次，放在 RPC Runtime；
 6. TcpModule Adapter 负责 ClientID、连接表、业务消息编解码和 Service 事件投递；
@@ -578,7 +578,7 @@ M5 建议在统一 `errs` 包增加以下 Transport 通用错误码，M6 后续�
 - 本地 error 保留底层 cause，方便 `errors.Is` 和日志定位；
 - 不把远端地址、凭证或消息内容写入稳定 Message；
 - `io.EOF`、`net.ErrClosed` 和 Context 错误按发生阶段映射；
-- RPC Adapter 在 M13/M14 把这些错误完成到 pendingCall；
+- RPC Adapter 在 M13/M15 把这些错误完成到 pendingCall；
 - TcpModule Adapter 把连接和帧错误转换为所属 Service 的连接事件或发送错误；
 - M5 不生成 RPC Response，也不决定某个错误是否可重试。
 
@@ -598,7 +598,7 @@ TCP 的核心对象是 Connection，NATS 的核心对象是 Subject 和 Subscrip
 
 ### 15.2 RPC 使用方定义最小热路径接口
 
-M13/M14 实现时，RPC Runtime 只定义自己真正需要的小接口，建议外观：
+M13/M15 实现时，RPC Runtime 只定义自己真正需要的小接口，建议外观：
 
 ```go
 type sender interface {
@@ -622,7 +622,7 @@ type sender interface {
 - 入站 TCP Adapter 取得 Buffer 所有权，同步交给 RPC 解码入口并释放。
 
 首版共同接口只统一发送热路径，不强行统一 Start、Subscribe、Reconnect、Connection Event
-和 Close。它们由 Node 分别持有具体 Adapter 并按真实生命周期管理。若 M13/M14 实现证明
+和 Close。它们由 Node 分别持有具体 Adapter 并按真实生命周期管理。若 M13/M15 实现证明
 还需要第二个共同方法，再在使用方增加，不提前猜测。
 
 ### 15.3 避免重复逻辑
@@ -634,12 +634,12 @@ type sender interface {
 | RPC 契约与顶层 Protobuf | M11 RPC Runtime |
 | 普通 Go 类型静态编解码 | M11 生成静态 Codec |
 | RPC 线协议、RequestID 与 pendingCall | M13 RPC Runtime |
-| RequestID 与 pendingCall | M13/M14 RPC Runtime |
+| RequestID 与 pendingCall | M13/M15 RPC Runtime |
 | 默认 `15s` Deadline | RPC Runtime |
 | TCP 长度帧 | M5 TCP |
-| NATS Subject 和订阅 | M6/M14 NATS Adapter |
-| NodeID 到连接或 Subject 的映射 | M13/M14 Adapter |
-| Transport 错误到 RPC 完成 | M13/M14 Adapter |
+| NATS Subject 和订阅 | M6/M15 NATS Adapter |
+| NodeID 到连接或 Subject 的映射 | M13/M15 Adapter |
+| Transport 错误到 RPC 完成 | M13/M15 Adapter |
 
 TCP 和 NATS 不分别复制一次 RPC Client、代码生成或业务调用 API。
 
@@ -835,7 +835,7 @@ M5 不预先写死绝对 QPS 或 p99 门槛。验收保存可复现环境、命�
 11. 发送 Buffer 只保存上层 payload，WriteLoop 使用最长四字节的独立长度头；接收 Buffer
     可以由 RPC 同步释放或继续转移给 TcpModule Service 事件；本项已于 2026-07-26 确认；
 12. Transport 使用 `3001`～`3005` 五个轻量统一错误码；
-13. RPC Adapter 由 M13/M14 使用方定义最小 Send 接口，M5/M6 不实现共同大接口；
+13. RPC Adapter 由 M13/M15 使用方定义最小 Send 接口，M5/M6 不实现共同大接口；
 14. M5 不自动重连，不包含 Node 握手、NodeID 或 RPC 语义；M13 Node 连接管理器在逻辑
     目标仍有效时负责有界退避重连，断线不自动重发非幂等调用；
 15. 收发热路径直接使用最终池化 Buffer，避免中间消息体复制；Benchmark 对比后采用

@@ -24,7 +24,7 @@ RPC Runtime 与另一个 Node 的 RPC Runtime 通过 M5 TCP 基础库连接起�
 7. 使用完整契约指纹在业务 payload 解码前识别不兼容 Service；
 8. 复用 Application 共享 BufferPool，并避免为了拼接 RPC 协议头复制完整 payload；
 9. 单进程双 Node 与双进程单 Node 使用相同真实 TCP 路径；
-10. 为 M14 NATS 适配保留最小的 Runtime 发送边界，但不建立复杂通用 Transport 框架。
+10. 为 M15 NATS 适配保留最小的 Runtime 发送边界，但不建立复杂通用 Transport 框架。
 
 M13 是 Transport 接入里程碑，不重新设计 RPC 外观。业务仍只使用 `origingen` 已生成的：
 
@@ -49,8 +49,8 @@ M13 不包含：
 - Origin 内置服务发现、etcd Provider、TTL、关注筛选和 Lost/Retired 业务事件；
 - 正式的 `static` Discovery Provider 或配置中的静态 peer 清单；
 - 自动实例选择、轮询、随机、按 Key 取模和多 Node Broadcast；
-- NATS RPC；它属于 M14；
-- `OnStart`、`OnStop` 生命周期 Await 和最终优雅停止顺序；它属于 M15；
+- NATS RPC；它属于 M15；
+- `OnStart` 生命周期 Await 属于 M14；`OnStop` 独占 Await 和最终优雅停止顺序属于 M16；
 - RPC 请求取消帧和远端主动取消通知；
 - 自动重发 Request、Notify 或 Broadcast；
 - 流式 RPC；
@@ -203,7 +203,7 @@ nodes:
 规则如下：
 
 1. `rpc` 省略时当前 Node 只支持同 Node RPC，不创建网络资源；
-2. M13 只接受 `transport: tcp`；`nats` 到 M14 才有运行语义；
+2. M13 只接受 `transport: tcp`；`nats` 到 M15 才有运行语义；
 3. `listen` 是当前 Node 绑定地址；
 4. `advertise` 是后续 Discovery 和 M13 内部测试目标源对外提供的可达地址；
 5. `advertise` 不允许通配地址或零端口；
@@ -973,7 +973,7 @@ M13 继续服从当前 M7～M11 停止骨架：
 5. 关闭 RPC DeadlineQueue；
 6. 继续既有 Service Scheduler 和 TimerEngine 回收。
 
-M15 会按已经确认的最终语义调整顺序，使 `OnStop(ctx)` 能在独占收尾阶段执行 Await RPC。
+M16 会按已经确认的最终语义调整顺序，使 `OnStop(ctx)` 能在独占收尾阶段执行 Await RPC。
 M13 不把当前临时顺序写成最终兼容承诺。
 
 ## 18. 服务发现与事件边界
@@ -1174,7 +1174,7 @@ M13 确认时已经同步以下细节：
 | 20 | 已接收任务 | 调用方断线后继续执行；响应无法投递时释放，不制造日志风暴 |
 | 21 | 压缩 | M13 不支持、不预留字段；以后由数据驱动并使用新的协议 Magic |
 | 22 | TCP 连接事件 | 只做内部诊断，不冒充 Discovery Added/Lost 业务事件 |
-| 23 | M13 停止边界 | 完成当前 Runtime 关闭和 pending 清理；最终 `OnStop Await` 顺序留 M15 |
+| 23 | M13 停止边界 | 完成当前 Runtime 关闭和 pending 清理；最终 `OnStop Await` 顺序留 M16 |
 
 ## 24. 实施与验收结果
 

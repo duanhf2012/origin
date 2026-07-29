@@ -21,7 +21,7 @@ M11 建立 Origin v3 第一套可实际调用的 RPC 契约、代码生成和同
 
 M11 不是完整网络 RPC 里程碑。M11 一并完成普通 Go 类型、结构体、容器和嵌套
 Protobuf 的静态编解码；自定义静态 Codec、TCP、NATS、服务发现和完整停止分别由
-M12～M15 及后续独立里程碑实现。
+M12～M16 及后续独立里程碑实现。
 
 ## 2. 设计依据
 
@@ -71,8 +71,8 @@ M11 必须同时遵守：
 22. 每个 Node 创建并独占一个 `rpc.Runtime`，但 RPC 的业务目标始终是 Service；
 23. 生成客户端只在构造冷路径取得一次 Runtime，不在调用热路径查询或断言；
 24. Dispatcher 使用静态方法分派和静态编解码函数，不建立公共 Codec 接口；
-25. M11 只支持 Running 阶段的本地 RPC；`OnStart`、`OnStop` 的生命周期 Await 基础进入
-    M15，`AwaitService`、`AwaitNodeService` 随后在服务发现里程碑接入；
+25. M11 只支持 Running 阶段的本地 RPC；`OnStart` 生命周期 Await、`AwaitService` 和
+    `AwaitNodeService` 由 M14 服务发现里程碑接入，`OnStop` 独占生命周期 Await 进入 M16；
 26. 首版不公开 `AwaitManaged` 或第二套 Await API；
 27. M11 一并支持普通 Go 结构体、指针、数组、Slice、Map 和其中嵌套的 Protobuf
     生成结构体，不使用反射或 JSON 回退；
@@ -112,11 +112,13 @@ M11 必须同时遵守：
 |---|---|
 | 自定义静态 Codec 和特殊类型扩展 | M12 |
 | RPC 线协议、RequestID、pendingCall、连接管理和 TCP | M13 |
-| NATS RPC Transport | M14 |
-| 生命周期 Await 基础、完整 Stop 排空、OnStop Await RPC 和异常进程收尾 | M15 |
-| Origin/etcd 服务发现、关注筛选和退休状态 | M15 后独立里程碑 |
+| 服务发现本地目录、关注筛选和发现/失去发现监听基础 | M14 |
+| NATS RPC Transport | M15 |
+| OnStart 生命周期 Await、AwaitService 和 AwaitNodeService | M14 |
+| OnStop 独占生命周期 Await、完整 Stop 排空和异常进程收尾 | M16 |
+| Origin/etcd 服务发现 Provider 和完整退休状态 | M16 后独立里程碑 |
 | RoundRobin、Rand、ModKey、自定义路由和多 Node 发现范围 Broadcast | 服务发现之后独立里程碑 |
-| 外部 gRPC 插件 | M15 后独立里程碑 |
+| 外部 gRPC 插件 | M16 后独立里程碑 |
 | 流式 RPC | 首版不支持，有真实需求后重新设计 |
 | RPC 压缩 | 基准证明有净收益后单独立项 |
 
@@ -369,7 +371,7 @@ M11 尚未接入服务发现：
 - 空名称、空 NodeID 和零值 Target 不 panic，在真正调用时返回
   `CodeInvalidArgument`。
 
-M13/M14 接入远端 Transport 后，继续使用同一个 Target 和生成客户端，不改变业务调用
+M13/M15 接入远端 Transport 后，继续使用同一个 Target 和生成客户端，不改变业务调用
 外观。后续服务发现和路由里程碑只扩展 `ToService` 的候选来源，不修改强类型方法。
 
 ### 6.3 为什么不使用两个构造函数
@@ -631,7 +633,7 @@ Schema 进入契约指纹；不兼容修改由指纹和兼容性检查拒绝。
 - MethodID 只由契约规范名和方法名生成；
 - 完整 ContractFingerprint 负责记录整个接口的精确签名和线格式；
 - 指纹不匹配必须在业务载荷解码前返回契约不匹配，不能尝试猜测或兼容解码；
-- M13/M14 必须通过握手、发现会话或等价的传输边界保证上述检查，但具体承载方式留在各自
+- M13/M15 必须通过握手、发现会话或等价的传输边界保证上述检查，但具体承载方式留在各自
   Transport 设计中确认，M11 不提前增加网络帧字段。
 
 原 RPC 可以直接进行的兼容修改仅包括：
@@ -1151,7 +1153,7 @@ RPC 默认超时，也不公开 `AwaitManaged` 等重复入口。Deadline 从进
 Async pending 使用与 Await 相同的有效 Deadline。调用方需要主动取消时使用
 `context.WithCancel` 派生 Context 并调用 `cancel()`；生成方法不再返回另一种取消句柄。
 
-M11 只处理 Running 期间的基本回调。Draining、停止期间的新调用和回调排空由 M15 完整
+M11 只处理 Running 期间的基本回调。Draining、停止期间的新调用和回调排空由 M16 完整
 实现。
 
 ### 13.5 Notify
@@ -1664,7 +1666,8 @@ Go RPC 接口
 ```
 
 这一闭环优先验证业务接口、生成结果、数据边界和 Service 单执行权，不提前加入网络、发现
-和复杂路由。M12～M14 只在该稳定基础上依次补齐自定义 Codec、TCP 和 NATS，不能重新
+和复杂路由。M12～M15 只在该稳定基础上依次补齐自定义 Codec、TCP、服务发现目录和
+NATS，不能重新
 发明客户端外观、Dispatcher 语义或 M11 已确定的数据表示。
 
 ## 22. 实施与验收结果

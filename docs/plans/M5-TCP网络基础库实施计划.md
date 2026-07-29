@@ -40,7 +40,7 @@ M5 只提供单次 Dial 和连接关闭通知，不实现 NodeID、握手、RPC 
 - ReadTimeout 默认关闭，WriteTimeout 默认 `15s`；
 - `Close` 立即停止传输并释放未发送 Buffer，不实现 Drain 或半关闭；
 - 已关闭 `Conn` 不复活，不保存可供自动重发的 payload；
-- 不提前实现 M6、M7～M15 或后续 TcpModule 能力。
+- 不提前实现 M6、M7～M16 或后续 TcpModule 能力。
 
 ## 4. 预计代码结构
 
