@@ -12,6 +12,7 @@ import (
 
 	"github.com/duanhf2012/origin/v3/command"
 	"github.com/duanhf2012/origin/v3/errs"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/rpc"
@@ -410,6 +411,105 @@ func TestLoadConfigRejectsInvalidNodeRPC(t *testing.T) {
 		directory := writeApplicationConfig(t, content)
 		if _, err := loadConfig(directory); !errs.IsCode(err, errs.CodeInvalidConfig) {
 			t.Fatalf("非法 Node RPC loadConfig() error = %v", err)
+		}
+	}
+}
+
+// TestLoadConfigDiscoveryFilter 验证 Node 标签与关注规则能够从 YAML 冻结为精确匹配器。
+func TestLoadConfigDiscoveryFilter(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: default-1
+    services: [lifecycleTestService]
+  - id: none-1
+    allow_discovery: []
+    services: [lifecycleTestService]
+  - id: filtered-1
+    labels:
+      region: cn-east
+      stage: dev
+    allow_discovery:
+      - services: [PlayerService, ChatService]
+        node_labels:
+          region: [cn-east, cn-north]
+          stage: prod
+    services: [lifecycleTestService]
+`)
+	loaded, err := loadConfig(directory)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if loaded.nodes[2].Labels["region"] != "cn-east" ||
+		loaded.nodes[2].Labels["stage"] != "dev" {
+		t.Fatalf("Node Labels = %v", loaded.nodes[2].Labels)
+	}
+
+	target := internaldiscovery.RawNode{
+		NodeID: "game-1",
+		Labels: map[string]string{"region": "cn-north", "stage": "prod"},
+	}
+	player := internaldiscovery.RawService{ServiceName: "PlayerService"}
+	if !loaded.nodes[0].DiscoveryFilter.Match(target, player) {
+		t.Fatal("省略 allow_discovery 没有允许公开远端 Service")
+	}
+	if loaded.nodes[1].DiscoveryFilter.Match(target, player) {
+		t.Fatal("显式空 allow_discovery 没有拒绝全部远端 Service")
+	}
+	if !loaded.nodes[2].DiscoveryFilter.Match(target, player) {
+		t.Fatal("组合关注规则没有匹配单值/多值标签")
+	}
+}
+
+// TestLoadConfigRejectsInvalidDiscoveryConfiguration 锁定空标签、null、空规则和空维度的
+// 启动期失败。
+func TestLoadConfigRejectsInvalidDiscoveryConfiguration(t *testing.T) {
+	tests := []string{
+		`nodes:
+  - id: game-1
+    labels:
+      "": cn-east
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    labels:
+      region: ""
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    allow_discovery: null
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    allow_discovery: [{}]
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    allow_discovery:
+      - services: []
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    allow_discovery:
+      - node_labels: {}
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    allow_discovery:
+      - node_labels:
+          region: []
+    services: [lifecycleTestService]
+`,
+	}
+	for _, content := range tests {
+		directory := writeApplicationConfig(t, content)
+		if _, err := loadConfig(directory); !errs.IsCode(err, errs.CodeInvalidConfig) {
+			t.Fatalf("非法发现配置 loadConfig() error = %v", err)
 		}
 	}
 }

@@ -3,6 +3,8 @@ package node
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/rpc"
@@ -27,9 +30,11 @@ type interfaceService = service.IService
 // Application 生命周期控制路径调用。
 type Node struct {
 	// id、private 和 logger 在构造完成后只读。
-	id      string
-	private bool
-	logger  originlog.Logger
+	id        string
+	sessionID string
+	private   bool
+	labels    map[string]string
+	logger    originlog.Logger
 	// schedulerConfig 是当前 Node 为每个 ServiceScheduler 提供的冻结默认策略。
 	schedulerConfig service.SchedulerConfig
 
@@ -46,6 +51,11 @@ type Node struct {
 	timerResources nodeTimerResources
 	// rpcRuntime 是当前 Node 独占的本地路由目录；BufferPool 仍由 Application 共享。
 	rpcRuntime *rpc.Runtime
+	// discovery 是当前 Node 独占的可见目录；source/subscription 只属于 M14 过渡数据源。
+	discovery             *discoveryRuntime
+	discoverySource       *internaldiscovery.Source
+	discoverySubscription *internaldiscovery.Subscription
+	discoveryPublished    atomic.Bool
 }
 
 // nodeTimerResources 管理当前 Node 生命周期内唯一 TimerID 和共享活跃额度。
@@ -58,14 +68,18 @@ type nodeTimerResources struct {
 
 // serviceEntry 保存单个 Service 的运行身份和由 Node 拥有的状态。
 type serviceEntry struct {
-	nodeID     string
-	name       string
-	template   string
-	private    bool
-	instance   service.IService
-	logger     originlog.Logger
-	state      atomic.Uint32
-	startError bool
+	nodeID              string
+	name                string
+	template            string
+	private             bool
+	instance            service.IService
+	logger              originlog.Logger
+	state               atomic.Uint32
+	startError          bool
+	contractID          uint64
+	contractFingerprint [32]byte
+	// discoveryRun 是当前 Service 唯一且稳定的发现状态同步函数。
+	discoveryRun func(context.Context)
 }
 
 // serviceRuntime 把 Service 的只读查询限制在所属 Node 和当前实例。
@@ -111,6 +125,21 @@ func New(
 		// node.New 仍可用于独立单元测试；正式 Application 会传入进程级共享 Pool。
 		options.BufferPool = bufferpool.NewPool(bufferpool.Options{})
 	}
+	if err := internaldiscovery.ValidateNodeLabels(config.Labels); err != nil {
+		return nil, invalidConfig(fmt.Sprintf(
+			"Node %q 的 labels 无效: %v",
+			config.ID,
+			err,
+		))
+	}
+	sessionID, err := newSessionID()
+	if err != nil {
+		return nil, fmt.Errorf("创建 Node %q SessionID: %w", config.ID, err)
+	}
+	discoveryRuntime, err := newDiscoveryRuntime(config.ID, config.DiscoveryFilter)
+	if err != nil {
+		return nil, fmt.Errorf("创建 Node %q 服务发现目录: %w", config.ID, err)
+	}
 
 	rpcRuntime, err := rpc.NewRuntime(
 		config.ID,
@@ -127,7 +156,9 @@ func New(
 	// 按已知数量一次分配有序表和查询表，避免装配时重复扩容。
 	instance := &Node{
 		id:              config.ID,
+		sessionID:       sessionID,
 		private:         config.Private,
+		labels:          cloneLabels(config.Labels),
 		logger:          logger.With(originlog.String("node_id", config.ID)),
 		schedulerConfig: config.Scheduler,
 		services:        make([]*serviceEntry, 0, len(bindings)),
@@ -137,7 +168,16 @@ func New(
 			maxTimers:     int64(options.MaxTimersPerNode),
 			timerLocation: options.TimerLocation,
 		},
-		rpcRuntime: rpcRuntime,
+		rpcRuntime:      rpcRuntime,
+		discovery:       discoveryRuntime,
+		discoverySource: options.DiscoverySource,
+	}
+	discoveryRuntime.bindNode(instance)
+	if err := rpcRuntime.BindSessionID(sessionID); err != nil {
+		return nil, fmt.Errorf("绑定 Node %q RPC SessionID: %w", config.ID, err)
+	}
+	if err := rpcRuntime.BindRemoteResolver(discoveryRuntime); err != nil {
+		return nil, fmt.Errorf("绑定 Node %q RPC 服务发现目录: %w", config.ID, err)
 	}
 	instance.state.Store(uint32(StateCreated))
 
@@ -165,6 +205,9 @@ func New(
 				originlog.String("service_name", binding.Name),
 			),
 		}
+		entry.discoveryRun = func(ctx context.Context) {
+			instance.discovery.deliver(ctx, entry)
+		}
 		entry.state.Store(uint32(service.StateCreated))
 		runtime := &serviceRuntime{node: instance, entry: entry}
 		if err := service.BindRuntime(binding.Service, runtime); err != nil {
@@ -185,6 +228,8 @@ func New(
 					binding.Name,
 				))
 			}
+			entry.contractID = uint64(dispatcher.ContractID())
+			entry.contractFingerprint = [32]byte(dispatcher.Fingerprint())
 		}
 		if err := instance.rpcRuntime.RegisterServiceVisibility(
 			binding.Name,
@@ -212,7 +257,37 @@ func New(
 		return nil, fmt.Errorf("创建 Node %q TimerEngine: %w", config.ID, err)
 	}
 	instance.timerEngine = timerEngine
+	if instance.discoverySource != nil {
+		subscription, err := instance.discoverySource.Subscribe(instance.discovery.apply)
+		if err != nil {
+			_ = timerEngine.Close()
+			rpcRuntime.Close()
+			return nil, fmt.Errorf("订阅 Node %q 过渡服务发现: %w", config.ID, err)
+		}
+		instance.discoverySubscription = subscription
+	}
 	return instance, nil
+}
+
+// newSessionID 使用系统安全随机源创建不由业务配置控制的 Node 进程会话标识。
+func newSessionID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw[:]), nil
+}
+
+// cloneLabels 冻结 Node 发布标签，防止配置根 Map 在启动后被外部修改。
+func cloneLabels(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 // acquireTimerSlot 原子申请一个活跃额度并分配永不复用的 Node TimerID。
@@ -395,33 +470,36 @@ func (node *Node) Start(ctx context.Context) error {
 				cause:       err,
 			}
 		}
+		// OnInit 中登记的监听器在 Scheduler Prepared 后形成脏标记，但仍等待统一激活屏障。
+		node.discovery.activateOwner(entry)
 
 		// 从真正进入 OnStart 前开始记录停止责任；OnStart 或 Activate 失败都必须先清理
 		// Prepared Scheduler，再执行当前 Service 的 OnStop。
 		node.started = append(node.started, entry)
-		err := callLifecycle(entry, "on_start", func() error {
-			return entry.instance.OnStart(ctx)
-		})
+		startContext, finishStart, err := service.PrepareStartContext(
+			entry.instance,
+			ctx,
+		)
 		if err != nil {
-			entry.startError = true
-			entry.state.Store(uint32(service.StateFailed))
-			node.state.Store(uint32(StateFailed))
-			return err
-		}
-
-		// 先发布 Service Running，再激活 Runner 和 watcher；已在 OnStart 到期的 Timer
-		// 随后才会转成 Ready Task，因此绝不会与 OnStart 并发。
-		entry.state.Store(uint32(service.StateRunning))
-		if err := service.ActivateScheduler(entry.instance); err != nil {
 			entry.startError = true
 			entry.state.Store(uint32(service.StateFailed))
 			node.state.Store(uint32(StateFailed))
 			return &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
-				phase:       "scheduler_activate",
+				phase:       "start_context_prepare",
 				cause:       err,
 			}
+		}
+		err = callLifecycle(entry, "on_start", func() error {
+			return entry.instance.OnStart(startContext)
+		})
+		finishStart()
+		if err != nil {
+			entry.startError = true
+			entry.state.Store(uint32(service.StateFailed))
+			node.state.Store(uint32(StateFailed))
+			return err
 		}
 	}
 	// 最后一个回调可能在执行期间越过 Deadline 却返回 nil，发布 Ready 前必须再次确认。
@@ -435,7 +513,40 @@ func (node *Node) Start(ctx context.Context) error {
 		}
 	}
 
-	// 所有 Service 成功后一次性发布 Node Ready。
+	// 全部 OnStart 成功后统一发布 Running 并激活 Runner，任何业务任务都不能与后续
+	// Service 的 OnStart 并发。
+	for _, entry := range node.started {
+		entry.state.Store(uint32(service.StateRunning))
+		if err := service.ActivateScheduler(entry.instance); err != nil {
+			entry.startError = true
+			entry.state.Store(uint32(service.StateFailed))
+			node.state.Store(uint32(StateFailed))
+			return &lifecycleContext{
+				nodeID:      node.id,
+				serviceName: entry.name,
+				phase:       "scheduler_activate",
+				cause:       err,
+			}
+		}
+	}
+
+	// 全部 Runner 已激活后开放入站业务准入；随后一次性发布全部公开 Service。
+	if err := node.rpcRuntime.OpenInbound(); err != nil {
+		node.state.Store(uint32(StateFailed))
+		return &lifecycleContext{
+			nodeID: node.id,
+			phase:  "rpc_inbound_open",
+			cause:  err,
+		}
+	}
+	if err := node.publishDiscovery(); err != nil {
+		node.state.Store(uint32(StateFailed))
+		return &lifecycleContext{
+			nodeID: node.id,
+			phase:  "discovery_publish",
+			cause:  err,
+		}
+	}
 	node.state.Store(uint32(StateReady))
 	node.logger.Info("node ready")
 	return nil
@@ -452,10 +563,12 @@ func (node *Node) Rollback(ctx context.Context) error {
 		return invalidArgument(fmt.Sprintf("Node %q 的回滚 Context 不能为空", node.id))
 	}
 	// 失败实例仍先获得反序 OnStop，最后再关闭 Node 时间轮并等待其 goroutine 退出。
+	node.withdrawDiscovery()
 	result := node.rpcRuntime.BeginStop(ctx)
 	result = errors.Join(result, node.stopStarted(ctx, true))
 	node.rpcRuntime.Close()
 	result = errors.Join(result, node.timerEngine.Close())
+	node.closeDiscoverySubscription()
 	node.state.Store(uint32(StateFailed))
 	return result
 }
@@ -483,32 +596,79 @@ func (node *Node) Stop(ctx context.Context) error {
 	// 正常停止会发布 Stopping/Stopped；失败回滚由 Rollback 保持 Failed。
 	node.state.Store(uint32(StateStopping))
 	node.logger.Info("node stopping")
+	node.withdrawDiscovery()
 	result := node.rpcRuntime.BeginStop(ctx)
 	// Service 清理阶段保留时间轮运行，全部 OnStop 返回后才回收 Node 最后的后台资源。
 	result = errors.Join(result, node.stopStarted(ctx, false))
 	node.rpcRuntime.Close()
 	result = errors.Join(result, node.timerEngine.Close())
+	node.closeDiscoverySubscription()
 	node.state.Store(uint32(StateStopped))
 	node.logger.Info("node stopped")
 	return result
 }
 
-// RPCAdvertiseAddress 返回当前 Node 对其他 Node 公开的 TCP RPC 地址。
-//
-// 该方法只供 Application 和未来 Discovery 装配连接目标；业务客户端仍只保存逻辑 Target。
-func (node *Node) RPCAdvertiseAddress() (string, bool) {
-	if node == nil || node.rpcRuntime == nil {
-		return "", false
+// publishDiscovery 在全部 OnStart 和 Runner 激活成功后整体发布当前 Node 的公开 Service。
+func (node *Node) publishDiscovery() error {
+	if node.discoverySource == nil || node.private {
+		return nil
 	}
-	return node.rpcRuntime.AdvertiseAddress()
+	services := make([]internaldiscovery.RawService, 0, len(node.services))
+	for _, entry := range node.services {
+		if entry.private {
+			continue
+		}
+		services = append(services, internaldiscovery.RawService{
+			ServiceName:         entry.name,
+			State:               internaldiscovery.ServiceStateRunning,
+			ContractID:          entry.contractID,
+			ContractFingerprint: entry.contractFingerprint,
+		})
+	}
+	// 全部 Service 均为私有时没有远端可见事实，不发布空 Node 记录。
+	if len(services) == 0 {
+		return nil
+	}
+	transport := internaldiscovery.TransportNone
+	address := ""
+	if advertised, exists := node.rpcRuntime.AdvertiseAddress(); exists {
+		transport = internaldiscovery.TransportTCP
+		address = advertised
+	}
+	if err := node.discoverySource.Publish(internaldiscovery.RawNode{
+		NodeID:    node.id,
+		SessionID: node.sessionID,
+		Labels:    cloneLabels(node.labels),
+		Transport: transport,
+		Address:   address,
+		Services:  services,
+	}); err != nil {
+		return err
+	}
+	node.discoveryPublished.Store(true)
+	return nil
 }
 
-// AddRPCTarget 把一个明确 Node 地址交给当前 Node 的连接管理器。
-func (node *Node) AddRPCTarget(nodeID, address string) error {
-	if node == nil || node.rpcRuntime == nil {
-		return errs.ErrInvalidArgument
+// withdrawDiscovery 在正式停止新业务准入前撤销当前精确 Node 会话。
+func (node *Node) withdrawDiscovery() {
+	if node == nil || node.discoverySource == nil ||
+		!node.discoveryPublished.Swap(false) {
+		return
 	}
-	return node.rpcRuntime.AddTarget(nodeID, address)
+	node.discoverySource.Withdraw(node.id, node.sessionID)
+}
+
+// closeDiscoverySubscription 幂等关闭当前 Node 对过渡完整快照源的订阅。
+func (node *Node) closeDiscoverySubscription() {
+	if node == nil {
+		return
+	}
+	if node.discoverySubscription != nil {
+		node.discoverySubscription.Close()
+		node.discoverySubscription = nil
+	}
+	// 即使独立 node.New 没有过渡 Source，也必须使查询、等待和监听外观随 Node 一起失效。
+	node.discovery.close()
 }
 
 // stopStarted 按 started 的严格反序执行唯一一次清理。
@@ -516,6 +676,8 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 	var result error
 	for index := len(node.started) - 1; index >= 0; index-- {
 		entry := node.started[index]
+		// 停止准入前先删除监听器并唤醒当前 Service 的发现等待，避免排空被新变化延长。
+		node.discovery.removeOwner(entry, errs.ErrServiceStopping)
 		// 先在 Scheduler 锁内关闭新任务和新 Timer 的准入，再向业务发布 Stopping。
 		// 两者的固定顺序消除“业务已经看到 Stopping、旧创建方却仍提交 Timer”的竞态。
 		if err := service.BeginStopScheduler(entry.instance); err != nil {

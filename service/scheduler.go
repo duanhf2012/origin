@@ -52,6 +52,7 @@ type serviceTaskKind uint8
 const (
 	taskKindDispatch serviceTaskKind = iota
 	taskKindTimer
+	taskKindDiscovery
 )
 
 // taskContextKey 是不可从 service 包外构造的 Context 私有键。
@@ -112,14 +113,25 @@ type deadlineBindingKind uint8
 
 const (
 	deadlineBindingAwait deadlineBindingKind = iota
+	deadlineBindingStartAwait
 	deadlineBindingTimer
 )
+
+// startAwait 保存 OnStart 顺序等待在 M8 DeadlineQueue 中的一次活动绑定。
+type startAwait struct {
+	token      *startContext
+	generation uint64
+	deadlineID timerwheel.DeadlineID
+	cancel     context.CancelCauseFunc
+	expired    bool
+}
 
 // deadlineBinding 防止旧 DeadlineID 误作用到复用后的 Await Task 或业务 Timer。
 type deadlineBinding struct {
 	kind       deadlineBindingKind
 	task       *serviceTask
 	token      *taskContext
+	start      *startAwait
 	timer      *businessTimer
 	generation uint64
 }
@@ -135,9 +147,15 @@ type serviceScheduler struct {
 	// activated 区分从 Prepared 直接停止和已经启动过 Runner 的 Draining。
 	// 状态进入 Draining 后仅凭 state 无法恢复这一事实，因此单独冻结该生命周期标记。
 	activated bool
-	config    SchedulerConfig
-	logger    originlog.Logger
-	runtime   Runtime
+	// startGeneration 和 startActive 只验证 Node 当前唯一 OnStart 生命周期令牌。
+	startGeneration uint64
+	startActive     bool
+	// startAwaitGeneration 和 activeStartAwait 防止旧默认 Deadline 命中新一轮生命周期等待。
+	startAwaitGeneration uint64
+	activeStartAwait     *startAwait
+	config               SchedulerConfig
+	logger               originlog.Logger
+	runtime              Runtime
 
 	ready       *ringqueue.Queue[*serviceTask]
 	runningTask *serviceTask
@@ -147,6 +165,12 @@ type serviceScheduler struct {
 	accepted int
 	running  int
 	awaiting int
+
+	// 发现更新只占用常数大小状态，并在统一 Ready FIFO 中最多存在一个同步 Task。
+	discoveryRun     func(context.Context)
+	discoveryDirty   bool
+	discoveryQueued  bool
+	discoveryRunning bool
 
 	acceptedHighWatermark int
 	dispatchedTotal       uint64
@@ -185,10 +209,11 @@ type serviceScheduler struct {
 	stopResult error
 }
 
-// PrepareScheduler 为 target 创建一次性的 Ready 和 Deadline 控制资源，但不启动 goroutine。
+// PrepareScheduler 为 target 创建一次性的 Ready 和 Deadline 控制资源。
 //
 // 该函数在业务 OnStart 前调用，使 OnStart 可以登记 Timer，同时保证任何用户任务都不会
-// 与 OnStart 并发。ActivateScheduler 才会启动 Runner 和 Deadline watcher。
+// 与 OnStart 并发。Prepare 阶段只启动不执行用户代码的 Deadline watcher；
+// ActivateScheduler 才会启动普通业务 Runner。
 func PrepareScheduler(
 	target IService,
 	config SchedulerConfig,
@@ -265,10 +290,13 @@ func PrepareScheduler(
 		deadlineQueue.Close()
 		return invalidArgument("ServiceScheduler 不能重复启动")
 	}
+	// OnStart 默认 Await 也使用 M8 DeadlineQueue，因此控制协程必须先于 OnStart 工作。
+	// 它只取消 Context，不会执行 Timer、监听器或其他业务回调。
+	go scheduler.watchDeadlines()
 	return nil
 }
 
-// ActivateScheduler 在 Service 已发布 Running 后启动唯一 Runner 和 Deadline watcher。
+// ActivateScheduler 在 Service 已发布 Running 后启动唯一普通业务 Runner。
 func ActivateScheduler(target IService) error {
 	// 激活只接受已经由 PrepareScheduler 完整发布的真实 Service。
 	if target == nil || isNilService(target) {
@@ -286,7 +314,7 @@ func ActivateScheduler(target IService) error {
 		return errs.ErrServiceNotReady
 	}
 
-	// 状态转换先于 goroutine 创建；只有首位激活者能取得两个后台资源的所有权。
+	// 状态转换先于 goroutine 创建；只有首位激活者能取得普通 Runner 的所有权。
 	scheduler.mu.Lock()
 	if scheduler.state != schedulerPrepared {
 		scheduler.mu.Unlock()
@@ -294,12 +322,14 @@ func ActivateScheduler(target IService) error {
 	}
 	scheduler.state = schedulerRunning
 	scheduler.activated = true
+	promotedDiscovery := scheduler.promoteDiscoveryLocked()
 	scheduler.mu.Unlock()
 
-	// 最后一个活动 Runner 关闭 runnerDone；Deadline watcher 在 Queue 关闭后关闭
-	// deadlineDone。两者都由 StopScheduler 等待并回收。
+	// 最后一个活动 Runner 关闭 runnerDone；Deadline watcher 已在 Prepare 阶段启动。
 	go scheduler.run()
-	go scheduler.watchDeadlines()
+	if promotedDiscovery {
+		scheduler.notifyRunner()
+	}
 	return nil
 }
 
@@ -327,6 +357,7 @@ func BeginStopScheduler(target IService) error {
 	case schedulerPrepared, schedulerRunning:
 		// Draining 是全部任务和 Timer 创建入口在同一锁内检查的线性化边界。
 		scheduler.state = schedulerDraining
+		scheduler.discoveryDirty = false
 		scheduler.cancelUnreadyTimersLocked()
 		notifyRunner = scheduler.activated
 	case schedulerDraining, schedulerStopped:
@@ -472,6 +503,15 @@ func (scheduler *serviceScheduler) nextTask() (
 			if next.kind == taskKindTimer {
 				scheduler.startTimerTaskLocked(next)
 			}
+			if next.kind == taskKindDiscovery {
+				if !scheduler.discoveryQueued || scheduler.discoveryRunning {
+					panic("service: 发现任务排队状态不一致")
+				}
+				scheduler.discoveryQueued = false
+				scheduler.discoveryRunning = true
+				// 当前 Task 将同步开始时看到的最新版本；执行期间的新更新会再次置脏。
+				scheduler.discoveryDirty = false
+			}
 			next.state = taskRunning
 			scheduler.running = 1
 			scheduler.runningTask = next
@@ -522,6 +562,7 @@ func (scheduler *serviceScheduler) restoreTaskLocked(task *serviceTask) *service
 // executeTask 调用一个普通根任务，并在最外层恢复业务 panic。
 func (scheduler *serviceScheduler) executeTask(task *serviceTask) {
 	panicValue, panicStack, panicked := callTask(task)
+	discoveryTask := task.kind == taskKindDiscovery
 	var timerID TimerID
 	var timerKind string
 	logTimerPanic := true
@@ -564,6 +605,13 @@ func (scheduler *serviceScheduler) executeTask(task *serviceTask) {
 	scheduler.running = 0
 	scheduler.accepted--
 	scheduler.completedTotal++
+	if discoveryTask {
+		if !scheduler.discoveryRunning {
+			scheduler.mu.Unlock()
+			panic("service: 发现任务完成时运行标记不存在")
+		}
+		scheduler.discoveryRunning = false
+	}
 	if panicked {
 		scheduler.panicTotal++
 	}
@@ -584,6 +632,8 @@ func (scheduler *serviceScheduler) executeTask(task *serviceTask) {
 	// 根任务释放 Accepted 额度后，最早到期的 Timer 优先取得该额度并追加到 Ready。
 	// 当前 goroutine 会继续 Runner 循环，因此不需要额外唤醒。
 	scheduler.promoteDueTimersLocked()
+	// Timer 到期项继续保持已有优先级；剩余额度再用于同步最新发现状态。
+	scheduler.promoteDiscoveryLocked()
 	scheduler.mu.Unlock()
 
 	if panicked {
@@ -631,6 +681,8 @@ func callTask(task *serviceTask) (
 
 	switch task.kind {
 	case taskKindDispatch:
+		task.fn(task.context)
+	case taskKindDiscovery:
 		task.fn(task.context)
 	case taskKindTimer:
 		callTimerTask(task)
@@ -705,15 +757,22 @@ func (scheduler *serviceScheduler) stop(ctx context.Context) error {
 	}
 	if scheduler.state == schedulerPrepared ||
 		(scheduler.state == schedulerDraining && !scheduler.activated) {
-		// Prepared 阶段从未创建 Runner 或 watcher。当前停止者直接取得全部冷路径资源，
-		// 关闭 Queue、取消 Context 并发布 Stopped，不能等待无人关闭的 Done Channel。
+		// Prepared 阶段没有普通 Runner，但 Deadline watcher 已经服务过 OnStart 默认超时。
+		// 当前停止者关闭 Queue 并等待 watcher 退出，再回收全部冷路径资源。
 		scheduler.state = schedulerDraining
+		scheduler.discoveryDirty = false
 		scheduler.ready.Clear()
 		scheduler.cancelUnreadyTimersLocked()
 		scheduler.mu.Unlock()
 		scheduler.deadlineQueue.Close()
+		<-scheduler.deadlineDone
 		scheduler.cancelLifetime(errs.ErrServiceStopped)
 		scheduler.mu.Lock()
+		if scheduler.awaiting != 0 || scheduler.activeStartAwait != nil ||
+			len(scheduler.deadlineBindings) != 0 {
+			scheduler.mu.Unlock()
+			panic("service: Prepared Scheduler 停止时仍包含生命周期 Await")
+		}
 		scheduler.cancelAllTimersLocked()
 		scheduler.releaseStoppedStorageLocked()
 		scheduler.state = schedulerStopped
@@ -787,6 +846,10 @@ func (scheduler *serviceScheduler) releaseStoppedStorageLocked() {
 	}
 
 	scheduler.ready = nil
+	scheduler.discoveryRun = nil
+	scheduler.discoveryDirty = false
+	scheduler.discoveryQueued = false
+	scheduler.discoveryRunning = false
 	scheduler.deadlineQueue = nil
 	scheduler.deadlineBindings = nil
 	scheduler.timerEngine = nil
@@ -929,6 +992,25 @@ func (scheduler *serviceScheduler) watchDeadlines() {
 					delete(scheduler.deadlineBindings, id)
 					task.awaitDeadlineID = timerwheel.InvalidDeadlineID
 					cancels[cancelCount] = task.awaitCancel
+					cancelCount++
+				case deadlineBindingStartAwait:
+					start := binding.start
+					if start == nil ||
+						start.token == nil ||
+						!start.token.active.Load() ||
+						scheduler.activeStartAwait != start ||
+						start.generation != binding.generation ||
+						start.deadlineID != id {
+						delete(scheduler.deadlineBindings, id)
+						continue
+					}
+
+					// 先在线性化锁内记录到期，再于锁外取消 Context。即使等待函数恰好
+					// 自行返回，清理路径也能稳定把本次结果判定为 DeadlineExceeded。
+					delete(scheduler.deadlineBindings, id)
+					start.deadlineID = timerwheel.InvalidDeadlineID
+					start.expired = true
+					cancels[cancelCount] = start.cancel
 					cancelCount++
 				case deadlineBindingTimer:
 					timer := binding.timer

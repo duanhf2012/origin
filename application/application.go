@@ -14,6 +14,7 @@ import (
 	"github.com/duanhf2012/origin/v3/command"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/log/zaplog"
 	"github.com/duanhf2012/origin/v3/node"
@@ -289,12 +290,11 @@ func (app *Application) run(
 	if err != nil {
 		return app.report(err)
 	}
-	nodes, err := app.buildNodes(selected)
+	// M14 过渡数据源只覆盖本次实际启动的 Node；每个 Node 仍建立自己的可见目录和 TCP。
+	discoverySource := internaldiscovery.NewSource()
+	nodes, err := app.buildNodes(selected, discoverySource)
 	if err != nil {
 		return app.report(err)
-	}
-	if err := wireRPCTargets(nodes); err != nil {
-		return app.report(rollbackBuiltNodes(nodes, err))
 	}
 	app.mu.Lock()
 	app.nodes = nodes
@@ -330,36 +330,6 @@ func (app *Application) run(
 	app.logger.Info("application running")
 	<-lifecycleCtx.Done()
 	return app.stopStartedNodes()
-}
-
-// wireRPCTargets 把同一 Application 已选择的 TCP Node 按真实地址互相登记。
-//
-// 这里只提供 M13 的显式地址来源；调用仍经真实 TCP 连接，不使用进程内 Runtime 指针
-// 短路。未来 Discovery 复用 Node.AddRPCTarget 即可，无需改变生成客户端。
-func wireRPCTargets(nodes []*node.Node) error {
-	for _, source := range nodes {
-		if _, enabled := source.RPCAdvertiseAddress(); !enabled {
-			continue
-		}
-		for _, target := range nodes {
-			if source == target {
-				continue
-			}
-			address, enabled := target.RPCAdvertiseAddress()
-			if !enabled {
-				continue
-			}
-			if err := source.AddRPCTarget(target.ID(), address); err != nil {
-				return fmt.Errorf(
-					"登记 Node %q 到 Node %q 的 RPC 目标: %w",
-					source.ID(),
-					target.ID(),
-					err,
-				)
-			}
-		}
-	}
-	return nil
 }
 
 // Stop 请求当前 Application 停止，并等待唯一生命周期路径完成清理。
@@ -437,7 +407,10 @@ func (app *Application) initializeResources(
 }
 
 // buildNodes 在启动任何回调前完成全部 Service 实例化和 Runtime 绑定。
-func (app *Application) buildNodes(configs []node.Config) ([]*node.Node, error) {
+func (app *Application) buildNodes(
+	configs []node.Config,
+	discoverySource *internaldiscovery.Source,
+) ([]*node.Node, error) {
 	result := make([]*node.Node, 0, len(configs))
 	for _, configured := range configs {
 		bindings := make([]node.ServiceBinding, 0, len(configured.Services))
@@ -483,6 +456,7 @@ func (app *Application) buildNodes(configs []node.Config) ([]*node.Node, error) 
 				MaxTimersPerNode: app.options.Timer.MaxTimersPerNode,
 				TimerLocation:    app.options.Timer.Location,
 				BufferPool:       app.bufferPool,
+				DiscoverySource:  discoverySource,
 			},
 		)
 		if err != nil {

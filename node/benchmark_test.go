@@ -1,9 +1,11 @@
 package node
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
 
@@ -55,4 +57,56 @@ func BenchmarkTimerSlotAcquireRelease(b *testing.B) {
 		}
 		current.releaseTimerSlot()
 	}
+}
+
+// BenchmarkBuildDiscoveryActions 保存监听器首次补发和 Node 会话替换的冷路径净变化成本。
+func BenchmarkBuildDiscoveryActions(b *testing.B) {
+	const instanceCount = 100
+	oldState := make(
+		map[internaldiscovery.InstanceKey]*internaldiscovery.Instance,
+		instanceCount,
+	)
+	newState := make(
+		map[internaldiscovery.InstanceKey]*internaldiscovery.Instance,
+		instanceCount,
+	)
+	for index := 0; index < instanceCount; index++ {
+		serviceName := fmt.Sprintf("Service%03d", index)
+		key := internaldiscovery.InstanceKey{
+			NodeID:      "game-1",
+			ServiceName: serviceName,
+		}
+		oldState[key] = &internaldiscovery.Instance{
+			NodeID:      "game-1",
+			SessionID:   "old-session",
+			ServiceName: serviceName,
+			State:       internaldiscovery.ServiceStateRunning,
+		}
+		newState[key] = &internaldiscovery.Instance{
+			NodeID:      "game-1",
+			SessionID:   "new-session",
+			ServiceName: serviceName,
+			State:       internaldiscovery.ServiceStateRunning,
+		}
+	}
+
+	b.Run("initial_sync", func(b *testing.B) {
+		empty := map[internaldiscovery.InstanceKey]*internaldiscovery.Instance{}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for index := 0; index < b.N; index++ {
+			if actions := buildDiscoveryActions(empty, newState); len(actions) != 1 {
+				b.Fatalf("initial actions = %d", len(actions))
+			}
+		}
+	})
+	b.Run("session_replacement", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for index := 0; index < b.N; index++ {
+			if actions := buildDiscoveryActions(oldState, newState); len(actions) != 2 {
+				b.Fatalf("replacement actions = %d", len(actions))
+			}
+		}
+	})
 }

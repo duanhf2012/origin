@@ -221,6 +221,169 @@ func TestPreparedSchedulerDoesNotRunUntilActivated(t *testing.T) {
 	receive(t, ran)
 }
 
+// TestStartContextAwaitRunsWithoutBusinessRunner 验证 OnStart 可以顺序等待，但不会开放业务调度。
+func TestStartContextAwaitRunsWithoutBusinessRunner(t *testing.T) {
+	fixture := newPreparedSchedulerFixture(t, DefaultSchedulerConfig())
+	startContext, finish, err := PrepareStartContext(
+		fixture.service,
+		context.Background(),
+	)
+	if err != nil {
+		t.Fatalf("PrepareStartContext() error = %v", err)
+	}
+
+	// 等待函数在当前 OnStart 调用链中直接完成；Prepared 阶段始终没有普通 Runner。
+	called := false
+	if err := fixture.service.Await(
+		startContext,
+		func(context.Context) error {
+			called = true
+			return nil
+		},
+	); err != nil {
+		t.Fatalf("OnStart Await() error = %v", err)
+	}
+	if !called {
+		t.Fatal("OnStart Await() 没有调用等待函数")
+	}
+	scheduler := fixture.service.scheduler.Load()
+	if scheduler.state != schedulerPrepared || scheduler.activated {
+		t.Fatalf("OnStart Await() 提前激活了业务 Runner: %+v", scheduler)
+	}
+
+	// 生命周期返回后令牌立即失效，旧 Context 不能在 Running 阶段伪造执行权。
+	finish()
+	if err := fixture.service.Await(
+		startContext,
+		func(context.Context) error { return nil },
+	); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("陈旧 OnStart Context Await() error = %v", err)
+	}
+}
+
+// TestStartContextAwaitUsesDefaultDeadline 验证 Prepared 阶段的 M8 watcher 管理默认超时。
+func TestStartContextAwaitUsesDefaultDeadline(t *testing.T) {
+	config := DefaultSchedulerConfig()
+	config.DefaultAwaitTimeout = 20 * time.Millisecond
+	fixture := newPreparedSchedulerFixture(t, config)
+	startContext, finish, err := PrepareStartContext(
+		fixture.service,
+		context.Background(),
+	)
+	if err != nil {
+		t.Fatalf("PrepareStartContext() error = %v", err)
+	}
+	defer finish()
+
+	err = fixture.service.Await(
+		startContext,
+		func(waitContext context.Context) error {
+			<-waitContext.Done()
+			return context.Cause(waitContext)
+		},
+	)
+	if !errors.Is(err, errs.ErrDeadlineExceeded) {
+		t.Fatalf("默认超时 Await() error = %v", err)
+	}
+}
+
+// TestStartContextRejectsBackgroundAndCrossService 验证生命周期执行权不能跨 Service 复用。
+func TestStartContextRejectsBackgroundAndCrossService(t *testing.T) {
+	first := newPreparedSchedulerFixture(t, DefaultSchedulerConfig())
+	second := newPreparedSchedulerFixture(t, DefaultSchedulerConfig())
+	startContext, finish, err := PrepareStartContext(
+		first.service,
+		context.Background(),
+	)
+	if err != nil {
+		t.Fatalf("PrepareStartContext() error = %v", err)
+	}
+	defer finish()
+
+	if err := first.service.Await(
+		context.Background(),
+		func(context.Context) error { return nil },
+	); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("Background Await() error = %v", err)
+	}
+	if err := second.service.Await(
+		startContext,
+		func(context.Context) error { return nil },
+	); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("跨 Service Await() error = %v", err)
+	}
+}
+
+// TestDiscoveryTaskWaitsForActivationAndCoalesces 验证 OnStart 注册只留下一个最新同步意图。
+func TestDiscoveryTaskWaitsForActivationAndCoalesces(t *testing.T) {
+	fixture := newPreparedSchedulerFixture(t, DefaultSchedulerConfig())
+	called := make(chan int, 2)
+	if err := MarkDiscoveryDirty(
+		fixture.service,
+		func(context.Context) { called <- 1 },
+	); err != nil {
+		t.Fatalf("第一次 MarkDiscoveryDirty() error = %v", err)
+	}
+	if err := MarkDiscoveryDirty(
+		fixture.service,
+		func(context.Context) { called <- 2 },
+	); err != nil {
+		t.Fatalf("第二次 MarkDiscoveryDirty() error = %v", err)
+	}
+	select {
+	case value := <-called:
+		t.Fatalf("Prepared 阶段提前执行发现任务: %d", value)
+	default:
+	}
+
+	// 激活时只把最新同步函数加入统一 FIFO 一次。
+	fixture.runtime.state.Store(uint32(StateRunning))
+	if err := ActivateScheduler(fixture.service); err != nil {
+		t.Fatalf("ActivateScheduler() error = %v", err)
+	}
+	if value := receive(t, called); value != 2 {
+		t.Fatalf("发现任务值 = %d, want 2", value)
+	}
+	select {
+	case value := <-called:
+		t.Fatalf("合并更新重复执行发现任务: %d", value)
+	default:
+	}
+}
+
+// TestDiscoveryDirtySurvivesFullQueue 验证硬容量满时保留一个待提升标记而不是丢失最终状态。
+func TestDiscoveryDirtySurvivesFullQueue(t *testing.T) {
+	config := DefaultSchedulerConfig()
+	config.MaxTasks = 1
+	config.MaxAwaitTasks = 1
+	fixture := newSchedulerFixture(t, config)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	if err := fixture.service.DispatchAsync(func(context.Context) {
+		close(started)
+		<-release
+	}); err != nil {
+		t.Fatalf("DispatchAsync() error = %v", err)
+	}
+	receive(t, started)
+
+	delivered := make(chan struct{}, 1)
+	if err := MarkDiscoveryDirty(
+		fixture.service,
+		func(context.Context) { delivered <- struct{}{} },
+	); err != nil {
+		t.Fatalf("满容量 MarkDiscoveryDirty() error = %v", err)
+	}
+	select {
+	case <-delivered:
+		t.Fatal("占用执行槽期间发现任务提前执行")
+	default:
+	}
+	close(release)
+	receive(t, delivered)
+}
+
 func TestStopPreparedSchedulerReleasesResourcesWithoutGoroutine(t *testing.T) {
 	fixture := newPreparedSchedulerFixture(t, DefaultSchedulerConfig())
 	fixture.runtime.state.Store(uint32(StateStopping))

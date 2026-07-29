@@ -28,10 +28,11 @@ type inboundSession struct {
 	handler *inboundHandler
 	conn    *tcpnet.Conn
 
-	sourceNodeID string
-	ready        bool
-	rejected     bool
-	closed       atomic.Bool
+	sourceNodeID    string
+	sourceSessionID string
+	ready           bool
+	rejected        bool
+	closed          atomic.Bool
 }
 
 // remoteDeadlineContext 为 M8 管理的线上超时补充标准 Context Deadline。
@@ -151,12 +152,14 @@ func (handler *inboundHandler) handleHello(
 	status := errs.CodeOK
 	handler.mu.Lock()
 	if hello.targetNodeID != handler.remote.owner.nodeID ||
+		hello.targetSessionID != handler.remote.owner.sessionID ||
 		hello.sourceNodeID == handler.remote.owner.nodeID {
 		status = errs.CodeTransportProtocol
 	} else if current := handler.byNode[hello.sourceNodeID]; current != nil {
 		status = errs.CodeTransportProtocol
 	} else {
 		session.sourceNodeID = hello.sourceNodeID
+		session.sourceSessionID = hello.sourceSessionID
 		session.ready = true
 		handler.byNode[hello.sourceNodeID] = session
 	}
@@ -175,6 +178,7 @@ func (handler *inboundHandler) handleHello(
 		handler.remote.owner.pool,
 		status,
 		handler.remote.owner.nodeID,
+		handler.remote.owner.sessionID,
 		services,
 	)
 	if err != nil {
@@ -326,6 +330,9 @@ func (remote *remoteRuntime) resolveInbound(
 	remote.mu.Unlock()
 	if remote.owner.closed.Load() || stopping {
 		return serviceEndpoint{}, errs.ErrServiceStopping
+	}
+	if !remote.owner.inboundReady.Load() {
+		return serviceEndpoint{}, errs.ErrServiceNotReady
 	}
 	endpoint, exists := remote.owner.endpoints[serviceName]
 	if !exists || !endpoint.public || endpoint.dispatcher == nil {

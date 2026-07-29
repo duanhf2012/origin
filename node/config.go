@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
@@ -21,6 +22,10 @@ type Options struct {
 	// 测试或独立使用 node.New 时可以省略，Node 会创建关闭统计的私有 Pool；正式
 	// Application 始终传入同一个共享实例。
 	BufferPool *bufferpool.Pool
+	// DiscoverySource 是 Application 在 M14 为实际启动 Node 创建的内部过渡完整快照源。
+	//
+	// 正式项目不直接设置该字段；省略时 Node 仍拥有空的本地目录，便于独立单元测试。
+	DiscoverySource *internaldiscovery.Source
 }
 
 // Config 是一个 Node 在配置文件中的最小静态定义。
@@ -29,6 +34,10 @@ type Config struct {
 	ID string
 	// Private 表示该 Node 后续不发布到服务发现。
 	Private bool
+	// Labels 是当前 Node 对外发布、供其他 Node 关注规则精确匹配的业务标签。
+	Labels map[string]string
+	// DiscoveryFilter 是配置加载阶段已经校验并预编译的远端服务关注规则。
+	DiscoveryFilter internaldiscovery.Filter
 	// Scheduler 定义当前 Node 下每个 Service 独立使用的调度容量和默认 Await 超时。
 	//
 	// 完全零值表示使用 service.DefaultSchedulerConfig；部分非零配置必须自身完整有效。

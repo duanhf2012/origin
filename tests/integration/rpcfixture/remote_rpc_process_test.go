@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/rpc"
 )
@@ -70,9 +71,12 @@ func TestRemoteRPCIndependentProcesses(t *testing.T) {
 	// 子进程只有在真实 Listener 已经绑定后才输出就绪标记。
 	scanner := bufio.NewScanner(stdout)
 	ready := false
+	var targetSessionID string
 	for scanner.Scan() {
-		if strings.Contains(scanner.Text(), processReadyLine) {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) == 2 && fields[0] == processReadyLine {
 			ready = true
+			targetSessionID = fields[1]
 			break
 		}
 	}
@@ -90,23 +94,33 @@ func TestRemoteRPCIndependentProcesses(t *testing.T) {
 
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	caller := &CallerService{}
+	discoverySource := internaldiscovery.NewSource()
+	if err := discoverySource.Publish(internaldiscovery.RawNode{
+		NodeID:    "player-1",
+		SessionID: targetSessionID,
+		Transport: internaldiscovery.TransportTCP,
+		Address:   targetConfig.TCP.Advertise,
+		Services: []internaldiscovery.RawService{{
+			ServiceName:         "PlayerService",
+			State:               internaldiscovery.ServiceStateRunning,
+			ContractID:          uint64(playerRPCContractID),
+			ContractFingerprint: [32]byte(playerRPCFingerprint),
+		}},
+	}); err != nil {
+		t.Fatalf("发布子进程发现记录: %v", err)
+	}
 	callerNode := newRemoteFixtureNode(
 		t,
 		"gateway-process",
 		callerConfig,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "CallerService",
 			Template: "CallerService",
 			Service:  caller,
 		},
 	)
-	if err := callerNode.AddRPCTarget(
-		"player-1",
-		targetConfig.TCP.Advertise,
-	); err != nil {
-		t.Fatal(err)
-	}
 	if err := callerNode.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -136,11 +150,31 @@ func TestRemoteRPCProcessHelper(t *testing.T) {
 	config.TCP.WriteTimeout = time.Second
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	player := &PlayerService{}
+	discoverySource := internaldiscovery.NewSource()
+	published := make(chan internaldiscovery.RawNode, 1)
+	subscription, err := discoverySource.Subscribe(
+		func(snapshot internaldiscovery.RawSnapshot) error {
+			for _, record := range snapshot.Nodes {
+				if record.NodeID == "player-1" && len(record.Services) != 0 {
+					select {
+					case published <- record:
+					default:
+					}
+				}
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("订阅子进程发现源: %v", err)
+	}
+	defer subscription.Close()
 	target := newRemoteFixtureNode(
 		t,
 		"player-1",
 		config,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "PlayerService",
 			Template: "PlayerService",
@@ -150,7 +184,8 @@ func TestRemoteRPCProcessHelper(t *testing.T) {
 	if err := target.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println(processReadyLine)
+	record := <-published
+	fmt.Printf("%s %s\n", processReadyLine, record.SessionID)
 
 	// 父进程关闭 stdin 表示调用验证完成；轮询文件和额外控制端口都不需要。
 	if _, err := io.Copy(io.Discard, os.Stdin); err != nil {

@@ -9,6 +9,7 @@ import (
 
 	originconfig "github.com/duanhf2012/origin/v3/config"
 	"github.com/duanhf2012/origin/v3/errs"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/rpc"
@@ -30,11 +31,40 @@ type bufferPoolConfig struct {
 
 // nodeConfig 与公开 node.Config 分离，使配置 Tag 不污染运行时对象。
 type nodeConfig struct {
-	ID        string                 `json:"id"`
-	Private   bool                   `json:"private"`
-	Scheduler *schedulerConfigMirror `json:"scheduler"`
-	RPC       *rpcConfigMirror       `json:"rpc"`
-	Services  []string               `json:"services"`
+	ID             string                 `json:"id"`
+	Private        bool                   `json:"private"`
+	Labels         map[string]string      `json:"labels"`
+	AllowDiscovery json.RawMessage        `json:"allow_discovery"`
+	Scheduler      *schedulerConfigMirror `json:"scheduler"`
+	RPC            *rpcConfigMirror       `json:"rpc"`
+	Services       []string               `json:"services"`
+}
+
+// discoveryRuleMirror 保留关注规则两个可选维度的“省略”和“显式空值”区别。
+type discoveryRuleMirror struct {
+	Services   *[]string                        `json:"services"`
+	NodeLabels *map[string]discoveryLabelValues `json:"node_labels"`
+}
+
+// discoveryLabelValues 把配置中的单个标签值和标签值列表统一转换为 Slice。
+type discoveryLabelValues []string
+
+// UnmarshalJSON 只接受一个字符串或字符串数组，不把数字、布尔值等隐式转成文本。
+func (values *discoveryLabelValues) UnmarshalJSON(data []byte) error {
+	// 优先解析单值外观，使常见的 region: cn-east 保持简洁。
+	var single string
+	if err := json.Unmarshal(data, &single); err == nil {
+		*values = discoveryLabelValues{single}
+		return nil
+	}
+
+	// 单值不成立时严格解析字符串数组；元素类型错误由标准库返回明确路径。
+	var multiple []string
+	if err := json.Unmarshal(data, &multiple); err != nil {
+		return err
+	}
+	*values = discoveryLabelValues(multiple)
+	return nil
 }
 
 // rpcConfigMirror 只负责把配置文本转换成 rpc.Config 的冻结值。
@@ -159,6 +189,13 @@ func loadConfig(directory string) (loadedConfig, error) {
 				configured.ID,
 			)
 		}
+		if err := internaldiscovery.ValidateNodeLabels(configured.Labels); err != nil {
+			return loadedConfig{}, invalidConfigf(
+				"Node %q 的 labels 无效: %v",
+				configured.ID,
+				err,
+			)
+		}
 		seen[configured.ID] = struct{}{}
 		schedulerConfig := service.DefaultSchedulerConfig()
 		if configured.Scheduler != nil {
@@ -187,15 +224,84 @@ func loadConfig(directory string) (loadedConfig, error) {
 		if err != nil {
 			return loadedConfig{}, err
 		}
+		discoveryFilter, err := decodeDiscoveryFilter(
+			configured.ID,
+			configured.AllowDiscovery,
+		)
+		if err != nil {
+			return loadedConfig{}, err
+		}
 		result.nodes[index] = node.Config{
-			ID:        configured.ID,
-			Private:   configured.Private,
-			Scheduler: schedulerConfig,
-			RPC:       rpcConfig,
-			Services:  append([]string(nil), configured.Services...),
+			ID:              configured.ID,
+			Private:         configured.Private,
+			Labels:          cloneStringMap(configured.Labels),
+			DiscoveryFilter: discoveryFilter,
+			Scheduler:       schedulerConfig,
+			RPC:             rpcConfig,
+			Services:        append([]string(nil), configured.Services...),
 		}
 	}
 	return result, nil
+}
+
+// decodeDiscoveryFilter 区分字段省略、显式 null、空列表和非空规则，并完成冷路径预编译。
+func decodeDiscoveryFilter(
+	nodeID string,
+	raw json.RawMessage,
+) (internaldiscovery.Filter, error) {
+	// RawMessage 为 nil 只表示字段完全省略，此时保持兼容默认的全量公开发现。
+	if len(raw) == 0 {
+		return internaldiscovery.CompileFilter(false, nil)
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return internaldiscovery.Filter{}, invalidConfigf(
+			"Node %q 的 allow_discovery 不能为 null",
+			nodeID,
+		)
+	}
+
+	// 对规则数组启用未知字段拒绝，避免拼写错误静默退化为另一种匹配范围。
+	var mirrors []discoveryRuleMirror
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&mirrors); err != nil {
+		return internaldiscovery.Filter{}, invalidConfigf(
+			"解析 Node %q 的 allow_discovery: %v",
+			nodeID,
+			err,
+		)
+	}
+	rules := make([]internaldiscovery.Rule, len(mirrors))
+	for index, mirror := range mirrors {
+		rules[index].Services = mirror.Services
+		if mirror.NodeLabels == nil {
+			continue
+		}
+
+		// 转换后每条规则独占自己的 Map 和 Slice，配置镜像不会泄漏到运行时。
+		labels := make(map[string][]string, len(*mirror.NodeLabels))
+		for key, values := range *mirror.NodeLabels {
+			labels[key] = append([]string(nil), values...)
+		}
+		rules[index].NodeLabels = &labels
+	}
+	filter, err := internaldiscovery.CompileFilter(true, rules)
+	if err != nil {
+		return internaldiscovery.Filter{}, err
+	}
+	return filter, nil
+}
+
+// cloneStringMap 冻结 Node 标签，避免配置根 Map 被项目代码修改后污染运行时。
+func cloneStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 // decodeNodeRPCConfig 从 RPC 默认值开始覆盖单个 Node 的显式字段。

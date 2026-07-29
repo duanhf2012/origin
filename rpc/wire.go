@@ -28,8 +28,8 @@ const (
 	wireNotifyFixedSize   = 10
 	wireResponseFixedSize = 13
 	wireHeartbeatSize     = 1
-	wireHelloFixedSize    = 6
-	wireHelloAckFixedSize = 11
+	wireHelloFixedSize    = 8
+	wireHelloAckFixedSize = 12
 	wireServiceFixedSize  = 33
 
 	// NodeID 和 ServiceName 使用 uint8 长度，避免热路径多一个无用字节。
@@ -44,14 +44,17 @@ type wireServiceEntry struct {
 
 // wireHello 是主动连接方第一帧声明的固定 Node 身份。
 type wireHello struct {
-	sourceNodeID string
-	targetNodeID string
+	sourceNodeID    string
+	sourceSessionID string
+	targetNodeID    string
+	targetSessionID string
 }
 
 // wireHelloAck 是被连接方返回的握手结论和公开契约目录。
 type wireHelloAck struct {
 	statusCode errs.Code
 	nodeID     string
+	sessionID  string
 	services   []wireServiceEntry
 }
 
@@ -89,21 +92,38 @@ type timeDuration uint64
 func encodeHello(
 	pool *bufferpool.Pool,
 	sourceNodeID string,
+	sourceSessionID string,
 	targetNodeID string,
+	targetSessionID string,
 ) (*bufferpool.Buffer, error) {
-	// 两个 NodeID 必须能够由 uint8 长度确定性表达。
-	if !validWireName(sourceNodeID) || !validWireName(targetNodeID) {
+	// NodeID 和 SessionID 都必须能够由 uint8 长度确定性表达。
+	if !validWireName(sourceNodeID) ||
+		!validWireName(sourceSessionID) ||
+		!validWireName(targetNodeID) ||
+		!validWireName(targetSessionID) {
 		return nil, errs.ErrInvalidArgument
 	}
-	buffer := pool.Acquire(wireHelloFixedSize + len(sourceNodeID) + len(targetNodeID))
+	buffer := pool.Acquire(
+		wireHelloFixedSize +
+			len(sourceNodeID) +
+			len(sourceSessionID) +
+			len(targetNodeID) +
+			len(targetSessionID),
+	)
 	data := buffer.Bytes()
 	copy(data[:4], wireMagic)
 	data[4] = byte(len(sourceNodeID))
-	data[5] = byte(len(targetNodeID))
+	data[5] = byte(len(sourceSessionID))
+	data[6] = byte(len(targetNodeID))
+	data[7] = byte(len(targetSessionID))
 	offset := wireHelloFixedSize
 	copy(data[offset:], sourceNodeID)
 	offset += len(sourceNodeID)
+	copy(data[offset:], sourceSessionID)
+	offset += len(sourceSessionID)
 	copy(data[offset:], targetNodeID)
+	offset += len(targetNodeID)
+	copy(data[offset:], targetSessionID)
 	return buffer, nil
 }
 
@@ -114,19 +134,40 @@ func parseHello(data []byte) (wireHello, error) {
 		return wireHello{}, errs.ErrTransportProtocol
 	}
 	sourceLength := int(data[4])
-	targetLength := int(data[5])
-	total := wireHelloFixedSize + sourceLength + targetLength
-	if sourceLength == 0 || targetLength == 0 || total != len(data) {
+	sourceSessionLength := int(data[5])
+	targetLength := int(data[6])
+	targetSessionLength := int(data[7])
+	total := wireHelloFixedSize +
+		sourceLength +
+		sourceSessionLength +
+		targetLength +
+		targetSessionLength
+	if sourceLength == 0 ||
+		sourceSessionLength == 0 ||
+		targetLength == 0 ||
+		targetSessionLength == 0 ||
+		total != len(data) {
 		return wireHello{}, errs.ErrTransportProtocol
 	}
-	sourceBytes := data[wireHelloFixedSize : wireHelloFixedSize+sourceLength]
-	targetBytes := data[wireHelloFixedSize+sourceLength : total]
-	if !utf8.Valid(sourceBytes) || !utf8.Valid(targetBytes) {
+	offset := wireHelloFixedSize
+	sourceBytes := data[offset : offset+sourceLength]
+	offset += sourceLength
+	sourceSessionBytes := data[offset : offset+sourceSessionLength]
+	offset += sourceSessionLength
+	targetBytes := data[offset : offset+targetLength]
+	offset += targetLength
+	targetSessionBytes := data[offset : offset+targetSessionLength]
+	if !utf8.Valid(sourceBytes) ||
+		!utf8.Valid(sourceSessionBytes) ||
+		!utf8.Valid(targetBytes) ||
+		!utf8.Valid(targetSessionBytes) {
 		return wireHello{}, errs.ErrTransportProtocol
 	}
 	return wireHello{
-		sourceNodeID: string(sourceBytes),
-		targetNodeID: string(targetBytes),
+		sourceNodeID:    string(sourceBytes),
+		sourceSessionID: string(sourceSessionBytes),
+		targetNodeID:    string(targetBytes),
+		targetSessionID: string(targetSessionBytes),
 	}, nil
 }
 
@@ -135,15 +176,17 @@ func encodeHelloAck(
 	pool *bufferpool.Pool,
 	statusCode errs.Code,
 	nodeID string,
+	sessionID string,
 	services []wireServiceEntry,
 ) (*bufferpool.Buffer, error) {
 	// 先完成全部长度与目录约束，失败时不申请任何 Buffer。
 	if !validWireName(nodeID) ||
+		!validWireName(sessionID) ||
 		len(services) > math.MaxUint16 ||
 		(statusCode != errs.CodeOK && len(services) != 0) {
 		return nil, errs.ErrInvalidArgument
 	}
-	size := wireHelloAckFixedSize + len(nodeID)
+	size := wireHelloAckFixedSize + len(nodeID) + len(sessionID)
 	for _, service := range services {
 		if !validWireName(service.name) {
 			return nil, errs.ErrInvalidArgument
@@ -160,10 +203,13 @@ func encodeHelloAck(
 	copy(data[:4], wireMagic)
 	binary.BigEndian.PutUint32(data[4:8], uint32(statusCode))
 	data[8] = byte(len(nodeID))
-	binary.BigEndian.PutUint16(data[9:11], uint16(len(services)))
+	data[9] = byte(len(sessionID))
+	binary.BigEndian.PutUint16(data[10:12], uint16(len(services)))
 	offset := wireHelloAckFixedSize
 	copy(data[offset:], nodeID)
 	offset += len(nodeID)
+	copy(data[offset:], sessionID)
+	offset += len(sessionID)
 	for _, service := range services {
 		data[offset] = byte(len(service.name))
 		offset++
@@ -182,16 +228,22 @@ func parseHelloAck(data []byte) (wireHelloAck, error) {
 	}
 	status := errs.Code(binary.BigEndian.Uint32(data[4:8]))
 	nodeLength := int(data[8])
-	serviceCount := int(binary.BigEndian.Uint16(data[9:11]))
+	sessionLength := int(data[9])
+	serviceCount := int(binary.BigEndian.Uint16(data[10:12]))
 	offset := wireHelloAckFixedSize
-	if nodeLength == 0 || nodeLength > len(data)-offset {
+	if nodeLength == 0 ||
+		sessionLength == 0 ||
+		nodeLength > len(data)-offset ||
+		sessionLength > len(data)-offset-nodeLength {
 		return wireHelloAck{}, errs.ErrTransportProtocol
 	}
 	nodeBytes := data[offset : offset+nodeLength]
-	if !utf8.Valid(nodeBytes) {
+	offset += nodeLength
+	sessionBytes := data[offset : offset+sessionLength]
+	if !utf8.Valid(nodeBytes) || !utf8.Valid(sessionBytes) {
 		return wireHelloAck{}, errs.ErrTransportProtocol
 	}
-	offset += nodeLength
+	offset += sessionLength
 	if status != errs.CodeOK && serviceCount != 0 {
 		return wireHelloAck{}, errs.ErrTransportProtocol
 	}
@@ -234,6 +286,7 @@ func parseHelloAck(data []byte) (wireHelloAck, error) {
 	return wireHelloAck{
 		statusCode: status,
 		nodeID:     string(nodeBytes),
+		sessionID:  string(sessionBytes),
 		services:   services,
 	}, nil
 }

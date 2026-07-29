@@ -9,6 +9,7 @@ import (
 
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/rpc"
@@ -26,6 +27,53 @@ type remoteRPCFixture struct {
 	pool         *bufferpool.Pool
 	callerConfig rpc.Config
 	targetConfig rpc.Config
+	discovery    *internaldiscovery.Source
+}
+
+// startAwaitCallerService 验证 OnStart 可以在普通 Runner 尚未激活时等待发现并顺序调用 RPC。
+type startAwaitCallerService struct {
+	CallerService
+	targetNodeID string
+	result       string
+}
+
+// OnStart 使用生命周期私有 Context 复用正式 Await 外观，不创建临时业务 Runner。
+func (target *startAwaitCallerService) OnStart(ctx context.Context) error {
+	if err := target.AwaitNodeService(
+		ctx,
+		target.targetNodeID,
+		"PlayerService",
+	); err != nil {
+		return err
+	}
+	client := NewPlayerRPCClient(
+		target,
+		rpc.ToServiceOnNode(target.targetNodeID, "PlayerService"),
+	)
+	for {
+		result, err := client.AwaitEchoName(ctx, "on-start")
+		if err == nil {
+			target.result = result
+			return nil
+		}
+		if !errors.Is(err, errs.ErrTransportUnavailable) {
+			return err
+		}
+
+		// 发现事实先于 TCP 连接就绪发布；幂等启动查询在生命周期 Context 内有界退避。
+		if err := target.Await(ctx, func(waitCtx context.Context) error {
+			timer := time.NewTimer(10 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				return nil
+			case <-waitCtx.Done():
+				return waitCtx.Err()
+			}
+		}); err != nil {
+			return err
+		}
+	}
 }
 
 // newRemoteRPCFixture 先启动服务端 Node，再启动调用端 Node。
@@ -36,11 +84,13 @@ func newRemoteRPCFixture(t testing.TB) *remoteRPCFixture {
 	callerConfig := testRPCConfig(t)
 	player := &PlayerService{}
 	caller := &CallerService{}
+	discoverySource := internaldiscovery.NewSource()
 	targetNode := newRemoteFixtureNode(
 		t,
 		"player-1",
 		targetConfig,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "PlayerService",
 			Template: "PlayerService",
@@ -52,18 +102,13 @@ func newRemoteRPCFixture(t testing.TB) *remoteRPCFixture {
 		"gateway-1",
 		callerConfig,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "CallerService",
 			Template: "CallerService",
 			Service:  caller,
 		},
 	)
-	if err := callerNode.AddRPCTarget(
-		targetNode.ID(),
-		targetConfig.TCP.Advertise,
-	); err != nil {
-		t.Fatalf("AddRPCTarget() error = %v", err)
-	}
 	if err := targetNode.Start(context.Background()); err != nil {
 		t.Fatalf("target Node.Start() error = %v", err)
 	}
@@ -79,6 +124,7 @@ func newRemoteRPCFixture(t testing.TB) *remoteRPCFixture {
 		pool:         pool,
 		callerConfig: callerConfig,
 		targetConfig: targetConfig,
+		discovery:    discoverySource,
 	}
 	t.Cleanup(func() {
 		stopTestNode(t, fixture.callerNode)
@@ -96,6 +142,7 @@ func newRemoteFixtureNode(
 	nodeID string,
 	rpcConfig rpc.Config,
 	pool *bufferpool.Pool,
+	discoverySource *internaldiscovery.Source,
 	binding node.ServiceBinding,
 ) *node.Node {
 	t.Helper()
@@ -105,6 +152,7 @@ func newRemoteFixtureNode(
 		rpcConfig,
 		service.DefaultSchedulerConfig(),
 		pool,
+		discoverySource,
 		binding,
 	)
 }
@@ -116,6 +164,7 @@ func newRemoteFixtureNodeWithScheduler(
 	rpcConfig rpc.Config,
 	scheduler service.SchedulerConfig,
 	pool *bufferpool.Pool,
+	discoverySource *internaldiscovery.Source,
 	binding node.ServiceBinding,
 ) *node.Node {
 	t.Helper()
@@ -131,6 +180,7 @@ func newRemoteFixtureNodeWithScheduler(
 			MaxTimersPerNode: 1024,
 			TimerLocation:    time.Local,
 			BufferPool:       pool,
+			DiscoverySource:  discoverySource,
 		},
 	)
 	if err != nil {
@@ -374,6 +424,7 @@ func TestGeneratedRemoteAwaitAsyncNotifyAndReconnect(t *testing.T) {
 		"player-1",
 		fixture.targetConfig,
 		fixture.pool,
+		fixture.discovery,
 		node.ServiceBinding{
 			Name:     "PlayerService",
 			Template: "PlayerService",
@@ -387,6 +438,101 @@ func TestGeneratedRemoteAwaitAsyncNotifyAndReconnect(t *testing.T) {
 	}
 	if result := awaitRemoteEcho(t, fixture, "reconnected"); result != "reconnected-echo" {
 		t.Fatalf("reconnected AwaitEchoName() = %q", result)
+	}
+}
+
+// TestRemoteOnStartAwaitsDiscoveryAndRPC 验证 Provider、TCP 与 Deadline 基础设施在 OnStart
+// 阶段持续工作，而普通业务 Runner 仍等待整个 Node 越过统一就绪屏障。
+func TestRemoteOnStartAwaitsDiscoveryAndRPC(t *testing.T) {
+	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
+	discoverySource := internaldiscovery.NewSource()
+	targetConfig := testRPCConfig(t)
+	callerConfig := testRPCConfig(t)
+	player := &PlayerService{}
+	caller := &startAwaitCallerService{targetNodeID: "player-1"}
+
+	targetNode := newRemoteFixtureNode(
+		t,
+		"player-1",
+		targetConfig,
+		pool,
+		discoverySource,
+		node.ServiceBinding{
+			Name:     "PlayerService",
+			Template: "PlayerService",
+			Service:  player,
+		},
+	)
+	callerNode := newRemoteFixtureNode(
+		t,
+		"gateway-1",
+		callerConfig,
+		pool,
+		discoverySource,
+		node.ServiceBinding{
+			Name:     "CallerService",
+			Template: "CallerService",
+			Service:  caller,
+		},
+	)
+	t.Cleanup(func() {
+		stopTestNode(t, callerNode)
+		stopTestNode(t, targetNode)
+	})
+
+	// 先启动依赖方，使 AwaitNodeService 确实进入等待；目标稍后发布后应唤醒原 OnStart。
+	callerDone := make(chan error, 1)
+	go func() {
+		callerDone <- callerNode.Start(context.Background())
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if err := targetNode.Start(context.Background()); err != nil {
+		t.Fatalf("target Node.Start() error = %v", err)
+	}
+	select {
+	case err := <-callerDone:
+		if err != nil {
+			t.Fatalf("caller Node.Start() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnStart 等待发现和 RPC 超时")
+	}
+	if caller.result != "on-start-echo" {
+		t.Fatalf("OnStart RPC result = %q", caller.result)
+	}
+}
+
+// TestRemoteRetiredServiceRemainsRoutable 锁定 Retired 仅作为可观察状态，不自动拒绝 RPC。
+func TestRemoteRetiredServiceRemainsRoutable(t *testing.T) {
+	fixture := newRemoteRPCFixture(t)
+	_ = awaitRemoteEcho(t, fixture, "running")
+
+	var targetRecord internaldiscovery.RawNode
+	subscription, err := fixture.discovery.Subscribe(
+		func(snapshot internaldiscovery.RawSnapshot) error {
+			for _, record := range snapshot.Nodes {
+				if record.NodeID == fixture.targetNode.ID() {
+					targetRecord = record
+					break
+				}
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	subscription.Close()
+	if len(targetRecord.Services) != 1 {
+		t.Fatalf("目标发现记录 = %+v", targetRecord)
+	}
+	targetRecord.Services[0].State = internaldiscovery.ServiceStateRetired
+	if err := fixture.discovery.Publish(targetRecord); err != nil {
+		t.Fatalf("Publish(retired) error = %v", err)
+	}
+
+	if result := awaitRemoteEcho(t, fixture, "retired"); result != "retired-echo" {
+		t.Fatalf("Retired AwaitEchoName() = %q", result)
 	}
 }
 
@@ -491,11 +637,13 @@ func TestRemoteUsesServiceDefaultAwaitTimeout(t *testing.T) {
 	callerConfig := testRPCConfig(t)
 	player := &PlayerService{}
 	caller := &CallerService{}
+	discoverySource := internaldiscovery.NewSource()
 	target := newRemoteFixtureNode(
 		t,
 		"player-1",
 		targetConfig,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "PlayerService",
 			Template: "PlayerService",
@@ -510,15 +658,13 @@ func TestRemoteUsesServiceDefaultAwaitTimeout(t *testing.T) {
 		callerConfig,
 		scheduler,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "CallerService",
 			Template: "CallerService",
 			Service:  caller,
 		},
 	)
-	if err := source.AddRPCTarget("player-1", targetConfig.TCP.Advertise); err != nil {
-		t.Fatal(err)
-	}
 	if err := target.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -591,11 +737,13 @@ func TestRemoteDuplicateNodeIDKeepsFirstConnection(t *testing.T) {
 	player := &PlayerService{}
 	firstCaller := &CallerService{}
 	secondCaller := &CallerService{}
+	discoverySource := internaldiscovery.NewSource()
 	target := newRemoteFixtureNode(
 		t,
 		"player-1",
 		targetConfig,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "PlayerService",
 			Template: "PlayerService",
@@ -607,6 +755,7 @@ func TestRemoteDuplicateNodeIDKeepsFirstConnection(t *testing.T) {
 		"duplicate-gateway",
 		firstConfig,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "CallerService",
 			Template: "CallerService",
@@ -618,17 +767,13 @@ func TestRemoteDuplicateNodeIDKeepsFirstConnection(t *testing.T) {
 		"duplicate-gateway",
 		secondConfig,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "CallerService",
 			Template: "CallerService",
 			Service:  secondCaller,
 		},
 	)
-	for _, source := range []*node.Node{first, second} {
-		if err := source.AddRPCTarget("player-1", targetConfig.TCP.Advertise); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := target.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -682,11 +827,13 @@ func TestRemotePrivateServiceIsNotAdvertised(t *testing.T) {
 	callerConfig := testRPCConfig(t)
 	player := &PlayerService{}
 	caller := &CallerService{}
+	discoverySource := internaldiscovery.NewSource()
 	target := newRemoteFixtureNode(
 		t,
 		"player-1",
 		targetConfig,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "PlayerService",
 			Template: "PlayerService",
@@ -699,15 +846,13 @@ func TestRemotePrivateServiceIsNotAdvertised(t *testing.T) {
 		"gateway-1",
 		callerConfig,
 		pool,
+		discoverySource,
 		node.ServiceBinding{
 			Name:     "CallerService",
 			Template: "CallerService",
 			Service:  caller,
 		},
 	)
-	if err := source.AddRPCTarget("player-1", targetConfig.TCP.Advertise); err != nil {
-		t.Fatal(err)
-	}
 	if err := target.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}

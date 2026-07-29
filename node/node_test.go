@@ -8,23 +8,60 @@ import (
 	"testing"
 	"time"
 
+	publicdiscovery "github.com/duanhf2012/origin/v3/discovery"
 	"github.com/duanhf2012/origin/v3/errs"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
+// nodeDiscoveryListener 记录公开发现回调，并验证回调 Context 可以执行协作式 Await。
+type nodeDiscoveryListener struct {
+	owner  *lifecycleService
+	events chan string
+}
+
+func (listener *nodeDiscoveryListener) OnDiscovered(
+	ctx context.Context,
+	event publicdiscovery.Event,
+) {
+	if err := listener.owner.Await(
+		ctx,
+		func(context.Context) error { return nil },
+	); err != nil {
+		listener.events <- "await-error"
+		return
+	}
+	listener.events <- "discovered:" + event.Services[0].ServiceName
+}
+
+func (listener *nodeDiscoveryListener) OnStateChanged(
+	_ context.Context,
+	event publicdiscovery.Event,
+) {
+	listener.events <- "state:" + event.Services[0].ServiceName
+}
+
+func (listener *nodeDiscoveryListener) OnLost(
+	_ context.Context,
+	event publicdiscovery.Event,
+) {
+	listener.events <- "lost:" + event.Services[0].ServiceName
+}
+
 // lifecycleService 用共享事件切片记录 Node 的严格调用顺序。
 type lifecycleService struct {
 	service.Service
-	label      string
-	events     *[]string
-	initErr    error
-	startErr   error
-	stopErr    error
-	panicPhase string
-	onInit     func()
-	onStart    func()
-	onStop     func()
+	label          string
+	events         *[]string
+	initErr        error
+	startErr       error
+	stopErr        error
+	panicPhase     string
+	onInit         func()
+	onStart        func()
+	onStartContext func(context.Context) error
+	onStop         func()
 }
 
 func (target *lifecycleService) OnInit() error {
@@ -39,16 +76,265 @@ func (target *lifecycleService) OnInit() error {
 	return target.initErr
 }
 
-func (target *lifecycleService) OnStart(context.Context) error {
+func (target *lifecycleService) OnStart(ctx context.Context) error {
 	*target.events = append(*target.events, "start:"+target.label)
 	if target.onStart != nil {
 		// OnStart 探针用于验证启动回调之前的框架资源已经可用。
 		target.onStart()
 	}
+	if target.onStartContext != nil {
+		if err := target.onStartContext(ctx); err != nil {
+			return err
+		}
+	}
 	if target.panicPhase == "start" {
 		panic("start panic")
 	}
 	return target.startErr
+}
+
+// TestNodePublishesOnlyAfterAllOnStart 验证统一就绪屏障、生命周期 Await 和 Stop 撤销发布。
+func TestNodePublishesOnlyAfterAllOnStart(t *testing.T) {
+	source := internaldiscovery.NewSource()
+	var snapshotMu sync.Mutex
+	var latest internaldiscovery.RawSnapshot
+	subscription, err := source.Subscribe(func(snapshot internaldiscovery.RawSnapshot) error {
+		snapshotMu.Lock()
+		latest = snapshot
+		snapshotMu.Unlock()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer subscription.Close()
+
+	events := make([]string, 0, 4)
+	first := &lifecycleService{label: "a", events: &events}
+	second := &lifecycleService{label: "b", events: &events}
+	assertUnpublished := func() {
+		snapshotMu.Lock()
+		defer snapshotMu.Unlock()
+		if len(latest.Nodes) != 0 {
+			t.Errorf("全部 OnStart 完成前 Node 已发布: %+v", latest)
+		}
+	}
+	first.onStart = assertUnpublished
+	second.onStart = assertUnpublished
+	first.onStartContext = func(ctx context.Context) error {
+		// OnStart 复用正常 Await 外观，但等待函数在原生命周期调用链中顺序完成。
+		called := false
+		err := first.Await(ctx, func(context.Context) error {
+			called = true
+			return nil
+		})
+		if err == nil && !called {
+			t.Error("OnStart Await 没有执行等待函数")
+		}
+		return err
+	}
+
+	current := newTestNodeWithConfigAndOptions(
+		t,
+		Config{
+			ID:       "game-1",
+			Labels:   map[string]string{"region": "cn-east"},
+			Services: []string{"unused"},
+		},
+		Options{
+			MaxTimersPerNode: 3_000_000,
+			TimerLocation:    time.Local,
+			DiscoverySource:  source,
+		},
+		first,
+		second,
+	)
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	snapshotMu.Lock()
+	if len(latest.Nodes) != 1 || len(latest.Nodes[0].Services) != 2 ||
+		latest.Nodes[0].Labels["region"] != "cn-east" {
+		t.Fatalf("Ready 后完整发布错误: %+v", latest)
+	}
+	snapshotMu.Unlock()
+
+	if err := current.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	snapshotMu.Lock()
+	defer snapshotMu.Unlock()
+	if len(latest.Nodes) != 0 {
+		t.Fatalf("Stop 后没有撤销发布: %+v", latest)
+	}
+}
+
+// TestNodeDiscoveryQueryWaitAndListener 验证远端快照通过 Service 外观查询和 FIFO 监听交付。
+func TestNodeDiscoveryQueryWaitAndListener(t *testing.T) {
+	source := internaldiscovery.NewSource()
+	events := make([]string, 0, 2)
+	target := &lifecycleService{label: "GatewayService", events: &events}
+	current := newTestNodeWithConfigAndOptions(
+		t,
+		Config{
+			ID:       "gateway-1",
+			Services: []string{"unused"},
+		},
+		Options{
+			MaxTimersPerNode: 3_000_000,
+			TimerLocation:    time.Local,
+			DiscoverySource:  source,
+		},
+		target,
+	)
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	listener := &nodeDiscoveryListener{
+		owner:  target,
+		events: make(chan string, 8),
+	}
+	id, err := target.AddDiscoveryListener(listener)
+	if err != nil {
+		t.Fatalf("AddDiscoveryListener() error = %v", err)
+	}
+	remote := internaldiscovery.RawNode{
+		NodeID:    "game-1",
+		SessionID: "session-game-1",
+		Labels:    map[string]string{"region": "cn-east"},
+		Transport: internaldiscovery.TransportNone,
+		Services: []internaldiscovery.RawService{{
+			ServiceName: "PlayerService",
+			State:       internaldiscovery.ServiceStateRunning,
+		}},
+	}
+	if err := source.Publish(remote); err != nil {
+		t.Fatalf("Publish(remote) error = %v", err)
+	}
+	if got := receiveNode(t, listener.events); got != "discovered:PlayerService" {
+		t.Fatalf("发现事件 = %q", got)
+	}
+
+	instance, exists := target.FindDiscoveredService("game-1", "PlayerService")
+	if !exists || instance.State != publicdiscovery.StateRunning ||
+		instance.Labels["region"] != "cn-east" {
+		t.Fatalf("FindDiscoveredService() = (%+v, %v)", instance, exists)
+	}
+	list := target.ListDiscoveredServices("PlayerService")
+	if len(list) != 1 || list[0].SessionID != "session-game-1" {
+		t.Fatalf("ListDiscoveredServices() = %+v", list)
+	}
+	// 修改业务副本的 Labels 不得污染 Node 内部不可变快照。
+	instance.Labels["region"] = "modified"
+	again, _ := target.FindDiscoveredService("game-1", "PlayerService")
+	if again.Labels["region"] != "cn-east" {
+		t.Fatalf("业务修改污染内部 Labels: %v", again.Labels)
+	}
+
+	remote.Services[0].State = internaldiscovery.ServiceStateRetired
+	if err := source.Publish(remote); err != nil {
+		t.Fatalf("Publish(retired) error = %v", err)
+	}
+	if got := receiveNode(t, listener.events); got != "state:PlayerService" {
+		t.Fatalf("状态事件 = %q", got)
+	}
+	if !source.Withdraw(remote.NodeID, remote.SessionID) {
+		t.Fatal("Withdraw(remote) = false")
+	}
+	if got := receiveNode(t, listener.events); got != "lost:PlayerService" {
+		t.Fatalf("失去发现事件 = %q", got)
+	}
+	if !target.RemoveDiscoveryListener(&id) || id != 0 {
+		t.Fatalf("RemoveDiscoveryListener() 未清零 ID: %d", id)
+	}
+
+	if err := current.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+// TestNodeWithoutSourceClosesDiscoveryRuntime 验证独立构造的 Node 停止后也会关闭发现外观。
+func TestNodeWithoutSourceClosesDiscoveryRuntime(t *testing.T) {
+	events := make([]string, 0, 2)
+	target := &lifecycleService{label: "GatewayService", events: &events}
+	current := newTestNode(t, target)
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	remote := internaldiscovery.RawSnapshot{Nodes: []internaldiscovery.RawNode{{
+		NodeID:    "game-2",
+		SessionID: "session-game-2",
+		Transport: internaldiscovery.TransportNone,
+		Services: []internaldiscovery.RawService{{
+			ServiceName: "PlayerService",
+			State:       internaldiscovery.ServiceStateRunning,
+		}},
+	}}}
+	if err := current.discovery.apply(remote); err != nil {
+		t.Fatalf("apply() error = %v", err)
+	}
+	if _, exists := target.FindDiscoveredService("game-2", "PlayerService"); !exists {
+		t.Fatal("Stop 前没有读到测试发现记录")
+	}
+
+	if err := current.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if _, exists := target.FindDiscoveredService("game-2", "PlayerService"); exists {
+		t.Fatal("Stop 后发现外观仍返回旧记录")
+	}
+	if err := current.discovery.apply(remote); !errs.IsCode(
+		err,
+		errs.CodeServiceStopped,
+	) {
+		t.Fatalf("Stop 后 apply() error = %v", err)
+	}
+}
+
+// TestBuildDiscoveryActionsBatchesNodeSessionReplacement 验证同一 Node 的全部旧 Service 先按
+// 一个 Lost 事件交付，再以一个 Discovered 事件发布新会话。
+func TestBuildDiscoveryActionsBatchesNodeSessionReplacement(t *testing.T) {
+	oldPlayer := &internaldiscovery.Instance{
+		NodeID: "game-1", SessionID: "old", ServiceName: "PlayerService",
+		State: internaldiscovery.ServiceStateRunning,
+	}
+	oldChat := &internaldiscovery.Instance{
+		NodeID: "game-1", SessionID: "old", ServiceName: "ChatService",
+		State: internaldiscovery.ServiceStateRetired,
+	}
+	newPlayer := &internaldiscovery.Instance{
+		NodeID: "game-1", SessionID: "new", ServiceName: "PlayerService",
+		State: internaldiscovery.ServiceStateRunning,
+	}
+	newChat := &internaldiscovery.Instance{
+		NodeID: "game-1", SessionID: "new", ServiceName: "ChatService",
+		State: internaldiscovery.ServiceStateRunning,
+	}
+	delivered := map[internaldiscovery.InstanceKey]*internaldiscovery.Instance{
+		{NodeID: "game-1", ServiceName: "PlayerService"}: oldPlayer,
+		{NodeID: "game-1", ServiceName: "ChatService"}:   oldChat,
+	}
+	current := map[internaldiscovery.InstanceKey]*internaldiscovery.Instance{
+		{NodeID: "game-1", ServiceName: "PlayerService"}: newPlayer,
+		{NodeID: "game-1", ServiceName: "ChatService"}:   newChat,
+	}
+
+	actions := buildDiscoveryActions(delivered, current)
+	if len(actions) != 2 ||
+		actions[0].kind != internaldiscovery.ChangeLost ||
+		actions[1].kind != internaldiscovery.ChangeDiscovered {
+		t.Fatalf("Session 替换 actions = %+v", actions)
+	}
+	for index, action := range actions {
+		if action.event.NodeID != "game-1" ||
+			len(action.event.Services) != 2 ||
+			action.event.Services[0].ServiceName != "ChatService" ||
+			action.event.Services[1].ServiceName != "PlayerService" {
+			t.Fatalf("actions[%d] 没有按 Node 批量稳定排序: %+v", index, action)
+		}
+	}
 }
 
 func (target *lifecycleService) OnStop(context.Context) error {
@@ -564,6 +850,16 @@ func TestNodeNewRejectsInvalidBindings(t *testing.T) {
 		{name: "empty binding name", config: Config{ID: "game-1"}, bindings: []ServiceBinding{{
 			Template: "service", Service: target,
 		}}},
+		{name: "empty label key", config: Config{
+			ID: "game-1", Labels: map[string]string{"": "cn-east"},
+		}, bindings: []ServiceBinding{{
+			Name: "a", Template: "service", Service: target,
+		}}},
+		{name: "empty label value", config: Config{
+			ID: "game-1", Labels: map[string]string{"region": ""},
+		}, bindings: []ServiceBinding{{
+			Name: "a", Template: "service", Service: target,
+		}}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -612,6 +908,19 @@ func newTestNode(t *testing.T, services ...*lifecycleService) *Node {
 		ID:       "game-1",
 		Services: []string{"unused"},
 	}, services...)
+}
+
+// receiveNode 使用统一上限等待异步 Node 回调，超时立即给出明确测试位置。
+func receiveNode[T any](t *testing.T, input <-chan T) T {
+	t.Helper()
+	select {
+	case value := <-input:
+		return value
+	case <-time.After(time.Second):
+		t.Fatal("等待 Node 异步结果超时")
+		var zero T
+		return zero
+	}
 }
 
 func newTestNodeWithConfig(

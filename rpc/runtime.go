@@ -27,19 +27,41 @@ type serviceEndpoint struct {
 // RegisterService 只允许 Node 在 Runtime 发布前调用。Freeze 后目录只读，因此 RPC 热路径
 // 查找普通 Map 不需要锁；每个 Node 使用独立 Runtime，不存在跨 Node 隐式共享状态。
 type Runtime struct {
-	nodeID string
-	pool   *bufferpool.Pool
-	logger originlog.Logger
+	nodeID    string
+	sessionID string
+	pool      *bufferpool.Pool
+	logger    originlog.Logger
 
 	mu        sync.Mutex
 	endpoints map[string]serviceEndpoint
 	frozen    atomic.Bool
 	closed    atomic.Bool
 	requestID atomic.Uint64
+	// inboundReady 只在整个 Node 越过统一 OnStart 屏障后开放远端业务准入。
+	inboundReady atomic.Bool
+	// remoteResolver 由所属 Node 的不可变发现目录实现，Freeze 后保持只读。
+	remoteResolver RemoteResolver
 
 	// remote 在配置启用 TCP 时保存连接、监听和 Deadline 资源；未配置时保持 nil，
 	// 本地调用热路径只需一次 nil 判断。
 	remote *remoteRuntime
+}
+
+// RemoteRoute 是发现目录为一次精确远端 RPC 解析出的 TCP 会话目标。
+type RemoteRoute struct {
+	NodeID    string
+	SessionID string
+	Address   string
+}
+
+// RemoteResolver 是 RPC 对所属 Node 发现目录定义的最小热路径接口。
+type RemoteResolver interface {
+	ResolveRemote(
+		nodeID string,
+		serviceName string,
+		contractID ContractID,
+		fingerprint ContractFingerprint,
+	) (RemoteRoute, error)
 }
 
 // NewRuntime 创建尚未发布的 Node RPC Runtime。
@@ -53,10 +75,83 @@ func NewRuntime(
 	}
 	return &Runtime{
 		nodeID:    nodeID,
+		sessionID: nodeID,
 		pool:      pool,
 		logger:    logger,
 		endpoints: make(map[string]serviceEndpoint),
 	}, nil
+}
+
+// BindSessionID 在 Freeze 前绑定当前 Node 进程会话，供 TCP Hello/Ack 校验。
+func (runtime *Runtime) BindSessionID(sessionID string) error {
+	if runtime == nil || !validWireName(sessionID) {
+		return errs.ErrInvalidArgument
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.frozen.Load() || runtime.closed.Load() {
+		return errs.ErrServiceNotReady
+	}
+	runtime.sessionID = sessionID
+	return nil
+}
+
+// BindRemoteResolver 在 Freeze 前绑定当前 Node 唯一的服务发现解析器。
+func (runtime *Runtime) BindRemoteResolver(resolver RemoteResolver) error {
+	if runtime == nil || resolver == nil {
+		return errs.ErrInvalidArgument
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.frozen.Load() || runtime.closed.Load() ||
+		runtime.remoteResolver != nil {
+		return errs.ErrServiceNotReady
+	}
+	runtime.remoteResolver = resolver
+	return nil
+}
+
+// OpenInbound 在整个 Node 的全部 OnStart 成功后开放远端业务请求准入。
+func (runtime *Runtime) OpenInbound() error {
+	if runtime == nil || !runtime.frozen.Load() || runtime.closed.Load() {
+		return errs.ErrServiceNotReady
+	}
+	if !runtime.inboundReady.CompareAndSwap(false, true) {
+		return errs.ErrInvalidArgument
+	}
+	return nil
+}
+
+// resolveRemote 使用当前不可变发现目录解析精确远端目标。
+func (runtime *Runtime) resolveRemote(
+	nodeID string,
+	serviceName string,
+	contractID ContractID,
+	fingerprint ContractFingerprint,
+) (RemoteRoute, error) {
+	if runtime == nil || nodeID == "" || serviceName == "" ||
+		contractID == 0 || fingerprint == (ContractFingerprint{}) {
+		return RemoteRoute{}, errs.ErrInvalidArgument
+	}
+	resolver := runtime.remoteResolver
+	if resolver == nil {
+		return RemoteRoute{}, errs.ErrRPCNoRoute
+	}
+	route, err := resolver.ResolveRemote(
+		nodeID,
+		serviceName,
+		contractID,
+		fingerprint,
+	)
+	if err != nil {
+		return RemoteRoute{}, err
+	}
+	if route.NodeID != nodeID ||
+		!validWireName(route.SessionID) ||
+		validateAdvertiseAddress(route.Address) != nil {
+		return RemoteRoute{}, errs.ErrTransportUnavailable
+	}
+	return route, nil
 }
 
 // RegisterService 登记一个 Node 内已经完成 Runtime 绑定的 Service。
@@ -248,10 +343,20 @@ func (runtime *Runtime) submit(
 
 	// 指定其他 Node 时只走真实 TCP 会话；同进程 Runtime 之间也不做指针短路。
 	if target.mode == targetServiceOnNode && target.nodeID != runtime.nodeID {
+		// 服务发现是远端调用的唯一事实来源；历史连接不能绕过当前可见快照。
+		route, err := runtime.resolveRemote(
+			target.nodeID,
+			target.serviceName,
+			contractID,
+			fingerprint,
+		)
+		if err != nil {
+			return remoteRequestHandle{}, err
+		}
 		if runtime.remote == nil {
 			return remoteRequestHandle{}, errs.ErrTransportUnavailable
 		}
-		session := runtime.remote.targetSession(target.nodeID)
+		session := runtime.remote.targetSession(target.nodeID, route.SessionID)
 		if session == nil {
 			return remoteRequestHandle{}, errs.ErrTransportUnavailable
 		}

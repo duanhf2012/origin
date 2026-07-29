@@ -37,8 +37,9 @@ type pendingCall struct {
 //
 // pending 没有跨重连迁移：连接断开即失败当前会话全部调用，新连接只接收之后的新请求。
 type outboundSession struct {
-	remote       *remoteRuntime
-	targetNodeID string
+	remote          *remoteRuntime
+	targetNodeID    string
+	targetSessionID string
 
 	mu        sync.Mutex
 	conn      *tcpnet.Conn
@@ -54,12 +55,14 @@ type outboundSession struct {
 func newOutboundSession(
 	remote *remoteRuntime,
 	targetNodeID string,
+	targetSessionID string,
 ) *outboundSession {
 	return &outboundSession{
-		remote:       remote,
-		targetNodeID: targetNodeID,
-		pending:      make(map[uint64]pendingCall),
-		handshake:    make(chan error, 1),
+		remote:          remote,
+		targetNodeID:    targetNodeID,
+		targetSessionID: targetSessionID,
+		pending:         make(map[uint64]pendingCall),
+		handshake:       make(chan error, 1),
 	}
 }
 
@@ -72,7 +75,9 @@ func (session *outboundSession) OnOpen(conn *tcpnet.Conn) {
 	hello, err := encodeHello(
 		session.remote.owner.pool,
 		session.remote.owner.nodeID,
+		session.remote.owner.sessionID,
 		session.targetNodeID,
+		session.targetSessionID,
 	)
 	if err != nil {
 		session.finishHandshake(err)
@@ -107,6 +112,14 @@ func (session *outboundSession) OnMessage(
 			err = errs.NewMessage(
 				errs.CodeTransportProtocol,
 				"RPC HelloAck 的 NodeID 与连接目标不一致",
+			)
+			session.finishHandshake(err)
+			return err
+		}
+		if ack.sessionID != session.targetSessionID {
+			err = errs.NewMessage(
+				errs.CodeTransportProtocol,
+				"RPC HelloAck 的 SessionID 与连接目标不一致",
 			)
 			session.finishHandshake(err)
 			return err

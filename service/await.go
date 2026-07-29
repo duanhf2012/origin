@@ -51,12 +51,28 @@ func (scheduler *serviceScheduler) await(
 	ctx context.Context,
 	fn func(context.Context) error,
 ) error {
+	// 普通业务 Task 和 OnStart 生命周期使用不同的私有令牌与调度语义。
+	if token, ok := ctx.Value(taskContextKey{}).(*taskContext); ok &&
+		token != nil &&
+		token.scheduler == scheduler {
+		return scheduler.awaitTask(ctx, fn, token)
+	}
+	if token, ok := ctx.Value(startContextKey{}).(*startContext); ok &&
+		token != nil &&
+		token.scheduler == scheduler {
+		return scheduler.awaitStart(ctx, fn, token)
+	}
+	return errs.ErrInvalidArgument
+}
+
+// awaitTask 释放普通根 Task 的执行权，并在 FIFO 恢复后继续原调用栈。
+func (scheduler *serviceScheduler) awaitTask(
+	ctx context.Context,
+	fn func(context.Context) error,
+	token *taskContext,
+) error {
 	// 私有令牌必须来自当前 Scheduler 正在执行的根任务。Background Context、另一个
 	// Service 的 Context 或已经完成的旧 Context 都不能释放当前执行槽。
-	token, ok := ctx.Value(taskContextKey{}).(*taskContext)
-	if !ok || token == nil || token.scheduler != scheduler {
-		return errs.ErrInvalidArgument
-	}
 	task := token.task.Load()
 	if task == nil {
 		return errs.ErrInvalidArgument
@@ -222,6 +238,125 @@ func (scheduler *serviceScheduler) await(
 	// 等待函数 panic 必须在重新获得执行权后展开。根任务边界优先记录原始等待位置堆栈。
 	if panicked {
 		task.restoredPanicStack = panicStack
+		panic(panicValue)
+	}
+	return finalError
+}
+
+// awaitStart 在当前 OnStart goroutine 中顺序执行等待函数，不激活或让出普通业务执行槽。
+func (scheduler *serviceScheduler) awaitStart(
+	ctx context.Context,
+	fn func(context.Context) error,
+	token *startContext,
+) error {
+	// Context 必须仍属于当前活动 OnStart 代次，父 Context 已取消时不进入用户函数。
+	if !token.active.Load() {
+		return errs.ErrInvalidArgument
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		return awaitContextError(cause)
+	}
+
+	// 校验 Prepared 状态并建立唯一活动生命周期 Await。OnStart 顺序编程正常只会有一项；
+	// 该检查也让错误地并发复用 Context 快速失败，而不是相互覆盖 Deadline 绑定。
+	scheduler.mu.Lock()
+	if scheduler.state != schedulerPrepared ||
+		!scheduler.startActive ||
+		scheduler.startGeneration != token.generation ||
+		!token.active.Load() {
+		scheduler.mu.Unlock()
+		return errs.ErrInvalidArgument
+	}
+	if scheduler.activeStartAwait != nil ||
+		scheduler.awaiting >= scheduler.config.MaxAwaitTasks {
+		scheduler.rejectedTotal++
+		scheduler.mu.Unlock()
+		return errs.ErrServiceQueueFull
+	}
+
+	// 显式 Deadline 由父 Context 的 Go Timer 管理；没有显式值时只登记一条 M8 Deadline。
+	now := time.Now()
+	deadlineAt, explicitDeadline := ctx.Deadline()
+	if !explicitDeadline {
+		deadlineAt = now.Add(scheduler.config.DefaultAwaitTimeout)
+	}
+	delay := time.Until(deadlineAt)
+	if delay <= 0 {
+		scheduler.mu.Unlock()
+		return errs.ErrDeadlineExceeded
+	}
+	cancelContext, cancelWait := context.WithCancelCause(ctx)
+	var waitContext context.Context = cancelContext
+	binding := &startAwait{
+		token:      token,
+		cancel:     cancelWait,
+		deadlineID: timerwheel.InvalidDeadlineID,
+	}
+	if !explicitDeadline {
+		waitContext = &managedDeadlineContext{
+			Context:  cancelContext,
+			deadline: deadlineAt,
+		}
+		deadlineID, err := scheduler.deadlineQueue.ScheduleAfter(delay)
+		if err != nil {
+			scheduler.mu.Unlock()
+			cancelWait(err)
+			return errs.Wrap(errs.CodeInternal, err)
+		}
+		scheduler.startAwaitGeneration++
+		binding.generation = scheduler.startAwaitGeneration
+		binding.deadlineID = deadlineID
+		scheduler.deadlineBindings[deadlineID] = deadlineBinding{
+			kind:       deadlineBindingStartAwait,
+			start:      binding,
+			generation: binding.generation,
+		}
+	}
+	scheduler.activeStartAwait = binding
+	scheduler.awaiting++
+	scheduler.awaitTotal++
+	scheduler.mu.Unlock()
+
+	// 等待函数就在 OnStart 的原调用 goroutine 执行；没有普通 Runner 或辅助执行 goroutine。
+	waitError, panicValue, _, panicked := callAwaitFunction(fn, waitContext)
+
+	// 解除仍未到期的 M8 绑定，并在锁内冻结最终到期标记和统计。
+	scheduler.mu.Lock()
+	if scheduler.activeStartAwait != binding {
+		scheduler.mu.Unlock()
+		panic("service: OnStart Await 活动绑定不一致")
+	}
+	if binding.deadlineID != timerwheel.InvalidDeadlineID {
+		scheduler.deadlineQueue.Cancel(binding.deadlineID)
+		delete(scheduler.deadlineBindings, binding.deadlineID)
+		binding.deadlineID = timerwheel.InvalidDeadlineID
+	}
+	scheduler.activeStartAwait = nil
+	scheduler.awaiting--
+	expired := binding.expired
+	scheduler.mu.Unlock()
+
+	// 必须在 cancel(nil) 前读取父/等待 Context 原因，否则成功路径会被主动清理标为取消。
+	cause := context.Cause(waitContext)
+	if cause == nil {
+		cause = context.Cause(ctx)
+	}
+	cancelWait(nil)
+	finalError := waitError
+	if expired || errors.Is(cause, context.DeadlineExceeded) {
+		finalError = errs.ErrDeadlineExceeded
+		scheduler.mu.Lock()
+		scheduler.awaitTimeoutTotal++
+		scheduler.mu.Unlock()
+	} else if cause != nil {
+		finalError = awaitContextError(cause)
+		scheduler.mu.Lock()
+		scheduler.awaitCanceledTotal++
+		scheduler.mu.Unlock()
+	}
+
+	// OnStart 外层生命周期边界负责统一恢复和日志；这里保持等待函数原 panic 控制流。
+	if panicked {
 		panic(panicValue)
 	}
 	return finalError

@@ -14,9 +14,10 @@ import (
 // 每个目标只有一个管理 goroutine；连接失败后按指数退避重试，但绝不重发已经提交过的
 // 业务 Request。current 只在 ORP1 握手成功后发布。
 type remoteTarget struct {
-	remote  *remoteRuntime
-	nodeID  string
-	address string
+	remote    *remoteRuntime
+	nodeID    string
+	sessionID string
+	address   string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -31,16 +32,30 @@ type remoteTarget struct {
 func newRemoteTarget(
 	remote *remoteRuntime,
 	nodeID string,
+	sessionID string,
 	address string,
 ) *remoteTarget {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &remoteTarget{
-		remote:  remote,
-		nodeID:  nodeID,
-		address: address,
-		ctx:     ctx,
-		cancel:  cancel,
-		done:    make(chan struct{}),
+		remote:    remote,
+		nodeID:    nodeID,
+		sessionID: sessionID,
+		address:   address,
+		ctx:       ctx,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+	}
+}
+
+// requestStop 非阻塞取消发现目录已经删除或替换的连接目标。
+func (target *remoteTarget) requestStop() {
+	target.start()
+	target.cancel()
+	target.mu.Lock()
+	session := target.current
+	target.mu.Unlock()
+	if session != nil {
+		session.close()
 	}
 }
 
@@ -82,7 +97,10 @@ func (target *remoteTarget) currentSession() *outboundSession {
 
 // run 串行执行 Dial、握手、运行、断线和退避。
 func (target *remoteTarget) run() {
-	defer close(target.done)
+	defer func() {
+		close(target.done)
+		target.remote.targetDone(target)
+	}()
 	delay := reconnectInitialDelay
 	random := uint64(1469598103934665603)
 	for {
@@ -122,7 +140,11 @@ func (target *remoteTarget) run() {
 
 // connect 执行一次有界 Dial 和 ORP1 握手。
 func (target *remoteTarget) connect() (*outboundSession, error) {
-	session := newOutboundSession(target.remote, target.nodeID)
+	session := newOutboundSession(
+		target.remote,
+		target.nodeID,
+		target.sessionID,
+	)
 	dialCtx, cancel := context.WithTimeout(target.ctx, DefaultDialTimeout)
 	conn, err := tcpnet.Dial(
 		dialCtx,

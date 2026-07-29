@@ -13,11 +13,15 @@ import (
 // TestWireGoldenBigEndian 锁定 ORP1 不依赖 Go 结构体内存布局的黄金字节。
 func TestWireGoldenBigEndian(t *testing.T) {
 	pool := bufferpool.NewPool(bufferpool.Options{})
-	hello, err := encodeHello(pool, "A", "B")
+	hello, err := encodeHello(pool, "A", "SA", "B", "SB")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expected := []byte{'O', 'R', 'P', '1', 1, 1, 'A', 'B'}; !bytes.Equal(
+	if expected := []byte{
+		'O', 'R', 'P', '1',
+		1, 2, 1, 2,
+		'A', 'S', 'A', 'B', 'S', 'B',
+	}; !bytes.Equal(
 		hello.Bytes(),
 		expected,
 	) {
@@ -44,7 +48,13 @@ func TestWireGoldenBigEndian(t *testing.T) {
 // TestWireHelloRoundTrip 锁定 Hello 和 HelloAck 的字段顺序、目录与错误响应。
 func TestWireHelloRoundTrip(t *testing.T) {
 	pool := bufferpool.NewPool(bufferpool.Options{})
-	helloBuffer, err := encodeHello(pool, "gateway-1", "game-1")
+	helloBuffer, err := encodeHello(
+		pool,
+		"gateway-1",
+		"session-gateway",
+		"game-1",
+		"session-game",
+	)
 	if err != nil {
 		t.Fatalf("encodeHello: %v", err)
 	}
@@ -52,7 +62,10 @@ func TestWireHelloRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseHello: %v", err)
 	}
-	if hello.sourceNodeID != "gateway-1" || hello.targetNodeID != "game-1" {
+	if hello.sourceNodeID != "gateway-1" ||
+		hello.sourceSessionID != "session-gateway" ||
+		hello.targetNodeID != "game-1" ||
+		hello.targetSessionID != "session-game" {
 		t.Fatalf("Hello 身份错误: %+v", hello)
 	}
 	helloBuffer.Release()
@@ -62,6 +75,7 @@ func TestWireHelloRoundTrip(t *testing.T) {
 		pool,
 		errs.CodeOK,
 		"game-1",
+		"session-game",
 		[]wireServiceEntry{{
 			name:        "PlayerService",
 			fingerprint: fingerprint,
@@ -75,6 +89,7 @@ func TestWireHelloRoundTrip(t *testing.T) {
 		t.Fatalf("parseHelloAck: %v", err)
 	}
 	if ack.statusCode != errs.CodeOK || ack.nodeID != "game-1" ||
+		ack.sessionID != "session-game" ||
 		len(ack.services) != 1 || ack.services[0].name != "PlayerService" ||
 		ack.services[0].fingerprint != fingerprint {
 		t.Fatalf("HelloAck 内容错误: %+v", ack)
@@ -192,6 +207,7 @@ func TestWireRejectsMalformedPackets(t *testing.T) {
 		pool,
 		errs.CodeOK,
 		"game-1",
+		"session-game",
 		[]wireServiceEntry{
 			{name: "S", fingerprint: ContractFingerprint{1}},
 			{name: "S", fingerprint: ContractFingerprint{2}},
@@ -208,7 +224,7 @@ func TestWireRejectsMalformedPackets(t *testing.T) {
 
 // FuzzWireParsers 确保任意远端输入不会触发 panic 或越界。
 func FuzzWireParsers(f *testing.F) {
-	f.Add([]byte("ORP1\x01\x01ab"))
+	f.Add([]byte("ORP1\x01\x01\x01\x01abcd"))
 	f.Add([]byte{wireKindRequest})
 	f.Add([]byte{wireKindNotify})
 	f.Add([]byte{wireKindResponse})
