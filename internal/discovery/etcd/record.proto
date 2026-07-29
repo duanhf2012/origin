@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package origin.discovery.etcd.v1;
+
+option go_package = "github.com/duanhf2012/origin/v3/internal/discovery/etcd";
+
+message EtcdNodeRecordV1 {
+  uint32 schema_version = 1;
+  string node_id = 2;
+  uint64 session_id = 3;
+  string network = 4;
+  uint32 transport = 5;
+  string address = 6;
+  repeated Label labels = 7;
+  repeated Service services = 8;
+}
+
+message Label {
+  string key = 1;
+  string value = 2;
+}
+
+message Service {
+  string name = 1;
+  uint32 state = 2;
+  uint64 contract_id = 3;
+  bytes contract_fingerprint = 4;
+}

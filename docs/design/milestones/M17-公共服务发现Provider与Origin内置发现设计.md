@@ -254,3 +254,6 @@ M17 完成必须同时满足：
 [M17 实施计划](../../plans/M17-公共服务发现Provider与Origin内置发现实施计划.md)完成。
 公共 SPI 已由 Origin 与最小 Consul 风格 Provider 共同验证，M18 可以只新增 etcd Provider
 与同名配置，不修改 Node、Directory、RPC 或业务发现 API。
+
+M18 的实际实现与全量回归已于 2026-07-30 进一步证明该边界成立；无需回改 M17 公共
+Factory、Provider、Context、Host、DTO、状态或错误码。

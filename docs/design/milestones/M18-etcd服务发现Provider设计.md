@@ -3,7 +3,7 @@
 > 文档类型：里程碑设计
 > 创建日期：2026-07-30
 > 最后更新：2026-07-30
-> 当前状态：最终 Review 已通过，允许实施
+> 当前状态：已实现并通过验收
 
 ## 1. 里程碑目标
 
@@ -81,3 +81,18 @@ M18 只能新增 etcd Provider 包、内部 Protobuf 记录、配置映射和测
 最终 Review 同时补齐 M17 `Host.SetTTL`，让 Origin、etcd 和第三方 Provider 都能以一个
 最小入口把 TTL 交给框架公共过期状态机，不在 Node 层增加后端判断。未发现需要修改 Node
 业务 API、Directory、RPC 或公共发现查询的冲突，允许在 M17 提交后实施 M18。
+
+## 5. 实施与最终复核结果
+
+M18 已于 2026-07-30 完成。实施阶段的最后一次 M17/M18 联合复核没有发现公共契约冲突，
+并补强了三项内部一致性细节：
+
+1. 所有网络的分页 Range 固定使用同一个线性化 revision；
+2. 全部 Watch 建立后等待显式 progress 屏障，闭合 Range/Watch 窗口；
+3. 同一 etcd revision 跨多个 Network 的事务只向 Host 提交一份合并快照。
+
+最终实现未修改 M17 公共 SPI、Node、Directory、RPC 或业务 API。真实 etcd 3.6.14 独立
+进程与 3.7.1 嵌入式 Server 均通过，覆盖多 Endpoint、分页、多网络事务、Lease、Session
+冲突与接管、重启恢复、用户名密码、Token、前缀 RBAC、HTTPS、自定义 CA、客户端证书加载、
+容量与 Compaction 错误路径。完整命令与性能数据记录在
+[M18 实施计划](../../plans/M18-etcd服务发现Provider实施计划.md)。

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
+	etcddiscovery "github.com/duanhf2012/origin/v3/internal/discovery/etcd"
 	origindiscovery "github.com/duanhf2012/origin/v3/internal/discovery/origin"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
@@ -30,8 +32,9 @@ type loadedConfig struct {
 
 // discoverySelection 保存顶层严格联合已经选中的唯一 Provider 配置块。
 type discoverySelection struct {
-	kind   string
-	config publicprovider.Config
+	kind       string
+	config     publicprovider.Config
+	configRoot string
 }
 
 // bufferPoolConfig 只包含 M7 已实现的内存池开关。
@@ -190,6 +193,18 @@ func loadConfig(directory string) (loadedConfig, error) {
 		selection, err := decodeDiscoverySelection(raw)
 		if err != nil {
 			return loadedConfig{}, err
+		}
+		selection.configRoot, err = filepath.Abs(directory)
+		if err != nil {
+			return loadedConfig{}, errs.Wrap(errs.CodeInvalidConfig, err)
+		}
+		if selection.kind == "etcd" {
+			if _, err := etcddiscovery.DecodeConfig(
+				selection.config,
+				selection.configRoot,
+			); err != nil {
+				return loadedConfig{}, err
+			}
 		}
 		result.discovery = selection
 	}

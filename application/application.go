@@ -15,6 +15,7 @@ import (
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	etcddiscovery "github.com/duanhf2012/origin/v3/internal/discovery/etcd"
 	origindiscovery "github.com/duanhf2012/origin/v3/internal/discovery/origin"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/log/zaplog"
@@ -557,7 +558,7 @@ func (app *Application) buildNodes(
 				return nil, err
 			}
 		case "etcd":
-			return nil, invalidConfigf("Discovery Provider %q 尚未在 M17 实现", discovery.kind)
+			factory = etcddiscovery.NewFactory(discovery.configRoot)
 		default:
 			app.mu.Lock()
 			factory = app.providers[discovery.kind]
