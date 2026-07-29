@@ -72,7 +72,7 @@ func TestValidateOptions(t *testing.T) {
 			o.MaxPingsOutstanding = 0
 		}},
 		{name: "negative reconnect attempts", change: func(o *Options) {
-			o.Reconnect.MaxAttempts = -1
+			o.Reconnect.MaxAttempts = -2
 		}},
 		{name: "zero reconnect wait", change: func(o *Options) {
 			o.Reconnect.Wait = 0
@@ -115,8 +115,9 @@ func TestValidateOptions(t *testing.T) {
 	// -1 是 RPC Adapter 禁用断线发送缓冲的唯一合法负值。
 	disabled := DefaultOptions("test.node", "nats://127.0.0.1:4222")
 	disabled.Reconnect.BufferSize = -1
+	disabled.Reconnect.MaxAttempts = -1
 	if _, err := validateOptions(disabled); err != nil {
-		t.Fatalf("Reconnect.BufferSize=-1 被拒绝: %v", err)
+		t.Fatalf("RPC 无限重连配置被拒绝: %v", err)
 	}
 
 	for _, test := range tests {

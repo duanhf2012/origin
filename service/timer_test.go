@@ -1114,45 +1114,6 @@ func TestNextTickerTimeRejectsDurationOverflow(t *testing.T) {
 	}
 }
 
-func TestTimerPanicLogDecisionAggregatesAndForcesLimitLog(t *testing.T) {
-	scheduler := &serviceScheduler{}
-	now := time.Unix(100, 0)
-
-	// 一个聚合窗口内第一条立即记录；后续重复 panic 只累计，不逐条拖慢 Service Runner。
-	if logNow, suppressed := scheduler.timerPanicLogDecisionLocked(now, false); !logNow || suppressed != 0 {
-		t.Fatalf("首次 panic 日志决策 = (%v, %d)", logNow, suppressed)
-	}
-	if logNow, suppressed := scheduler.timerPanicLogDecisionLocked(
-		now.Add(time.Millisecond),
-		false,
-	); logNow || suppressed != 0 {
-		t.Fatalf("窗口内重复 panic 日志决策 = (%v, %d)", logNow, suppressed)
-	}
-
-	// 达到连续 panic 上限时必须越过限流可靠记录，并带上此前被聚合的数量。
-	if logNow, suppressed := scheduler.timerPanicLogDecisionLocked(
-		now.Add(2*time.Millisecond),
-		true,
-	); !logNow || suppressed != 1 {
-		t.Fatalf("panic 上限日志决策 = (%v, %d)", logNow, suppressed)
-	}
-
-	// 新窗口重新允许第一条日志；墙上时间回拨也不能让限流永久失效。
-	later := now.Add(2*time.Millisecond + timerPanicLogInterval)
-	if logNow, suppressed := scheduler.timerPanicLogDecisionLocked(
-		later,
-		false,
-	); !logNow || suppressed != 0 {
-		t.Fatalf("新窗口 panic 日志决策 = (%v, %d)", logNow, suppressed)
-	}
-	if logNow, suppressed := scheduler.timerPanicLogDecisionLocked(
-		now,
-		false,
-	); !logNow || suppressed != 0 {
-		t.Fatalf("时间回拨 panic 日志决策 = (%v, %d)", logNow, suppressed)
-	}
-}
-
 func TestTimerCallbackCanAwaitAndLetsOtherTaskRun(t *testing.T) {
 	fixture := newTimerFixture(t, 8)
 	awaitStarted := make(chan struct{})

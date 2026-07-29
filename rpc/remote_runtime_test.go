@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net"
 	"testing"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
 
@@ -68,7 +70,9 @@ func TestRemoteTargetAddressLifecycle(t *testing.T) {
 	if err := runtime.AddTarget("player-1", 2, "127.0.0.1:17003"); err != nil {
 		t.Fatalf("AddTarget after exact remove error = %v", err)
 	}
-	runtime.Close()
+	if err := runtime.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
 }
 
 func TestRequestIDDoesNotWrap(t *testing.T) {
@@ -91,5 +95,99 @@ func TestReconnectJitterBounds(t *testing.T) {
 		if delay < 800*time.Millisecond || delay > 1200*time.Millisecond {
 			t.Fatalf("jitterDelay() = %v", delay)
 		}
+	}
+}
+
+// TestTCPListenerUnexpectedStopRecovers 验证 Listener 不是由 Runtime 正式 Stop 关闭时，
+// 唯一恢复 owner 会在相同地址重建监听，并依次发布 Recovering 和 Ready。
+func TestTCPListenerUnexpectedStopRecovers(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("申请临时 TCP 端口: %v", err)
+	}
+	address := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatalf("释放临时 TCP 端口: %v", err)
+	}
+
+	engine, err := timerwheel.New(timerwheel.DefaultOptions())
+	if err != nil {
+		t.Fatalf("timerwheel.New() error = %v", err)
+	}
+	if err := engine.Start(); err != nil {
+		t.Fatalf("Engine.Start() error = %v", err)
+	}
+	defer engine.Close()
+
+	runtime, err := NewRuntime(
+		"gateway-1",
+		bufferpool.NewPool(bufferpool.Options{}),
+		originlog.NewNop(),
+	)
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	config := DefaultConfig()
+	config.TCP.Listen = address
+	config.TCP.Advertise = address
+	if err := runtime.Configure(&config); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	events := make(chan TransportEvent, 8)
+	if err := runtime.BindTransportObserver(func(event TransportEvent) {
+		events <- event
+	}); err != nil {
+		t.Fatalf("BindTransportObserver() error = %v", err)
+	}
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	if err := runtime.StartNetwork(context.Background(), engine); err != nil {
+		t.Fatalf("StartNetwork() error = %v", err)
+	}
+	defer runtime.Close(context.Background())
+
+	remote := runtime.remote
+	remote.mu.Lock()
+	first := remote.listener
+	firstGeneration := remote.listenerGeneration
+	remote.mu.Unlock()
+	if first == nil {
+		t.Fatal("StartNetwork() 未发布 TCP Listener")
+	}
+	if err := first.StopAccept(context.Background()); err != nil {
+		t.Fatalf("意外 StopAccept() error = %v", err)
+	}
+
+	deadline := time.After(3 * time.Second)
+	recovering := false
+	ready := false
+	for !ready {
+		select {
+		case event := <-events:
+			if event.State == TransportStateRecovering {
+				recovering = true
+			}
+			if recovering && event.State == TransportStateReady {
+				ready = true
+			}
+		case <-deadline:
+			t.Fatal("TCP Listener 没有在期限内完成恢复")
+		}
+	}
+
+	remote.mu.Lock()
+	current := remote.listener
+	currentGeneration := remote.listenerGeneration
+	remote.mu.Unlock()
+	if current == nil || current == first {
+		t.Fatal("恢复后仍持有旧 TCP Listener")
+	}
+	if currentGeneration <= firstGeneration {
+		t.Fatalf(
+			"恢复代次没有递增: before=%d after=%d",
+			firstGeneration,
+			currentGeneration,
+		)
 	}
 }

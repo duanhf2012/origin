@@ -58,7 +58,15 @@ func DispatchAsyncCompletion(
 		return errs.ErrInvalidArgument
 	}
 
-	return owner.DispatchAsync(func(taskCtx context.Context) {
+	base := owner.baseService()
+	if base == nil {
+		return errs.ErrInvalidArgument
+	}
+	scheduler := base.scheduler.Load()
+	if scheduler == nil {
+		return errs.ErrServiceNotReady
+	}
+	return scheduler.dispatchContinuation(ctx, func(taskCtx context.Context) {
 		// 组合 Context 只活到本回调任务结束，不交给其他根任务或长期保存。
 		merged := &completionContext{
 			execution: taskCtx,

@@ -436,7 +436,9 @@ go test -race ./rpc -run 'TestNATS(Pending|Response)'
 
 - 产出：稳定 Subject、请求/响应 Subscription、原始只读 Data 唯一移交、按需一次响应复制。
 - 产出：发现路由同时校验 NodeID、ServiceName、Contract、Transport、SessionID。
-- 产出：NATS 终态和 TCP Listener 永久失败触发发现撤销及受控 Node Stop 信号。
+- 历史产出：NATS 终态和 TCP Listener 永久失败触发发现撤销及受控 Node Stop 信号。
+  2026-07-29 最新决策要求 M16 将其改为详细记录错误、撤销不可达发现并完成 pending，
+  但不取消 Application，也不停止 Node 或 Service。
 
 - [x] **Step 1：写真实嵌入式三节点端到端失败测试**
 

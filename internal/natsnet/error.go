@@ -88,6 +88,17 @@ func mapError(err error) error {
 	return errs.Wrap(errs.CodeTransportUnavailable, err)
 }
 
+// IsAuthenticationError 报告初始连接失败是否来自确定性认证拒绝。
+//
+// RPC 启动恢复只重试网络可达性问题；错误凭据必须立即返回，避免默认无限 Start 在无法
+// 自行恢复的配置上永久等待。运行期凭据轮换仍由 IgnoreAuthErrorAbort 持续重连处理。
+func IsAuthenticationError(err error) bool {
+	return errors.Is(err, nats.ErrAuthorization) ||
+		errors.Is(err, nats.ErrAuthExpired) ||
+		errors.Is(err, nats.ErrAuthRevoked) ||
+		errors.Is(err, nats.ErrAccountAuthExpired)
+}
+
 // panicError 把 Handler 或 EventHandler panic 转换为带现场堆栈的内部错误。
 func panicError(scope string, value any) error {
 	// debug.Stack 必须在 recover 所在 defer 中调用，才能保留真实 panic 现场。

@@ -194,17 +194,18 @@ payload 又允许为空，因此两者仍必须有一个不可推导的类型标
   其他负数继续报配置错误；
 - 即使连接状态检查和 Publish 之间发生断线竞争，禁用缓冲也必须让该次 Publish 立即失败，
   不能在重连后延迟重放；
-- 断线前已经提交的 Await/Async pending 保留到响应或原 Deadline；
-- 不因瞬时断线立即完成这些 pending；
+- 连接断开时，已经提交的 Await/Async pending 立即以
+  `CodeTransportUnavailable` 完成；
+- 迟到 Response 按未知 RequestID 丢弃，不能恢复或重放已经完成的调用；
 - 不自动重新发布或重试非幂等请求；
-- NATS 连接终态关闭或重连耗尽时统一完成全部 pending；
+- NATS 当前 Connection Closed 时统一完成该 generation 的全部 pending；M16 RPC Adapter
+  改为无限重连，Closed 后由唯一 owner 重建新 generation，不再以次数耗尽作为终态；
 - 恢复连接只服务后续新调用。
 
-TCP 与 NATS 都在重连期间拒绝新调用、都不自动重发 Request/Notify，但已有 pending 的
-物理归属不同：TCP pending 属于一条已经断开的目标连接，因此断线时立即失败；NATS pending
-属于 Node 级共享响应 Subject，Broker 短暂切换不会证明目标 Request 已经丢失，因此保留到
-合法 Response、原 Deadline 或 Connection 终态。该差异是 Transport 资源模型决定的，不
-向生成客户端增加不同接口。
+TCP 与 NATS 都在重连期间拒绝新调用、都不自动重发 Request/Notify，并且都在承载当前
+调用的连接断开时立即完成受影响 pending。调用方得到相同的
+`CodeTransportUnavailable`，不需要理解两种 Transport 的物理差异；目标业务是否已经执行
+仍然属于分布式调用固有的不确定性，框架不能据此自动重试非幂等请求。
 
 ### 2.10 M15 同步实施的 TCP 线协议精简
 
@@ -415,7 +416,8 @@ pending 从“登记成功、准备 Publish”开始占用，直到以下任一�
 - 收到并验证合法 Response；
 - 调用方 Context 取消或 Deadline 到期；
 - Publish 立即失败并回滚登记；
-- NATS Connection 进入不会再恢复的关闭终态；
+- NATS 当前 Connection 进入 Closed；该 generation 的 pending 终止，M16 外层恢复创建
+  新 generation；
 - Node/RPC Runtime 正式停止。
 
 达到 `65536` 时，新 Await/Async 必须在编码完成但 Publish 之前立即返回
@@ -676,9 +678,10 @@ nodes:
 
 Node 的 NATS RPC 配置只公开项目确实需要选择的 namespace、Server 地址、接收队列容量、
 认证和 TLS。`no_randomize`、连接与基础操作超时、Drain 超时、Ping、最大未响应 Ping 和
-重连次数/等待/抖动继续存在于 M6 `internal/natsnet.Options`，由 M15 RPC Adapter 使用固定
-安全默认值，不逐项暴露到业务配置。真实生产场景和可重复数据证明需要调整时，再单独
-Review 最小高级配置，避免 Node 配置与 nats.go 版本细节强耦合。
+重连次数/等待/抖动继续存在于 M6 `internal/natsnet.Options`，不逐项暴露到业务配置。M16
+RPC Adapter 固定使用无限重连、`2s` 等待、普通 `500ms` Jitter 和 TLS `1s` Jitter。
+真实生产场景和可重复数据证明需要调整时，再单独 Review 最小高级配置，避免 Node 配置与
+nats.go 版本细节强耦合。
 
 `transport` 与配置块使用严格互斥规则：
 
@@ -689,21 +692,24 @@ Review 最小高级配置，避免 Node 配置与 nats.go 版本细节强耦合�
   `read_timeout`、`subscription.pending_messages` 在 M15 迁移后直接报配置错误，不建立
   长期兼容别名。
 
-### 3.4.1 Transport 基础设施终态
+### 3.4.1 Transport 基础设施恢复
 
-Node 的 RPC 入站能力是公开 Service 的基础设施。以下状态已经不能只记日志后继续假装
-Node 可用：
+Node 的 RPC 入站能力是公开 Service 的基础设施。以下状态不能只记日志后继续假装 Node
+可用，必须撤销发现并进入持续恢复：
 
-- TCP Listener 在非正常 Stop 期间永久关闭或 AcceptLoop 退出；
-- NATS Connection 进入不会恢复的关闭终态，或有界重连次数耗尽。
+- TCP Listener 在非正常 Stop 期间关闭或 AcceptLoop 退出；
+- NATS Connection 因鉴权、协议或客户端内部原因意外进入 Closed。
 
-发生上述状态时，Node 必须先撤销服务发现中的公开 Service，再触发受控 Node Stop；上层
-Application 按既有失败规则收尾，并由 Kubernetes、systemd 或其他进程管理器决定是否
-重启。这样不会让发现目录长期保留一个实际已经无法接收 RPC 的 Node。
+> 2026-07-29 M16 最新决策覆盖本节原停止策略：发生上述状态时，Node 必须撤销服务发现
+> 中的公开 Service、完成受影响 pending 并记录详细错误，但不得取消 Application，也不得
+> 自动停止 Node 或 Service。TCP 按原地址无限重建 Listener；NATS 在 nats.go 内部无限
+> 重连之外，由唯一 Transport owner 对意外 Closed 周期性重建 Connection、Subscription 和
+> Session，直到恢复或收到 Stop。
 
 以下局部故障不升级为 Node Stop：
 
-- 单个 TCP 目标连接断开，只影响该目标并按 M13 规则有界重连；
+- 单个 TCP 目标连接断开，只影响该目标并按 M13 规则在 Application 运行期持续重试、限制
+  最大退避，并可由 Stop 立即取消；
 - NATS 慢消费者、Service 队列满和单次 Publish 失败按过载或调用错误处理；
 - Retired 只是业务可观察状态，继续允许收发 RPC。
 
@@ -728,7 +734,9 @@ Application 按既有失败规则收尾，并由 Kubernetes、systemd 或其他�
 8. TCP/NATS Transport 配置块严格互斥，迁移前旧字段和无效组合都具有配置失败测试；
 9. 更新 TCP 单元、集成、双进程、Race、Fuzz、Benchmark 和 Windows/Linux 回归，证明字段
    迁移及队列简化没有改变 M13 的调用、重连、心跳、Deadline 和 Buffer 所有权；
-10. 更新 NATS 三节点、慢消费者、队列边界、断线、重连耗尽和受控 Node Stop 测试；
+10. 更新 NATS 三节点、慢消费者、队列边界、断线和 Closed 测试；M16 按最新决策改为
+    无限重连，意外 Closed 由唯一 owner 周期性重建，并修正为撤销发现、详细记录错误且不
+    停止 Node/Service；
 11. 更新全部公开文档、示例和配置夹具，不允许代码接受旧名而文档只展示新名；
 12. 本次迁移不增加兼容别名、弃用周期或双字段优先级，因为 Origin v3 尚未正式发布。
 
@@ -760,8 +768,9 @@ Docker Compose NATS 集群。
 - 三个 Server 逐个滚动重启；
 - 全集群停止再恢复；
 - 重连期间新 RPC 快速失败且不进入隐藏发送缓冲；
-- 断线前 pending 按响应、Deadline 或连接终态完成一次；
-- 达到最大重连次数后的整体 pending 分离；
+- 断线前 pending 在连接断开时以 `CodeTransportUnavailable` 完成一次；
+- NATS Closed 后的当前 generation pending 整体分离；M16 随后由唯一 owner 重建新
+  generation；
 - Node 重启、SessionID 改变、迟到/重复/未知 Response；
 - Request/Response Subscription 慢消费者；
 - Service 队列满；
@@ -786,7 +795,9 @@ Docker Compose NATS 集群。
 5. pending 热路径不增加对象池分支；
 6. TCP/NATS 都只维护消息数量队列，不再维护队列 payload 字节计数；
 7. 并发登记、响应、取消、Stop 和整体关闭通过 Race；
-8. TCP Listener 异常终止和 NATS 永久终态会撤销发现并触发受控 Node Stop；
+8. TCP Listener 异常终止和 NATS 意外 Closed 会撤销发现、完成受影响 pending、记录详细
+   错误并持续尝试恢复，但不触发 Application、Node 或 Service Stop；M16 负责修正 M15
+   当前代码差异；
 9. 不设置脱离机器的固定 QPS 或微秒门禁；同机重复基准出现超过约 `10%` 的稳定退化时，
    必须定位原因并由开发者确认是否接受复杂度。
 
@@ -800,13 +811,17 @@ M15 于 2026-07-29 完成实现，最终代码严格保持以下边界：
 - NATS 每 Node 只创建一条 Connection、一个 Request Subscription 和一个 Response
   Subscription，Subject 固定为 `orpc.{namespace}.req.{node}` 与
   `orpc.{namespace}.resp.{node}`；
-- NATS 重连缓冲固定关闭，重连期间新调用快速失败，断线前 pending 保留且 Request 不重放；
+- NATS 重连缓冲固定关闭，重连期间新调用快速失败，断线时当前 pending 立即失败且
+  Request 不重放；
 - Request/Notify 直接借用 nats.go 入站 `Message.Data`；成功 Response 按需复制一次，
   错误、迟到和未知 Response 不复制业务 payload；
 - TCP/NATS 均只保留消息数量边界；历史发送字节额度和 NATS pending 字节额度已经删除；
 - Running 与 Retired 均允许 RPC，Stopping 才停止新入站准入；
-- TCP Listener 永久失败和 NATS Connection 终态先撤销发现，再取消 Application 唯一
-  生命周期 Context，由串行控制路径执行优雅 Stop。
+- M15 实现时 TCP Listener 失败和 NATS Connection Closed 会先撤销发现，再取消
+  Application 生命周期 Context；M16 按 2026-07-29 最新决策移除取消行为，改为无限自动
+  恢复：TCP 重建 Listener，NATS 由唯一 owner 重建 Connection、Subscription 和内部
+  Transport generation；Node 进程级 SessionID 保持不变，不因恢复持续时间停止
+  Application、Node 或 Service。
 
 验证结果：
 

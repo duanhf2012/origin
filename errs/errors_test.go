@@ -33,6 +33,7 @@ func TestStableCodes(t *testing.T) {
 		{name: "service queue full", code: errs.CodeServiceQueueFull, want: 1004},
 		{name: "graceful shutdown timeout", code: errs.CodeGracefulShutdownTimeout, want: 1005},
 		{name: "service not ready", code: errs.CodeServiceNotReady, want: 1006},
+		{name: "service failed", code: errs.CodeServiceFailed, want: 1007},
 		{name: "rpc no route", code: errs.CodeRPCNoRoute, want: 2001},
 		{name: "rpc invalid route key", code: errs.CodeRPCInvalidRouteKey, want: 2002},
 		{name: "rpc route selector failed", code: errs.CodeRPCRouteSelectorFailed, want: 2003},
@@ -52,6 +53,7 @@ func TestStableCodes(t *testing.T) {
 		{name: "transport overloaded", code: errs.CodeTransportOverloaded, want: 3003},
 		{name: "transport protocol", code: errs.CodeTransportProtocol, want: 3004},
 		{name: "transport message too large", code: errs.CodeTransportMessageTooLarge, want: 3005},
+		{name: "discovery unavailable", code: errs.CodeDiscoveryUnavailable, want: 5001},
 		{name: "log closed", code: errs.CodeLogClosed, want: 7001},
 		{name: "log output failed", code: errs.CodeLogOutputFailed, want: 7002},
 	}
@@ -144,6 +146,7 @@ func TestNew(t *testing.T) {
 			want: errs.ErrServiceNotReady,
 			text: "service not ready",
 		},
+		{code: errs.CodeServiceFailed, want: errs.ErrServiceFailed, text: "service failed"},
 		{
 			code: errs.CodeTransportUnavailable,
 			want: errs.ErrTransportUnavailable,
@@ -164,6 +167,11 @@ func TestNew(t *testing.T) {
 			code: errs.CodeTransportMessageTooLarge,
 			want: errs.ErrTransportMessageTooLarge,
 			text: "transport message too large",
+		},
+		{
+			code: errs.CodeDiscoveryUnavailable,
+			want: errs.ErrDiscoveryUnavailable,
+			text: "discovery unavailable",
 		},
 		{code: errs.CodeLogClosed, want: errs.ErrLogClosed, text: "log runtime closed"},
 		{code: errs.CodeLogOutputFailed, want: errs.ErrLogOutputFailed, text: "log output failed"},

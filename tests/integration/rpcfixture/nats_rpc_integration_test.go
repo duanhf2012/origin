@@ -208,7 +208,7 @@ func TestExternalNATSRPCThreeNodeCluster(t *testing.T) {
 }
 
 // TestNATSRPCThreeNodeClusterAndReconnect 覆盖三个 Origin Node 跨三个 Broker 的路由、复杂
-// Codec、Retired 可调用，以及调用方 Broker 断开后旧 pending 保留且不会重放 Request。
+// Codec、Retired 可调用，以及调用方 Broker 断开后旧 pending 快速失败且不会重放 Request。
 func TestNATSRPCThreeNodeClusterAndReconnect(t *testing.T) {
 	cluster := startRPCNATSCluster(t, 3)
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
@@ -353,14 +353,28 @@ func TestNATSRPCThreeNodeClusterAndReconnect(t *testing.T) {
 	close(gate)
 	select {
 	case err := <-pendingDone:
-		if err != nil {
-			t.Fatalf("重连后的旧 pending error = %v", err)
+		if !errors.Is(err, errs.ErrTransportUnavailable) {
+			t.Fatalf("断线时旧 pending error = %v", err)
 		}
 	case <-time.After(8 * time.Second):
 		t.Fatal("重连后的旧 pending 未完成")
 	}
+	recoveryDeadline := time.Now().Add(8 * time.Second)
+	for gatewayNode.TransportStatus().State != node.TransportReady {
+		if time.Now().After(recoveryDeadline) {
+			t.Fatalf(
+				"gateway NATS Transport 未恢复: %+v",
+				gatewayNode.TransportStatus(),
+			)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := awaitNATSEcho(t, gateway, "after-reconnect"); got != "after-reconnect-echo" {
+		t.Fatalf("重连后的新 NATS RPC = %q", got)
+	}
 
-	// 如果请求被重放，目标业务计数会大于前面两次复杂/Retired 调用所形成的准确数量。
+	// 断线时调用方 pending 快速失败，Adapter 不会把旧请求重新发布；恢复后的 Echo 调用也
+	// 不属于 GetPlayer。若旧 Request 被重放，目标计数会超过断线前已经确认的准确值。
 	countDone := make(chan int, 1)
 	if err := player.DispatchAsync(func(context.Context) {
 		countDone <- player.GetCount

@@ -23,6 +23,10 @@ type Runtime interface {
 	ReleaseTimerSlot()
 	TimerLimit() int
 	TimerLocation() *time.Location
+	// Failure 返回所属 Service 第一个不可恢复根因；正常状态返回 nil。
+	Failure() error
+	// ReportFailure 由 Scheduler 在无法证明状态安全时调用，业务代码不应主动使用。
+	ReportFailure(cause error)
 }
 
 // RuntimeOf 返回框架绑定给 target 的只读 Runtime。

@@ -12,6 +12,7 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -76,6 +77,7 @@ type lifecycleService struct {
 	onStart        func()
 	onStartContext func(context.Context) error
 	onStop         func()
+	onStopContext  func(context.Context) error
 }
 
 func (target *lifecycleService) OnInit() error {
@@ -351,7 +353,7 @@ func TestBuildDiscoveryActionsBatchesNodeSessionReplacement(t *testing.T) {
 	}
 }
 
-func (target *lifecycleService) OnStop(context.Context) error {
+func (target *lifecycleService) OnStop(ctx context.Context) error {
 	*target.events = append(*target.events, "stop:"+target.label)
 	if target.onStop != nil {
 		// OnStop 探针用于验证业务清理期间 Node 资源尚未被提前回收。
@@ -360,7 +362,80 @@ func (target *lifecycleService) OnStop(context.Context) error {
 	if target.panicPhase == "stop" {
 		panic("stop panic")
 	}
+	if target.onStopContext != nil {
+		if err := target.onStopContext(ctx); err != nil {
+			return err
+		}
+	}
 	return target.stopErr
+}
+
+func TestNodeOnStopRunsAfterDrainAndCanAwait(t *testing.T) {
+	events := make([]string, 0, 6)
+	taskStarted := make(chan struct{})
+	releaseTask := make(chan struct{})
+	finalizerAwaited := make(chan struct{})
+	target := &lifecycleService{label: "a", events: &events}
+	target.onStopContext = func(ctx context.Context) error {
+		return target.Await(ctx, func(waitCtx context.Context) error {
+			if waitCtx == nil {
+				t.Error("OnStop Await 收到 nil Context")
+			}
+			close(finalizerAwaited)
+			return nil
+		})
+	}
+	current := newTestNode(t, target)
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := target.DispatchAsync(func(context.Context) {
+		close(taskStarted)
+		<-releaseTask
+		events = append(events, "task:done")
+	}); err != nil {
+		t.Fatalf("DispatchAsync() error = %v", err)
+	}
+	<-taskStarted
+
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- current.Stop(context.Background())
+	}()
+	// Draining 已经关闭普通根任务准入，但不能越过尚未完成的已接受任务执行 OnStop。
+	deadline := time.Now().Add(time.Second)
+	for target.State() != service.StateStopping {
+		if time.Now().After(deadline) {
+			t.Fatal("Service 未进入 Stopping")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := target.DispatchAsync(func(context.Context) {}); !errors.Is(
+		err,
+		errs.ErrServiceStopping,
+	) {
+		t.Fatalf("Draining DispatchAsync() error = %v", err)
+	}
+	select {
+	case <-finalizerAwaited:
+		t.Fatal("已接受任务返回前提前执行 OnStop")
+	default:
+	}
+	close(releaseTask)
+	if err := receiveNode(t, stopDone); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	select {
+	case <-finalizerAwaited:
+	default:
+		t.Fatal("OnStop Await 没有执行")
+	}
+	if got := events[len(events)-2:]; !slices.Equal(
+		got,
+		[]string{"task:done", "stop:a"},
+	) {
+		t.Fatalf("排空与 OnStop 顺序 = %v", events)
+	}
 }
 
 func TestNodeLifecycleOrder(t *testing.T) {
@@ -916,11 +991,10 @@ func TestLifecycleErrorExposesLocation(t *testing.T) {
 	}
 }
 
-func TestRuntimeFailureWithdrawsDiscoveryAndNotifiesOnce(t *testing.T) {
+func TestTransportRecoveryWithdrawsAndRepublishesDiscovery(t *testing.T) {
 	t.Parallel()
 
 	source := internaldiscovery.NewSource()
-	notified := make(chan error, 2)
 	events := make([]string, 0, 3)
 	current := newTestNodeWithConfigAndOptions(
 		t,
@@ -932,12 +1006,6 @@ func TestRuntimeFailureWithdrawsDiscoveryAndNotifiesOnce(t *testing.T) {
 			MaxTimersPerNode: 3_000_000,
 			TimerLocation:    time.Local,
 			DiscoverySource:  source,
-			RuntimeFailure: func(nodeID string, cause error) {
-				if nodeID != "game-1" {
-					t.Errorf("runtime failure NodeID = %q", nodeID)
-				}
-				notified <- cause
-			},
 		},
 		&lifecycleService{label: "service-a", events: &events},
 	)
@@ -945,17 +1013,14 @@ func TestRuntimeFailureWithdrawsDiscoveryAndNotifiesOnce(t *testing.T) {
 		t.Fatalf("Node.Start() error = %v", err)
 	}
 
-	first := errors.New("first runtime failure")
-	current.handleRuntimeFailure(first)
-	current.handleRuntimeFailure(errors.New("second runtime failure"))
-	if got := receiveNode(t, notified); !errors.Is(got, first) {
-		t.Fatalf("runtime failure = %v", got)
-	}
-	select {
-	case duplicate := <-notified:
-		t.Fatalf("重复 RuntimeFailure 回调: %v", duplicate)
-	default:
-	}
+	first := errors.New("transport interruption")
+	current.handleTransportEvent(rpc.TransportEvent{
+		Kind:                rpc.TransportKindTCP,
+		State:               rpc.TransportStateRecovering,
+		ConsecutiveFailures: 1,
+		ErrorCode:           errs.CodeTransportUnavailable,
+		Cause:               first,
+	})
 
 	var records int
 	subscription, err := source.Subscribe(func(snapshot internaldiscovery.RawSnapshot) error {
@@ -967,7 +1032,90 @@ func TestRuntimeFailureWithdrawsDiscoveryAndNotifiesOnce(t *testing.T) {
 	}
 	subscription.Close()
 	if records != 0 {
-		t.Fatalf("Runtime 终态后发现记录数 = %d", records)
+		t.Fatalf("Transport 恢复期间发现记录数 = %d", records)
+	}
+	status := current.TransportStatus()
+	if status.State != TransportRecovering ||
+		status.ErrorCode != errs.CodeTransportUnavailable {
+		t.Fatalf("TransportStatus() = %+v", status)
+	}
+	health := current.HealthStatus()
+	if !health.Liveness || health.Readiness || !health.Degraded {
+		t.Fatalf("HealthStatus() = %+v", health)
+	}
+
+	current.handleTransportEvent(rpc.TransportEvent{
+		Kind:       rpc.TransportKindTCP,
+		State:      rpc.TransportStateReady,
+		Reconnects: 1,
+	})
+	subscription, err = source.Subscribe(func(snapshot internaldiscovery.RawSnapshot) error {
+		records = len(snapshot.Nodes)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Source.Subscribe() after recovery error = %v", err)
+	}
+	subscription.Close()
+	if records != 1 {
+		t.Fatalf("Transport 恢复后发现记录数 = %d", records)
+	}
+}
+
+func TestHealthStatusTracksPartialAndCompleteServiceFailure(t *testing.T) {
+	events := make([]string, 0, 8)
+	current := newTestNode(t,
+		&lifecycleService{label: "a", events: &events},
+		&lifecycleService{label: "b", events: &events},
+	)
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if health := current.HealthStatus(); !health.Liveness ||
+		!health.Readiness ||
+		health.Degraded ||
+		health.ErrorCode != errs.CodeOK {
+		t.Fatalf("Ready HealthStatus() = %+v", health)
+	}
+
+	first := errors.New("first scheduler failure")
+	current.recordServiceFailure(current.byName["a"], first)
+	partial := current.HealthStatus()
+	if !partial.Liveness || !partial.Readiness || !partial.Degraded ||
+		partial.ErrorCode != errs.CodeServiceFailed {
+		t.Fatalf("partial failure HealthStatus() = %+v", partial)
+	}
+	status, exists := current.ServiceStatus("a")
+	if !exists || status.State != service.StateFailed ||
+		!errors.Is(status.Failure, first) {
+		t.Fatalf("ServiceStatus(a) = %+v, %v", status, exists)
+	}
+
+	current.recordServiceFailure(
+		current.byName["b"],
+		errors.New("second scheduler failure"),
+	)
+	allFailed := current.HealthStatus()
+	if !allFailed.Liveness || allFailed.Readiness || !allFailed.Degraded ||
+		allFailed.ErrorCode != errs.CodeServiceFailed {
+		t.Fatalf("all failed HealthStatus() = %+v", allFailed)
+	}
+	if allocations := testing.AllocsPerRun(1000, func() {
+		_ = current.HealthStatus()
+		_ = current.TransportStatus()
+		_, _ = current.ServiceStatus("a")
+	}); allocations != 0 {
+		t.Fatalf("状态查询分配 = %f", allocations)
+	}
+
+	if err := current.Stop(context.Background()); !errors.Is(
+		err,
+		errs.ErrServiceFailed,
+	) {
+		t.Fatalf("Failed Node Stop() error = %v", err)
+	}
+	if current.State() != StateFailed {
+		t.Fatalf("Failed Node final State = %v", current.State())
 	}
 }
 

@@ -657,8 +657,8 @@ TCP ReadLoop 只执行：
 ### 11.5 入站 Notify
 
 Notify 通过独立短头和相同目标校验后进入目标 Service FIFO，但不建立 pending、Deadline
-或响应。队列拒绝、契约错误、业务 error 或 panic 只能在目标侧限频记录，发送方不会收到
-结果。
+或响应。队列拒绝、契约错误和业务 error 只在目标侧按既定规则记录；panic 根据 M16 最新
+规则每次输出一次完整堆栈，不能限频省略。发送方不会收到结果。
 
 ## 12. pendingCall
 

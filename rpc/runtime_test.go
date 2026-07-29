@@ -124,7 +124,9 @@ func TestRuntimeRegistrationResolutionAndClose(t *testing.T) {
 		t.Fatalf("contract resolve() error = %v", err)
 	}
 
-	runtime.Close()
+	if err := runtime.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
 	if _, err := runtime.resolve(
 		ToService("PlayerService"),
 		1,

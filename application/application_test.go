@@ -26,6 +26,25 @@ type lifecycleTestService struct {
 	stopped bool
 }
 
+var startupStopEntered chan struct{}
+
+// startupStopService 让测试在 OnStart 内观察正式停止信号。
+type startupStopService struct {
+	service.Service
+	stopped atomic.Bool
+}
+
+func (*startupStopService) OnStart(ctx context.Context) error {
+	close(startupStopEntered)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (target *startupStopService) OnStop(context.Context) error {
+	target.stopped.Store(true)
+	return nil
+}
+
 func (target *lifecycleTestService) OnInit() error {
 	if target.NodeID() == "bad-1" {
 		return testInitFailure
@@ -62,7 +81,7 @@ func (handler *silentHandler) Close() error {
 	return nil
 }
 
-func TestRuntimeFailureCancelsApplicationLifecycleOnce(t *testing.T) {
+func TestServiceFailureDoesNotCancelApplicationAndIsAggregated(t *testing.T) {
 	t.Parallel()
 
 	app := New()
@@ -72,20 +91,22 @@ func TestRuntimeFailureCancelsApplicationLifecycleOnce(t *testing.T) {
 	app.runCancel = cancel
 	app.mu.Unlock()
 
-	first := errors.New("first runtime failure")
-	app.handleRuntimeFailure("game-1", first)
-	app.handleRuntimeFailure("game-1", errors.New("second runtime failure"))
+	first := errors.New("first service failure")
+	second := errors.New("second service failure")
+	app.handleServiceFailure("game-1", "PlayerService", first)
+	app.handleServiceFailure("game-1", "SceneService", second)
 
 	select {
 	case <-lifecycle.Done():
-	case <-time.After(time.Second):
-		t.Fatal("Runtime 终态没有取消 Application 生命周期")
+		t.Fatal("Service 运行期隔离不应取消 Application 生命周期")
+	default:
 	}
-	app.mu.Lock()
-	recorded := app.runtimeFailure
-	app.mu.Unlock()
-	if !errors.Is(recorded, first) {
-		t.Fatalf("recorded runtime failure = %v", recorded)
+	recorded := app.serviceFailureResult()
+	if !errors.Is(recorded, first) || !errors.Is(recorded, second) {
+		t.Fatalf("recorded service failures = %v", recorded)
+	}
+	if got := errs.CodeOf(recorded); got != errs.CodeServiceFailed {
+		t.Fatalf("service failure code = %d", got)
 	}
 }
 
@@ -229,6 +250,46 @@ nodes:
 	}
 	if err := app.Stop(context.Background()); err != nil {
 		t.Fatalf("重复 Stop() error = %v", err)
+	}
+}
+
+func TestApplicationStopDuringStartupIsSuccessfulStop(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: game-1
+    services: [startupStopService]
+`)
+	startupStopEntered = make(chan struct{})
+	app := newSilentApplication()
+	app.Setup(&startupStopService{})
+	runResult := make(chan error, 1)
+	go func() {
+		runResult <- app.run(context.Background(), command.StartRequest{
+			AppName:   "startup-stop-test",
+			ConfigDir: directory,
+		})
+	}()
+	select {
+	case <-startupStopEntered:
+	case <-time.After(time.Second):
+		t.Fatal("OnStart 未执行")
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := app.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if err := <-runResult; err != nil {
+		t.Fatalf("启动期正式停止被误报为失败: %v", err)
+	}
+	if app.State() != StateStopped {
+		t.Fatalf("State() = %v", app.State())
+	}
+	current, _ := app.Node("game-1")
+	instance, _ := current.Service("startupStopService")
+	if !instance.(*startupStopService).stopped.Load() {
+		t.Fatal("已经进入 OnStart 的 Service 没有执行 OnStop")
 	}
 }
 

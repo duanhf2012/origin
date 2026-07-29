@@ -26,6 +26,8 @@ type IService interface {
 	Await(ctx context.Context, fn func(context.Context) error) error
 	SetDefaultAwaitTimeout(timeout time.Duration) error
 	ExecutionStats() ExecutionStats
+	GoSafe(fn func()) error
+	RunSafe(fn func()) error
 
 	baseService() *Service
 }
@@ -176,6 +178,17 @@ func (service *Service) ExecutionStats() ExecutionStats {
 	return scheduler.statsSnapshot()
 }
 
+// Failure 返回当前 Service 在运行期被隔离时记录的第一个根因。
+//
+// 正常、停止中或正常停止完成的 Service 返回 nil；失败根因会保留到一次性 Service 对象
+// 被释放。该错误只供本地诊断，不应直接通过 RPC 发送。
+func (service *Service) Failure() error {
+	if service == nil || service.runtime == nil {
+		return nil
+	}
+	return service.runtime.Failure()
+}
+
 // acceptanceError 把公开 Service 生命周期映射为稳定的调度准入错误。
 func (service *Service) acceptanceError() error {
 	switch service.State() {
@@ -183,8 +196,10 @@ func (service *Service) acceptanceError() error {
 		return nil
 	case StateStopping:
 		return errs.ErrServiceStopping
-	case StateStopped, StateFailed:
+	case StateStopped:
 		return errs.ErrServiceStopped
+	case StateFailed:
+		return errs.ErrServiceFailed
 	default:
 		return errs.ErrServiceNotReady
 	}

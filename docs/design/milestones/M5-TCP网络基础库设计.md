@@ -246,8 +246,10 @@ type Handler interface {
 - Handler 是框架内部协议适配器，不能直接执行 Service 业务逻辑；
 - Handler panic 属于框架内部故障，不按业务异常恢复继续使用连接。ReadLoop 的最外层
   goroutine 边界捕获现场、记录一次堆栈，并以 `CodeInternal` 原因触发 `OnClose`；
-  Handler 自己的最外层所有权保护必须先释放尚未转移的 Buffer。M13 接入后还必须据此把
-  所属 Node 标记为失败并进入受控停止。
+  Handler 自己的最外层所有权保护必须先释放尚未转移的 Buffer。M16 最新规则要求任务
+  调用边界 panic 只结束当前问题任务并打印完整堆栈；TCP Listener 意外失效先撤销不可达
+  发现，再由单一所有者按 Application 生命周期持续恢复，不自动停止 Application、Node
+  或 Service。
 
 每条 Connection 固定绑定一个 Handler。首版不提供运行中更换 Handler 或多个监听器链。
 

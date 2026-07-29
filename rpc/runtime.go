@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"sync"
@@ -41,10 +42,9 @@ type Runtime struct {
 	inboundReady atomic.Bool
 	// remoteResolver 由所属 Node 的不可变发现目录实现，Freeze 后保持只读。
 	remoteResolver RemoteResolver
-	// failureHandler 把 Node 级 Transport 永久终态上报给唯一生命周期控制路径。
-	// failureOnce 保证 TCP Listener 与 NATS Connection 的竞态故障只触发一次停机。
-	failureHandler func(error)
-	failureOnce    sync.Once
+	// transportObserver 把整体入站状态变化交给 Node。网络回调只发布常数大小快照，
+	// 不在这里执行发现发布、Service Stop 或 Application Stop。
+	transportObserver func(TransportEvent)
 
 	// remote 在配置启用 TCP 时保存连接、监听和 Deadline 资源；未配置时保持 nil，
 	// 本地调用热路径只需一次 nil 判断。
@@ -118,37 +118,38 @@ func (runtime *Runtime) BindRemoteResolver(resolver RemoteResolver) error {
 	return nil
 }
 
-// BindFailureHandler 在 Freeze 前绑定 Transport 永久终态的唯一上报入口。
+// BindTransportObserver 在 Freeze 前绑定当前 Node 唯一的 Transport 状态观察者。
 //
-// Handler 必须快速返回；Runtime 在网络回调 goroutine 中调用它，真正的生命周期清理由
-// Application 的串行控制路径执行。
-func (runtime *Runtime) BindFailureHandler(handler func(error)) error {
-	if runtime == nil || handler == nil {
+// Observer 必须快速返回；Runtime 可能从网络恢复 goroutine 中调用它。观察者只能更新状态、
+// 撤销或重新发布发现，不能直接停止 Node 或 Application。
+func (runtime *Runtime) BindTransportObserver(observer func(TransportEvent)) error {
+	if runtime == nil || observer == nil {
 		return errs.ErrInvalidArgument
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	if runtime.frozen.Load() || runtime.closed.Load() ||
-		runtime.failureHandler != nil {
+		runtime.transportObserver != nil {
 		return errs.ErrServiceNotReady
 	}
-	runtime.failureHandler = handler
+	runtime.transportObserver = observer
 	return nil
 }
 
-// reportTransportFailure 只把第一个永久故障交给生命周期层，避免重复 Stop。
-func (runtime *Runtime) reportTransportFailure(cause error) {
-	if runtime == nil || cause == nil || runtime.closed.Load() {
+// reportTransportEvent 在不持有 Runtime 状态锁时同步发布一次 Transport 状态变化。
+//
+// Transport 状态变化属于冷路径；同步调用可以保证发现撤销先于后续恢复尝试完成，不需要
+// 再建立一条可能乱序或溢出的内部 Channel。
+func (runtime *Runtime) reportTransportEvent(event TransportEvent) {
+	if runtime == nil {
 		return
 	}
-	runtime.failureOnce.Do(func() {
-		runtime.mu.Lock()
-		handler := runtime.failureHandler
-		runtime.mu.Unlock()
-		if handler != nil {
-			handler(cause)
-		}
-	})
+	runtime.mu.Lock()
+	observer := runtime.transportObserver
+	runtime.mu.Unlock()
+	if observer != nil {
+		observer(event)
+	}
 }
 
 // OpenInbound 在整个 Node 的全部 OnStart 成功后开放远端业务请求准入。
@@ -294,20 +295,47 @@ func (runtime *Runtime) Freeze() error {
 	return nil
 }
 
-// Close 永久关闭一次性 Runtime，并拒绝之后的新调用。
-func (runtime *Runtime) Close() {
+// Close 使用调用方的总体停止 Context 永久关闭一次性 Runtime。
+func (runtime *Runtime) Close(ctx context.Context) error {
 	if runtime == nil {
-		return
+		return nil
 	}
-	runtime.BeginStop(context.Background())
+	if ctx == nil {
+		return errs.ErrInvalidArgument
+	}
+	result := runtime.BeginStop(ctx)
 	runtime.closed.Store(true)
 	if runtime.remote != nil {
-		_ = runtime.remote.closeTransport(context.Background())
+		result = errors.Join(result, runtime.remote.closeTransport(ctx))
 		runtime.remote.closeDeadlines()
 	}
 	if runtime.nats != nil {
-		runtime.nats.close()
+		result = errors.Join(result, runtime.nats.close(ctx))
 	}
+	runtime.reportTransportEvent(TransportEvent{
+		Kind:  runtime.transportKind(),
+		State: TransportStateStopped,
+	})
+	return result
+}
+
+// transportKind 返回冻结配置对应的内部 Transport 类型。
+func (runtime *Runtime) transportKind() TransportKind {
+	switch {
+	case runtime != nil && runtime.remote != nil:
+		return TransportKindTCP
+	case runtime != nil && runtime.nats != nil:
+		return TransportKindNATS
+	default:
+		return TransportKindNone
+	}
+}
+
+// TransportKind 返回当前 Runtime 的冻结传输类型。
+//
+// 该查询只用于 Node 初始化状态，不进入逐次 RPC 热路径。
+func (runtime *Runtime) TransportKind() TransportKind {
+	return runtime.transportKind()
 }
 
 // maxMessageSize 返回当前 Node 冻结的业务 payload 上限。

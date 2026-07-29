@@ -47,6 +47,8 @@ func (runtime *testRuntime) TimerLocation() *time.Location {
 	}
 	return runtime.location
 }
+func (runtime *testRuntime) Failure() error      { return nil }
+func (runtime *testRuntime) ReportFailure(error) {}
 
 func TestBindRuntimeAndQueries(t *testing.T) {
 	target := &testService{}

@@ -68,6 +68,11 @@ type Options struct {
 	MaxPingsOutstanding int
 	// Reconnect 配置成功连接后的有限自动重连。
 	Reconnect ReconnectOptions
+	// IgnoreAuthErrorAbort 允许官方客户端在重复认证错误后继续重连。
+	//
+	// 普通调用方默认关闭；Origin RPC Adapter 会固定开启，使凭据轮换后连接可以自行恢复，
+	// 而不是因连续两次认证失败永久关闭。
+	IgnoreAuthErrorAbort bool
 	// Subscription 是每条订阅未显式覆盖时使用的 Pending 上限。
 	Subscription SubscriptionDefaults
 	// Auth 配置四种互斥认证方式之一。
@@ -82,7 +87,7 @@ type Options struct {
 type ReconnectOptions struct {
 	// Enabled 决定连接断开后是否由 nats.go 自动重连。
 	Enabled bool
-	// MaxAttempts 是自动重连次数上限，禁止负数无限重试。
+	// MaxAttempts 是自动重连次数上限；-1 是唯一合法的无限重试哨兵。
 	MaxAttempts int
 	// Wait 是相邻重连尝试的基础等待。
 	Wait time.Duration
@@ -221,9 +226,9 @@ func validateOptions(options Options) (bool, error) {
 		return false, invalidConfig("natsnet: MaxPingsOutstanding 必须大于零")
 	}
 
-	// 重连即使关闭也保持字段合法，防止后续动态启用时带入无限或无界值。
-	if options.Reconnect.MaxAttempts < 0 {
-		return false, invalidConfig("natsnet: Reconnect.MaxAttempts 不能为负数")
+	// -1 与 nats.go 的标准无限重试语义一致；其他负数仍属于容易误配的非法值。
+	if options.Reconnect.MaxAttempts < -1 {
+		return false, invalidConfig("natsnet: Reconnect.MaxAttempts 只能为 -1 或非负数")
 	}
 	if options.Reconnect.Wait <= 0 {
 		return false, invalidConfig("natsnet: Reconnect.Wait 必须大于零")
@@ -400,6 +405,9 @@ func buildNATSOptions(
 	}
 	if options.NoEcho {
 		result = append(result, nats.NoEcho())
+	}
+	if options.IgnoreAuthErrorAbort {
+		result = append(result, nats.IgnoreAuthErrorAbort())
 	}
 
 	// 认证只添加已经确认的一种模式；URL 内嵌认证由官方客户端直接处理。

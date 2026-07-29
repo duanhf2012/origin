@@ -41,6 +41,10 @@ type Node struct {
 
 	// state 为查询提供无锁快照，生命周期写入由单一控制路径串行执行。
 	state atomic.Uint32
+	// stopMu/stopComplete 把正常 Stop 与启动失败 Rollback 串行化，并保留首次最终结果。
+	stopMu       sync.Mutex
+	stopComplete bool
+	stopResult   error
 	// services 同时提供稳定顺序和按实际名称的 O(1) 本地查询。
 	services []*serviceEntry
 	byName   map[string]*serviceEntry
@@ -57,9 +61,14 @@ type Node struct {
 	discoverySource       *internaldiscovery.Source
 	discoverySubscription *internaldiscovery.Subscription
 	discoveryPublished    atomic.Bool
-	// runtimeFailure 只通知 Application 的唯一控制路径；failureOnce 防止重复撤销和停机。
-	runtimeFailure func(nodeID string, cause error)
-	failureOnce    sync.Once
+	// discoveryAvailable 和三个原子快照只在生命周期、恢复和故障冷路径更新。
+	discoveryAvailable atomic.Bool
+	transportStatus    atomic.Pointer[transportStatusSnapshot]
+	healthStatus       atomic.Pointer[healthStatusSnapshot]
+	// publicServices 在静态装配后冻结，用于区分“没有公开 Service”和“全部公开 Service 失败”。
+	publicServices int
+	// serviceFailure 把真正隔离的 Service 摘要交给 Application，但不触发 Stop。
+	serviceFailure func(nodeID string, serviceName string, cause error)
 }
 
 // nodeTimerResources 管理当前 Node 生命周期内唯一 TimerID 和共享活跃额度。
@@ -84,6 +93,8 @@ type serviceEntry struct {
 	contractFingerprint [32]byte
 	// discoveryRun 是当前 Service 唯一且稳定的发现状态同步函数。
 	discoveryRun func(context.Context)
+	// failure 只保存第一个无法恢复根因，生命周期结束后仍保留供本地诊断。
+	failure atomic.Pointer[serviceFailureSnapshot]
 }
 
 // serviceRuntime 把 Service 的只读查询限制在所属 Node 和当前实例。
@@ -175,7 +186,7 @@ func New(
 		rpcRuntime:      rpcRuntime,
 		discovery:       discoveryRuntime,
 		discoverySource: options.DiscoverySource,
-		runtimeFailure:  options.RuntimeFailure,
+		serviceFailure:  options.ServiceFailure,
 	}
 	discoveryRuntime.bindNode(instance)
 	if err := rpcRuntime.BindSessionID(sessionID); err != nil {
@@ -184,8 +195,8 @@ func New(
 	if err := rpcRuntime.BindRemoteResolver(discoveryRuntime); err != nil {
 		return nil, fmt.Errorf("绑定 Node %q RPC 服务发现目录: %w", config.ID, err)
 	}
-	if err := rpcRuntime.BindFailureHandler(instance.handleRuntimeFailure); err != nil {
-		return nil, fmt.Errorf("绑定 Node %q RPC 终态处理器: %w", config.ID, err)
+	if err := rpcRuntime.BindTransportObserver(instance.handleTransportEvent); err != nil {
+		return nil, fmt.Errorf("绑定 Node %q RPC 状态观察器: %w", config.ID, err)
 	}
 	instance.state.Store(uint32(StateCreated))
 
@@ -254,6 +265,9 @@ func New(
 		}
 		instance.services = append(instance.services, entry)
 		instance.byName[binding.Name] = entry
+		if !config.Private && !binding.Private {
+			instance.publicServices++
+		}
 	}
 	if err := instance.rpcRuntime.Freeze(); err != nil {
 		return nil, fmt.Errorf("冻结 Node %q RPC Runtime: %w", config.ID, err)
@@ -269,25 +283,13 @@ func New(
 		subscription, err := instance.discoverySource.Subscribe(instance.discovery.apply)
 		if err != nil {
 			_ = timerEngine.Close()
-			rpcRuntime.Close()
+			_ = rpcRuntime.Close(context.Background())
 			return nil, fmt.Errorf("订阅 Node %q 过渡服务发现: %w", config.ID, err)
 		}
 		instance.discoverySubscription = subscription
 	}
+	instance.initializeStatus(rpcRuntime.TransportKind())
 	return instance, nil
-}
-
-// handleRuntimeFailure 先撤销当前会话的公开发现，再唤醒 Application 的串行停机路径。
-func (node *Node) handleRuntimeFailure(cause error) {
-	if node == nil || cause == nil {
-		return
-	}
-	node.failureOnce.Do(func() {
-		node.withdrawDiscovery()
-		if node.runtimeFailure != nil {
-			node.runtimeFailure(node.id, cause)
-		}
-	})
 }
 
 // newSessionID 使用系统安全随机源创建不由业务配置控制的 Node 进程会话标识。
@@ -434,25 +436,45 @@ func (node *Node) Start(ctx context.Context) error {
 		))
 	}
 	node.state.Store(uint32(StateStarting))
+	node.refreshHealth()
 	node.logger.Info("node starting")
 
-	// 第一阶段只执行纯初始化；任一失败时当前 Node 不调用任何 OnStart 或 OnStop。
+	// 第一阶段只执行纯初始化。业务 OnInit 错误不会跳过后续 Service，确保一次启动能够
+	// 报告完整配置/装配问题；只有外部 Context 已经结束时才不再开始新的生命周期回调。
+	var initializationErrors error
 	for _, entry := range node.services {
+		if err := contextFailure(ctx); err != nil {
+			node.state.Store(uint32(StateFailed))
+			node.refreshHealth()
+			return errors.Join(initializationErrors, &lifecycleContext{
+				nodeID:      node.id,
+				serviceName: entry.name,
+				phase:       "on_init",
+				cause:       err,
+			})
+		}
 		entry.state.Store(uint32(service.StateInitializing))
 		err := callLifecycle(entry, "on_init", func() error {
 			return entry.instance.OnInit()
 		})
 		if err != nil {
 			entry.state.Store(uint32(service.StateFailed))
-			node.state.Store(uint32(StateFailed))
-			return err
+			entry.recordFailure(err)
+			initializationErrors = errors.Join(initializationErrors, err)
+			continue
 		}
 		entry.state.Store(uint32(service.StateInitialized))
+	}
+	if initializationErrors != nil {
+		node.state.Store(uint32(StateFailed))
+		node.refreshHealth()
+		return initializationErrors
 	}
 
 	// 全部 OnInit 成功后启动 Node 唯一时间轮，使每个 OnStart 都能依赖统一 Deadline 能力。
 	if err := node.timerEngine.Start(); err != nil {
 		node.state.Store(uint32(StateFailed))
+		node.refreshHealth()
 		return &lifecycleContext{
 			nodeID: node.id,
 			phase:  "timer_engine_start",
@@ -461,8 +483,9 @@ func (node *Node) Start(ctx context.Context) error {
 	}
 	// TCP Listener 和出站连接依赖已经运行的 M8 DeadlineQueue，并且必须先于 OnStart
 	// 建立，使启动逻辑可以调用已经可达的远端 Service。
-	if err := node.rpcRuntime.StartNetwork(node.timerEngine); err != nil {
+	if err := node.rpcRuntime.StartNetwork(ctx, node.timerEngine); err != nil {
 		node.state.Store(uint32(StateFailed))
+		node.refreshHealth()
 		return &lifecycleContext{
 			nodeID: node.id,
 			phase:  "rpc_network_start",
@@ -476,6 +499,7 @@ func (node *Node) Start(ctx context.Context) error {
 		// 在进入每个业务回调前观察取消，避免超时后继续启动后续 Service。
 		if err := contextFailure(ctx); err != nil {
 			node.state.Store(uint32(StateFailed))
+			node.refreshHealth()
 			return &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
@@ -491,6 +515,7 @@ func (node *Node) Start(ctx context.Context) error {
 		); err != nil {
 			entry.state.Store(uint32(service.StateFailed))
 			node.state.Store(uint32(StateFailed))
+			node.refreshHealth()
 			return &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
@@ -512,6 +537,7 @@ func (node *Node) Start(ctx context.Context) error {
 			entry.startError = true
 			entry.state.Store(uint32(service.StateFailed))
 			node.state.Store(uint32(StateFailed))
+			node.refreshHealth()
 			return &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
@@ -527,12 +553,14 @@ func (node *Node) Start(ctx context.Context) error {
 			entry.startError = true
 			entry.state.Store(uint32(service.StateFailed))
 			node.state.Store(uint32(StateFailed))
+			node.refreshHealth()
 			return err
 		}
 	}
 	// 最后一个回调可能在执行期间越过 Deadline 却返回 nil，发布 Ready 前必须再次确认。
 	if err := contextFailure(ctx); err != nil {
 		node.state.Store(uint32(StateFailed))
+		node.refreshHealth()
 		return &lifecycleContext{
 			nodeID:      node.id,
 			serviceName: node.services[len(node.services)-1].name,
@@ -549,6 +577,7 @@ func (node *Node) Start(ctx context.Context) error {
 			entry.startError = true
 			entry.state.Store(uint32(service.StateFailed))
 			node.state.Store(uint32(StateFailed))
+			node.refreshHealth()
 			return &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
@@ -561,6 +590,7 @@ func (node *Node) Start(ctx context.Context) error {
 	// 全部 Runner 已激活后开放入站业务准入；随后一次性发布全部公开 Service。
 	if err := node.rpcRuntime.OpenInbound(); err != nil {
 		node.state.Store(uint32(StateFailed))
+		node.refreshHealth()
 		return &lifecycleContext{
 			nodeID: node.id,
 			phase:  "rpc_inbound_open",
@@ -569,6 +599,8 @@ func (node *Node) Start(ctx context.Context) error {
 	}
 	if err := node.publishDiscovery(); err != nil {
 		node.state.Store(uint32(StateFailed))
+		node.updateDiscoveryAvailable(false)
+		node.refreshHealth()
 		return &lifecycleContext{
 			nodeID: node.id,
 			phase:  "discovery_publish",
@@ -576,6 +608,7 @@ func (node *Node) Start(ctx context.Context) error {
 		}
 	}
 	node.state.Store(uint32(StateReady))
+	node.refreshHealth()
 	node.logger.Info("node ready")
 	return nil
 }
@@ -590,14 +623,22 @@ func (node *Node) Rollback(ctx context.Context) error {
 	if ctx == nil {
 		return invalidArgument(fmt.Sprintf("Node %q 的回滚 Context 不能为空", node.id))
 	}
+	node.stopMu.Lock()
+	defer node.stopMu.Unlock()
+	if node.stopComplete {
+		return node.stopResult
+	}
 	// 失败实例仍先获得反序 OnStop，最后再关闭 Node 时间轮并等待其 goroutine 退出。
 	node.withdrawDiscovery()
 	result := node.rpcRuntime.BeginStop(ctx)
 	result = errors.Join(result, node.stopStarted(ctx, true))
-	node.rpcRuntime.Close()
+	result = errors.Join(result, node.rpcRuntime.Close(ctx))
 	result = errors.Join(result, node.timerEngine.Close())
 	node.closeDiscoverySubscription()
 	node.state.Store(uint32(StateFailed))
+	node.refreshHealth()
+	node.stopComplete = true
+	node.stopResult = result
 	return result
 }
 
@@ -608,6 +649,11 @@ func (node *Node) Stop(ctx context.Context) error {
 	}
 	if ctx == nil {
 		return invalidArgument(fmt.Sprintf("Node %q 的停止 Context 不能为空", node.id))
+	}
+	node.stopMu.Lock()
+	defer node.stopMu.Unlock()
+	if node.stopComplete {
+		return node.stopResult
 	}
 	state := node.State()
 	if state == StateStopped {
@@ -623,16 +669,38 @@ func (node *Node) Stop(ctx context.Context) error {
 
 	// 正常停止会发布 Stopping/Stopped；失败回滚由 Rollback 保持 Failed。
 	node.state.Store(uint32(StateStopping))
+	node.refreshHealth()
 	node.logger.Info("node stopping")
 	node.withdrawDiscovery()
 	result := node.rpcRuntime.BeginStop(ctx)
 	// Service 清理阶段保留时间轮运行，全部 OnStop 返回后才回收 Node 最后的后台资源。
 	result = errors.Join(result, node.stopStarted(ctx, false))
-	node.rpcRuntime.Close()
+	result = errors.Join(result, node.rpcRuntime.Close(ctx))
 	result = errors.Join(result, node.timerEngine.Close())
 	node.closeDiscoverySubscription()
+	if result == nil {
+		// Scheduler Failed 正常会随 FinalizeScheduler 返回根因；该分支为其他隔离来源保留
+		// 兜底，确保清理成功不会把已经记录的 Service Failure 掩盖成正常停止。
+		result = node.serviceFailureResult()
+	}
+	if result != nil {
+		// 清理动作已经全部执行，但任一 Service Failed 或停止阶段错误都不能被资源回收成功
+		// 掩盖。Node 保留 Failed 终态，Application 将据此返回非零结果。
+		node.state.Store(uint32(StateFailed))
+		node.refreshHealth()
+		node.logger.Error(
+			"node stopped with failures",
+			originlog.Err(result),
+		)
+		node.stopComplete = true
+		node.stopResult = result
+		return result
+	}
 	node.state.Store(uint32(StateStopped))
+	node.refreshHealth()
 	node.logger.Info("node stopped")
+	node.stopComplete = true
+	node.stopResult = nil
 	return result
 }
 
@@ -643,7 +711,11 @@ func (node *Node) publishDiscovery() error {
 	}
 	services := make([]internaldiscovery.RawService, 0, len(node.services))
 	for _, entry := range node.services {
-		if entry.private {
+		state := service.State(entry.state.Load())
+		if entry.private ||
+			state == service.StateFailed ||
+			state == service.StateStopping ||
+			state == service.StateStopped {
 			continue
 		}
 		services = append(services, internaldiscovery.RawService{
@@ -655,6 +727,7 @@ func (node *Node) publishDiscovery() error {
 	}
 	// 全部 Service 均为私有时没有远端可见事实，不发布空 Node 记录。
 	if len(services) == 0 {
+		node.withdrawDiscovery()
 		return nil
 	}
 	transport := internaldiscovery.TransportNone
@@ -724,23 +797,21 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 		// started 只由 Start 追加一次；清理后置空可以让重复 Stop 保持幂等。
 		entry.state.Store(uint32(service.StateStopping))
 
-		// Scheduler 先拒绝新的根任务并排空已经接受的工作。它完全退出后 OnStop 才能安全
-		// 访问 Service 状态，避免与旧 Task 并发。
-		if err := service.StopScheduler(ctx, entry.instance); err != nil {
+		// Scheduler 排空后由最后一个 Service Runner 独占执行 OnStop。OnStop 的 Context
+		// 携带 finalizer 令牌，因此可以顺序 Await，但不能重新开放普通任务或 Timer。
+		if err := service.FinalizeScheduler(
+			ctx,
+			entry.instance,
+			entry.instance.OnStop,
+		); err != nil {
 			result = errors.Join(result, &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
-				phase:       "scheduler_stop",
+				phase:       "service_finalize",
 				cause:       err,
 			})
 		}
-		err := callLifecycle(entry, "on_stop", func() error {
-			return entry.instance.OnStop(ctx)
-		})
-		if err != nil {
-			result = errors.Join(result, err)
-		}
-		if rollback && entry.startError {
+		if entry.failureCause() != nil || (rollback && entry.startError) {
 			entry.state.Store(uint32(service.StateFailed))
 		} else {
 			entry.state.Store(uint32(service.StateStopped))
@@ -793,6 +864,22 @@ func (runtime *serviceRuntime) TimerLimit() int {
 // TimerLocation 实现 service.Runtime，返回 Node 创建后保持只读的统一 Cron 时区。
 func (runtime *serviceRuntime) TimerLocation() *time.Location {
 	return runtime.node.timerResources.timerLocation
+}
+
+// Failure 实现 service.Runtime，并返回当前 Service 首个不可恢复根因。
+func (runtime *serviceRuntime) Failure() error {
+	if runtime == nil || runtime.entry == nil {
+		return nil
+	}
+	return runtime.entry.failureCause()
+}
+
+// ReportFailure 实现 service.Runtime，把 Scheduler 隔离结果提交给 Node 冷路径。
+func (runtime *serviceRuntime) ReportFailure(cause error) {
+	if runtime == nil || runtime.node == nil || runtime.entry == nil || cause == nil {
+		return
+	}
+	runtime.node.recordServiceFailure(runtime.entry, cause)
 }
 
 // RPC 实现 service.Runtime，返回当前 Node 独占且启动后只读的 RPC Runtime。

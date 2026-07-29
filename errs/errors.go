@@ -40,6 +40,8 @@ var (
 	ErrGracefulShutdownTimeout error = newCodeError(CodeGracefulShutdownTimeout)
 	// ErrServiceNotReady 表示 Service 尚未完成启动或调度器尚未开放。
 	ErrServiceNotReady error = newCodeError(CodeServiceNotReady)
+	// ErrServiceFailed 表示 Service 因内部状态无法证明安全而被运行期隔离。
+	ErrServiceFailed error = newCodeError(CodeServiceFailed)
 	// ErrRPCNoRoute 表示当前 RPC Target 没有可用目标。
 	ErrRPCNoRoute error = newCodeError(CodeRPCNoRoute)
 	// ErrRPCInvalidRouteKey 表示 RPC 路由键类型无效。
@@ -70,6 +72,8 @@ var (
 	ErrTransportProtocol error = newCodeError(CodeTransportProtocol)
 	// ErrTransportMessageTooLarge 表示消息超过配置的传输上限。
 	ErrTransportMessageTooLarge error = newCodeError(CodeTransportMessageTooLarge)
+	// ErrDiscoveryUnavailable 表示必需服务发现当前不可用或尚未完成重新发布。
+	ErrDiscoveryUnavailable error = newCodeError(CodeDiscoveryUnavailable)
 	// ErrLogClosed 表示日志运行时已经关闭。
 	ErrLogClosed error = newCodeError(CodeLogClosed)
 	// ErrLogOutputFailed 表示日志输出创建、刷新或关闭失败。
@@ -177,6 +181,8 @@ func New(code Code) error {
 		return ErrGracefulShutdownTimeout
 	case CodeServiceNotReady:
 		return ErrServiceNotReady
+	case CodeServiceFailed:
+		return ErrServiceFailed
 	case CodeRPCNoRoute:
 		return ErrRPCNoRoute
 	case CodeRPCInvalidRouteKey:
@@ -207,6 +213,8 @@ func New(code Code) error {
 		return ErrTransportProtocol
 	case CodeTransportMessageTooLarge:
 		return ErrTransportMessageTooLarge
+	case CodeDiscoveryUnavailable:
+		return ErrDiscoveryUnavailable
 	case CodeLogClosed:
 		return ErrLogClosed
 	case CodeLogOutputFailed:

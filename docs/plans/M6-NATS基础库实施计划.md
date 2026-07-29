@@ -4,6 +4,9 @@
 > 创建日期：2026-07-26
 > 对应里程碑：[M6 NATS 基础库设计](../design/milestones/M6-NATS基础库设计.md)
 
+> 后续覆盖：M16 RPC Adapter 固定使用无限重连和有上限退避；本文有限重连条目保留为
+> M6 通用低层实现记录。
+
 ## 1. 实施目标
 
 实现内部 `natsnet` 包，为后续 M15 NATS RPC 和服务发现控制面提供 Core NATS 连接、
@@ -38,7 +41,8 @@ M6 只处理 Subject 和原始字节消息，不实现 Origin RPC Subject、Requ
 - 不定义 Origin RPC Subject，不引入 NodeID 或 ServiceName；
 - 不在官方客户端外增加发送队列或每消息 goroutine；
 - 不建立 TCP/NATS 共同的大型 Transport 接口；
-- 初始连接失败直接返回，成功后的自动重连次数有界；
+- 初始连接失败直接返回；M6 通用默认的自动重连次数有界，M16 RPC Adapter 固定使用
+  无限重连和有上限退避；
 - 正常消息热路径不写日志，不执行每次 Publish Flush。
 
 ## 4. 预计代码结构

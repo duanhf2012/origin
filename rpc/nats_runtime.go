@@ -2,8 +2,10 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
@@ -33,6 +35,17 @@ type natsRuntime struct {
 	requestSub  *natsnet.Subscription
 	responseSub *natsnet.Subscription
 	deadlines   *inboundDeadlines
+	engine      *timerwheel.Engine
+
+	// generation 只隔离当前进程内的 Transport 实例；Node SessionID 在整个进程生命周期
+	// 保持不变。recoveryWake 容量为 1，用于合并重复 Closed 回调。
+	generation          uint64
+	activeGeneration    atomic.Uint64
+	reconnects          uint64
+	consecutiveFailures uint64
+	recoveryCancel      context.CancelFunc
+	recoveryWake        chan struct{}
+	recoveryDone        chan struct{}
 
 	pending *natsPendingTable
 
@@ -55,9 +68,12 @@ func newNATSRuntime(owner *Runtime, config Config) *natsRuntime {
 	}
 }
 
-// start 建立 Connection、校验 Server 上限并依次发布 Response/Request Subscription。
-func (runtime *natsRuntime) start(engine *timerwheel.Engine) error {
-	if runtime == nil || engine == nil {
+// start 建立首个 Connection，并启动唯一外层恢复 owner。
+func (runtime *natsRuntime) start(
+	ctx context.Context,
+	engine *timerwheel.Engine,
+) error {
+	if runtime == nil || ctx == nil || engine == nil {
 		return errs.ErrInvalidArgument
 	}
 	runtime.mu.Lock()
@@ -82,17 +98,81 @@ func (runtime *natsRuntime) start(engine *timerwheel.Engine) error {
 	runtime.requestSubjects[runtime.owner.nodeID] = runtime.localRequest
 	runtime.responseSubjects[runtime.owner.nodeID] = runtime.localResponse
 	runtime.subjectMu.Unlock()
+	recoveryCtx, recoveryCancel := context.WithCancel(context.Background())
+	runtime.engine = engine
+	runtime.generation = 1
+	runtime.activeGeneration.Store(runtime.generation)
+	runtime.recoveryCancel = recoveryCancel
+	runtime.recoveryWake = make(chan struct{}, 1)
+	runtime.recoveryDone = make(chan struct{})
+	generation := runtime.generation
 	runtime.mu.Unlock()
 
+	delay := reconnectInitialDelay
+	for {
+		err := runtime.connectGeneration(ctx, generation)
+		if err == nil {
+			break
+		}
+		if natsnet.IsAuthenticationError(err) ||
+			errs.IsCode(err, errs.CodeInvalidConfig) {
+			recoveryCancel()
+			return err
+		}
+		runtime.mu.Lock()
+		runtime.consecutiveFailures++
+		failures := runtime.consecutiveFailures
+		runtime.mu.Unlock()
+		runtime.owner.reportTransportEvent(TransportEvent{
+			Kind:                TransportKindNATS,
+			State:               TransportStateRecovering,
+			ConsecutiveFailures: failures,
+			ErrorCode:           errs.CodeTransportUnavailable,
+			Cause:               err,
+		})
+		if !waitTransportBackoff(ctx, delay) {
+			recoveryCancel()
+			return contextError(context.Cause(ctx))
+		}
+		delay = nextTransportBackoff(delay)
+		runtime.mu.Lock()
+		runtime.generation++
+		generation = runtime.generation
+		runtime.activeGeneration.Store(generation)
+		runtime.mu.Unlock()
+	}
+	runtime.mu.Lock()
+	runtime.started = true
+	runtime.consecutiveFailures = 0
+	runtime.mu.Unlock()
+	go runtime.recoveryLoop(recoveryCtx)
+	return nil
+}
+
+// connectGeneration 创建并发布一整组 Connection、Subscription 和入站 Deadline。
+//
+// 该函数只在首次启动 goroutine 或唯一恢复 owner 中调用，因此不会并行创建两代资源。
+func (runtime *natsRuntime) connectGeneration(
+	ctx context.Context,
+	generation uint64,
+) error {
+	runtime.mu.Lock()
+	engine := runtime.engine
+	runtime.mu.Unlock()
+	if ctx == nil || engine == nil {
+		return errs.ErrInvalidArgument
+	}
 	deadlines, err := newInboundDeadlines(engine)
 	if err != nil {
 		return err
 	}
 	options := runtime.connectionOptions()
 	conn, err := natsnet.Connect(
-		context.Background(),
+		ctx,
 		options,
-		runtime.handleEvent,
+		func(event natsnet.Event) {
+			runtime.handleGenerationEvent(generation, event)
+		},
 	)
 	if err != nil {
 		deadlines.close(errs.ErrServiceStopped)
@@ -115,6 +195,13 @@ func (runtime *natsRuntime) start(engine *timerwheel.Engine) error {
 	}
 
 	runtime.mu.Lock()
+	if runtime.stopping || runtime.closed || runtime.generation != generation {
+		runtime.mu.Unlock()
+		conn.Close()
+		_ = conn.Wait(context.Background())
+		deadlines.close(errs.ErrServiceStopped)
+		return errs.ErrServiceStopped
+	}
 	runtime.conn = conn
 	runtime.deadlines = deadlines
 	runtime.mu.Unlock()
@@ -124,13 +211,17 @@ func (runtime *natsRuntime) start(engine *timerwheel.Engine) error {
 	}
 	// 先建立 Response Subscription，确保第一个 Request 发出前调用方已经具备响应路径。
 	responseSub, err := conn.Subscribe(
-		context.Background(),
+		ctx,
 		runtime.localResponse,
 		subscriptionOptions,
-		runtime.handleResponse,
+		func(message natsnet.Message) {
+			if runtime.generationCurrent(generation) {
+				runtime.handleResponse(message)
+			}
+		},
 	)
 	if err != nil {
-		runtime.close()
+		runtime.discardGeneration(generation, conn, nil, nil, deadlines)
 		return err
 	}
 	runtime.mu.Lock()
@@ -138,27 +229,171 @@ func (runtime *natsRuntime) start(engine *timerwheel.Engine) error {
 	runtime.mu.Unlock()
 
 	requestSub, err := conn.Subscribe(
-		context.Background(),
+		ctx,
 		runtime.localRequest,
 		subscriptionOptions,
-		runtime.handleInbound,
+		func(message natsnet.Message) {
+			if runtime.generationCurrent(generation) {
+				runtime.handleInbound(message)
+			}
+		},
 	)
 	if err != nil {
-		runtime.close()
+		runtime.discardGeneration(
+			generation,
+			conn,
+			nil,
+			responseSub,
+			deadlines,
+		)
 		return err
 	}
 	runtime.mu.Lock()
 	runtime.requestSub = requestSub
-	// EventClosed 与启动完成使用同一把锁线性化：若终态先发生，启动明确失败；若本处
-	// 先发布 started，随后 EventClosed 会走 Node 级受控停机，不能形成“成功但已关闭”的 Node。
-	if conn.Status() != natsnet.StatusConnected {
+	// Closed 与发布使用同一代次线性化：已经终止的连接不能被宣布为当前 Ready。
+	if runtime.stopping || runtime.closed ||
+		runtime.generation != generation ||
+		conn.Status() != natsnet.StatusConnected {
 		runtime.mu.Unlock()
-		runtime.close()
+		runtime.discardGeneration(
+			generation,
+			conn,
+			requestSub,
+			responseSub,
+			deadlines,
+		)
 		return errs.ErrTransportUnavailable
 	}
-	runtime.started = true
 	runtime.mu.Unlock()
 	return nil
+}
+
+// generationCurrent 是 NATS 消息回调进入解析前的冷分支代次校验。
+func (runtime *natsRuntime) generationCurrent(generation uint64) bool {
+	// 一次原子读取替代逐消息互斥锁。Draining 期间仍保留当前代次，让已经接受的 Request
+	// 和 Response 完成；正式 Close 或 Closed 外层重建才把活动代次切换掉。
+	return generation != 0 && runtime.activeGeneration.Load() == generation
+}
+
+// discardGeneration 回收一次没有成功发布或已经被新代次取代的资源。
+func (runtime *natsRuntime) discardGeneration(
+	generation uint64,
+	conn *natsnet.Conn,
+	requestSub *natsnet.Subscription,
+	responseSub *natsnet.Subscription,
+	deadlines *inboundDeadlines,
+) {
+	runtime.mu.Lock()
+	if runtime.generation == generation {
+		if runtime.conn == conn {
+			runtime.conn = nil
+		}
+		if runtime.requestSub == requestSub {
+			runtime.requestSub = nil
+		}
+		if runtime.responseSub == responseSub {
+			runtime.responseSub = nil
+		}
+		if runtime.deadlines == deadlines {
+			runtime.deadlines = nil
+		}
+	}
+	runtime.mu.Unlock()
+	if requestSub != nil {
+		requestSub.Close()
+	}
+	if responseSub != nil {
+		responseSub.Close()
+	}
+	if conn != nil {
+		conn.Close()
+		_ = conn.Wait(context.Background())
+	}
+	if deadlines != nil {
+		deadlines.close(errs.ErrTransportUnavailable)
+	}
+}
+
+// recoveryLoop 在非 Stop Closed 后持续重建整组 NATS 资源。
+func (runtime *natsRuntime) recoveryLoop(ctx context.Context) {
+	defer close(runtime.recoveryDone)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-runtime.recoveryWake:
+		}
+
+		// EventClosed 回调本身不能等待 natsnet.Conn，否则会等待自己的完成发布。唯一恢复
+		// owner 在回调返回后统一拆除旧代资源，再开始下一代连接。
+		runtime.mu.Lock()
+		generation := runtime.generation
+		conn := runtime.conn
+		requestSub := runtime.requestSub
+		responseSub := runtime.responseSub
+		deadlines := runtime.deadlines
+		runtime.mu.Unlock()
+		runtime.discardGeneration(
+			generation,
+			conn,
+			requestSub,
+			responseSub,
+			deadlines,
+		)
+
+		delay := reconnectInitialDelay
+		for {
+			if !waitTransportBackoff(ctx, delay) {
+				return
+			}
+
+			// 每次尝试使用新代次，确保上一代迟到 Event/Message 无法覆盖恢复结果。
+			runtime.mu.Lock()
+			if runtime.stopping || runtime.closed {
+				runtime.mu.Unlock()
+				return
+			}
+			runtime.generation++
+			generation := runtime.generation
+			runtime.activeGeneration.Store(generation)
+			runtime.mu.Unlock()
+
+			err := runtime.connectGeneration(ctx, generation)
+			if err != nil {
+				runtime.mu.Lock()
+				runtime.consecutiveFailures++
+				failures := runtime.consecutiveFailures
+				reconnects := runtime.reconnects
+				runtime.mu.Unlock()
+				runtime.owner.reportTransportEvent(TransportEvent{
+					Kind:                TransportKindNATS,
+					State:               TransportStateRecovering,
+					Reconnects:          reconnects,
+					ConsecutiveFailures: failures,
+					ErrorCode:           errs.CodeTransportUnavailable,
+					Cause:               err,
+				})
+				delay = nextTransportBackoff(delay)
+				continue
+			}
+
+			runtime.mu.Lock()
+			runtime.reconnects++
+			runtime.consecutiveFailures = 0
+			reconnects := runtime.reconnects
+			runtime.mu.Unlock()
+			runtime.owner.logger.Info(
+				"NATS RPC Transport 已完成外层重建",
+				originlog.Uint64("transport_generation", generation),
+			)
+			runtime.owner.reportTransportEvent(TransportEvent{
+				Kind:       TransportKindNATS,
+				State:      TransportStateReady,
+				Reconnects: reconnects,
+			})
+			break
+		}
+	}
 }
 
 // connectionOptions 把稳定 RPC 配置映射到 M6 原生 Options。
@@ -169,8 +404,10 @@ func (runtime *natsRuntime) connectionOptions() natsnet.Options {
 		config.URLs...,
 	)
 	options.NoEcho = true
+	options.IgnoreAuthErrorAbort = true
 	options.MaxMessageSize =
 		runtime.config.MaxPayloadSize + natsMaximumEnvelopeSize
+	options.Reconnect.MaxAttempts = -1
 	options.Reconnect.BufferSize = -1
 	options.Subscription.PendingMessages = config.ReceiveQueueMessages
 	options.Auth = natsnet.AuthOptions{
@@ -199,8 +436,12 @@ func (runtime *natsRuntime) beginStop(ctx context.Context) error {
 	}
 	runtime.mu.Lock()
 	runtime.stopping = true
+	cancelRecovery := runtime.recoveryCancel
 	requestSub := runtime.requestSub
 	runtime.mu.Unlock()
+	if cancelRecovery != nil {
+		cancelRecovery()
+	}
 	if requestSub == nil {
 		return nil
 	}
@@ -212,17 +453,24 @@ func (runtime *natsRuntime) beginStop(ctx context.Context) error {
 }
 
 // close 最终关闭 Subscription、Connection、入站 Deadline，并完成全部 pending。
-func (runtime *natsRuntime) close() {
+func (runtime *natsRuntime) close(ctx context.Context) error {
 	if runtime == nil {
-		return
+		return nil
+	}
+	if ctx == nil {
+		return errs.ErrInvalidArgument
 	}
 	runtime.mu.Lock()
 	if runtime.closed {
 		runtime.mu.Unlock()
-		return
+		return nil
 	}
 	runtime.closed = true
 	runtime.stopping = true
+	runtime.activeGeneration.Store(0)
+	cancelRecovery := runtime.recoveryCancel
+	recoveryDone := runtime.recoveryDone
+	recoveryStarted := runtime.started
 	requestSub := runtime.requestSub
 	responseSub := runtime.responseSub
 	conn := runtime.conn
@@ -232,6 +480,9 @@ func (runtime *natsRuntime) close() {
 	runtime.conn = nil
 	runtime.deadlines = nil
 	runtime.mu.Unlock()
+	if cancelRecovery != nil {
+		cancelRecovery()
+	}
 
 	if requestSub != nil {
 		requestSub.Close()
@@ -240,13 +491,27 @@ func (runtime *natsRuntime) close() {
 		responseSub.Close()
 	}
 	runtime.pending.failAll(errs.ErrTransportUnavailable)
+	var result error
 	if conn != nil {
 		conn.Close()
-		_ = conn.Wait(context.Background())
+		result = conn.Wait(ctx)
+		// 本地 Close 会让 natsnet 以 CodeTransportClosed 完成 Wait；这是预期终态，
+		// 不能污染一次正常的 Node/Application 优雅停止结果。
+		if errors.Is(result, errs.ErrTransportClosed) {
+			result = nil
+		}
 	}
 	if deadlines != nil {
 		deadlines.close(errs.ErrServiceStopped)
 	}
+	if recoveryStarted && recoveryDone != nil {
+		select {
+		case <-recoveryDone:
+		case <-ctx.Done():
+			result = errors.Join(result, contextError(context.Cause(ctx)))
+		}
+	}
+	return result
 }
 
 // sendRequest 预占 Node 级 pending、发布 NATS Request，并在成功后释放请求 Buffer。
@@ -617,27 +882,99 @@ func (runtime *natsRuntime) handleResponse(message natsnet.Message) {
 	call.complete(response, nil)
 }
 
-// handleEvent 只处理连接终态；短暂断线保留 pending，重连后也不自动重放。
+// handleEvent 保留给同包测试和诊断注入；正式连接回调始终携带创建时的 generation。
 func (runtime *natsRuntime) handleEvent(event natsnet.Event) {
-	if event.Type != natsnet.EventClosed {
-		return
-	}
-	runtime.pending.failAll(errs.ErrTransportUnavailable)
 	runtime.mu.Lock()
-	unexpected := runtime.started && !runtime.stopping && !runtime.closed
+	generation := runtime.generation
 	runtime.mu.Unlock()
-	if !unexpected {
+	runtime.handleGenerationEvent(generation, event)
+}
+
+// handleGenerationEvent 把当前代连接事件转换为整体 Transport 状态。
+func (runtime *natsRuntime) handleGenerationEvent(
+	generation uint64,
+	event natsnet.Event,
+) {
+	runtime.mu.Lock()
+	current := runtime.generation == generation &&
+		!runtime.stopping &&
+		!runtime.closed
+	started := runtime.started
+	if !current {
+		runtime.mu.Unlock()
 		return
 	}
-	runtime.owner.logger.Error(
-		"NATS RPC Connection 已进入终态",
-		originlog.Err(event.Err),
-	)
-	cause := event.Err
-	if cause == nil {
-		cause = errs.ErrTransportUnavailable
+	reconnects := runtime.reconnects
+	failures := runtime.consecutiveFailures
+	runtime.mu.Unlock()
+
+	switch event.Type {
+	case natsnet.EventDisconnected:
+		// 不缓存、不重放已经在途的调用；新调用由 connectedConn 快速失败。
+		runtime.pending.failCurrent(errs.ErrTransportUnavailable)
+		runtime.mu.Lock()
+		runtime.consecutiveFailures++
+		failures = runtime.consecutiveFailures
+		reconnects = runtime.reconnects
+		runtime.mu.Unlock()
+		runtime.owner.reportTransportEvent(TransportEvent{
+			Kind:                TransportKindNATS,
+			State:               TransportStateRecovering,
+			Reconnects:          reconnects,
+			ConsecutiveFailures: failures,
+			ErrorCode:           errs.CodeTransportUnavailable,
+			Cause:               event.Err,
+		})
+	case natsnet.EventReconnected:
+		runtime.mu.Lock()
+		runtime.reconnects++
+		runtime.consecutiveFailures = 0
+		reconnects = runtime.reconnects
+		runtime.mu.Unlock()
+		runtime.owner.reportTransportEvent(TransportEvent{
+			Kind:       TransportKindNATS,
+			State:      TransportStateReady,
+			Reconnects: reconnects,
+		})
+	case natsnet.EventClosed:
+		runtime.pending.failCurrent(errs.ErrTransportUnavailable)
+		if !started {
+			return
+		}
+		runtime.activeGeneration.CompareAndSwap(generation, 0)
+		runtime.mu.Lock()
+		runtime.consecutiveFailures++
+		failures = runtime.consecutiveFailures
+		reconnects = runtime.reconnects
+		wake := runtime.recoveryWake
+		runtime.mu.Unlock()
+		cause := event.Err
+		if cause == nil {
+			cause = errs.ErrTransportUnavailable
+		}
+		runtime.owner.logger.Error(
+			"NATS RPC Connection 已进入终态，开始外层重建",
+			originlog.Uint64("transport_generation", generation),
+			originlog.Err(cause),
+		)
+		runtime.owner.reportTransportEvent(TransportEvent{
+			Kind:                TransportKindNATS,
+			State:               TransportStateRecovering,
+			Reconnects:          reconnects,
+			ConsecutiveFailures: failures,
+			ErrorCode:           errs.CodeTransportUnavailable,
+			Cause:               cause,
+		})
+		if wake != nil {
+			select {
+			case wake <- struct{}{}:
+			default:
+			}
+		}
+	default:
+		// Connected、LameDuck 和单次异步错误不改变整体 RPC 就绪状态。
+		return
 	}
-	runtime.owner.reportTransportFailure(cause)
 }
 
 // requestSubject 返回缓存的目标 Request Subject。

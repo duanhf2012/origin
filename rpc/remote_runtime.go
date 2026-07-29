@@ -43,6 +43,14 @@ type remoteRuntime struct {
 	retired map[*remoteTarget]struct{}
 
 	deadlines *inboundDeadlines
+
+	// listenerCancel/listenerDone 由单一恢复 owner 持有。运行期 Listener 永久退出时，
+	// owner 在同一地址持续重建；正式 Stop 只需取消一次并等待该 goroutine 归还所有权。
+	listenerCancel     context.CancelFunc
+	listenerDone       chan struct{}
+	listenerGeneration uint64
+	listenerReconnects uint64
+	listenerFailures   uint64
 }
 
 // newRemoteRuntime 创建尚未启动、没有后台 goroutine 的远端资源容器。
@@ -55,18 +63,45 @@ func newRemoteRuntime(owner *Runtime, config Config) *remoteRuntime {
 	}
 }
 
-// StartNetwork 在 Node 时间轮已经运行后启动 Listener、Deadline watcher 和已知目标。
-func (runtime *Runtime) StartNetwork(engine *timerwheel.Engine) error {
-	if runtime == nil || engine == nil {
+// StartNetwork 在 Node 时间轮已经运行后启动整体入站 Transport。
+//
+// ctx 属于 Node 启动阶段：初次建立期间可以据此停止等待；成功后运行期恢复改由 Runtime
+// 自己的生命周期 Context 管理，不会错误继承 OnStart 或命令行调用者的取消。
+func (runtime *Runtime) StartNetwork(
+	ctx context.Context,
+	engine *timerwheel.Engine,
+) error {
+	if runtime == nil || ctx == nil || engine == nil {
 		return errs.ErrInvalidArgument
 	}
-	if runtime.remote == nil {
-		if runtime.nats == nil {
-			return nil
-		}
-		return runtime.nats.start(engine)
+	kind := runtime.transportKind()
+	if kind == TransportKindNone {
+		return nil
 	}
-	return runtime.remote.start(engine)
+	runtime.reportTransportEvent(TransportEvent{
+		Kind:  kind,
+		State: TransportStateStarting,
+	})
+	var err error
+	if runtime.remote == nil {
+		err = runtime.nats.start(ctx, engine)
+	} else {
+		err = runtime.remote.start(ctx, engine)
+	}
+	if err != nil {
+		runtime.reportTransportEvent(TransportEvent{
+			Kind:      kind,
+			State:     TransportStateFailed,
+			ErrorCode: errs.CodeOf(err),
+			Cause:     err,
+		})
+		return err
+	}
+	runtime.reportTransportEvent(TransportEvent{
+		Kind:  kind,
+		State: TransportStateReady,
+	})
+	return nil
 }
 
 // AdvertiseAddress 返回当前 Runtime 冻结的可连接地址。
@@ -92,7 +127,13 @@ func (runtime *Runtime) TransportInfo() (transport string, address string, enabl
 }
 
 // start 一次性发布远端 RPC 资源。
-func (remote *remoteRuntime) start(engine *timerwheel.Engine) error {
+func (remote *remoteRuntime) start(
+	ctx context.Context,
+	engine *timerwheel.Engine,
+) error {
+	if ctx == nil {
+		return errs.ErrInvalidArgument
+	}
 	remote.mu.Lock()
 	if remote.started || remote.stopping {
 		remote.mu.Unlock()
@@ -124,6 +165,11 @@ func (remote *remoteRuntime) start(engine *timerwheel.Engine) error {
 	// started 在目标 goroutine 启动前发布；AddTarget 此后会自行启动新增目标。
 	remote.listener = listener
 	remote.started = true
+	listenerCtx, listenerCancel := context.WithCancel(context.Background())
+	remote.listenerCancel = listenerCancel
+	remote.listenerDone = make(chan struct{})
+	remote.listenerGeneration++
+	generation := remote.listenerGeneration
 	targets := make([]*remoteTarget, 0, len(remote.targets))
 	for _, target := range remote.targets {
 		targets = append(targets, target)
@@ -133,27 +179,164 @@ func (remote *remoteRuntime) start(engine *timerwheel.Engine) error {
 	for _, target := range targets {
 		target.start()
 	}
-	// 监听器永久退出属于 Node 级基础设施终态；正常 StopAccept 的 Cause 为 nil，不会误报。
-	go remote.watchListener(listener)
+	// 唯一 owner 同时观察终止和执行重建，避免多个 watcher 竞争覆盖新 Listener。
+	go remote.maintainListener(listenerCtx, listener, generation)
 	return nil
 }
 
-// watchListener 把 TCP AcceptLoop 的永久终态提升到唯一 Application 生命周期路径。
-func (remote *remoteRuntime) watchListener(listener *tcpnet.Listener) {
-	if remote == nil || listener == nil {
-		return
+// maintainListener 串行持有当前 Listener，并在意外永久退出后持续重建。
+func (remote *remoteRuntime) maintainListener(
+	ctx context.Context,
+	listener *tcpnet.Listener,
+	generation uint64,
+) {
+	defer close(remote.listenerDone)
+	current := listener
+	currentGeneration := generation
+
+	for {
+		// 正常运行只阻塞在当前 AcceptLoop 或正式 Stop，不产生轮询和 Timer。
+		select {
+		case <-ctx.Done():
+			return
+		case <-current.AcceptDone():
+		}
+		cause := current.Cause()
+		remote.mu.Lock()
+		unexpected := !remote.stopping &&
+			remote.listener == current &&
+			remote.listenerGeneration == currentGeneration
+		if unexpected {
+			remote.listenerFailures++
+		}
+		failures := remote.listenerFailures
+		reconnects := remote.listenerReconnects
+		remote.mu.Unlock()
+		if !unexpected {
+			return
+		}
+		if cause == nil {
+			// StopAccept 只允许由 RPC 正式停止路径发起。若底层 Listener 在 Runtime
+			// 仍处于运行状态时无错误退出，对上层仍然是“已经无法接受新连接”的故障。
+			cause = errs.ErrTransportUnavailable
+		}
+
+		remote.owner.reportTransportEvent(TransportEvent{
+			Kind:                TransportKindTCP,
+			State:               TransportStateRecovering,
+			Reconnects:          reconnects,
+			ConsecutiveFailures: failures,
+			ErrorCode:           errs.CodeTransportUnavailable,
+			Cause:               cause,
+		})
+		remote.owner.logger.Error(
+			"RPC TCP Listener 意外退出，开始持续恢复",
+			originlog.Uint64("transport_generation", currentGeneration),
+			originlog.Err(cause),
+		)
+		// 永久 Accept 错误通常已经关闭旧连接；主动或异常的无错误退出则可能只关闭
+		// Accept。幂等 Close 把两种情况统一收敛，确保替换 Listener 后没有旧连接所有权
+		// 遗留。该操作只在恢复冷路径执行。
+		if err := current.Close(ctx); err != nil &&
+			!errors.Is(err, context.Canceled) {
+			remote.owner.logger.Warn(
+				"RPC TCP 旧 Listener 清理未完整完成",
+				originlog.Err(err),
+			)
+		}
+
+		delay := reconnectInitialDelay
+		for {
+			if !waitTransportBackoff(ctx, delay) {
+				return
+			}
+			next, err := tcpnet.Listen(
+				remote.config.TCP.Listen,
+				remote.listenOptions(),
+				remote.inbound,
+			)
+			if err != nil {
+				remote.mu.Lock()
+				remote.listenerFailures++
+				failures = remote.listenerFailures
+				reconnects = remote.listenerReconnects
+				remote.mu.Unlock()
+				remote.owner.reportTransportEvent(TransportEvent{
+					Kind:                TransportKindTCP,
+					State:               TransportStateRecovering,
+					Reconnects:          reconnects,
+					ConsecutiveFailures: failures,
+					ErrorCode:           errs.CodeTransportUnavailable,
+					Cause:               err,
+				})
+				delay = nextTransportBackoff(delay)
+				continue
+			}
+
+			// 新 Listener 只有在代次和停止状态仍匹配时才能成为当前实例。迟到的成功结果
+			// 立即关闭，不能在 Stop 后重新开放入站端口。
+			remote.mu.Lock()
+			if remote.stopping ||
+				remote.listener != current ||
+				remote.listenerGeneration != currentGeneration {
+				remote.mu.Unlock()
+				_ = next.Close(context.Background())
+				return
+			}
+			remote.listenerGeneration++
+			currentGeneration = remote.listenerGeneration
+			remote.listenerReconnects++
+			remote.listenerFailures = 0
+			remote.listener = next
+			reconnects = remote.listenerReconnects
+			remote.mu.Unlock()
+
+			remote.owner.logger.Info(
+				"RPC TCP Listener 已恢复",
+				originlog.Uint64("transport_generation", currentGeneration),
+			)
+			remote.owner.reportTransportEvent(TransportEvent{
+				Kind:       TransportKindTCP,
+				State:      TransportStateReady,
+				Reconnects: reconnects,
+			})
+			current = next
+			break
+		}
 	}
-	<-listener.AcceptDone()
-	cause := listener.Cause()
-	if cause == nil {
-		return
+}
+
+// waitTransportBackoff 使用可取消 Timer 等待带 ±20% 抖动的恢复间隔。
+func waitTransportBackoff(ctx context.Context, base time.Duration) bool {
+	if ctx == nil {
+		return false
 	}
-	remote.mu.Lock()
-	unexpected := remote.listener == listener && !remote.stopping
-	remote.mu.Unlock()
-	if unexpected {
-		remote.owner.reportTransportFailure(cause)
+	spread := base / 5
+	delay := base
+	if spread > 0 {
+		window := int64(2*spread + 1)
+		delay += time.Duration(time.Now().UnixNano()%window) - spread
 	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// nextTransportBackoff 计算不超过固定上限的指数退避。
+func nextTransportBackoff(current time.Duration) time.Duration {
+	if current >= reconnectMaximumDelay {
+		return reconnectMaximumDelay
+	}
+	next := current * 2
+	if next > reconnectMaximumDelay {
+		return reconnectMaximumDelay
+	}
+	return next
 }
 
 // AddTarget 保留 M13 的底层单目标兼容入口；M14 的 Node/Application 不再调用它，而统一
@@ -325,6 +508,13 @@ func (runtime *Runtime) BeginStop(ctx context.Context) error {
 		return errs.ErrInvalidArgument
 	}
 	runtime.inboundReady.Store(false)
+	kind := runtime.transportKind()
+	if kind != TransportKindNone {
+		runtime.reportTransportEvent(TransportEvent{
+			Kind:  kind,
+			State: TransportStateStopping,
+		})
+	}
 	if runtime.remote == nil {
 		if runtime.nats == nil {
 			return nil
@@ -346,8 +536,12 @@ func (remote *remoteRuntime) beginStop(ctx context.Context) error {
 		return listener.StopAccept(ctx)
 	}
 	remote.stopping = true
+	cancelListener := remote.listenerCancel
 	listener := remote.listener
 	remote.mu.Unlock()
+	if cancelListener != nil {
+		cancelListener()
+	}
 	if listener == nil {
 		return nil
 	}
@@ -361,6 +555,8 @@ func (remote *remoteRuntime) closeTransport(ctx context.Context) error {
 	}
 	remote.mu.Lock()
 	remote.stopping = true
+	cancelListener := remote.listenerCancel
+	listenerDone := remote.listenerDone
 	listener := remote.listener
 	targets := make([]*remoteTarget, 0, len(remote.targets))
 	for _, target := range remote.targets {
@@ -370,6 +566,9 @@ func (remote *remoteRuntime) closeTransport(ctx context.Context) error {
 		targets = append(targets, target)
 	}
 	remote.mu.Unlock()
+	if cancelListener != nil {
+		cancelListener()
+	}
 
 	var result error
 	for _, target := range targets {
@@ -377,6 +576,13 @@ func (remote *remoteRuntime) closeTransport(ctx context.Context) error {
 	}
 	if listener != nil {
 		result = errors.Join(result, listener.Close(ctx))
+	}
+	if listenerDone != nil {
+		select {
+		case <-listenerDone:
+		case <-ctx.Done():
+			result = errors.Join(result, contextError(context.Cause(ctx)))
+		}
 	}
 	return result
 }

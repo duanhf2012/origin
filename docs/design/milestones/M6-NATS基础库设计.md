@@ -6,6 +6,9 @@
 > 适用里程碑：M6
 > 前置依赖：M0 工程基础、M1 日志库、M3 基础配置库、M5 Transport 错误码
 
+> 后续覆盖：M16 保留 M6 通用低层默认值，但允许 `MaxAttempts=-1`，并由 RPC Adapter
+> 固定使用无限重连；下文“有限重连”只描述 M6 当时已经实现的通用默认。
+
 ## 1. 目标
 
 M6 实现一个只面向 Origin 框架内部的 Core NATS 基础库，为 M15 NATS RPC、后续 NATS
@@ -58,7 +61,8 @@ v2 中需要修正的问题：
 
 1. NATS 连接、Subject、RPC 编解码、压缩和调用关联混在同一包；
 2. `os.<NodeID>`、`oc.<NodeID>` 及 `fnode` Header 被写死在 Transport 内；
-3. `MaxReconnects(-1)` 永久重连，不符合 v3 的有界重试原则；
+3. M6 当时认为 `MaxReconnects(-1)` 永久重连不符合有界重试原则；M16 针对 RPC 高可用
+   场景修正为无限重连、退避时间有上限且 Stop 可取消；
 4. 连接事件依赖包级日志和全 Service 广播，没有实例隔离；
 5. Subscription 没有独立所有者、关闭、排空和等待外观；
 6. NATS Client 的 `Close`、`Run`、`OnClose` 是空实现，资源边界不完整；
@@ -220,7 +224,7 @@ type SubscriptionDefaults struct {
 | `PingInterval` | `30s` | 比官方两分钟默认值更早发现黑洞连接 |
 | `MaxPingsOutstanding` | `2` | 连续两次 Ping 无响应后判定失活 |
 | `Reconnect.Enabled` | `true` | 已成功连接后允许自动恢复 |
-| `Reconnect.MaxAttempts` | `60` | 不允许无限重连 |
+| `Reconnect.MaxAttempts` | `60` | M6 通用低层默认；M16 RPC Adapter 固定覆盖为 `-1` 无限重连 |
 | `Reconnect.Wait` | `2s` | 使用成熟客户端默认节奏 |
 | `Reconnect.Jitter` | `500ms` | 减少大量 Node 同时重连 |
 | `Reconnect.TLSJitter` | `1s` | TLS 建连成本更高，使用更大抖动 |
@@ -575,7 +579,8 @@ Context-aware Dialer：
 初始成功后使用 `nats.go` 成熟的自动重连和自动重订阅：
 
 - 不手工重建 Subscription；
-- 重连次数必须有限；
+- M6 通用低层默认重连次数有限；M16 RPC 场景允许 `MaxAttempts=-1`，以有上限退避和
+  Stop Context 控制资源；
 - 每次等待包含 Jitter，避免大量 Node 同时冲击 NATS 集群；
 - 重连成功后原 Subscription 继续工作；
 - 达到上限后进入 Closed，Wait 返回 `CodeTransportUnavailable`；
@@ -978,7 +983,8 @@ Windows 和 Linux 必须分别执行真实 NATS Server 集成测试。macOS 至�
 3. 包名使用 `internal/natsnet`；
 4. M6 只支持 Core NATS，不支持 JetStream；
 5. 一个 Node 持有一条 NATS Connection，Connection 复用全部 RPC/发现订阅；
-6. 初始连接失败直接返回，由 Node 启动层决定重试；连接成功后的重连最多 60 次；
+6. 初始连接失败直接返回，由 Node 启动层决定重试；M6 通用默认在连接成功后最多重连
+   60 次，M16 RPC Adapter 固定改为无限重连；
 7. 默认 Ping `30s`、两次未响应判定失活；
 8. 默认重连等待 `2s`，普通 Jitter `500ms`、TLS Jitter `1s`；
 9. 默认 Reconnect Buffer `8M`，其“本地接受但可能延迟发送”语义必须显式；M15 RPC

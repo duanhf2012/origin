@@ -36,6 +36,8 @@ const (
 	CodeGracefulShutdownTimeout Code = 1005
 	// CodeServiceNotReady 表示 Service 尚未完成启动或调度器尚未开放。
 	CodeServiceNotReady Code = 1006
+	// CodeServiceFailed 表示 Service 因框架内部状态无法证明安全而被运行期隔离。
+	CodeServiceFailed Code = 1007
 
 	// CodeRPCNoRoute 表示当前 RPC Target 没有可用的 Service。
 	CodeRPCNoRoute Code = 2001
@@ -68,6 +70,9 @@ const (
 	CodeTransportProtocol Code = 3004
 	// CodeTransportMessageTooLarge 表示发送或接收的消息超过配置上限。
 	CodeTransportMessageTooLarge Code = 3005
+
+	// CodeDiscoveryUnavailable 表示必需服务发现当前不可用或尚未完成重新发布。
+	CodeDiscoveryUnavailable Code = 5001
 
 	// CodeLogClosed 表示日志运行时已经关闭。
 	CodeLogClosed Code = 7001
@@ -109,6 +114,8 @@ func codeText(code Code) string {
 		return "graceful shutdown timeout"
 	case CodeServiceNotReady:
 		return "service not ready"
+	case CodeServiceFailed:
+		return "service failed"
 	case CodeRPCNoRoute:
 		return "rpc route not found"
 	case CodeRPCInvalidRouteKey:
@@ -139,6 +146,8 @@ func codeText(code Code) string {
 		return "transport protocol error"
 	case CodeTransportMessageTooLarge:
 		return "transport message too large"
+	case CodeDiscoveryUnavailable:
+		return "discovery unavailable"
 	case CodeLogClosed:
 		return "log runtime closed"
 	case CodeLogOutputFailed:

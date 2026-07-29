@@ -2,44 +2,55 @@ package rpc
 
 import (
 	"errors"
-	"sync/atomic"
 	"testing"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/natsnet"
 )
 
-func TestRuntimeReportsOnlyFirstTransportFailure(t *testing.T) {
+func TestRuntimeReportsTransportStateChanges(t *testing.T) {
 	t.Parallel()
 
 	runtime := &Runtime{}
-	var calls atomic.Int32
-	first := errors.New("first transport failure")
-	if err := runtime.BindFailureHandler(func(cause error) {
-		if !errors.Is(cause, first) {
-			t.Errorf("failure cause = %v", cause)
-		}
-		calls.Add(1)
+	events := make([]TransportEvent, 0, 2)
+	first := errors.New("first transport interruption")
+	if err := runtime.BindTransportObserver(func(event TransportEvent) {
+		events = append(events, event)
 	}); err != nil {
-		t.Fatalf("BindFailureHandler() error = %v", err)
+		t.Fatalf("BindTransportObserver() error = %v", err)
 	}
 
-	runtime.reportTransportFailure(first)
-	runtime.reportTransportFailure(errors.New("second transport failure"))
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("failure handler calls = %d, want 1", got)
+	runtime.reportTransportEvent(TransportEvent{
+		Kind:      TransportKindTCP,
+		State:     TransportStateRecovering,
+		ErrorCode: errs.CodeTransportUnavailable,
+		Cause:     first,
+	})
+	runtime.reportTransportEvent(TransportEvent{
+		Kind:  TransportKindTCP,
+		State: TransportStateReady,
+	})
+	if len(events) != 2 {
+		t.Fatalf("transport observer events = %d, want 2", len(events))
+	}
+	if !errors.Is(events[0].Cause, first) ||
+		events[0].State != TransportStateRecovering {
+		t.Fatalf("first transport event = %+v", events[0])
+	}
+	if events[1].State != TransportStateReady || events[1].Cause != nil {
+		t.Fatalf("second transport event = %+v", events[1])
 	}
 }
 
-func TestNATSTerminalEventReportsOnlyUnexpectedClosure(t *testing.T) {
+func TestNATSClosedEventReportsRecoveringOnlyWhenUnexpected(t *testing.T) {
 	t.Parallel()
 
-	var calls atomic.Int32
+	events := make([]TransportEvent, 0, 2)
 	owner := &Runtime{}
-	if err := owner.BindFailureHandler(func(error) {
-		calls.Add(1)
+	if err := owner.BindTransportObserver(func(event TransportEvent) {
+		events = append(events, event)
 	}); err != nil {
-		t.Fatalf("BindFailureHandler() error = %v", err)
+		t.Fatalf("BindTransportObserver() error = %v", err)
 	}
 	nats := &natsRuntime{
 		owner:   owner,
@@ -51,19 +62,16 @@ func TestNATSTerminalEventReportsOnlyUnexpectedClosure(t *testing.T) {
 		Type: natsnet.EventClosed,
 		Err:  errs.ErrTransportUnavailable,
 	})
-	nats.handleEvent(natsnet.Event{
-		Type: natsnet.EventClosed,
-		Err:  errs.ErrTransportUnavailable,
-	})
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("unexpected terminal calls = %d, want 1", got)
+	if len(events) != 1 ||
+		events[0].State != TransportStateRecovering {
+		t.Fatalf("unexpected close events = %+v", events)
 	}
 
 	normalOwner := &Runtime{}
-	if err := normalOwner.BindFailureHandler(func(error) {
-		calls.Add(1)
+	if err := normalOwner.BindTransportObserver(func(event TransportEvent) {
+		events = append(events, event)
 	}); err != nil {
-		t.Fatalf("normal BindFailureHandler() error = %v", err)
+		t.Fatalf("normal BindTransportObserver() error = %v", err)
 	}
 	normal := &natsRuntime{
 		owner:    normalOwner,
@@ -75,7 +83,7 @@ func TestNATSTerminalEventReportsOnlyUnexpectedClosure(t *testing.T) {
 		Type: natsnet.EventClosed,
 		Err:  errs.ErrTransportUnavailable,
 	})
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("normal closure reported failure, calls = %d", got)
+	if len(events) != 1 {
+		t.Fatalf("normal closure reported state change, events = %+v", events)
 	}
 }

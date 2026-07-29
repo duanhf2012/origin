@@ -133,7 +133,9 @@ func (service *Service) timerCreationError() error {
 		return nil
 	case StateStopping:
 		return errs.ErrServiceStopping
-	case StateStopped, StateFailed:
+	case StateFailed:
+		return errs.ErrServiceFailed
+	case StateStopped:
 		return errs.ErrServiceStopped
 	default:
 		return errs.ErrServiceNotReady
@@ -202,6 +204,9 @@ func (service *Service) TimerStats() TimerStats {
 
 // pauseTimer 在线性化锁内裁决到期、开始执行和暂停之间的先后顺序。
 func (scheduler *serviceScheduler) pauseTimer(timerID TimerID) bool {
+	if scheduler.failureLockUnsafe.Load() {
+		return false
+	}
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 
@@ -258,6 +263,9 @@ func (scheduler *serviceScheduler) pauseTimer(timerID TimerID) bool {
 
 // resumeTimer 为 Paused After/Ticker 重新登记剩余延迟。
 func (scheduler *serviceScheduler) resumeTimer(timerID TimerID) bool {
+	if scheduler.failureLockUnsafe.Load() {
+		return false
+	}
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 
@@ -318,6 +326,9 @@ func (scheduler *serviceScheduler) resumeTimer(timerID TimerID) bool {
 
 // cancelTimer 取消仍未开始的 AfterFunc。
 func (scheduler *serviceScheduler) cancelTimer(timerID TimerID) bool {
+	if scheduler.failureLockUnsafe.Load() {
+		return false
+	}
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 
@@ -515,7 +526,7 @@ func (scheduler *serviceScheduler) acquireBusinessTimerLocked() *businessTimer {
 	}
 	timer := item.(*businessTimer)
 	if !timer.pooled {
-		panic("service: Timer 对象池包含未清零对象")
+		panicInvariant("service: Timer 对象池包含未清零对象")
 	}
 	*timer = businessTimer{}
 	return timer
@@ -526,7 +537,7 @@ func (scheduler *serviceScheduler) acquireBusinessTimerLocked() *businessTimer {
 // 调用方必须先从 timers、deadlineBindings 和任务对象中解除该 Timer 的全部内部引用。
 func (scheduler *serviceScheduler) releaseBusinessTimerLocked(timer *businessTimer) {
 	if timer == nil || timer.id == InvalidTimerID {
-		panic("service: 非法 Timer 回池")
+		panicInvariant("service: 非法 Timer 回池")
 	}
 	*timer = businessTimer{}
 	timer.pooled = true
@@ -549,7 +560,7 @@ func (scheduler *serviceScheduler) releaseTerminalTimerIfUnreferencedLocked(
 		return false
 	}
 	if scheduler.timers[timer.id] != timer {
-		panic("service: 终态 Timer Map 所有权不一致")
+		panicInvariant("service: 终态 Timer Map 所有权不一致")
 	}
 	delete(scheduler.timers, timer.id)
 	scheduler.releaseBusinessTimerLocked(timer)
@@ -602,7 +613,7 @@ func (scheduler *serviceScheduler) enqueueExpiredTimerLocked(timer *businessTime
 		timer:      timer,
 		generation: timer.generation,
 	}) {
-		panic("service: DuePending 数量超过 Node Timer 额度")
+		panicInvariant("service: DuePending 数量超过 Node Timer 额度")
 	}
 	timer.dueReferences++
 	return scheduler.promoteDueTimersLocked()
@@ -625,11 +636,11 @@ func (scheduler *serviceScheduler) promoteDueTimersLocked() bool {
 		}
 		timer := entry.timer
 		if timer == nil {
-			panic("service: DuePending 包含空 Timer")
+			panicInvariant("service: DuePending 包含空 Timer")
 		}
 		timer.dueReferences--
 		if timer.dueReferences < 0 {
-			panic("service: DuePending Timer 引用计数下溢")
+			panicInvariant("service: DuePending Timer 引用计数下溢")
 		}
 
 		// 代次或状态不匹配表示 Pause/Resume/Cancel 留下的墓碑。Canceled Timer 已无
@@ -654,7 +665,7 @@ func (scheduler *serviceScheduler) promoteDueTimersLocked() bool {
 		task.timerGeneration = timer.generation
 		timer.taskReferences++
 		if !scheduler.ready.Enqueue(task) {
-			panic("service: Timer Task 在 Accepted 未达到硬上限时拒绝入队")
+			panicInvariant("service: Timer Task 在 Accepted 未达到硬上限时拒绝入队")
 		}
 		scheduler.accepted++
 		if scheduler.accepted > scheduler.acceptedHighWatermark {
@@ -673,7 +684,7 @@ func (scheduler *serviceScheduler) startTimerTaskLocked(task *serviceTask) {
 		task.timerGeneration != timer.generation ||
 		timer.state != businessTimerReady ||
 		scheduler.timers[timer.id] != timer {
-		panic("service: Timer Task 与 Timer 状态不一致")
+		panicInvariant("service: Timer Task 与 Timer 状态不一致")
 	}
 	timer.state = businessTimerRunning
 	scheduler.timerStats.Ready--
@@ -708,12 +719,12 @@ func (scheduler *serviceScheduler) discardStaleTimerTaskLocked(task *serviceTask
 		task.kind != taskKindTimer ||
 		task.state != taskReady ||
 		task.timer == nil {
-		panic("service: 非法 Timer Task 墓碑")
+		panicInvariant("service: 非法 Timer Task 墓碑")
 	}
 	timer := task.timer
 	timer.taskReferences--
 	if timer.taskReferences < 0 {
-		panic("service: Timer Task 引用计数下溢")
+		panicInvariant("service: Timer Task 引用计数下溢")
 	}
 
 	// 墓碑仍然是已经准入的 Service Task，必须在出队时对称减少 Accepted 并归还 Task 池。
@@ -744,7 +755,7 @@ func (scheduler *serviceScheduler) finishTimerTaskLocked(
 		task.timerGeneration != timer.generation ||
 		timer.state != businessTimerRunning ||
 		scheduler.timers[timer.id] != timer {
-		panic("service: Timer 回调完成状态不一致")
+		panicInvariant("service: Timer 回调完成状态不一致")
 	}
 
 	if panicked {
@@ -798,7 +809,7 @@ func (scheduler *serviceScheduler) finishTimerTaskLocked(
 		next = timer.schedule.Next(cronNow)
 		valid = !next.IsZero() && next.After(cronNow)
 	default:
-		panic("service: 未知周期 Timer 类型")
+		panicInvariant("service: 未知周期 Timer 类型")
 	}
 	if !valid {
 		timer.state = businessTimerCanceled
@@ -914,7 +925,7 @@ func (scheduler *serviceScheduler) cancelUnreadyTimersLocked() {
 		case businessTimerCanceled:
 			// 控制接口已经提交统计，只等待墓碑引用清理。
 		default:
-			panic("service: Stop 遇到非法 Timer 状态")
+			panicInvariant("service: Stop 遇到非法 Timer 状态")
 		}
 	}
 
@@ -927,7 +938,7 @@ func (scheduler *serviceScheduler) cancelUnreadyTimersLocked() {
 		}
 		timer := entry.timer
 		if timer == nil || timer.dueReferences <= 0 {
-			panic("service: Stop 清理 DuePending 引用计数不一致")
+			panicInvariant("service: Stop 清理 DuePending 引用计数不一致")
 		}
 		timer.dueReferences--
 		if timer.state == businessTimerCanceled {
@@ -940,12 +951,15 @@ func (scheduler *serviceScheduler) cancelUnreadyTimersLocked() {
 func (scheduler *serviceScheduler) cancelAllTimersLocked() {
 	scheduler.cancelUnreadyTimersLocked()
 	if len(scheduler.timers) != 0 {
-		panic("service: Scheduler 排空后仍有 Timer 内部引用")
+		panicInvariant("service: Scheduler 排空后仍有 Timer 内部引用")
 	}
 }
 
 // timerStatsSnapshot 在一次短锁内复制全部 Timer 当前值和累计值。
 func (scheduler *serviceScheduler) timerStatsSnapshot() TimerStats {
+	if scheduler.failureLockUnsafe.Load() {
+		return TimerStats{}
+	}
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 	return scheduler.timerStats

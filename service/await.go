@@ -57,10 +57,10 @@ func (scheduler *serviceScheduler) await(
 		token.scheduler == scheduler {
 		return scheduler.awaitTask(ctx, fn, token)
 	}
-	if token, ok := ctx.Value(startContextKey{}).(*startContext); ok &&
+	if token, ok := ctx.Value(lifecycleContextKey{}).(*lifecycleContext); ok &&
 		token != nil &&
 		token.scheduler == scheduler {
-		return scheduler.awaitStart(ctx, fn, token)
+		return scheduler.awaitLifecycle(ctx, fn, token)
 	}
 	return errs.ErrInvalidArgument
 }
@@ -167,14 +167,14 @@ func (scheduler *serviceScheduler) awaitTask(
 
 	// 当前 goroutine 从此不再持有 Service 执行权。替补 Runner 负责处理 Ready 任务；
 	// 等待函数则直接在原 goroutine 执行，不额外创建“执行 fn”的辅助 goroutine。
-	go scheduler.run()
+	scheduler.startRunner()
 	waitError, panicValue, panicStack, panicked := callAwaitFunction(fn, waitContext)
 
 	// 外部等待完成只把同一个根任务转为恢复项，不增加 Accepted，也不经过容量拒绝。
 	scheduler.mu.Lock()
 	if task.awaitGeneration != generation || task.state != taskWaiting {
 		scheduler.mu.Unlock()
-		panic("service: Await 完成时 Task 状态或代次不一致")
+		panicInvariant("service: Await 完成时 Task 状态或代次不一致")
 	}
 	task.awaitError = waitError
 	task.awaitPanic = panicValue
@@ -182,7 +182,7 @@ func (scheduler *serviceScheduler) awaitTask(
 	task.state = taskRecoveryReady
 	if !scheduler.ready.Enqueue(task) {
 		scheduler.mu.Unlock()
-		panic("service: 已接受 Await 恢复项无法进入 Ready 环形队列")
+		panicInvariant("service: 已接受 Await 恢复项无法进入 Ready 环形队列")
 	}
 	scheduler.mu.Unlock()
 	scheduler.notifyRunner()
@@ -207,7 +207,7 @@ func (scheduler *serviceScheduler) awaitTask(
 	if scheduler.runningTask != task || scheduler.running != 1 ||
 		task.state != taskRunning || task.awaitGeneration != generation {
 		scheduler.mu.Unlock()
-		panic("service: Await 恢复后执行槽状态不一致")
+		panicInvariant("service: Await 恢复后执行槽状态不一致")
 	}
 	panicValue = task.awaitPanic
 	panicStack = task.awaitPanicStack
@@ -243,13 +243,13 @@ func (scheduler *serviceScheduler) awaitTask(
 	return finalError
 }
 
-// awaitStart 在当前 OnStart goroutine 中顺序执行等待函数，不激活或让出普通业务执行槽。
-func (scheduler *serviceScheduler) awaitStart(
+// awaitLifecycle 在当前 OnStart/OnStop goroutine 中顺序等待，不让出普通业务执行槽。
+func (scheduler *serviceScheduler) awaitLifecycle(
 	ctx context.Context,
 	fn func(context.Context) error,
-	token *startContext,
+	token *lifecycleContext,
 ) error {
-	// Context 必须仍属于当前活动 OnStart 代次，父 Context 已取消时不进入用户函数。
+	// Context 必须仍属于当前活动生命周期代次，父 Context 已取消时不进入用户函数。
 	if !token.active.Load() {
 		return errs.ErrInvalidArgument
 	}
@@ -257,17 +257,20 @@ func (scheduler *serviceScheduler) awaitStart(
 		return awaitContextError(cause)
 	}
 
-	// 校验 Prepared 状态并建立唯一活动生命周期 Await。OnStart 顺序编程正常只会有一项；
-	// 该检查也让错误地并发复用 Context 快速失败，而不是相互覆盖 Deadline 绑定。
+	// 启动期只接受 Prepared，停止期只接受 Finalizing；二者都保持唯一顺序 Await。
+	expectedState := schedulerPrepared
+	if token.phase == lifecyclePhaseFinalizer {
+		expectedState = schedulerFinalizing
+	}
 	scheduler.mu.Lock()
-	if scheduler.state != schedulerPrepared ||
-		!scheduler.startActive ||
-		scheduler.startGeneration != token.generation ||
+	if scheduler.state != expectedState ||
+		scheduler.activeLifecycle != token ||
+		scheduler.lifecycleGeneration != token.generation ||
 		!token.active.Load() {
 		scheduler.mu.Unlock()
 		return errs.ErrInvalidArgument
 	}
-	if scheduler.activeStartAwait != nil ||
+	if scheduler.activeLifecycleAwait != nil ||
 		scheduler.awaiting >= scheduler.config.MaxAwaitTasks {
 		scheduler.rejectedTotal++
 		scheduler.mu.Unlock()
@@ -287,7 +290,7 @@ func (scheduler *serviceScheduler) awaitStart(
 	}
 	cancelContext, cancelWait := context.WithCancelCause(ctx)
 	var waitContext context.Context = cancelContext
-	binding := &startAwait{
+	binding := &lifecycleAwait{
 		token:      token,
 		cancel:     cancelWait,
 		deadlineID: timerwheel.InvalidDeadlineID,
@@ -303,35 +306,35 @@ func (scheduler *serviceScheduler) awaitStart(
 			cancelWait(err)
 			return errs.Wrap(errs.CodeInternal, err)
 		}
-		scheduler.startAwaitGeneration++
-		binding.generation = scheduler.startAwaitGeneration
+		scheduler.lifecycleAwaitGeneration++
+		binding.generation = scheduler.lifecycleAwaitGeneration
 		binding.deadlineID = deadlineID
 		scheduler.deadlineBindings[deadlineID] = deadlineBinding{
-			kind:       deadlineBindingStartAwait,
-			start:      binding,
+			kind:       deadlineBindingLifecycleAwait,
+			lifecycle:  binding,
 			generation: binding.generation,
 		}
 	}
-	scheduler.activeStartAwait = binding
+	scheduler.activeLifecycleAwait = binding
 	scheduler.awaiting++
 	scheduler.awaitTotal++
 	scheduler.mu.Unlock()
 
-	// 等待函数就在 OnStart 的原调用 goroutine 执行；没有普通 Runner 或辅助执行 goroutine。
+	// 等待函数就在原生命周期 goroutine 执行；Finalizer 不创建替补 Runner。
 	waitError, panicValue, _, panicked := callAwaitFunction(fn, waitContext)
 
 	// 解除仍未到期的 M8 绑定，并在锁内冻结最终到期标记和统计。
 	scheduler.mu.Lock()
-	if scheduler.activeStartAwait != binding {
+	if scheduler.activeLifecycleAwait != binding {
 		scheduler.mu.Unlock()
-		panic("service: OnStart Await 活动绑定不一致")
+		panicInvariant("service: 生命周期 Await 活动绑定不一致")
 	}
 	if binding.deadlineID != timerwheel.InvalidDeadlineID {
 		scheduler.deadlineQueue.Cancel(binding.deadlineID)
 		delete(scheduler.deadlineBindings, binding.deadlineID)
 		binding.deadlineID = timerwheel.InvalidDeadlineID
 	}
-	scheduler.activeStartAwait = nil
+	scheduler.activeLifecycleAwait = nil
 	scheduler.awaiting--
 	expired := binding.expired
 	scheduler.mu.Unlock()
@@ -355,7 +358,7 @@ func (scheduler *serviceScheduler) awaitStart(
 		scheduler.mu.Unlock()
 	}
 
-	// OnStart 外层生命周期边界负责统一恢复和日志；这里保持等待函数原 panic 控制流。
+	// 外层生命周期边界负责统一恢复和日志；这里保持等待函数原 panic 控制流。
 	if panicked {
 		panic(panicValue)
 	}

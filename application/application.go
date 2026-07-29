@@ -41,14 +41,18 @@ type Application struct {
 	config        map[string]any
 	bufferPool    *bufferpool.Pool
 	logRuntime    *originlog.Runtime
+	crashOutput   *originlog.CrashOutput
 	logger        originlog.Logger
 	runCancel     context.CancelFunc
 	stopRequested bool
 	done          chan struct{}
 	doneOnce      sync.Once
 	lifecycleErr  error
-	// runtimeFailure 保存第一个 Node 级 Transport 永久终态，由 run 在完成统一 Stop 后返回。
-	runtimeFailure error
+	// serviceFailures 按首次报告顺序保存运行期真正隔离的 Service。
+	//
+	// Transport 恢复不写入本列表，也不取消 Application。正式 Stop 完成后，列表中的稳定
+	// 摘要才参与最终 errors.Join，避免局部 Service 故障被清理成功掩盖。
+	serviceFailures []error
 }
 
 // New 创建一个尚未绑定配置和 Service 类型的 Application。
@@ -258,6 +262,17 @@ func (app *Application) run(
 	runCtx context.Context,
 	request command.StartRequest,
 ) (result error) {
+	// cleanupCtx 是当前 Application 整次收尾唯一的时间预算。只有真正进入清理时才惰性
+	// 创建，随后 Node、Service、Transport、Buffer 诊断、Crash 和日志全部共享剩余时间。
+	var cleanupCtx context.Context
+	var cleanupCancel context.CancelFunc
+	ensureCleanupContext := func() context.Context {
+		if cleanupCtx == nil {
+			cleanupCtx, cleanupCancel = app.newStopContext()
+		}
+		return cleanupCtx
+	}
+
 	app.mu.Lock()
 	if app.State() != StateCreated {
 		app.mu.Unlock()
@@ -271,7 +286,12 @@ func (app *Application) run(
 
 	// 无论失败发生在配置、日志还是 Service 阶段，都保存一次最终状态并唤醒 Stop。
 	defer func() {
-		result = errors.Join(result, app.closeResources())
+		// 即使配置或日志初始化失败，也只建立这一份清理 Context；没有对应资源的关闭操作
+		// 保持幂等成功。
+		result = errors.Join(result, app.closeResources(ensureCleanupContext()))
+		if cleanupCancel != nil {
+			cleanupCancel()
+		}
 		if result != nil && app.State() != StateStopped {
 			app.state.Store(uint32(StateFailed))
 		}
@@ -325,27 +345,33 @@ func (app *Application) run(
 	err = app.startNodes(startCtx, nodes)
 	startCancel()
 	if err != nil {
-		// Transport 可能在某个长 OnStart 期间进入终态并取消启动 Context；保留首个真实
-		// 基础设施原因，避免最终日志只剩没有定位信息的 context canceled。
-		app.mu.Lock()
-		runtimeFailure := app.runtimeFailure
-		app.mu.Unlock()
-		err = errors.Join(err, runtimeFailure)
-		return app.rollbackStartup(err)
+		// 明确 Stop/信号在启动期间到达时，context.Canceled 只是停止意图而不是启动故障。
+		// StartTimeout 的 DeadlineExceeded 和同时存在的业务错误仍保留非零结果。
+		stopDuringStartup := errors.Is(lifecycleCtx.Err(), context.Canceled) &&
+			(errors.Is(err, context.Canceled) ||
+				errs.IsCode(err, errs.CodeCanceled))
+		if stopDuringStartup {
+			return app.rollbackStartup(ensureCleanupContext(), nil, true)
+		}
+		return app.rollbackStartup(ensureCleanupContext(), err, false)
 	}
 
 	app.state.Store(uint32(StateRunning))
 	app.logger.Info("application running")
 	<-lifecycleCtx.Done()
-	stopErr := app.stopStartedNodes()
-	app.mu.Lock()
-	runtimeFailure := app.runtimeFailure
-	app.mu.Unlock()
-	if runtimeFailure == nil {
-		return stopErr
+	stopErr := app.stopStartedNodes(ensureCleanupContext())
+	serviceFailures := app.serviceFailureResult()
+	finalResult := stopErr
+	if finalResult == nil {
+		// 正常 Scheduler Failed 清理会把同一根因随 Node.Stop 返回。该兜底只覆盖未来某个
+		// 隔离适配器完成清理却没有返回根因的情况，避免同一 Service 在 errors.Join 中重复。
+		finalResult = serviceFailures
+	}
+	if finalResult == nil {
+		return nil
 	}
 	app.state.Store(uint32(StateFailed))
-	return app.report(errors.Join(runtimeFailure, stopErr))
+	return app.report(finalResult)
 }
 
 // Stop 请求当前 Application 停止，并等待唯一生命周期路径完成清理。
@@ -419,6 +445,18 @@ func (app *Application) initializeResources(
 	app.logger = logger
 	app.bufferPool = pool
 	app.mu.Unlock()
+
+	// 文件日志启用时同时安装 Go 进程级 Crash 输出。它独立于异步日志队列，因此即使进程
+	// 遭遇未恢复 panic，runtime 仍可把现场直接写入同目录的 .crash.log。
+	if configured.log.File.Enabled {
+		crashOutput, crashErr := originlog.InstallCrashOutput(configured.log.File)
+		if crashErr != nil {
+			return crashErr
+		}
+		app.mu.Lock()
+		app.crashOutput = crashOutput
+		app.mu.Unlock()
+	}
 	return nil
 }
 
@@ -473,7 +511,7 @@ func (app *Application) buildNodes(
 				TimerLocation:    app.options.Timer.Location,
 				BufferPool:       app.bufferPool,
 				DiscoverySource:  discoverySource,
-				RuntimeFailure:   app.handleRuntimeFailure,
+				ServiceFailure:   app.handleServiceFailure,
 			},
 		)
 		if err != nil {
@@ -484,26 +522,49 @@ func (app *Application) buildNodes(
 	return result, nil
 }
 
-// handleRuntimeFailure 记录首个 Node 级基础设施终态并只取消运行 Context。
+// handleServiceFailure 保存单个运行期 Failed Service 的稳定摘要。
 //
-// 网络回调不会在这里直接 Stop Node，从而避免等待自身网络 goroutine 形成死锁；run 被唤醒后
-// 仍按真实启动顺序的严格反序执行统一优雅关闭。
-func (app *Application) handleRuntimeFailure(nodeID string, cause error) {
-	if app == nil || cause == nil {
+// 该回调只走故障冷路径，不取消 Application，也不直接执行 Stop。Node 已经隔离并撤销该
+// Service；这里保留最终退出结果需要的证据，同时让同进程其他 Service 继续提供服务。
+func (app *Application) handleServiceFailure(
+	nodeID string,
+	serviceName string,
+	cause error,
+) {
+	if app == nil || nodeID == "" || serviceName == "" || cause == nil {
 		return
 	}
-	wrapped := fmt.Errorf("Node %q RPC 基础设施终态: %w", nodeID, cause)
+	wrapped := errs.Wrap(
+		errs.CodeServiceFailed,
+		fmt.Errorf(
+			"Node %q Service %q 运行期隔离: %w",
+			nodeID,
+			serviceName,
+			cause,
+		),
+	)
 	app.mu.Lock()
-	if app.runtimeFailure != nil {
-		app.mu.Unlock()
-		return
-	}
-	app.runtimeFailure = wrapped
-	cancel := app.runCancel
+	app.serviceFailures = append(app.serviceFailures, wrapped)
+	logger := app.logger
 	app.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	logger.Error(
+		"service entered failed state",
+		originlog.String("node_id", nodeID),
+		originlog.String("service_name", serviceName),
+		originlog.Uint32("error_code", uint32(errs.CodeServiceFailed)),
+		originlog.Err(cause),
+	)
+}
+
+// serviceFailureResult 复制当前不可恢复 Service 摘要并按首次报告顺序聚合。
+func (app *Application) serviceFailureResult() error {
+	if app == nil {
+		return nil
 	}
+	app.mu.Lock()
+	failures := append([]error(nil), app.serviceFailures...)
+	app.mu.Unlock()
+	return errors.Join(failures...)
 }
 
 // rollbackBuiltNodes 释放装配阶段已经创建、但尚未启动的 Node 底层资源。
@@ -535,9 +596,11 @@ func (app *Application) startNodes(ctx context.Context, nodes []*node.Node) erro
 }
 
 // rollbackStartup 清理失败 Node，再反序停止此前已经 Ready 的 Node。
-func (app *Application) rollbackStartup(primary error) error {
-	stopCtx, cancel := app.newStopContext()
-	defer cancel()
+func (app *Application) rollbackStartup(
+	stopCtx context.Context,
+	primary error,
+	stopRequested bool,
+) error {
 	result := primary
 
 	// buildNodes 会先创建全部选中 Node。启动中途失败时，从最后一个尚未 Ready 的 Node
@@ -550,16 +613,19 @@ func (app *Application) rollbackStartup(primary error) error {
 		result = errors.Join(result, app.started[index].Stop(stopCtx))
 	}
 	app.started = app.started[:0]
+	if stopRequested && result == nil {
+		app.state.Store(uint32(StateStopped))
+		app.logger.Info("application stopped during startup")
+		return nil
+	}
 	app.state.Store(uint32(StateFailed))
 	return app.report(result)
 }
 
 // stopStartedNodes 使用独立于运行取消信号的 Context 反序停止全部 Ready Node。
-func (app *Application) stopStartedNodes() error {
+func (app *Application) stopStartedNodes(stopCtx context.Context) error {
 	app.state.Store(uint32(StateStopping))
 	app.logger.Info("application stopping")
-	stopCtx, cancel := app.newStopContext()
-	defer cancel()
 	var result error
 	for index := len(app.started) - 1; index >= 0; index-- {
 		result = errors.Join(result, app.started[index].Stop(stopCtx))
@@ -582,21 +648,31 @@ func (app *Application) newStopContext() (context.Context, context.CancelFunc) {
 	return context.WithCancel(context.Background())
 }
 
-// closeResources 最后关闭日志 Runtime；BufferPool 在 M7 没有后台资源。
-func (app *Application) closeResources() error {
+// closeResources 使用总体停止 Context 完成 Buffer 诊断、Crash 注销和日志关闭。
+func (app *Application) closeResources(ctx context.Context) error {
 	app.mu.Lock()
 	runtime := app.logRuntime
+	crashOutput := app.crashOutput
+	pool := app.bufferPool
+	logger := app.logger
 	app.mu.Unlock()
 	if runtime == nil {
 		return nil
 	}
-	ctx := context.Background()
-	cancel := func() {}
-	if app.options.StopTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, app.options.StopTimeout)
+
+	// BufferPool 没有 Close；只有开启统计时才在全部 Node 回收后读取一次最终快照。
+	// 非零值表示框架或适配器仍持有 Buffer，记录容量便于定位，但不能跳过后续日志 Flush。
+	if stats := pool.Stats(); stats.Enabled && stats.InUseBuffers != 0 {
+		logger.Warn(
+			"buffer pool contains unreleased buffers",
+			originlog.Int64("in_use_buffers", stats.InUseBuffers),
+			originlog.Int64("in_use_capacity_bytes", stats.InUseCapacityBytes),
+			originlog.Int64("oversize_buffers", stats.OversizeInUse),
+		)
 	}
-	defer cancel()
-	return runtime.Close(ctx)
+	crashErr := crashOutput.Close()
+	logErr := runtime.Close(ctx)
+	return errors.Join(crashErr, logErr)
 }
 
 // finish 保存唯一最终结果并唤醒所有 Stop 等待者。

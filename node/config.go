@@ -26,10 +26,10 @@ type Options struct {
 	//
 	// 正式项目不直接设置该字段；省略时 Node 仍拥有空的本地目录，便于独立单元测试。
 	DiscoverySource *internaldiscovery.Source
-	// RuntimeFailure 接收当前 Node 的 TCP Listener 或 NATS Connection 永久终态。
+	// ServiceFailure 接收当前 Node 中真正无法恢复并被隔离的 Service。
 	//
-	// 正式 Application 用它取消唯一生命周期 Context；回调必须快速返回，不能直接执行 Stop。
-	RuntimeFailure func(nodeID string, cause error)
+	// 正式 Application 只记录稳定失败摘要；回调必须快速返回，不能直接执行 Stop。
+	ServiceFailure func(nodeID string, serviceName string, cause error)
 }
 
 // Config 是一个 Node 在配置文件中的最小静态定义。

@@ -19,6 +19,6 @@ const (
 	StateStopping
 	// StateStopped 表示 OnStop 已经完成，实例不能再次启动。
 	StateStopped
-	// StateFailed 表示初始化或启动回调失败。
+	// StateFailed 表示初始化、启动失败，或运行期 Scheduler 已无法证明状态安全。
 	StateFailed
 )

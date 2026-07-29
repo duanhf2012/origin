@@ -125,3 +125,24 @@ func (table *natsPendingTable) failAll(cause error) {
 		call.complete(nil, cause)
 	}
 }
+
+// failCurrent 只完成当前在途调用，恢复后仍允许新的 Request 进入同一有界表。
+//
+// NATS 断线时请求不会缓存或重放，但断线不是 Runtime 终态，因此不能像正式 Close 一样
+// 永久关闭 pending 表。
+func (table *natsPendingTable) failCurrent(cause error) {
+	if table == nil {
+		return
+	}
+	table.mu.Lock()
+	if table.closed {
+		table.mu.Unlock()
+		return
+	}
+	requests := table.requests
+	table.requests = make(map[uint64]natsPendingCall)
+	table.mu.Unlock()
+	for _, call := range requests {
+		call.complete(nil, cause)
+	}
+}

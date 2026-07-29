@@ -157,8 +157,17 @@ func TestSubscriptionDrainTimeout(t *testing.T) {
 
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	subscription, err := conn.Subscribe(
+	defer close(release)
+	// DefaultOperationTimeout 故意只有 30ms，用于验证 Drain 默认期限。订阅建立不是本测试
+	// 的目标路径，使用独立的集成测试期限，避免并行测试或慢机器把建链抖动误报成 Drain
+	// 语义失败。
+	setupCtx, setupCancel := context.WithTimeout(
 		context.Background(),
+		integrationTimeout,
+	)
+	defer setupCancel()
+	subscription, err := conn.Subscribe(
+		setupCtx,
 		"origin.integration.drain-timeout",
 		natsnet.SubscriptionOptions{},
 		func(natsnet.Message) {
@@ -183,7 +192,6 @@ func TestSubscriptionDrainTimeout(t *testing.T) {
 	if !errors.Is(err, errs.ErrDeadlineExceeded) {
 		t.Fatalf("Subscription Drain() error = %v", err)
 	}
-	close(release)
 }
 
 // TestConnectionDrainTimeout 验证整条连接排空超时后会强制关闭，
@@ -201,8 +209,16 @@ func TestConnectionDrainTimeout(t *testing.T) {
 	// 处理函数收到消息后保持阻塞，模拟业务代码尚未从回调返回。
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	_, err := conn.Subscribe(
+	defer close(release)
+	// 和 Subscription Drain 用例一样，只让 Drain 使用 30ms 默认期限；订阅装配使用独立
+	// 测试期限，确保失败位置准确落在连接排空而不是前置建链。
+	setupCtx, setupCancel := context.WithTimeout(
 		context.Background(),
+		integrationTimeout,
+	)
+	defer setupCancel()
+	_, err := conn.Subscribe(
+		setupCtx,
 		"origin.integration.connection-drain-timeout",
 		natsnet.SubscriptionOptions{},
 		func(natsnet.Message) {
@@ -237,7 +253,4 @@ func TestConnectionDrainTimeout(t *testing.T) {
 	if err = conn.Wait(context.Background()); !errors.Is(err, errs.ErrDeadlineExceeded) {
 		t.Fatalf("Conn Wait() error = %v", err)
 	}
-
-	// 连接关闭已经解除官方客户端对回调的等待；释放业务回调，避免测试留下协程。
-	close(release)
 }

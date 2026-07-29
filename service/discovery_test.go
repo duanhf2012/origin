@@ -36,6 +36,8 @@ func (runtime *discoveryServiceTestRuntime) TimerLimit() int   { return 1 }
 func (runtime *discoveryServiceTestRuntime) TimerLocation() *time.Location {
 	return time.Local
 }
+func (runtime *discoveryServiceTestRuntime) Failure() error      { return nil }
+func (runtime *discoveryServiceTestRuntime) ReportFailure(error) {}
 
 func (runtime *discoveryServiceTestRuntime) FindDiscoveredService(
 	nodeID string,

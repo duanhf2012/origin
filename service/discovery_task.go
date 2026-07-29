@@ -74,7 +74,7 @@ func (scheduler *serviceScheduler) promoteDiscoveryLocked() bool {
 	task := scheduler.acquireTaskLocked(scheduler.discoveryRun)
 	task.kind = taskKindDiscovery
 	if !scheduler.ready.Enqueue(task) {
-		panic("service: 发现任务在 Accepted 未达到硬上限时无法进入 Ready")
+		panicInvariant("service: 发现任务在 Accepted 未达到硬上限时无法进入 Ready")
 	}
 	scheduler.discoveryQueued = true
 	scheduler.accepted++

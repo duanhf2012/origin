@@ -88,6 +88,11 @@ func BenchmarkTimerCallback(b *testing.B) {
 		b.StartTimer()
 		advanceTimerFixture(b, fixture, timerwheel.TickDuration)
 		<-fired
+		// 回调写入 Channel 后，Runner 还需要在同一执行链中提交 Timer 完成并归还 Node
+		// 额度。等待 Active 归零，避免下一轮把“回调已通知”误当成“内部资源已回收”。
+		for fixture.service.TimerStats().Active != 0 {
+			runtime.Gosched()
+		}
 	}
 }
 
@@ -113,6 +118,11 @@ func BenchmarkTimerCallbackAwait(b *testing.B) {
 		advanceTimerFixture(b, fixture, timerwheel.TickDuration)
 		if err := <-fired; err != nil {
 			b.Fatal(err)
+		}
+		// Await 返回只代表业务回调已经继续执行；仍需等 Runner 完成本轮 Timer 回收，
+		// 才能在单 Timer 额度下开始下一轮。
+		for fixture.service.TimerStats().Active != 0 {
+			runtime.Gosched()
 		}
 	}
 }

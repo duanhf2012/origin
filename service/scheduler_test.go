@@ -27,6 +27,11 @@ type schedulerTestRuntime struct {
 	nextID        atomic.Uint64
 	timerLimit    int
 	timerLocation *time.Location
+	failure       atomic.Pointer[schedulerTestFailure]
+}
+
+type schedulerTestFailure struct {
+	cause error
 }
 
 func (runtime *schedulerTestRuntime) NodeID() string      { return runtime.nodeID }
@@ -63,6 +68,21 @@ func (runtime *schedulerTestRuntime) TimerLocation() *time.Location {
 		return runtime.timerLocation
 	}
 	return time.Local
+}
+func (runtime *schedulerTestRuntime) Failure() error {
+	failure := runtime.failure.Load()
+	if failure == nil {
+		return nil
+	}
+	return failure.cause
+}
+func (runtime *schedulerTestRuntime) ReportFailure(cause error) {
+	if cause == nil {
+		return
+	}
+	if runtime.failure.CompareAndSwap(nil, &schedulerTestFailure{cause: cause}) {
+		runtime.state.Store(uint32(StateFailed))
+	}
 }
 
 // schedulerFixture 集中拥有测试 Service、Runtime 和 Node TimerEngine。
@@ -186,6 +206,136 @@ func newPreparedSchedulerFixture(
 		_ = engine.Close()
 	})
 	return fixture
+}
+
+func TestSchedulerInvariantFailureIsolatesOnlyService(t *testing.T) {
+	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
+	scheduler := fixture.service.scheduler.Load()
+	if scheduler == nil {
+		t.Fatal("Scheduler 未装配")
+	}
+
+	// 直接注入只能由框架内部产生的不变量错误，验证它不会逃逸为进程 panic。
+	scheduler.failInvariant(
+		schedulerInvariantError{message: "injected invariant failure"},
+		[]byte("injected stack"),
+	)
+	deadline := time.Now().Add(schedulerTestTimeout)
+	for fixture.service.State() != StateFailed {
+		if time.Now().After(deadline) {
+			t.Fatal("Service 未进入 Failed")
+		}
+		runtime.Gosched()
+	}
+	if !errors.Is(fixture.service.DispatchAsync(func(context.Context) {}), errs.ErrServiceFailed) {
+		t.Fatal("Failed Service 仍接受新任务")
+	}
+	if !errors.Is(fixture.service.Failure(), errs.ErrServiceFailed) {
+		t.Fatalf("Failure() = %v", fixture.service.Failure())
+	}
+
+	// 正式 Stop 跳过业务 finalizer，等待真实 Runner 退出并返回首个稳定根因。
+	stopCtx, cancel := context.WithTimeout(context.Background(), schedulerTestTimeout)
+	defer cancel()
+	if err := StopScheduler(stopCtx, fixture.service); !errors.Is(
+		err,
+		errs.ErrServiceFailed,
+	) {
+		t.Fatalf("StopScheduler() error = %v", err)
+	}
+}
+
+// TestSchedulerInvariantFailureWithUnavailableLockDoesNotBlockStop 模拟内部 panic 遗留
+// Scheduler 锁的最坏情况。故障边界不得等待这把锁，正式 Stop 也必须快速返回稳定错误，
+// 以便 Node 继续倒序停止其他 Service。
+func TestSchedulerInvariantFailureWithUnavailableLockDoesNotBlockStop(t *testing.T) {
+	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
+	scheduler := fixture.service.scheduler.Load()
+	if scheduler == nil {
+		t.Fatal("Scheduler 未装配")
+	}
+
+	scheduler.mu.Lock()
+	scheduler.failInvariant(
+		schedulerInvariantError{message: "injected locked invariant failure"},
+		[]byte("injected locked stack"),
+	)
+	if !scheduler.failureLockUnsafe.Load() {
+		scheduler.mu.Unlock()
+		t.Fatal("无法取得 Scheduler 锁时未进入保守清理模式")
+	}
+
+	beginDone := make(chan error, 1)
+	go func() {
+		beginDone <- BeginStopScheduler(fixture.service)
+	}()
+	select {
+	case err := <-beginDone:
+		if err != nil {
+			scheduler.mu.Unlock()
+			t.Fatalf("BeginStopScheduler() error = %v", err)
+		}
+	case <-time.After(schedulerTestTimeout):
+		scheduler.mu.Unlock()
+		t.Fatal("BeginStopScheduler 被不可用状态锁卡住")
+	}
+
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- StopScheduler(context.Background(), fixture.service)
+	}()
+	select {
+	case err := <-stopDone:
+		if !errors.Is(err, errs.ErrServiceFailed) {
+			t.Fatalf("StopScheduler() error = %v", err)
+		}
+	case <-time.After(schedulerTestTimeout):
+		scheduler.mu.Unlock()
+		t.Fatal("保守 Stop 被 Scheduler 状态锁卡住")
+	}
+	// 首次 Stop 已经证明不会等待遗留锁；现在释放测试锁，让 Cleanup 能重试完整的
+	// Failed 资源回收并确认所有测试 goroutine 最终收敛。
+	scheduler.mu.Unlock()
+}
+
+func TestDrainingAcceptsOnlyContinuationFromAcceptedTask(t *testing.T) {
+	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
+	rootStarted := make(chan struct{})
+	continueRoot := make(chan struct{})
+	continuationDone := make(chan struct{})
+	dispatchResult := make(chan error, 1)
+	if err := fixture.service.DispatchAsync(func(ctx context.Context) {
+		close(rootStarted)
+		<-continueRoot
+		dispatchResult <- DispatchAsyncCompletion(
+			fixture.service,
+			ctx,
+			func(context.Context) error { return nil },
+			func(context.Context, error) { close(continuationDone) },
+		)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-rootStarted
+	if err := BeginStopScheduler(fixture.service); err != nil {
+		t.Fatalf("BeginStopScheduler() error = %v", err)
+	}
+	close(continueRoot)
+	if err := <-dispatchResult; err != nil {
+		t.Fatalf("已接受任务的 Async 延续被拒绝: %v", err)
+	}
+
+	fixture.runtime.state.Store(uint32(StateStopping))
+	stopCtx, cancel := context.WithTimeout(context.Background(), schedulerTestTimeout)
+	defer cancel()
+	if err := StopScheduler(stopCtx, fixture.service); err != nil {
+		t.Fatalf("StopScheduler() error = %v", err)
+	}
+	select {
+	case <-continuationDone:
+	default:
+		t.Fatal("Draining 没有排空已经预留的 Async 延续")
+	}
 }
 
 func TestPreparedSchedulerDoesNotRunUntilActivated(t *testing.T) {

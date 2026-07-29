@@ -63,3 +63,31 @@ func TestNATSPendingCompletesExactlyOnce(t *testing.T) {
 		t.Fatalf("complete 调用次数 = %d", calls.Load())
 	}
 }
+
+// TestNATSPendingDisconnectAllowsFutureRequests 验证断线只失败当前调用，不永久关闭表。
+func TestNATSPendingDisconnectAllowsFutureRequests(t *testing.T) {
+	table := newNATSPendingTable(2)
+	var completed atomic.Int32
+	if err := table.reserve(1, 101, func(_ *Buffer, err error) {
+		if !errors.Is(err, errs.ErrTransportUnavailable) {
+			t.Errorf("disconnect completion error = %v", err)
+		}
+		completed.Add(1)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	table.failCurrent(errs.ErrTransportUnavailable)
+	if completed.Load() != 1 {
+		t.Fatalf("disconnect completion calls = %d", completed.Load())
+	}
+	if err := table.reserve(2, 102, func(*Buffer, error) {}); err != nil {
+		t.Fatalf("恢复后 reserve error = %v", err)
+	}
+	table.failAll(errs.ErrTransportUnavailable)
+	if err := table.reserve(3, 103, func(*Buffer, error) {}); !errors.Is(
+		err,
+		errs.ErrTransportUnavailable,
+	) {
+		t.Fatalf("正式关闭后 reserve error = %v", err)
+	}
+}
