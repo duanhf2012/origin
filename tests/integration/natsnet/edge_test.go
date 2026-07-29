@@ -96,7 +96,6 @@ func TestInboundMessageLimit(t *testing.T) {
 	options := testOptions("integration.inbound-limit", running.ClientURL())
 	options.MaxMessageSize = 32
 	options.Reconnect.BufferSize = 64
-	options.Subscription.PendingBytes = 64
 	events := make(chan natsnet.Event, 8)
 	conn := connectForTest(
 		t,

@@ -91,7 +91,6 @@ func TestConcurrentLoopbackConnections(t *testing.T) {
 	listenOptions.MaxConnections = 32
 	listenOptions.Connection.MaxMessageSize = 1024
 	listenOptions.Connection.SendQueueFrames = 256
-	listenOptions.Connection.SendQueueBytes = 256 * 1024
 	listener, err := tcpnet.Listen(
 		"127.0.0.1:0",
 		listenOptions,
@@ -121,7 +120,6 @@ func TestConcurrentLoopbackConnections(t *testing.T) {
 		options := tcpnet.DefaultConnectionOptions(pool)
 		options.MaxMessageSize = 1024
 		options.SendQueueFrames = 256
-		options.SendQueueBytes = 256 * 1024
 		ctx, cancel := context.WithTimeout(context.Background(), integrationTimeout)
 		conn, dialErr := tcpnet.Dial(
 			ctx,

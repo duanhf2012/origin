@@ -111,8 +111,8 @@ func (source *Source) Publish(node RawNode) error {
 // Withdraw 只删除 NodeID 和 SessionID 同时匹配的当前记录。
 //
 // 陈旧进程的迟到停止不能移除同一逻辑 Node 上已经发布的新会话。
-func (source *Source) Withdraw(nodeID, sessionID string) bool {
-	if source == nil || nodeID == "" || sessionID == "" {
+func (source *Source) Withdraw(nodeID string, sessionID uint64) bool {
+	if source == nil || nodeID == "" || sessionID == 0 {
 		return false
 	}
 	source.dispatchMu.Lock()

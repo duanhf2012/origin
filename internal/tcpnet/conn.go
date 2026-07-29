@@ -67,7 +67,7 @@ func newConn(
 		logger:     options.Logger,
 		localAddr:  raw.LocalAddr(),
 		remoteAddr: raw.RemoteAddr(),
-		send:       newSendQueue(options.SendQueueFrames, options.SendQueueBytes),
+		send:       newSendQueue(options.SendQueueFrames),
 		writeDone:  make(chan struct{}),
 		done:       make(chan struct{}),
 		onDone:     onDone,
@@ -151,17 +151,16 @@ func (conn *Conn) Send(buffer *bufferpool.Buffer) error {
 		encodeFrameLength(&item.header, payloadSize, conn.options.Frame),
 	)
 
-	// enqueue 是连接关闭状态、双重额度和所有权转移的唯一原子边界。
+	// enqueue 是连接关闭状态、消息数额度和所有权转移的唯一原子边界。
 	err := conn.send.enqueue(item)
 	if err != nil &&
 		errors.Is(err, errs.ErrTransportOverloaded) &&
 		conn.overloadLogged.CompareAndSwap(false, true) {
-		frames, bytes, _ := conn.send.snapshot()
+		messages, _ := conn.send.snapshot()
 		conn.logger.Warn(
 			"TCP 发送队列过载",
 			originlog.String("remote_addr", addrString(conn.remoteAddr)),
-			originlog.Int("queued_frames", frames),
-			originlog.Int("queued_bytes", bytes),
+			originlog.Int("queued_messages", messages),
 		)
 	}
 	return err

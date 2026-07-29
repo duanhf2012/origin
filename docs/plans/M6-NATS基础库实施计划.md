@@ -19,7 +19,8 @@ M6 只处理 Subject 和原始字节消息，不实现 Origin RPC Subject、Requ
 3. 实现 NATS error 到 Origin Transport 错误码的统一映射；
 4. 实现 Context-aware 初始连接、有限自动重连、连接状态和事件回调；
 5. 实现允许空 payload 的 Publish、消息大小限制和 Context Flush；
-6. 实现普通订阅、Queue Group、Pending 双重上限、慢消费者报告和统计；
+6. 实现普通订阅、Queue Group、Pending 上限、慢消费者报告和统计；M6 首次实现包含
+   消息数和字节数，M15 按 2026-07-29 最终结论删除字节额度；
 7. 实现 Handler/EventHandler panic 隔离和敏感信息保护；
 8. 实现 Connection/Subscription 的幂等 Close、Drain 和 Wait；
 9. 补齐单元测试、真实 NATS Server 集成测试、Benchmark、竞态和覆盖率验证；
@@ -74,7 +75,8 @@ tests/integration/natsnet/
 8. Handler 和 EventHandler 调用期间不持有包装层状态锁；
 9. Handler/EventHandler panic 只能终止当前回调，不能破坏连接或订阅调度；
 10. 日志、Event URL 和错误不得包含密码、Token、NKey Seed 或 URL UserInfo；
-11. Pending 数量或字节达到上限时必须映射为过载，不建立无界缓冲；
+11. M6 首次实现的 Pending 数量或字节达到上限时必须映射为过载，不建立无界缓冲；
+    M15 按最终设计删除字节额度，只保留由 `receive_queue_messages` 映射的数量限制；
 12. 所有初始连接取消观察协程在 Connect 返回前退出。
 
 ## 6. 验证命令

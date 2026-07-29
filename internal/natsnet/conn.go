@@ -157,7 +157,6 @@ func (conn *Conn) Subscribe(
 	}
 	resolved, err := validateSubscriptionOptions(
 		conn.options.Subscription,
-		conn.options.MaxMessageSize,
 		options,
 	)
 	if err != nil {
@@ -197,8 +196,8 @@ func (conn *Conn) Subscribe(
 		return nil, mapError(redactCause(err, conn.options))
 	}
 
-	// Pending 双重上限在 Server 订阅屏障前设置，任何失败都先注销已创建资源。
-	if err = raw.SetPendingLimits(resolved.PendingMessages, resolved.PendingBytes); err != nil {
+	// 只限制待回调消息数；字节额度固定为 -1，避免重复且难解释的双重配置。
+	if err = raw.SetPendingLimits(resolved.PendingMessages, -1); err != nil {
 		_ = raw.Unsubscribe()
 		// 解除可能已经取得消息的官方回调；activeSubscription 仍为空，因此不会调用业务。
 		close(callbackReady)
@@ -249,6 +248,17 @@ func (conn *Conn) Flush(ctx context.Context) error {
 func (conn *Conn) Status() Status {
 	// Status 的底层值由包装层原子维护，不需要获取官方客户端内部锁。
 	return Status(conn.status.Load())
+}
+
+// MaxPayload 返回当前 NATS Server 在 INFO 中公布的单消息 payload 上限。
+//
+// RPC Adapter 在创建 Subscription 前读取该值，确保“业务上限 + Origin 包络”不会在运行中
+// 才被 Server 拒绝。nats.go 会在重连后原子更新 Server INFO，因此该读取可以并发使用。
+func (conn *Conn) MaxPayload() int64 {
+	if conn == nil || conn.raw == nil {
+		return 0
+	}
+	return conn.raw.MaxPayload()
 }
 
 // Stats 返回官方客户端已经维护的累计统计，不增加热路径原子计数。
@@ -478,7 +488,6 @@ func (conn *Conn) handleAsyncError(
 			fields = append(
 				fields,
 				originlog.Int("pending_messages", stats.PendingMessages),
-				originlog.Int("pending_bytes", stats.PendingBytes),
 				originlog.Int("dropped_messages", stats.DroppedMessages),
 			)
 		}

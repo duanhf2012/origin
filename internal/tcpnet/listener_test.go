@@ -27,7 +27,6 @@ func TestListenAndDialRoundTrip(t *testing.T) {
 	}
 	listenOptions := DefaultListenOptions(serverPool)
 	listenOptions.Connection.MaxMessageSize = 1024
-	listenOptions.Connection.SendQueueBytes = 4096
 	listener, err := Listen("127.0.0.1:0", listenOptions, serverHandler)
 	if err != nil {
 		t.Fatalf("Listen 失败：%v", err)
@@ -38,7 +37,6 @@ func TestListenAndDialRoundTrip(t *testing.T) {
 	clientHandler := newRecordingHandler()
 	dialOptions := DefaultConnectionOptions(clientPool)
 	dialOptions.MaxMessageSize = 1024
-	dialOptions.SendQueueBytes = 4096
 	ctx, cancel := context.WithTimeout(context.Background(), testWaitTimeout)
 	defer cancel()
 	client, err := Dial(ctx, listener.Addr().String(), dialOptions, clientHandler)
@@ -70,6 +68,74 @@ func TestListenAndDialRoundTrip(t *testing.T) {
 	assertPoolEmpty(t, clientPool)
 }
 
+// TestListenerStopAcceptKeepsAcceptedConnections 验证两阶段停止只关闭新连接准入。
+func TestListenerStopAcceptKeepsAcceptedConnections(t *testing.T) {
+	t.Parallel()
+
+	serverPool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
+	serverHandler := newRecordingHandler()
+	serverHandler.onMessage = func(conn *Conn, packet *bufferpool.Buffer) error {
+		if err := conn.Send(packet); err != nil {
+			packet.Release()
+			return err
+		}
+		return nil
+	}
+	listener, err := Listen(
+		"127.0.0.1:0",
+		DefaultListenOptions(serverPool),
+		serverHandler,
+	)
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+
+	clientPool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
+	clientHandler := newRecordingHandler()
+	ctx, cancel := context.WithTimeout(context.Background(), testWaitTimeout)
+	defer cancel()
+	client, err := Dial(
+		ctx,
+		listener.Addr().String(),
+		DefaultConnectionOptions(clientPool),
+		clientHandler,
+	)
+	if err != nil {
+		closeListener(t, listener)
+		t.Fatalf("Dial() error = %v", err)
+	}
+	waitForConnCount(t, listener, 1)
+
+	// StopAccept 返回时监听 socket 已经结束，但之前接受的连接仍归 Listener 所有。
+	if err := listener.StopAccept(ctx); err != nil {
+		t.Fatalf("StopAccept() error = %v", err)
+	}
+	if _, err := Dial(
+		ctx,
+		listener.Addr().String(),
+		DefaultConnectionOptions(
+			bufferpool.NewPool(bufferpool.Options{}),
+		),
+		newRecordingHandler(),
+	); !errs.IsCode(err, errs.CodeTransportUnavailable) {
+		t.Fatalf("StopAccept 后 Dial error = %v", err)
+	}
+
+	packet := acquireBytes(clientPool, "admitted")
+	if err := client.Send(packet); err != nil {
+		packet.Release()
+		t.Fatalf("旧连接 Send() error = %v", err)
+	}
+	assertMessage(t, clientHandler.messages, []byte("admitted"))
+
+	closeListener(t, listener)
+	if err := waitConn(t, client); !errs.IsCode(err, errs.CodeTransportUnavailable) {
+		t.Fatalf("旧连接最终状态 = %v", err)
+	}
+	assertPoolEmpty(t, serverPool)
+	assertPoolEmpty(t, clientPool)
+}
+
 func TestListenerEnforcesConnectionLimit(t *testing.T) {
 	t.Parallel()
 
@@ -79,7 +145,6 @@ func TestListenerEnforcesConnectionLimit(t *testing.T) {
 	options := DefaultListenOptions(pool)
 	options.MaxConnections = 1
 	options.Connection.MaxMessageSize = 64
-	options.Connection.SendQueueBytes = 64
 	listener, err := Listen("127.0.0.1:0", options, handler)
 	if err != nil {
 		t.Fatalf("Listen 失败：%v", err)
@@ -135,7 +200,6 @@ func TestListenerCloseContextDoesNotAbortCleanup(t *testing.T) {
 	}
 	options := DefaultListenOptions(pool)
 	options.Connection.MaxMessageSize = 64
-	options.Connection.SendQueueBytes = 64
 	listener, err := Listen("127.0.0.1:0", options, handler)
 	if err != nil {
 		t.Fatalf("Listen 失败：%v", err)
@@ -243,7 +307,6 @@ func TestListenerCloseIsIdempotentWithoutConnections(t *testing.T) {
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	options := DefaultListenOptions(pool)
 	options.Connection.MaxMessageSize = 64
-	options.Connection.SendQueueBytes = 64
 	listener, err := Listen("127.0.0.1:0", options, newRecordingHandler())
 	if err != nil {
 		t.Fatalf("Listen 失败：%v", err)
@@ -263,7 +326,6 @@ func TestListenerConcurrentClose(t *testing.T) {
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	options := DefaultListenOptions(pool)
 	options.Connection.MaxMessageSize = 64
-	options.Connection.SendQueueBytes = 64
 	listener, err := Listen("127.0.0.1:0", options, newRecordingHandler())
 	if err != nil {
 		t.Fatalf("Listen 失败：%v", err)

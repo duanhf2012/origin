@@ -17,7 +17,7 @@ type sendItem struct {
 	payloadSize int
 }
 
-// sendQueue 是按帧数和 payload 字节数双重限制的单消费者环形队列。
+// sendQueue 是按完整消息数量限制的单消费者环形队列。
 //
 // 多个业务 goroutine 可以并发 enqueue，唯一 WriteLoop 调用 next。队列不关闭 wake channel，
 // 从而避免并发 Send 与 Close 产生 send-on-closed-channel。
@@ -28,34 +28,30 @@ type sendQueue struct {
 	head  int
 	tail  int
 	count int
-	bytes int
 
-	maxBytes int
-	closed   bool
+	closed bool
 	// wake 只表示“状态可能变化”，不承载队列项；容量一允许重复信号合并。
 	wake chan struct{}
 }
 
 // newSendQueue 按已校验配置创建一条连接独占的固定槽位队列。
-func newSendQueue(maxFrames, maxBytes int) *sendQueue {
-	// 槽位只保存小型元数据，不预分配 maxBytes 对应的 payload 内存。
+func newSendQueue(maxMessages int) *sendQueue {
+	// 槽位只保存小型元数据，不预分配任何 payload 内存。
 	return &sendQueue{
-		items:    make([]sendItem, maxFrames),
-		maxBytes: maxBytes,
-		wake:     make(chan struct{}, 1),
+		items: make([]sendItem, maxMessages),
+		wake:  make(chan struct{}, 1),
 	}
 }
 
 // enqueue 非阻塞地提交一帧，并在成功时接管 Buffer 所有权。
 func (queue *sendQueue) enqueue(item sendItem) error {
-	// 状态检查、双重额度校验和所有权提交必须处于同一个锁边界。
+	// 状态检查、消息数额度和所有权提交必须处于同一个锁边界。
 	queue.mu.Lock()
 	if queue.closed {
 		queue.mu.Unlock()
 		return errs.ErrTransportClosed
 	}
-	if queue.count == len(queue.items) ||
-		item.payloadSize > queue.maxBytes-queue.bytes {
+	if queue.count == len(queue.items) {
 		queue.mu.Unlock()
 		return errs.ErrTransportOverloaded
 	}
@@ -67,7 +63,6 @@ func (queue *sendQueue) enqueue(item sendItem) error {
 		queue.tail = 0
 	}
 	queue.count++
-	queue.bytes += item.payloadSize
 	queue.mu.Unlock()
 
 	// 唤醒信号可以合并；队列本身才是唯一事实来源。
@@ -89,7 +84,6 @@ func (queue *sendQueue) next() (sendItem, bool) {
 				queue.head = 0
 			}
 			queue.count--
-			queue.bytes -= item.payloadSize
 			queue.mu.Unlock()
 			return item, true
 		}
@@ -123,7 +117,6 @@ func (queue *sendQueue) close() {
 			queue.head = 0
 		}
 		queue.count--
-		queue.bytes -= item.payloadSize
 		item.buffer.Release()
 	}
 	queue.mu.Unlock()
@@ -141,13 +134,13 @@ func (queue *sendQueue) isClosed() bool {
 	return closed
 }
 
-// snapshot 返回测试和内部诊断使用的当前帧数、字节数和关闭状态。
-func (queue *sendQueue) snapshot() (frames, bytes int, closed bool) {
-	// 快照字段在同一锁内读取，保证测试不会看到互相矛盾的水位。
+// snapshot 返回测试和内部诊断使用的当前消息数和关闭状态。
+func (queue *sendQueue) snapshot() (messages int, closed bool) {
+	// 快照字段在同一锁内读取，保证测试不会看到互相矛盾的状态。
 	queue.mu.Lock()
-	frames, bytes, closed = queue.count, queue.bytes, queue.closed
+	messages, closed = queue.count, queue.closed
 	queue.mu.Unlock()
-	return frames, bytes, closed
+	return messages, closed
 }
 
 // signal 合并唤醒通知，调用方永远不会因 Writer 尚未等待而阻塞。

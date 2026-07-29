@@ -25,12 +25,8 @@ func TestDefaultOptions(t *testing.T) {
 	if options.MaxMessageSize != 4*1024*1024 {
 		t.Fatalf("MaxMessageSize = %d", options.MaxMessageSize)
 	}
-	if options.SendQueueFrames != 4096 || options.SendQueueBytes != 8*1024*1024 {
-		t.Fatalf(
-			"发送队列默认值 = (%d, %d)",
-			options.SendQueueFrames,
-			options.SendQueueBytes,
-		)
+	if options.SendQueueFrames != 4096 {
+		t.Fatalf("发送队列默认值 = %d", options.SendQueueFrames)
 	}
 	if options.ReadTimeout != 0 || options.WriteTimeout != 15*time.Second {
 		t.Fatalf("读写超时 = (%s, %s)", options.ReadTimeout, options.WriteTimeout)
@@ -89,12 +85,6 @@ func TestValidateConnectionOptions(t *testing.T) {
 			},
 		},
 		{
-			name: "byte capacity below message",
-			mutate: func(options *ConnectionOptions) {
-				options.SendQueueBytes = options.MaxMessageSize - 1
-			},
-		},
-		{
 			name: "negative read timeout",
 			mutate: func(options *ConnectionOptions) {
 				options.ReadTimeout = -time.Nanosecond
@@ -134,7 +124,6 @@ func TestValidateConnectionOptions(t *testing.T) {
 	boundary.Frame.LengthFieldSize = 1
 	boundary.Frame.ByteOrder = LittleEndian
 	boundary.MaxMessageSize = 255
-	boundary.SendQueueBytes = 255
 	boundary.ReadTimeout = 0
 	boundary.KeepAlive = 0
 	if err := validateConnectionOptions(boundary); err != nil {

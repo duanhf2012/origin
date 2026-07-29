@@ -76,8 +76,10 @@ Origin Node 通过真实 TCP 完成 Await、Async 和 Notify 调用：
 
 ### Task 2：RPC 配置与生成客户端适配
 
-- [x] 实现 TCP RPC 默认配置、严格校验和内部字节额度派生。
-- [x] 配置只公开 `send_queue_frames`，不公开 `send_queue_bytes`。
+- [x] 实现 TCP RPC 默认配置、严格校验和历史内部字节额度派生；M15 按
+  2026-07-29 最终结论删除字节额度。
+- [x] M13 开发期配置公开 `send_queue_frames`；M15 按最终字段语义迁移为
+  `send_queue_messages`，并同步迁移 `max_payload_size`、`read_idle_timeout`。
 - [x] 生成请求编码器按 Request/Notify 取得准确 headroom。
 - [x] 重复生成和 `origingen rpc --check ./...` 保持稳定。
 

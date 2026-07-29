@@ -70,8 +70,6 @@ type ConnStats struct {
 type SubscriptionStats struct {
 	// PendingMessages 是尚未完成回调的消息数。
 	PendingMessages int
-	// PendingBytes 是尚未完成回调的 payload 总字节数。
-	PendingBytes int
 	// DroppedMessages 是因 Pending 上限而丢弃的累计消息数。
 	DroppedMessages int
 }

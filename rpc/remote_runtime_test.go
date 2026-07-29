@@ -30,13 +30,13 @@ func TestRemoteTargetAddressLifecycle(t *testing.T) {
 	}
 
 	// 相同目标幂等；不同地址不能隐式替换当前目标。
-	if err := runtime.AddTarget("player-1", "127.0.0.1:17002"); err != nil {
+	if err := runtime.AddTarget("player-1", 1, "127.0.0.1:17002"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.AddTarget("player-1", "127.0.0.1:17002"); err != nil {
+	if err := runtime.AddTarget("player-1", 1, "127.0.0.1:17002"); err != nil {
 		t.Fatalf("same AddTarget() error = %v", err)
 	}
-	if err := runtime.AddTarget("player-1", "127.0.0.1:17003"); !errors.Is(
+	if err := runtime.AddTarget("player-1", 1, "127.0.0.1:17003"); !errors.Is(
 		err,
 		errs.ErrTransportProtocol,
 	) {
@@ -52,7 +52,7 @@ func TestRemoteTargetAddressLifecycle(t *testing.T) {
 	); err != nil {
 		t.Fatalf("stale RemoveTarget() error = %v", err)
 	}
-	if err := runtime.AddTarget("player-1", "127.0.0.1:17003"); !errors.Is(
+	if err := runtime.AddTarget("player-1", 1, "127.0.0.1:17003"); !errors.Is(
 		err,
 		errs.ErrTransportProtocol,
 	) {
@@ -65,7 +65,7 @@ func TestRemoteTargetAddressLifecycle(t *testing.T) {
 	); err != nil {
 		t.Fatalf("exact RemoveTarget() error = %v", err)
 	}
-	if err := runtime.AddTarget("player-1", "127.0.0.1:17003"); err != nil {
+	if err := runtime.AddTarget("player-1", 2, "127.0.0.1:17003"); err != nil {
 		t.Fatalf("AddTarget after exact remove error = %v", err)
 	}
 	runtime.Close()

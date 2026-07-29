@@ -42,8 +42,6 @@ const (
 	defaultReconnectBufferSize = 8 * 1024 * 1024
 	// 单订阅默认允许 16384 条待回调消息。
 	defaultPendingMessages = 16384
-	// 单订阅默认允许 8M 待回调 payload。
-	defaultPendingBytes = 8 * 1024 * 1024
 )
 
 // Options 配置一条由 Node 独占、可复用多个 Subject 的 NATS Connection。
@@ -96,12 +94,10 @@ type ReconnectOptions struct {
 	BufferSize int
 }
 
-// SubscriptionDefaults 配置每条异步订阅的默认 Pending 双重上限。
+// SubscriptionDefaults 配置每条异步订阅的默认 Pending 消息数上限。
 type SubscriptionDefaults struct {
 	// PendingMessages 限制尚未进入或完成回调的消息数。
 	PendingMessages int
-	// PendingBytes 限制尚未进入或完成回调的 payload 总字节数。
-	PendingBytes int
 }
 
 // AuthOptions 配置 NATS 客户端认证；四种认证模式互斥。
@@ -140,8 +136,6 @@ type SubscriptionOptions struct {
 	Queue string
 	// PendingMessages 为零时使用 Connection 默认值。
 	PendingMessages int
-	// PendingBytes 为零时使用 Connection 默认值。
-	PendingBytes int
 }
 
 // DefaultOptions 返回一份具有完整安全边界的 NATS 默认配置。
@@ -167,7 +161,6 @@ func DefaultOptions(name string, urls ...string) Options {
 		},
 		Subscription: SubscriptionDefaults{
 			PendingMessages: defaultPendingMessages,
-			PendingBytes:    defaultPendingBytes,
 		},
 		Logger: originlog.NewNop(),
 	}
@@ -238,16 +231,14 @@ func validateOptions(options Options) (bool, error) {
 	if options.Reconnect.Jitter < 0 || options.Reconnect.TLSJitter < 0 {
 		return false, invalidConfig("natsnet: Reconnect Jitter 不能为负数")
 	}
-	if options.Reconnect.BufferSize < options.MaxMessageSize {
+	if options.Reconnect.BufferSize != -1 &&
+		options.Reconnect.BufferSize < options.MaxMessageSize {
 		return false, invalidConfig("natsnet: Reconnect.BufferSize 不能小于 MaxMessageSize")
 	}
 
-	// Pending 双重上限都必须存在，并至少容纳一条最大合法消息。
+	// Subscription 只保留消息数上限；字节数由 nats.go 的 -1 明确关闭。
 	if options.Subscription.PendingMessages <= 0 {
 		return false, invalidConfig("natsnet: Subscription.PendingMessages 必须大于零")
-	}
-	if options.Subscription.PendingBytes < options.MaxMessageSize {
-		return false, invalidConfig("natsnet: Subscription.PendingBytes 不能小于 MaxMessageSize")
 	}
 
 	// 认证模式严格互斥，URL 内嵌认证也视作一种独立模式。
@@ -307,33 +298,18 @@ func validateOptions(options Options) (bool, error) {
 	return tlsEnabled, nil
 }
 
-// validateSubscriptionOptions 解析零值默认项并验证 Pending 双重上限。
+// validateSubscriptionOptions 解析零值默认项并验证 Pending 消息数上限。
 func validateSubscriptionOptions(
 	defaults SubscriptionDefaults,
-	maxMessageSize int,
 	options SubscriptionOptions,
 ) (SubscriptionOptions, error) {
-	// 零值只表示“使用连接默认值”，负数不允许借用 nats.go 的无限 Pending 语义。
+	// 零值只表示“使用连接默认值”，负数不允许借用 nats.go 的无限消息数语义。
 	if options.PendingMessages == 0 {
 		options.PendingMessages = defaults.PendingMessages
-	}
-	if options.PendingBytes == 0 {
-		options.PendingBytes = defaults.PendingBytes
 	}
 	if options.PendingMessages < 0 {
 		return SubscriptionOptions{}, invalidConfig(
 			"natsnet: Subscription PendingMessages 不能为负数",
-		)
-	}
-	if options.PendingBytes < 0 {
-		return SubscriptionOptions{}, invalidConfig(
-			"natsnet: Subscription PendingBytes 不能为负数",
-		)
-	}
-	// 单订阅覆盖值仍需至少容纳一条最大合法消息，否则配置允许接收的消息会在回调前被丢弃。
-	if options.PendingBytes < maxMessageSize {
-		return SubscriptionOptions{}, invalidConfig(
-			"natsnet: Subscription PendingBytes 不能小于 MaxMessageSize",
 		)
 	}
 	return options, nil

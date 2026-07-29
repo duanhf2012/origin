@@ -78,13 +78,13 @@ func BenchmarkBuildDiscoveryActions(b *testing.B) {
 		}
 		oldState[key] = &internaldiscovery.Instance{
 			NodeID:      "game-1",
-			SessionID:   "old-session",
+			SessionID:   10,
 			ServiceName: serviceName,
 			State:       internaldiscovery.ServiceStateRunning,
 		}
 		newState[key] = &internaldiscovery.Instance{
 			NodeID:      "game-1",
-			SessionID:   "new-session",
+			SessionID:   11,
 			ServiceName: serviceName,
 			State:       internaldiscovery.ServiceStateRunning,
 		}

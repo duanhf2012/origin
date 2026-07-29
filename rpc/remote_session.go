@@ -17,15 +17,22 @@ import (
 // 零值用于本地调用和 Notify；cancel 保持幂等，晚到远端 Response 会被会话安全丢弃。
 type remoteRequestHandle struct {
 	session   *outboundSession
+	nats      *natsRuntime
 	requestID uint64
 }
 
 // cancel 从仍存活的会话中删除当前调用，并提交调用方已经确定的终态。
 func (handle remoteRequestHandle) cancel(cause error) {
-	if handle.session == nil || handle.requestID == 0 {
+	if handle.requestID == 0 {
 		return
 	}
-	handle.session.cancelPending(handle.requestID, cause)
+	if handle.session != nil {
+		handle.session.cancelPending(handle.requestID, cause)
+		return
+	}
+	if handle.nats != nil {
+		handle.nats.pending.cancel(handle.requestID, cause)
+	}
 }
 
 // pendingCall 是一条出站连接上尚未返回的最小请求状态。
@@ -39,7 +46,7 @@ type pendingCall struct {
 type outboundSession struct {
 	remote          *remoteRuntime
 	targetNodeID    string
-	targetSessionID string
+	targetSessionID uint64
 
 	mu        sync.Mutex
 	conn      *tcpnet.Conn
@@ -55,7 +62,7 @@ type outboundSession struct {
 func newOutboundSession(
 	remote *remoteRuntime,
 	targetNodeID string,
-	targetSessionID string,
+	targetSessionID uint64,
 ) *outboundSession {
 	return &outboundSession{
 		remote:          remote,
@@ -75,7 +82,6 @@ func (session *outboundSession) OnOpen(conn *tcpnet.Conn) {
 	hello, err := encodeHello(
 		session.remote.owner.pool,
 		session.remote.owner.nodeID,
-		session.remote.owner.sessionID,
 		session.targetNodeID,
 		session.targetSessionID,
 	)
@@ -105,22 +111,6 @@ func (session *outboundSession) OnMessage(
 		ack, err := parseHelloAck(data)
 		packet.Release()
 		if err != nil {
-			session.finishHandshake(err)
-			return err
-		}
-		if ack.nodeID != session.targetNodeID {
-			err = errs.NewMessage(
-				errs.CodeTransportProtocol,
-				"RPC HelloAck 的 NodeID 与连接目标不一致",
-			)
-			session.finishHandshake(err)
-			return err
-		}
-		if ack.sessionID != session.targetSessionID {
-			err = errs.NewMessage(
-				errs.CodeTransportProtocol,
-				"RPC HelloAck 的 SessionID 与连接目标不一致",
-			)
 			session.finishHandshake(err)
 			return err
 		}
@@ -158,7 +148,7 @@ func (session *outboundSession) OnMessage(
 		packet.Release()
 		return err
 	}
-	if len(data)-response.payloadOffset > session.remote.config.MaxMessageSize {
+	if len(data)-response.payloadOffset > session.remote.config.MaxPayloadSize {
 		packet.Release()
 		return errs.ErrTransportMessageTooLarge
 	}
@@ -252,7 +242,7 @@ func (session *outboundSession) sendRequest(
 		request,
 		requestID,
 		methodID,
-		timeDuration(remaining),
+		remaining,
 		serviceName,
 	); err != nil {
 		session.removePending(requestID)

@@ -26,7 +26,7 @@ func TestSourcePublishesFullOwnedSnapshots(t *testing.T) {
 
 	first := rawNode(
 		"game-2",
-		"session-2",
+		2,
 		"127.0.0.1:20002",
 		"PlayerService",
 		2,
@@ -39,7 +39,7 @@ func TestSourcePublishesFullOwnedSnapshots(t *testing.T) {
 
 	second := rawNode(
 		"game-1",
-		"session-1",
+		1,
 		"127.0.0.1:20001",
 		"PlayerService",
 		1,
@@ -55,14 +55,14 @@ func TestSourcePublishesFullOwnedSnapshots(t *testing.T) {
 		t.Fatalf("Source 引用了发布方 Labels: %v", latest.Nodes[1].Labels)
 	}
 
-	if !source.Withdraw("game-2", "session-2") {
+	if !source.Withdraw("game-2", 2) {
 		t.Fatal("Withdraw() 没有删除精确会话")
 	}
 	latest = received[len(received)-1]
 	if len(latest.Nodes) != 1 || latest.Nodes[0].NodeID != "game-1" {
 		t.Fatalf("Withdraw 后完整快照 = %+v", latest)
 	}
-	if source.Withdraw("game-1", "stale-session") {
+	if source.Withdraw("game-1", 999) {
 		t.Fatal("陈旧 SessionID 删除了当前记录")
 	}
 }
@@ -74,7 +74,7 @@ func TestSourceLateSubscriberReceivesCurrentSnapshot(t *testing.T) {
 	source := NewSource()
 	if err := source.Publish(rawNode(
 		"db-1",
-		"session-db",
+		3,
 		"127.0.0.1:20001",
 		"DBService",
 		1,
@@ -104,7 +104,7 @@ func TestSourceRejectsInvalidReplacementWithoutPoisoningState(t *testing.T) {
 	source := NewSource()
 	valid := rawNode(
 		"db-1",
-		"session-valid",
+		7,
 		"127.0.0.1:20001",
 		"DBService",
 		1,
@@ -113,7 +113,7 @@ func TestSourceRejectsInvalidReplacementWithoutPoisoningState(t *testing.T) {
 		t.Fatalf("Publish(valid) error = %v", err)
 	}
 	invalid := valid
-	invalid.SessionID = ""
+	invalid.SessionID = 0
 	if err := source.Publish(invalid); err == nil {
 		t.Fatal("Publish(invalid) 没有返回错误")
 	}
@@ -128,7 +128,7 @@ func TestSourceRejectsInvalidReplacementWithoutPoisoningState(t *testing.T) {
 	}
 	defer subscription.Close()
 	if len(latest.Nodes) != 1 ||
-		latest.Nodes[0].SessionID != "session-valid" {
+		latest.Nodes[0].SessionID != 7 {
 		t.Fatalf("非法替换污染 Source: %+v", latest)
 	}
 }
@@ -198,7 +198,7 @@ func TestSourcePublishRollsBackAfterConsumerFailure(t *testing.T) {
 	// 第一次新记录广播失败；健康消费者应先观察暂态记录，再收到恢复为空的完整快照。
 	failDelivery = true
 	publishErr := source.Publish(
-		rawNode("game-1", "session-1", "127.0.0.1:20001", "PlayerService", 1),
+		rawNode("game-1", 1, "127.0.0.1:20001", "PlayerService", 1),
 	)
 	if !errors.Is(publishErr, expected) {
 		t.Fatalf("Publish() error = %v, want consumer failure", publishErr)

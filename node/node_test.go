@@ -15,6 +15,20 @@ import (
 	"github.com/duanhf2012/origin/v3/service"
 )
 
+// TestNewSessionIDReturnsNonZeroUint64 验证 Node 会话使用紧凑非零随机标识。
+func TestNewSessionIDReturnsNonZeroUint64(t *testing.T) {
+	for index := 0; index < 256; index++ {
+		sessionID, err := newSessionID()
+		if err != nil {
+			t.Fatalf("newSessionID() error = %v", err)
+		}
+		var typed uint64 = sessionID
+		if typed == 0 {
+			t.Fatal("newSessionID() 返回零值")
+		}
+	}
+}
+
 // nodeDiscoveryListener 记录公开发现回调，并验证回调 Context 可以执行协作式 Await。
 type nodeDiscoveryListener struct {
 	owner  *lifecycleService
@@ -201,7 +215,7 @@ func TestNodeDiscoveryQueryWaitAndListener(t *testing.T) {
 	}
 	remote := internaldiscovery.RawNode{
 		NodeID:    "game-1",
-		SessionID: "session-game-1",
+		SessionID: 1,
 		Labels:    map[string]string{"region": "cn-east"},
 		Transport: internaldiscovery.TransportNone,
 		Services: []internaldiscovery.RawService{{
@@ -222,7 +236,7 @@ func TestNodeDiscoveryQueryWaitAndListener(t *testing.T) {
 		t.Fatalf("FindDiscoveredService() = (%+v, %v)", instance, exists)
 	}
 	list := target.ListDiscoveredServices("PlayerService")
-	if len(list) != 1 || list[0].SessionID != "session-game-1" {
+	if len(list) != 1 || list[0].SessionID != 1 {
 		t.Fatalf("ListDiscoveredServices() = %+v", list)
 	}
 	// 修改业务副本的 Labels 不得污染 Node 内部不可变快照。
@@ -265,7 +279,7 @@ func TestNodeWithoutSourceClosesDiscoveryRuntime(t *testing.T) {
 
 	remote := internaldiscovery.RawSnapshot{Nodes: []internaldiscovery.RawNode{{
 		NodeID:    "game-2",
-		SessionID: "session-game-2",
+		SessionID: 2,
 		Transport: internaldiscovery.TransportNone,
 		Services: []internaldiscovery.RawService{{
 			ServiceName: "PlayerService",
@@ -297,19 +311,19 @@ func TestNodeWithoutSourceClosesDiscoveryRuntime(t *testing.T) {
 // 一个 Lost 事件交付，再以一个 Discovered 事件发布新会话。
 func TestBuildDiscoveryActionsBatchesNodeSessionReplacement(t *testing.T) {
 	oldPlayer := &internaldiscovery.Instance{
-		NodeID: "game-1", SessionID: "old", ServiceName: "PlayerService",
+		NodeID: "game-1", SessionID: 10, ServiceName: "PlayerService",
 		State: internaldiscovery.ServiceStateRunning,
 	}
 	oldChat := &internaldiscovery.Instance{
-		NodeID: "game-1", SessionID: "old", ServiceName: "ChatService",
+		NodeID: "game-1", SessionID: 10, ServiceName: "ChatService",
 		State: internaldiscovery.ServiceStateRetired,
 	}
 	newPlayer := &internaldiscovery.Instance{
-		NodeID: "game-1", SessionID: "new", ServiceName: "PlayerService",
+		NodeID: "game-1", SessionID: 11, ServiceName: "PlayerService",
 		State: internaldiscovery.ServiceStateRunning,
 	}
 	newChat := &internaldiscovery.Instance{
-		NodeID: "game-1", SessionID: "new", ServiceName: "ChatService",
+		NodeID: "game-1", SessionID: 11, ServiceName: "ChatService",
 		State: internaldiscovery.ServiceStateRunning,
 	}
 	delivered := map[internaldiscovery.InstanceKey]*internaldiscovery.Instance{
@@ -899,6 +913,61 @@ func TestLifecycleErrorExposesLocation(t *testing.T) {
 	}
 	if err.Error() == "" {
 		t.Fatal("生命周期错误文本为空")
+	}
+}
+
+func TestRuntimeFailureWithdrawsDiscoveryAndNotifiesOnce(t *testing.T) {
+	t.Parallel()
+
+	source := internaldiscovery.NewSource()
+	notified := make(chan error, 2)
+	events := make([]string, 0, 3)
+	current := newTestNodeWithConfigAndOptions(
+		t,
+		Config{
+			ID:       "game-1",
+			Services: []string{"unused"},
+		},
+		Options{
+			MaxTimersPerNode: 3_000_000,
+			TimerLocation:    time.Local,
+			DiscoverySource:  source,
+			RuntimeFailure: func(nodeID string, cause error) {
+				if nodeID != "game-1" {
+					t.Errorf("runtime failure NodeID = %q", nodeID)
+				}
+				notified <- cause
+			},
+		},
+		&lifecycleService{label: "service-a", events: &events},
+	)
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Node.Start() error = %v", err)
+	}
+
+	first := errors.New("first runtime failure")
+	current.handleRuntimeFailure(first)
+	current.handleRuntimeFailure(errors.New("second runtime failure"))
+	if got := receiveNode(t, notified); !errors.Is(got, first) {
+		t.Fatalf("runtime failure = %v", got)
+	}
+	select {
+	case duplicate := <-notified:
+		t.Fatalf("重复 RuntimeFailure 回调: %v", duplicate)
+	default:
+	}
+
+	var records int
+	subscription, err := source.Subscribe(func(snapshot internaldiscovery.RawSnapshot) error {
+		records = len(snapshot.Nodes)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Source.Subscribe() error = %v", err)
+	}
+	subscription.Close()
+	if records != 0 {
+		t.Fatalf("Runtime 终态后发现记录数 = %d", records)
 	}
 }
 

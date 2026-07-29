@@ -135,6 +135,29 @@ func TestInternalErrorHelpers(t *testing.T) {
 	}
 }
 
+func TestListenerExposesPermanentAcceptFailure(t *testing.T) {
+	t.Parallel()
+
+	raw := newScriptedListener(scriptPermanent)
+	listener := newTestListener(raw)
+	go listener.acceptLoop()
+
+	select {
+	case <-listener.AcceptDone():
+	case <-time.After(time.Second):
+		t.Fatal("永久 Accept 失败后 AcceptDone 未关闭")
+	}
+	if !errs.IsCode(listener.Cause(), errs.CodeTransportUnavailable) {
+		t.Fatalf("Listener.Cause() = %v", listener.Cause())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := listener.Close(ctx); !errs.IsCode(err, errs.CodeTransportUnavailable) {
+		t.Fatalf("Listener.Close() error = %v", err)
+	}
+}
+
 // acceptScript 指定 scriptedListener 的 Accept 行为。
 type acceptScript uint8
 
@@ -229,15 +252,15 @@ func newTestListener(raw net.Listener) *Listener {
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	options := DefaultListenOptions(pool)
 	options.Connection.MaxMessageSize = 64
-	options.Connection.SendQueueBytes = 64
 	return &Listener{
-		raw:       raw,
-		addr:      raw.Addr(),
-		options:   options,
-		handler:   newRecordingHandler(),
-		logger:    options.Connection.Logger,
-		conns:     make(map[*Conn]struct{}),
-		closingCh: make(chan struct{}),
-		done:      make(chan struct{}),
+		raw:        raw,
+		addr:       raw.Addr(),
+		options:    options,
+		handler:    newRecordingHandler(),
+		logger:     options.Connection.Logger,
+		conns:      make(map[*Conn]struct{}),
+		closingCh:  make(chan struct{}),
+		acceptDone: make(chan struct{}),
+		done:       make(chan struct{}),
 	}
 }

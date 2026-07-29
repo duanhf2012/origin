@@ -37,7 +37,7 @@ M5 不实现 RPC 方法、请求响应关联、Node 身份、TcpModule ClientID�
 - 每条连接一个 ReadLoop 和一个 WriteLoop；
 - 一、二、四字节长度字段和大端、小端字节序；
 - 最大消息长度；
-- 有界发送消息数和有界待发送字节数；
+- 有界发送消息数量；
 - 非阻塞发送与明确的队列过载错误；
 - TCP_NODELAY、KeepAlive、可选读空闲超时和写超时；
 - 连接、Listener 的幂等关闭与等待；
@@ -167,7 +167,6 @@ type ConnectionOptions struct {
     Frame            FrameOptions
     MaxMessageSize   int
     SendQueueFrames  int
-    SendQueueBytes   int
     ReadTimeout      time.Duration
     WriteTimeout     time.Duration
     KeepAlive        time.Duration
@@ -182,9 +181,8 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions
 |---|---:|---|
 | `Frame.LengthFieldSize` | `4` | RPC 默认帧以及大消息上限都可直接使用 |
 | `Frame.ByteOrder` | `BigEndian` | 使用网络字节序作为新协议默认值 |
-| `MaxMessageSize` | `4 * 1024 * 1024` | 与已确认 RPC 最大消息 `4M` 一致 |
+| `MaxMessageSize` | `4 * 1024 * 1024` | 通用 TCP 单帧 payload 默认上限；RPC Adapter 按业务上限加包络单独覆盖 |
 | `SendQueueFrames` | `4096` | 通用 TCP 默认值，限制大量小消息且控制每连接队列槽位内存 |
-| `SendQueueBytes` | `8 * 1024 * 1024` | 限制大消息的最坏在途内存 |
 | `ReadTimeout` | `0` | 默认允许健康空闲连接长期存在；非零值表示读空闲超时 |
 | `WriteTimeout` | `15s` | 防止单次网络写永久占住 WriteLoop |
 | `KeepAlive` | `30s` | 使用系统 TCP 保活辅助发现死连接 |
@@ -196,12 +194,17 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions
 一字节长度字段最大只能配置 `255B`。M13 TCP RPC Adapter 固定选择四字节大端，不允许
 Node 配置改变；后续 TcpModule 可以按已有客户端线协议选择一、二、四字节和大小端。
 
-M5 将发送帧数和待发送字节数都作为上层可设置的 Go Options，不把某个业务场景写死在
-TCP 库中。M13 内部 RPC 的首版使用 `16384` 帧，并在 Adapter 内把字节上限派生为
-`max(8M, max_message_size + 512B)`，以承受可信 Node 连接上大量小 RPC 的瞬时突发，同时
-不增加第二个 RPC 配置；后续 TcpModule 按外部客户端数量、消息大小和慢客户端策略单独
-配置。`SendQueueFrames` 和 `SendQueueBytes` 都必须大于零，任意一个达到上限都拒绝新帧。
-队列上限表示准入边界，不代表建立连接时预先申请对应 payload 内存。
+2026-07-29 最终确认覆盖早期“双重帧数/字节额度”方案：M5 发送队列只保留
+`SendQueueFrames`。M15 后 RPC 公开配置使用方向和业务含义更明确的
+`send_queue_messages=16384`，由 RPC Adapter 映射到本字段；后续 TcpModule 可以根据
+外部客户端数量和峰值单独设置。`SendQueueFrames` 必须大于零，达到上限立即拒绝新帧。
+
+`MaxMessageSize` 继续限制单个 TCP 帧 payload 的最大字节数，不表示队列长度。RPC 层
+`max_payload_size` 只限制业务 payload，并在映射到 M5 时加固定协议包络余量，两者不是
+同一个边界。只按消息数量限制队列后，最坏内存由“队列数量 × 单消息上限”共同决定；
+这是为减少双计数和 TCP/NATS 行为差异而确认的取舍。队列上限表示准入边界，不代表建立
+连接时预先申请消息体。M15 实施时同步删除 `SendQueueBytes`、相关原子计数、校验、统计和
+测试。
 
 M5 的 Go Options 使用 `int` 和 `time.Duration`。未来 M7 配置模型负责把 `config.ByteSize` 和
 `config.Duration` 转换为这些内部值，M5 不依赖配置加载包。
@@ -451,36 +454,26 @@ Benchmark 决定。
 
 ## 10. 有界发送与背压
 
-发送队列同时限制：
-
-- 待发送帧数量；
-- 待发送 payload 总字节数。
-
-两个限制缺一不可：
-
-- 只限制数量时，少量 `4M` 消息仍可能占用大量内存；
-- 只限制字节时，海量极小消息仍可能占用大量队列槽和对象。
+发送队列只限制待发送帧数量。空 payload 也占用一个帧槽，不能绕过上限。
 
 默认值按使用场景区分：
 
-| 使用场景 | `SendQueueFrames` | `SendQueueBytes` |
-|---|---:|---:|
-| M5 通用 TCP | `4096` | `8M` |
-| M13 内部 RPC | `16384`，RPC 配置可调整 | Adapter 派生，不公开 RPC 配置 |
-| 后续 TcpModule | 按业务显式配置 | 按业务显式配置 |
+| 使用场景 | `SendQueueFrames` |
+|---|---:|
+| M5 通用 TCP | `4096` |
+| M13 内部 RPC | `16384`，RPC 配置可调整 |
+| 后续 TcpModule | 按业务显式配置 |
 
-[nats.go Pending Limits](https://pkg.go.dev/github.com/nats-io/nats.go) 默认采用 `65536` 条与
-`64M` 两个上限，说明成熟消息系统会允许远高于 `1024` 的小消息突发；但 NATS Broker
-订阅队列与 Origin 每条 Node TCP 连接的内存模型不同，不能直接照搬。Origin RPC 首版选择
-`16384`，在提高突发容量的同时避免每条连接预留过多队列槽位；确有需要的项目可以显式
-提高到 `65536`，但必须结合连接数、平均消息大小、队列高水位和 p99 延迟复核内存成本。
+Origin RPC 首版选择 `16384`，用于承受可信 Node 连接上的小消息瞬时突发。确有需要的项目
+可以显式提高到 `65536`，但必须结合连接数、平均消息大小、队列高水位和 p99 延迟复核
+内存成本。
 
 `Send` 使用非阻塞准入：
 
 1. 先校验连接状态和 Buffer；
-2. 在同一同步边界内检查帧数与字节额度；
-3. 两项都有容量才入队并转移所有权；
-4. 任一项不足立即返回 `CodeTransportOverloaded`；
+2. 在同一同步边界内检查帧数；
+3. 有容量才入队并转移所有权；
+4. 数量达到上限立即返回 `CodeTransportOverloaded`；
 5. 不等待队列、不丢弃旧消息、不静默丢新消息，也不因队满关闭连接。
 
 空 payload 也占用一个帧槽位，因此不能绕过帧数限制。RPC Runtime 收到过载后立即完成
@@ -569,7 +562,7 @@ M5 建议在统一 `errs` 包增加以下 Transport 通用错误码，M6 后续�
 |---|---:|---|
 | `CodeTransportUnavailable` | `3001` | Dial、Accept 或底层 I/O 使传输不可用 |
 | `CodeTransportClosed` | `3002` | 本地组件已经关闭，不能再执行操作 |
-| `CodeTransportOverloaded` | `3003` | 连接数、发送帧数或待发送字节达到上限 |
+| `CodeTransportOverloaded` | `3003` | 连接数或发送帧数达到上限 |
 | `CodeTransportProtocol` | `3004` | 远端长度帧非法或违反传输协议 |
 | `CodeTransportMessageTooLarge` | `3005` | 本地发送或远端声明的消息超过上限 |
 
@@ -853,8 +846,8 @@ M5 于 2026-07-26 完成以下实现：
 1. `errs` 登记 `3001`～`3005` 五个 Transport 错误码及可复用哨兵；
 2. `internal/tcpnet` 提供默认配置、严格校验、一/二/四字节大小端长度帧、单次 Dial、
    Listener、Conn、Handler、Send、Close 和 Wait；
-3. 每条连接固定一个 ReadLoop 和一个 WriteLoop；发送使用帧数与 payload 字节数双重有界
-   环形队列，队列满立即返回，不阻塞 Service；
+3. 每条连接固定一个 ReadLoop 和一个 WriteLoop；M5 最初实现了帧数与 payload 字节数
+   双重有界环形队列，M15 按 2026-07-29 最终结论删除字节计数，只保留帧数上限；
 4. 收包在长度校验后直接取得最终 `bufferpool.Buffer`；发送使用连接级复用的
    `net.Buffers` scatter/gather 描述符，不拼接完整帧；
 5. TCP_NODELAY 固定开启，KeepAlive、ReadTimeout 和 WriteTimeout 均按配置生效；

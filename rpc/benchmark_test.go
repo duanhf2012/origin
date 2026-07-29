@@ -46,7 +46,7 @@ func BenchmarkBytePayloadCodec(b *testing.B) {
 	cases := []int{
 		16,
 		1024,
-		DefaultMaxMessageSize - 4,
+		DefaultMaxPayloadSize - 4,
 	}
 	for _, payloadSize := range cases {
 		b.Run(fmt.Sprintf("%dB", payloadSize), func(b *testing.B) {
@@ -131,7 +131,7 @@ func BenchmarkCustomPayloadCodec(b *testing.B) {
 	for _, payloadSize := range []int{
 		16,
 		1024,
-		DefaultMaxMessageSize - 4,
+		DefaultMaxPayloadSize - 4,
 	} {
 		b.Run(fmt.Sprintf("%dB", payloadSize), func(b *testing.B) {
 			source := make(benchmarkBlob, payloadSize)
@@ -234,6 +234,25 @@ func BenchmarkPendingMapValueLifecycle(b *testing.B) {
 		call := session.pending[requestID]
 		delete(session.pending, requestID)
 		session.mu.Unlock()
+		call.complete(nil, nil)
+	}
+}
+
+func BenchmarkNATSPendingMapValueLifecycle(b *testing.B) {
+	// NATS pending 同样以值保存；固定上限只参与准入判断，不预分配 65536 个槽位。
+	table := newNATSPendingTable(DefaultPendingPerNode)
+	complete := func(*Buffer, error) {}
+	var requestID uint64
+	b.ReportAllocs()
+	for b.Loop() {
+		requestID++
+		if err := table.reserve(requestID, 1, complete); err != nil {
+			b.Fatal(err)
+		}
+		call, exists := table.take(requestID, 1, 2, 2)
+		if !exists {
+			b.Fatal("pending missing")
+		}
 		call.complete(nil, nil)
 	}
 }

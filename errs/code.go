@@ -22,7 +22,9 @@ const (
 	// CodeProcessControlFailed 表示本地进程锁、控制文件或停止通知操作失败。
 	CodeProcessControlFailed
 
-	// CodeServiceRetired 表示 Service 处于退休状态并拒绝新的 RPC 请求。
+	// CodeServiceRetired 表示业务主动拒绝退休期间不允许执行的操作。
+	//
+	// 框架不会仅因 Service 处于 Retired 自动返回该错误。
 	CodeServiceRetired Code = 1001
 	// CodeServiceStopping 表示 Service 已经开始停止并拒绝新的工作。
 	CodeServiceStopping Code = 1002

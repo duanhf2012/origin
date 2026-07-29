@@ -26,6 +26,10 @@ type Options struct {
 	//
 	// 正式项目不直接设置该字段；省略时 Node 仍拥有空的本地目录，便于独立单元测试。
 	DiscoverySource *internaldiscovery.Source
+	// RuntimeFailure 接收当前 Node 的 TCP Listener 或 NATS Connection 永久终态。
+	//
+	// 正式 Application 用它取消唯一生命周期 Context；回调必须快速返回，不能直接执行 Stop。
+	RuntimeFailure func(nodeID string, cause error)
 }
 
 // Config 是一个 Node 在配置文件中的最小静态定义。
@@ -42,7 +46,7 @@ type Config struct {
 	//
 	// 完全零值表示使用 service.DefaultSchedulerConfig；部分非零配置必须自身完整有效。
 	Scheduler service.SchedulerConfig
-	// RPC 为 nil 时当前 Node 只支持本地调用；非 nil 时启用 M13 TCP 监听与出站连接。
+	// RPC 为 nil 时当前 Node 只支持本地调用；非 nil 时按 Transport 启用 TCP 或 NATS。
 	RPC *rpc.Config
 	// Services 按声明顺序保存当前 Node 实际启用的 Service。
 	Services []string

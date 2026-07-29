@@ -62,6 +62,33 @@ func (handler *silentHandler) Close() error {
 	return nil
 }
 
+func TestRuntimeFailureCancelsApplicationLifecycleOnce(t *testing.T) {
+	t.Parallel()
+
+	app := New()
+	lifecycle, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	app.mu.Lock()
+	app.runCancel = cancel
+	app.mu.Unlock()
+
+	first := errors.New("first runtime failure")
+	app.handleRuntimeFailure("game-1", first)
+	app.handleRuntimeFailure("game-1", errors.New("second runtime failure"))
+
+	select {
+	case <-lifecycle.Done():
+	case <-time.After(time.Second):
+		t.Fatal("Runtime 终态没有取消 Application 生命周期")
+	}
+	app.mu.Lock()
+	recorded := app.runtimeFailure
+	app.mu.Unlock()
+	if !errors.Is(recorded, first) {
+		t.Fatalf("recorded runtime failure = %v", recorded)
+	}
+}
+
 func TestApplicationRunsSelectedNodesAndStopsInPlace(t *testing.T) {
 	directory := writeApplicationConfig(t, `
 buffer_pool:
@@ -342,12 +369,12 @@ nodes:
   - id: tcp-1
     rpc:
       transport: tcp
-      max_message_size: 2M
+      max_payload_size: 2M
       tcp:
         listen: 127.0.0.1:17001
         advertise: 127.0.0.1:17001
-        send_queue_frames: 2048
-        read_timeout: 0s
+        send_queue_messages: 2048
+        read_idle_timeout: 0s
         write_timeout: 3s
     services: [lifecycleTestService]
 `)
@@ -361,13 +388,51 @@ nodes:
 	configured := loaded.nodes[1].RPC
 	if configured == nil ||
 		configured.Transport != rpc.TransportTCP ||
-		configured.MaxMessageSize != 2*1024*1024 ||
+		configured.MaxPayloadSize != 2*1024*1024 ||
 		configured.TCP.Listen != "127.0.0.1:17001" ||
 		configured.TCP.Advertise != "127.0.0.1:17001" ||
-		configured.TCP.SendQueueFrames != 2048 ||
-		configured.TCP.ReadTimeout != 0 ||
+		configured.TCP.SendQueueMessages != 2048 ||
+		configured.TCP.ReadIdleTimeout != 0 ||
 		configured.TCP.WriteTimeout != 3*time.Second {
 		t.Fatalf("Node RPC 配置 = %+v", configured)
+	}
+}
+
+// TestLoadConfigNodeNATSDefaultsAndOverrides 验证 NATS 最小公开配置能完整冻结到运行时配置。
+func TestLoadConfigNodeNATSDefaultsAndOverrides(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: game-1
+    rpc:
+      transport: nats
+      max_payload_size: 2M
+      nats:
+        namespace: game-prod
+        urls: [nats://127.0.0.1:4222]
+        receive_queue_messages: 2048
+        auth:
+          username: game
+          password: secret
+        tls:
+          enabled: false
+    services: [lifecycleTestService]
+`)
+	loaded, err := loadConfig(directory)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	configured := loaded.nodes[0].RPC
+	if configured == nil ||
+		configured.Transport != rpc.TransportNATS ||
+		configured.MaxPayloadSize != 2*1024*1024 ||
+		configured.TCP != nil ||
+		configured.NATS == nil ||
+		configured.NATS.Namespace != "game-prod" ||
+		len(configured.NATS.URLs) != 1 ||
+		configured.NATS.ReceiveQueueMessages != 2048 ||
+		configured.NATS.Auth.Username != "game" ||
+		configured.NATS.Auth.Password != "secret" {
+		t.Fatalf("Node NATS RPC 配置 = %+v", configured)
 	}
 }
 
@@ -394,7 +459,7 @@ func TestLoadConfigRejectsInvalidNodeRPC(t *testing.T) {
       tcp:
         listen: "127.0.0.1:17001"
         advertise: "127.0.0.1:17001"
-        send_queue_frames: 70000
+        send_queue_messages: 70000
     services: [lifecycleTestService]
 `,
 		`nodes:
@@ -405,6 +470,24 @@ func TestLoadConfigRejectsInvalidNodeRPC(t *testing.T) {
         listen: "127.0.0.1:17001"
         advertise: "127.0.0.1:17001"
         unknown: true
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    rpc:
+      transport: tcp
+      max_message_size: 2M
+      tcp: {listen: "127.0.0.1:17001", advertise: "127.0.0.1:17001"}
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    rpc:
+      transport: nats
+      nats:
+        namespace: game-prod
+        urls: [nats://127.0.0.1:4222]
+      tcp: {listen: "127.0.0.1:17001", advertise: "127.0.0.1:17001"}
     services: [lifecycleTestService]
 `,
 	} {

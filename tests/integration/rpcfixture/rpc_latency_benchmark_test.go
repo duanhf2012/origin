@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/rpc"
+	"github.com/duanhf2012/origin/v3/service"
 )
 
 // BenchmarkGeneratedLocalAwaitLatency 记录同 Node 完整 Await 闭环的 P50/P95/P99。
@@ -97,6 +98,45 @@ func BenchmarkGeneratedCustomTimeAwaitLatency(b *testing.B) {
 func BenchmarkGeneratedRemoteAwaitLatency(b *testing.B) {
 	fixture := newRemoteRPCFixture(b)
 	_ = awaitRemoteEcho(b, fixture, "latency-ready")
+
+	samples := make([]time.Duration, b.N)
+	done := make(chan struct{})
+	var benchmarkErr error
+	b.ResetTimer()
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		defer close(done)
+		client := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToServiceOnNode("player-1", "PlayerService"),
+		)
+		for index := range b.N {
+			startedAt := time.Now()
+			_, benchmarkErr = client.AwaitEchoName(ctx, "12345678901234567890123456789012")
+			samples[index] = time.Since(startedAt)
+			if benchmarkErr != nil {
+				return
+			}
+		}
+	}); err != nil {
+		b.Fatal(err)
+	}
+	<-done
+	b.StopTimer()
+	if benchmarkErr != nil {
+		b.Fatal(benchmarkErr)
+	}
+
+	slices.Sort(samples)
+	b.ReportMetric(float64(percentile(samples, 50).Nanoseconds()), "ns/p50")
+	b.ReportMetric(float64(percentile(samples, 95).Nanoseconds()), "ns/p95")
+	b.ReportMetric(float64(percentile(samples, 99).Nanoseconds()), "ns/p99")
+}
+
+// BenchmarkGeneratedNATSAwaitLatency 记录真实 loopback NATS、ORN1 和 Service 恢复的
+// P50/P95/P99，与 TCP 使用相同的 32B 业务字符串便于持续对比。
+func BenchmarkGeneratedNATSAwaitLatency(b *testing.B) {
+	fixture := newNATSRPCPair(b, service.DefaultSchedulerConfig())
+	_ = awaitNATSEcho(b, fixture.caller, "latency-ready")
 
 	samples := make([]time.Duration, b.N)
 	done := make(chan struct{})

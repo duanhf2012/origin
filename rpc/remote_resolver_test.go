@@ -66,6 +66,12 @@ func TestRuntimeRemoteResolverReturnsSessionBoundRoute(t *testing.T) {
 		bufferpool.NewPool(bufferpool.Options{}),
 		originlog.NewNop(),
 	)
+	config := DefaultConfig()
+	config.TCP.Listen = "127.0.0.1:20000"
+	config.TCP.Advertise = "127.0.0.1:20000"
+	if err := runtime.Configure(&config); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
 	resolver := remoteResolverFunc(func(
 		nodeID string,
 		serviceName string,
@@ -74,7 +80,8 @@ func TestRuntimeRemoteResolverReturnsSessionBoundRoute(t *testing.T) {
 	) (RemoteRoute, error) {
 		return RemoteRoute{
 			NodeID:    nodeID,
-			SessionID: "session-game",
+			SessionID: 7,
+			Transport: TransportTCP,
 			Address:   "127.0.0.1:20001",
 		}, nil
 	})
@@ -90,7 +97,7 @@ func TestRuntimeRemoteResolverReturnsSessionBoundRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveRemote() error = %v", err)
 	}
-	if route.SessionID != "session-game" || route.NodeID != "game-1" {
+	if route.SessionID != 7 || route.NodeID != "game-1" {
 		t.Fatalf("resolveRemote() route = %+v", route)
 	}
 }

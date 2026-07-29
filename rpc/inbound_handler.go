@@ -28,11 +28,10 @@ type inboundSession struct {
 	handler *inboundHandler
 	conn    *tcpnet.Conn
 
-	sourceNodeID    string
-	sourceSessionID string
-	ready           bool
-	rejected        bool
-	closed          atomic.Bool
+	sourceNodeID string
+	ready        bool
+	rejected     bool
+	closed       atomic.Bool
 }
 
 // remoteDeadlineContext 为 M8 管理的线上超时补充标准 Context Deadline。
@@ -159,7 +158,6 @@ func (handler *inboundHandler) handleHello(
 		status = errs.CodeTransportProtocol
 	} else {
 		session.sourceNodeID = hello.sourceNodeID
-		session.sourceSessionID = hello.sourceSessionID
 		session.ready = true
 		handler.byNode[hello.sourceNodeID] = session
 	}
@@ -177,8 +175,6 @@ func (handler *inboundHandler) handleHello(
 	ack, err := encodeHelloAck(
 		handler.remote.owner.pool,
 		status,
-		handler.remote.owner.nodeID,
-		handler.remote.owner.sessionID,
 		services,
 	)
 	if err != nil {
@@ -202,7 +198,7 @@ func (handler *inboundHandler) handleRequest(
 		return err
 	}
 	if len(packet.Bytes())-view.payloadOffset >
-		handler.remote.config.MaxMessageSize {
+		handler.remote.config.MaxPayloadSize {
 		packet.Release()
 		return errs.ErrTransportMessageTooLarge
 	}
@@ -221,7 +217,7 @@ func (handler *inboundHandler) handleRequest(
 		packet.Release()
 		return errs.ErrTransportProtocol
 	}
-	delay := time.Duration(view.remainingTimeout)
+	delay := view.remainingTimeout
 	if delay <= 0 {
 		packet.Release()
 		session.sendError(view.requestID, errs.ErrDeadlineExceeded)
@@ -233,7 +229,16 @@ func (handler *inboundHandler) handleRequest(
 		Context:  cancelContext,
 		deadline: time.Now().Add(delay),
 	}
-	deadlineID, err := handler.remote.bindDeadline(delay, cancel)
+	handler.remote.mu.Lock()
+	deadlines := handler.remote.deadlines
+	handler.remote.mu.Unlock()
+	if deadlines == nil {
+		cancel(errs.ErrServiceStopped)
+		packet.Release()
+		session.sendError(view.requestID, errs.ErrServiceStopped)
+		return nil
+	}
+	deadlineID, err := deadlines.bind(delay, cancel)
 	if err != nil {
 		cancel(err)
 		packet.Release()
@@ -244,7 +249,7 @@ func (handler *inboundHandler) handleRequest(
 	err = endpoint.target.DispatchAsync(func(targetCtx context.Context) {
 		defer packet.Release()
 		defer cancel(nil)
-		defer handler.remote.unbindDeadline(deadlineID)
+		defer deadlines.unbind(deadlineID)
 
 		// 已在 FIFO 等待阶段超时的请求不再执行业务方法。
 		if cause := context.Cause(deadlineContext); cause != nil {
@@ -271,7 +276,7 @@ func (handler *inboundHandler) handleRequest(
 		session.sendResponse(view.requestID, response, dispatchErr)
 	})
 	if err != nil {
-		handler.remote.unbindDeadline(deadlineID)
+		deadlines.unbind(deadlineID)
 		cancel(err)
 		packet.Release()
 		session.sendError(view.requestID, err)
@@ -289,7 +294,7 @@ func (handler *inboundHandler) handleNotify(
 		return err
 	}
 	if len(packet.Bytes())-view.payloadOffset >
-		handler.remote.config.MaxMessageSize {
+		handler.remote.config.MaxPayloadSize {
 		packet.Release()
 		return errs.ErrTransportMessageTooLarge
 	}
@@ -328,13 +333,27 @@ func (remote *remoteRuntime) resolveInbound(
 	remote.mu.Lock()
 	stopping := remote.stopping
 	remote.mu.Unlock()
-	if remote.owner.closed.Load() || stopping {
+	if stopping {
 		return serviceEndpoint{}, errs.ErrServiceStopping
 	}
-	if !remote.owner.inboundReady.Load() {
+	return remote.owner.resolveInbound(serviceName, methodID)
+}
+
+// resolveInbound 实现 TCP/NATS 共用的 Service Ready、可见性和 Dispatcher 校验。
+func (runtime *Runtime) resolveInbound(
+	serviceName string,
+	methodID MethodID,
+) (serviceEndpoint, error) {
+	if runtime == nil || serviceName == "" || methodID == 0 {
+		return serviceEndpoint{}, errs.ErrInvalidArgument
+	}
+	if runtime.closed.Load() {
+		return serviceEndpoint{}, errs.ErrServiceStopping
+	}
+	if !runtime.inboundReady.Load() {
 		return serviceEndpoint{}, errs.ErrServiceNotReady
 	}
-	endpoint, exists := remote.owner.endpoints[serviceName]
+	endpoint, exists := runtime.endpoints[serviceName]
 	if !exists || !endpoint.public || endpoint.dispatcher == nil {
 		return serviceEndpoint{}, errs.ErrRPCNoRoute
 	}

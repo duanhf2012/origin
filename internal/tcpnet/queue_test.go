@@ -12,9 +12,9 @@ import (
 func TestSendQueueLimitsAndFIFO(t *testing.T) {
 	t.Parallel()
 
-	// 三个槽位和四字节额度同时覆盖帧满、字节满、空帧以及 FIFO 环回。
+	// 三个槽位覆盖消息数满、空帧以及 FIFO 环回；payload 大小不再形成第二套额度。
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
-	queue := newSendQueue(3, 4)
+	queue := newSendQueue(3)
 	first := newQueueItem(pool, []byte{1, 2})
 	empty := newQueueItem(pool, nil)
 	second := newQueueItem(pool, []byte{3, 4})
@@ -37,7 +37,7 @@ func TestSendQueueLimitsAndFIFO(t *testing.T) {
 	// 入队失败没有转移所有权，测试调用方负责释放。
 	rejected.buffer.Release()
 
-	// 依次出队并释放，验证零长度项没有破坏顺序和字节记账。
+	// 依次出队并释放，验证零长度项没有破坏顺序。
 	for index, want := range [][]byte{{1, 2}, {}, {3, 4}} {
 		item, ok := queue.next()
 		if !ok {
@@ -48,24 +48,29 @@ func TestSendQueueLimitsAndFIFO(t *testing.T) {
 		}
 		item.buffer.Release()
 	}
-	if frames, bytes, closed := queue.snapshot(); frames != 0 || bytes != 0 || closed {
-		t.Fatalf("空队列快照 = (%d, %d, %v)", frames, bytes, closed)
+	if messages, closed := queue.snapshot(); messages != 0 || closed {
+		t.Fatalf("空队列快照 = (%d, %v)", messages, closed)
 	}
 
 	// 环形下标已经跨过尾部，再次入队必须仍可正常工作。
-	item := newQueueItem(pool, []byte{9, 8, 7, 6})
+	item := newQueueItem(pool, make([]byte, 64*1024))
 	if err := queue.enqueue(item); err != nil {
 		t.Fatalf("enqueue wrapped item: %v", err)
 	}
-	tooManyBytes := newQueueItem(pool, []byte{1})
-	if err := queue.enqueue(tooManyBytes); !errors.Is(err, errs.ErrTransportOverloaded) {
-		t.Fatalf("byte limit error = %v", err)
+	// 第二条大消息只受剩余槽位约束，证明队列不再按总字节数拒绝合法消息。
+	secondLarge := newQueueItem(pool, make([]byte, 64*1024))
+	if err := queue.enqueue(secondLarge); err != nil {
+		t.Fatalf("enqueue second large item: %v", err)
 	}
-	tooManyBytes.buffer.Release()
 
 	got, ok := queue.next()
-	if !ok || !equalBytes(got.buffer.Bytes(), []byte{9, 8, 7, 6}) {
+	if !ok || len(got.buffer.Bytes()) != 64*1024 {
 		t.Fatalf("wrapped next = (%v, %v)", got.buffer, ok)
+	}
+	got.buffer.Release()
+	got, ok = queue.next()
+	if !ok || len(got.buffer.Bytes()) != 64*1024 {
+		t.Fatalf("second large next = (%v, %v)", got.buffer, ok)
 	}
 	got.buffer.Release()
 	queue.close()
@@ -77,7 +82,7 @@ func TestSendQueueCloseReleasesAndWakes(t *testing.T) {
 
 	// 先放入两个待发送 Buffer，Close 必须接管并释放它们。
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
-	queue := newSendQueue(2, 8)
+	queue := newSendQueue(2)
 	if err := queue.enqueue(newQueueItem(pool, []byte{1})); err != nil {
 		t.Fatalf("enqueue first: %v", err)
 	}
@@ -115,7 +120,7 @@ func TestSendQueueCloseWakesEmptyWaiter(t *testing.T) {
 	t.Parallel()
 
 	// 让消费者先阻塞在空队列，再验证 Close 信号没有丢失。
-	queue := newSendQueue(1, 1)
+	queue := newSendQueue(1)
 	done := make(chan struct{})
 	go func() {
 		_, _ = queue.next()

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -71,12 +72,15 @@ func TestRemoteRPCIndependentProcesses(t *testing.T) {
 	// 子进程只有在真实 Listener 已经绑定后才输出就绪标记。
 	scanner := bufio.NewScanner(stdout)
 	ready := false
-	var targetSessionID string
+	var targetSessionID uint64
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) == 2 && fields[0] == processReadyLine {
 			ready = true
-			targetSessionID = fields[1]
+			targetSessionID, err = strconv.ParseUint(fields[1], 10, 64)
+			if err != nil {
+				t.Fatalf("解析子进程 SessionID: %v", err)
+			}
 			break
 		}
 	}
@@ -146,7 +150,7 @@ func TestRemoteRPCProcessHelper(t *testing.T) {
 	config := rpc.DefaultConfig()
 	config.TCP.Listen = address
 	config.TCP.Advertise = address
-	config.TCP.ReadTimeout = time.Second
+	config.TCP.ReadIdleTimeout = time.Second
 	config.TCP.WriteTimeout = time.Second
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	player := &PlayerService{}
@@ -185,7 +189,7 @@ func TestRemoteRPCProcessHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := <-published
-	fmt.Printf("%s %s\n", processReadyLine, record.SessionID)
+	fmt.Printf("%s %d\n", processReadyLine, record.SessionID)
 
 	// 父进程关闭 stdin 表示调用验证完成；轮询文件和额外控制端口都不需要。
 	if _, err := io.Copy(io.Discard, os.Stdin); err != nil {

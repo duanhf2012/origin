@@ -3,6 +3,7 @@ package rpc
 import (
 	"encoding/binary"
 	"math"
+	"time"
 	"unicode/utf8"
 
 	"github.com/duanhf2012/origin/v3/errs"
@@ -10,29 +11,28 @@ import (
 )
 
 const (
-	// wireMagic 同时标识 Origin RPC 和第一代不兼容 TCP 线协议。
-	wireMagic = "ORP1"
+	// tcpWireVersion 标识 Origin TCP RPC 当前不兼容线布局版本。
+	tcpWireVersion byte = 1
 
 	// wireEnvelopeSize 是 M5 在业务 payload 上限之外允许的固定协议包络余量。
-	wireEnvelopeSize = 512
+	wireEnvelopeSize = 576
 
-	// 业务包使用一字节 Kind；握手阶段由连接角色决定包类型，因此不携带 Kind。
-	wireKindRequest  byte = 1
-	wireKindNotify   byte = 2
-	wireKindResponse byte = 3
-	wireKindPing     byte = 4
-	wireKindPong     byte = 5
+	// 主动方业务包必须区分 Request、Notify 和 Ping；被动方只返回 Response 或一字节 Pong。
+	wireKindRequest byte = 1
+	wireKindNotify  byte = 2
+	wireKindPing    byte = 3
+	wireKindPong    byte = 4
 
-	// 固定头大小必须与 M13 设计的逐字段布局严格一致。
-	wireRequestFixedSize  = 26
+	// 固定头大小与 M15 已确认的逐字段布局严格一致。
+	wireRequestFixedSize  = 22
 	wireNotifyFixedSize   = 10
-	wireResponseFixedSize = 13
+	wireResponseFixedSize = 12
 	wireHeartbeatSize     = 1
-	wireHelloFixedSize    = 8
-	wireHelloAckFixedSize = 12
+	wireHelloFixedSize    = 11
+	wireHelloAckFixedSize = 6
 	wireServiceFixedSize  = 33
 
-	// NodeID 和 ServiceName 使用 uint8 长度，避免热路径多一个无用字节。
+	// NodeID 和 ServiceName 使用 uint8 长度，避免热路径多一个无效长度字节。
 	wireMaxNameSize = math.MaxUint8
 )
 
@@ -42,19 +42,18 @@ type wireServiceEntry struct {
 	fingerprint ContractFingerprint
 }
 
-// wireHello 是主动连接方第一帧声明的固定 Node 身份。
+// wireHello 是主动连接方第一帧声明的来源 Node 和精确目标会话。
 type wireHello struct {
 	sourceNodeID    string
-	sourceSessionID string
 	targetNodeID    string
-	targetSessionID string
+	targetSessionID uint64
 }
 
 // wireHelloAck 是被连接方返回的握手结论和公开契约目录。
+//
+// 目标 NodeID 和 SessionID 已在 Hello 中校验，固定连接方向使 Ack 不必重复返回这些字段。
 type wireHelloAck struct {
 	statusCode errs.Code
-	nodeID     string
-	sessionID  string
 	services   []wireServiceEntry
 }
 
@@ -64,7 +63,7 @@ type wireHelloAck struct {
 type wireRequestView struct {
 	requestID        uint64
 	methodID         MethodID
-	remainingTimeout timeDuration
+	remainingTimeout time.Duration
 	serviceName      []byte
 	payloadOffset    int
 }
@@ -83,91 +82,62 @@ type wireResponseView struct {
 	payloadOffset int
 }
 
-// timeDuration 使用 uint64 保存线上纳秒值，解析完成后再安全转换为 time.Duration。
-//
-// 独立别名让 wire.go 不需要在多个字段上重复“线上无符号、进程内有符号”的说明。
-type timeDuration uint64
-
-// encodeHello 创建主动方第一帧。握手属于连接冷路径，可以直接按准确大小申请 Buffer。
+// encodeHello 创建主动方第一帧。握手属于连接冷路径，可以按准确大小申请 Buffer。
 func encodeHello(
 	pool *bufferpool.Pool,
 	sourceNodeID string,
-	sourceSessionID string,
 	targetNodeID string,
-	targetSessionID string,
+	targetSessionID uint64,
 ) (*bufferpool.Buffer, error) {
-	// NodeID 和 SessionID 都必须能够由 uint8 长度确定性表达。
-	if !validWireName(sourceNodeID) ||
-		!validWireName(sourceSessionID) ||
+	if pool == nil ||
+		!validWireName(sourceNodeID) ||
 		!validWireName(targetNodeID) ||
-		!validWireName(targetSessionID) {
+		targetSessionID == 0 {
 		return nil, errs.ErrInvalidArgument
 	}
+
+	// 固定头直接保存版本、两个名称长度和紧凑 SessionID，不再携带 ASCII Magic。
 	buffer := pool.Acquire(
-		wireHelloFixedSize +
-			len(sourceNodeID) +
-			len(sourceSessionID) +
-			len(targetNodeID) +
-			len(targetSessionID),
+		wireHelloFixedSize + len(sourceNodeID) + len(targetNodeID),
 	)
 	data := buffer.Bytes()
-	copy(data[:4], wireMagic)
-	data[4] = byte(len(sourceNodeID))
-	data[5] = byte(len(sourceSessionID))
-	data[6] = byte(len(targetNodeID))
-	data[7] = byte(len(targetSessionID))
+	data[0] = tcpWireVersion
+	data[1] = byte(len(sourceNodeID))
+	data[2] = byte(len(targetNodeID))
+	binary.BigEndian.PutUint64(data[3:11], targetSessionID)
 	offset := wireHelloFixedSize
 	copy(data[offset:], sourceNodeID)
 	offset += len(sourceNodeID)
-	copy(data[offset:], sourceSessionID)
-	offset += len(sourceSessionID)
 	copy(data[offset:], targetNodeID)
-	offset += len(targetNodeID)
-	copy(data[offset:], targetSessionID)
 	return buffer, nil
 }
 
-// parseHello 严格解析主动方第一帧，并拒绝尾部数据和非法 UTF-8 身份。
+// parseHello 严格解析主动方第一帧，并拒绝未知版本、尾部数据和非法 UTF-8。
 func parseHello(data []byte) (wireHello, error) {
-	// 在读取长度字段前先验证最小尺寸和 Magic。
-	if len(data) < wireHelloFixedSize || string(data[:4]) != wireMagic {
+	if len(data) < wireHelloFixedSize || data[0] != tcpWireVersion {
 		return wireHello{}, errs.ErrTransportProtocol
 	}
-	sourceLength := int(data[4])
-	sourceSessionLength := int(data[5])
-	targetLength := int(data[6])
-	targetSessionLength := int(data[7])
-	total := wireHelloFixedSize +
-		sourceLength +
-		sourceSessionLength +
-		targetLength +
-		targetSessionLength
+	sourceLength := int(data[1])
+	targetLength := int(data[2])
+	targetSessionID := binary.BigEndian.Uint64(data[3:11])
+	total := wireHelloFixedSize + sourceLength + targetLength
 	if sourceLength == 0 ||
-		sourceSessionLength == 0 ||
 		targetLength == 0 ||
-		targetSessionLength == 0 ||
+		targetSessionID == 0 ||
 		total != len(data) {
 		return wireHello{}, errs.ErrTransportProtocol
 	}
 	offset := wireHelloFixedSize
 	sourceBytes := data[offset : offset+sourceLength]
 	offset += sourceLength
-	sourceSessionBytes := data[offset : offset+sourceSessionLength]
-	offset += sourceSessionLength
 	targetBytes := data[offset : offset+targetLength]
-	offset += targetLength
-	targetSessionBytes := data[offset : offset+targetSessionLength]
-	if !utf8.Valid(sourceBytes) ||
-		!utf8.Valid(sourceSessionBytes) ||
-		!utf8.Valid(targetBytes) ||
-		!utf8.Valid(targetSessionBytes) {
+	if !utf8.Valid(sourceBytes) || !utf8.Valid(targetBytes) {
 		return wireHello{}, errs.ErrTransportProtocol
 	}
 	return wireHello{
 		sourceNodeID:    string(sourceBytes),
-		sourceSessionID: string(sourceSessionBytes),
 		targetNodeID:    string(targetBytes),
-		targetSessionID: string(targetSessionBytes),
+		targetSessionID: targetSessionID,
 	}, nil
 }
 
@@ -175,24 +145,20 @@ func parseHello(data []byte) (wireHello, error) {
 func encodeHelloAck(
 	pool *bufferpool.Pool,
 	statusCode errs.Code,
-	nodeID string,
-	sessionID string,
 	services []wireServiceEntry,
 ) (*bufferpool.Buffer, error) {
-	// 先完成全部长度与目录约束，失败时不申请任何 Buffer。
-	if !validWireName(nodeID) ||
-		!validWireName(sessionID) ||
+	if pool == nil ||
 		len(services) > math.MaxUint16 ||
 		(statusCode != errs.CodeOK && len(services) != 0) {
 		return nil, errs.ErrInvalidArgument
 	}
-	size := wireHelloAckFixedSize + len(nodeID) + len(sessionID)
+	size := wireHelloAckFixedSize
 	for _, service := range services {
 		if !validWireName(service.name) {
 			return nil, errs.ErrInvalidArgument
 		}
 		size += wireServiceFixedSize + len(service.name)
-		if size > DefaultMaxMessageSize+wireEnvelopeSize {
+		if size > DefaultMaxPayloadSize+wireEnvelopeSize {
 			return nil, errs.ErrTransportMessageTooLarge
 		}
 	}
@@ -200,16 +166,9 @@ func encodeHelloAck(
 	// 按最终准确大小一次申请并顺序写入，握手目录不建立中间序列化对象。
 	buffer := pool.Acquire(size)
 	data := buffer.Bytes()
-	copy(data[:4], wireMagic)
-	binary.BigEndian.PutUint32(data[4:8], uint32(statusCode))
-	data[8] = byte(len(nodeID))
-	data[9] = byte(len(sessionID))
-	binary.BigEndian.PutUint16(data[10:12], uint16(len(services)))
+	binary.BigEndian.PutUint32(data[0:4], uint32(statusCode))
+	binary.BigEndian.PutUint16(data[4:6], uint16(len(services)))
 	offset := wireHelloAckFixedSize
-	copy(data[offset:], nodeID)
-	offset += len(nodeID)
-	copy(data[offset:], sessionID)
-	offset += len(sessionID)
 	for _, service := range services {
 		data[offset] = byte(len(service.name))
 		offset++
@@ -223,32 +182,17 @@ func encodeHelloAck(
 
 // parseHelloAck 严格解析握手结果，并保证目录名称唯一、没有截断或尾部数据。
 func parseHelloAck(data []byte) (wireHelloAck, error) {
-	if len(data) < wireHelloAckFixedSize || string(data[:4]) != wireMagic {
+	if len(data) < wireHelloAckFixedSize {
 		return wireHelloAck{}, errs.ErrTransportProtocol
 	}
-	status := errs.Code(binary.BigEndian.Uint32(data[4:8]))
-	nodeLength := int(data[8])
-	sessionLength := int(data[9])
-	serviceCount := int(binary.BigEndian.Uint16(data[10:12]))
-	offset := wireHelloAckFixedSize
-	if nodeLength == 0 ||
-		sessionLength == 0 ||
-		nodeLength > len(data)-offset ||
-		sessionLength > len(data)-offset-nodeLength {
-		return wireHelloAck{}, errs.ErrTransportProtocol
-	}
-	nodeBytes := data[offset : offset+nodeLength]
-	offset += nodeLength
-	sessionBytes := data[offset : offset+sessionLength]
-	if !utf8.Valid(nodeBytes) || !utf8.Valid(sessionBytes) {
-		return wireHelloAck{}, errs.ErrTransportProtocol
-	}
-	offset += sessionLength
+	status := errs.Code(binary.BigEndian.Uint32(data[0:4]))
+	serviceCount := int(binary.BigEndian.Uint16(data[4:6]))
 	if status != errs.CodeOK && serviceCount != 0 {
 		return wireHelloAck{}, errs.ErrTransportProtocol
 	}
 
 	// 目录只在握手冷路径分配一次，随后成为出站会话的只读兼容快照。
+	offset := wireHelloAckFixedSize
 	services := make([]wireServiceEntry, 0, serviceCount)
 	seen := make(map[string]struct{}, serviceCount)
 	for index := 0; index < serviceCount; index++ {
@@ -283,12 +227,7 @@ func parseHelloAck(data []byte) (wireHelloAck, error) {
 	if offset != len(data) {
 		return wireHelloAck{}, errs.ErrTransportProtocol
 	}
-	return wireHelloAck{
-		statusCode: status,
-		nodeID:     string(nodeBytes),
-		sessionID:  string(sessionBytes),
-		services:   services,
-	}, nil
+	return wireHelloAck{statusCode: status, services: services}, nil
 }
 
 // prependRequest 在已经编码的业务 payload 前原地写入最小 Request 头。
@@ -296,10 +235,11 @@ func prependRequest(
 	buffer *bufferpool.Buffer,
 	requestID uint64,
 	methodID MethodID,
-	remaining timeDuration,
+	remaining time.Duration,
 	serviceName string,
 ) error {
-	if buffer == nil || requestID == 0 || methodID == 0 || remaining == 0 ||
+	remainingMillis, ok := durationToWireMillis(remaining)
+	if buffer == nil || requestID == 0 || methodID == 0 || !ok ||
 		!validWireName(serviceName) {
 		return errs.ErrInvalidArgument
 	}
@@ -311,9 +251,9 @@ func prependRequest(
 	header[0] = wireKindRequest
 	binary.BigEndian.PutUint64(header[1:9], requestID)
 	binary.BigEndian.PutUint64(header[9:17], uint64(methodID))
-	binary.BigEndian.PutUint64(header[17:25], uint64(remaining))
-	header[25] = byte(len(serviceName))
-	copy(header[26:], serviceName)
+	binary.BigEndian.PutUint32(header[17:21], remainingMillis)
+	header[21] = byte(len(serviceName))
+	copy(header[22:], serviceName)
 	return nil
 }
 
@@ -324,19 +264,19 @@ func parseRequest(data []byte) (wireRequestView, error) {
 	}
 	requestID := binary.BigEndian.Uint64(data[1:9])
 	methodID := MethodID(binary.BigEndian.Uint64(data[9:17]))
-	remaining := binary.BigEndian.Uint64(data[17:25])
-	nameLength := int(data[25])
+	remainingMillis := binary.BigEndian.Uint32(data[17:21])
+	nameLength := int(data[21])
 	headerSize := wireRequestFixedSize + nameLength
-	if requestID == 0 || methodID == 0 || remaining == 0 ||
-		remaining > math.MaxInt64 || nameLength == 0 ||
-		headerSize > len(data) || !utf8.Valid(data[26:headerSize]) {
+	if requestID == 0 || methodID == 0 || remainingMillis == 0 ||
+		nameLength == 0 || headerSize > len(data) ||
+		!utf8.Valid(data[22:headerSize]) {
 		return wireRequestView{}, errs.ErrTransportProtocol
 	}
 	return wireRequestView{
 		requestID:        requestID,
 		methodID:         methodID,
-		remainingTimeout: timeDuration(remaining),
-		serviceName:      data[26:headerSize],
+		remainingTimeout: time.Duration(remainingMillis) * time.Millisecond,
+		serviceName:      data[22:headerSize],
 		payloadOffset:    headerSize,
 	}, nil
 }
@@ -381,7 +321,7 @@ func parseNotify(data []byte) (wireNotifyView, error) {
 	}, nil
 }
 
-// prependResponse 在成功业务 payload 或空错误响应前原地写入 Response 头。
+// prependResponse 在成功业务 payload 或空错误响应前原地写入无 Kind 的 Response 头。
 func prependResponse(
 	buffer *bufferpool.Buffer,
 	requestID uint64,
@@ -395,19 +335,18 @@ func prependResponse(
 	if !ok {
 		return errs.ErrRPCEncodeFailed
 	}
-	header[0] = wireKindResponse
-	binary.BigEndian.PutUint64(header[1:9], requestID)
-	binary.BigEndian.PutUint32(header[9:13], uint32(errorCode))
+	binary.BigEndian.PutUint64(header[0:8], requestID)
+	binary.BigEndian.PutUint32(header[8:12], uint32(errorCode))
 	return nil
 }
 
 // parseResponse 返回响应关联字段和 payload 起点。
 func parseResponse(data []byte) (wireResponseView, error) {
-	if len(data) < wireResponseFixedSize || data[0] != wireKindResponse {
+	if len(data) < wireResponseFixedSize {
 		return wireResponseView{}, errs.ErrTransportProtocol
 	}
-	requestID := binary.BigEndian.Uint64(data[1:9])
-	errorCode := errs.Code(binary.BigEndian.Uint32(data[9:13]))
+	requestID := binary.BigEndian.Uint64(data[0:8])
+	errorCode := errs.Code(binary.BigEndian.Uint32(data[8:12]))
 	if requestID == 0 ||
 		(errorCode != errs.CodeOK && len(data) != wireResponseFixedSize) {
 		return wireResponseView{}, errs.ErrTransportProtocol
@@ -427,6 +366,21 @@ func encodeHeartbeat(pool *bufferpool.Pool, kind byte) (*bufferpool.Buffer, erro
 	buffer := pool.Acquire(wireHeartbeatSize)
 	buffer.Bytes()[0] = kind
 	return buffer, nil
+}
+
+// durationToWireMillis 把剩余时长向上取整为协议 uint32 毫秒。
+//
+// 向上取整保证正的亚毫秒 Deadline 不会被编码成零；超过约 49.71 天的值不能由协议表达。
+func durationToWireMillis(remaining time.Duration) (uint32, bool) {
+	if remaining <= 0 {
+		return 0, false
+	}
+	milliseconds := (uint64(remaining) + uint64(time.Millisecond) - 1) /
+		uint64(time.Millisecond)
+	if milliseconds == 0 || milliseconds > math.MaxUint32 {
+		return 0, false
+	}
+	return uint32(milliseconds), true
 }
 
 // validWireName 检查一字节长度名称的共同约束。

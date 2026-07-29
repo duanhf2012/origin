@@ -26,7 +26,9 @@ var (
 	ErrProcessAlreadyRunning error = newCodeError(CodeProcessAlreadyRunning)
 	// ErrProcessControlFailed 表示本地进程控制操作失败。
 	ErrProcessControlFailed error = newCodeError(CodeProcessControlFailed)
-	// ErrServiceRetired 表示 Service 处于退休状态并拒绝新的 RPC 请求。
+	// ErrServiceRetired 供业务主动拒绝退休期间不允许执行的操作。
+	//
+	// 框架不会仅因 Service 处于 Retired 自动返回该错误。
 	ErrServiceRetired error = newCodeError(CodeServiceRetired)
 	// ErrServiceStopping 表示 Service 已经开始停止并拒绝新的工作。
 	ErrServiceStopping error = newCodeError(CodeServiceStopping)

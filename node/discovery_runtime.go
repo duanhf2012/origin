@@ -174,13 +174,25 @@ func (runtime *discoveryRuntime) ResolveRemote(
 		instance.ContractFingerprint != [32]byte(fingerprint) {
 		return rpc.RemoteRoute{}, errs.ErrRPCContractMismatch
 	}
-	if instance.Transport != internaldiscovery.TransportTCP ||
-		instance.Address == "" {
+	transport := ""
+	switch instance.Transport {
+	case internaldiscovery.TransportTCP:
+		if instance.Address == "" {
+			return rpc.RemoteRoute{}, errs.ErrTransportUnavailable
+		}
+		transport = rpc.TransportTCP
+	case internaldiscovery.TransportNATS:
+		if instance.Address != "" {
+			return rpc.RemoteRoute{}, errs.ErrTransportUnavailable
+		}
+		transport = rpc.TransportNATS
+	default:
 		return rpc.RemoteRoute{}, errs.ErrTransportUnavailable
 	}
 	return rpc.RemoteRoute{
 		NodeID:    instance.NodeID,
 		SessionID: instance.SessionID,
+		Transport: transport,
 		Address:   instance.Address,
 	}, nil
 }

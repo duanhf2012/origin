@@ -34,7 +34,7 @@ func (sizer *Sizer) Add(n int) error {
 	if sizer.err != nil {
 		return sizer.err
 	}
-	if n < 0 || n > DefaultMaxMessageSize-sizer.size {
+	if n < 0 || n > DefaultMaxPayloadSize-sizer.size {
 		sizer.err = errs.ErrRPCEncodeFailed
 		return sizer.err
 	}
@@ -379,7 +379,7 @@ func newReader(data []byte, failure error) Reader {
 	return Reader{
 		data:       data,
 		failure:    failure,
-		messageMax: DefaultMaxMessageSize,
+		messageMax: DefaultMaxPayloadSize,
 	}
 }
 

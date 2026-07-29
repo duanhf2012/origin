@@ -24,7 +24,8 @@ const (
 	ServiceStateUnknown ServiceState = iota
 	// ServiceStateRunning 表示 Service 正常提供业务能力。
 	ServiceStateRunning
-	// ServiceStateRetired 表示 Service 暂停接收外部 RPC，但仍保持其他业务运行。
+	// ServiceStateRetired 表示 Service 处于可观察的退休状态，普通 RPC 和其他业务仍按
+	// Running 规则执行；是否拒绝具体操作由业务自行决定。
 	ServiceStateRetired
 )
 
@@ -38,7 +39,7 @@ type RawSnapshot struct {
 // RawNode 描述一个 Node 进程会话及其全部公开 Service。
 type RawNode struct {
 	NodeID    string
-	SessionID string
+	SessionID uint64
 	Labels    map[string]string
 	Transport Transport
 	Address   string

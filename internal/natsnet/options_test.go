@@ -38,8 +38,7 @@ func TestDefaultOptions(t *testing.T) {
 		options.Reconnect.BufferSize != 8*1024*1024 {
 		t.Fatalf("Reconnect 默认值不正确：%+v", options.Reconnect)
 	}
-	if options.Subscription.PendingMessages != 16384 ||
-		options.Subscription.PendingBytes != 8*1024*1024 {
+	if options.Subscription.PendingMessages != 16384 {
 		t.Fatalf("Subscription 默认值不正确：%+v", options.Subscription)
 	}
 }
@@ -84,11 +83,11 @@ func TestValidateOptions(t *testing.T) {
 		{name: "small reconnect buffer", change: func(o *Options) {
 			o.Reconnect.BufferSize = o.MaxMessageSize - 1
 		}},
+		{name: "invalid disabled reconnect buffer", change: func(o *Options) {
+			o.Reconnect.BufferSize = -2
+		}},
 		{name: "zero pending messages", change: func(o *Options) {
 			o.Subscription.PendingMessages = 0
-		}},
-		{name: "small pending bytes", change: func(o *Options) {
-			o.Subscription.PendingBytes = o.MaxMessageSize - 1
 		}},
 		{name: "password without username", change: func(o *Options) {
 			o.Auth.Password = "secret"
@@ -111,6 +110,13 @@ func TestValidateOptions(t *testing.T) {
 		{name: "tls fields while disabled", change: func(o *Options) {
 			o.TLS.ServerName = "localhost"
 		}},
+	}
+
+	// -1 是 RPC Adapter 禁用断线发送缓冲的唯一合法负值。
+	disabled := DefaultOptions("test.node", "nats://127.0.0.1:4222")
+	disabled.Reconnect.BufferSize = -1
+	if _, err := validateOptions(disabled); err != nil {
+		t.Fatalf("Reconnect.BufferSize=-1 被拒绝: %v", err)
 	}
 
 	for _, test := range tests {
@@ -155,35 +161,21 @@ func TestValidateSubscriptionOptions(t *testing.T) {
 	t.Parallel()
 
 	// 零值必须完整继承 Connection 默认值。
-	defaults := SubscriptionDefaults{PendingMessages: 10, PendingBytes: 1024}
-	resolved, err := validateSubscriptionOptions(defaults, 512, SubscriptionOptions{})
+	defaults := SubscriptionDefaults{PendingMessages: 10}
+	resolved, err := validateSubscriptionOptions(defaults, SubscriptionOptions{})
 	if err != nil {
 		t.Fatalf("validateSubscriptionOptions() error = %v", err)
 	}
-	if resolved.PendingMessages != 10 || resolved.PendingBytes != 1024 {
+	if resolved.PendingMessages != 10 {
 		t.Fatalf("resolved = %+v", resolved)
 	}
 
-	// 两个负数分支分别验证，防止无限 Pending 语义渗入包装层。
-	for _, options := range []SubscriptionOptions{
-		{PendingMessages: -1},
-		{PendingBytes: -1},
-	} {
-		if _, err = validateSubscriptionOptions(defaults, 512, options); !errors.Is(
-			err,
-			errs.ErrInvalidConfig,
-		) {
-			t.Fatalf("options %+v error = %v", options, err)
-		}
-	}
-
-	// 自定义 PendingBytes 不能小于最大合法消息，避免配置允许的消息在 Handler 前必然被丢弃。
+	// 负消息数不能借用 nats.go 的无限 Pending 语义。
 	if _, err = validateSubscriptionOptions(
 		defaults,
-		512,
-		SubscriptionOptions{PendingBytes: 511},
+		SubscriptionOptions{PendingMessages: -1},
 	); !errors.Is(err, errs.ErrInvalidConfig) {
-		t.Fatalf("small PendingBytes error = %v", err)
+		t.Fatalf("negative PendingMessages error = %v", err)
 	}
 }
 

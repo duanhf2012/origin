@@ -24,7 +24,7 @@ func BenchmarkFrameLength(b *testing.B) {
 func BenchmarkSendQueue(b *testing.B) {
 	// 使用关闭统计的 Pool 测量固定环形队列本身，不把诊断原子计数混入结果。
 	pool := bufferpool.NewPool(bufferpool.Options{})
-	queue := newSendQueue(4096, 8*1024*1024)
+	queue := newSendQueue(4096)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
@@ -46,7 +46,6 @@ func BenchmarkWriteItem(b *testing.B) {
 	pool := bufferpool.NewPool(bufferpool.Options{})
 	options := smallConnectionOptions(pool)
 	options.MaxMessageSize = 1024
-	options.SendQueueBytes = 1024
 	conn := newConn(
 		discardNetConn{},
 		options,

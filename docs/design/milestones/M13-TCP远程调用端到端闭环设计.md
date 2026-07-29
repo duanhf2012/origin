@@ -1,6 +1,6 @@
 # Origin 第三版 M13 TCP 远程调用端到端闭环设计
 
-> 文档状态：已实现并验收
+> 文档状态：M13 开发期基线已实现并验收；最终 TCP Wire v1 精简并入 M15
 >
 > 创建日期：2026-07-28
 >
@@ -61,8 +61,8 @@ M13 不包含：
 - 修改 M11/M12 已确认的基础类型、普通结构体、Protobuf 和自定义 Codec 编码规则。
 
 M13 不为尚未实现的压缩预留 Flags、算法或协商字段。以后只有真实业务数据证明压缩可以
-降低总体延迟或带宽成本时，才通过新的协议 Magic 引入完整设计，不能让每一条低延迟小包
-长期承担无效字段。
+降低总体延迟或带宽成本时，才通过新的 WireVersion 引入完整设计，不能让每一条低延迟
+小包长期承担无效字段。
 
 ## 3. v2 对照与 v3 调整
 
@@ -142,7 +142,7 @@ M5 `tcpnet` 保持通用网络层，只负责：
 - 四字节长度帧；
 - socket、Listener、Conn 和读写循环；
 - Buffer 唯一所有权；
-- 双重有界发送队列；
+- 有界发送消息队列；
 - ReadTimeout、WriteTimeout 和 TCP KeepAlive；
 - 单次 Dial、立即 Close 和 Wait。
 
@@ -187,13 +187,13 @@ nodes:
 
     rpc:
       transport: tcp
-      max_message_size: 4M
+      max_payload_size: 4M
 
       tcp:
         listen: 0.0.0.0:7101
         advertise: 10.0.1.20:7101
-        send_queue_frames: 16384
-        read_timeout: 15s
+        send_queue_messages: 16384
+        read_idle_timeout: 15s
         write_timeout: 15s
 
     services:
@@ -207,22 +207,26 @@ nodes:
 3. `listen` 是当前 Node 绑定地址；
 4. `advertise` 是后续 Discovery 和 M13 内部测试目标源对外提供的可达地址；
 5. `advertise` 不允许通配地址或零端口；
-6. `max_message_size` 表示业务 payload 上限，默认 `4M`；
+6. `max_payload_size` 表示业务 payload 上限，默认 `4M`；
 7. TCP 实际长度帧上限为业务上限加固定 `512B` RPC 包络余量；
 8. 接收端先用“业务上限 + 512B”限制完整帧分配，再在解析固定头后校验真实业务 payload；
-9. `send_queue_frames` 表示每条连接最多等待发送的完整 RPC 包数量，默认 `16384`，最大
+9. `send_queue_messages` 表示每条连接最多等待发送的完整 RPC 包数量，默认 `16384`，最大
    `65536`；
-10. RPC 配置不再暴露 `send_queue_bytes`，减少两个“队列大小”概念造成的理解成本；
-11. 底层 M5 仍保留必要的字节额度，RPC Adapter 自动使用
-    `max(8M, max_message_size + 512B)`，防止 `16384` 条大包形成数十 GiB 内存滞留；
-12. 帧数或内部字节额度任一达到上限都立即返回 Transport 过载；
+10. TCP RPC 队列只按 `send_queue_messages` 限制消息数量，不再配置或内部维护
+    `send_queue_bytes`；
+11. 队列达到消息数量上限时立即返回 Transport 过载；
+12. `max_payload_size` 只限制单个 RPC 业务 payload 的字节大小，不表示队列长度；
 13. `write_timeout` 默认 `15s`，必须大于零；
-14. `read_timeout` 默认 `15s`；`0s` 显式关闭应用层心跳和读空闲检测；
+14. `read_idle_timeout` 默认 `15s`；`0s` 显式关闭应用层心跳和读空闲检测；
 15. RPC 不增加独立 `default_timeout`，继续使用 Service/Node 的统一 Await 默认链；
 16. M13 不增加 `peers`、`static_targets`、`heartbeat` 或 `reconnect` 配置段。
 
 拨号超时、握手超时、重连退避和抖动先使用框架固定安全默认值。真实部署证明必须调整时，
 再增加最小配置，避免把实现细节提前暴露给项目。
+
+上述名称是 M15 后的最终公开外观。M13 已提交代码仍使用开发期字段
+`max_message_size`、`send_queue_frames` 和 `read_timeout`；M15 在同步精简 TCP Wire 时
+一次性迁移配置结构、错误信息、测试和示例，不维护两套字段或长期兼容别名。
 
 ## 7. 为什么采用有向连接
 
@@ -410,23 +414,28 @@ M13 固定复用 M5：
 ### 10.2 握手包
 
 握手发生在 TCP 连接建立后的固定阶段：主动方第一包只能是 Hello，被连接方第一包只能是
-HelloAck。因此握手包不再携带 Kind、Reserved、Nonce 或独立 ProtocolVersion。
+HelloAck。因此握手包不携带 Kind、Reserved 或 Nonce。
 
-协议标识固定使用：
+M13 开发期首次实现使用四字节 ASCII `ORP1` Magic 和字符串 SessionID。M15 已确认在
+引入 NATS RPC 和全局 `uint64` SessionID 时同步完成最终 TCP Wire v1 精简；Origin v3
+尚未正式发布，不保留开发期协议兼容分支。最终协议删除 ASCII Magic，由 Hello 首字节
+固定携带：
 
 ```text
-Magic[4] = "ORP1"
+WireVersion uint8 = 1
 ```
 
-`ORP1` 同时表达“Origin RPC”与第一代不兼容线协议，不需要从构建版本、配置或服务发现
-生成。未来只有线布局发生不兼容变化时才改为 `ORP2`，不能在同一个 Magic 下猜测字段。
+WireVersion 是框架固定的 TCP RPC 线布局代次，不从构建版本、配置或服务发现生成。未来
+只有线布局发生不兼容变化时才递增；收到不支持的值立即按传输协议错误关闭连接，不猜测
+字段或回退旧布局。
 
 Hello 完整布局为：
 
 ```text
-Magic[4]          = "ORP1"
+WireVersion       uint8 = 1
 SourceNodeLength  uint8
 TargetNodeLength  uint8
+TargetSessionID   uint64
 SourceNodeID      []byte
 TargetNodeID      []byte
 ```
@@ -434,11 +443,8 @@ TargetNodeID      []byte
 HelloAck 完整布局为：
 
 ```text
-Magic[4]          = "ORP1"
 StatusCode        uint32
-NodeIDLength      uint8
 ServiceCount      uint16
-NodeID            []byte
 ServiceEntries    []ServiceEntry
 ```
 
@@ -452,33 +458,38 @@ ContractFingerprint [32]byte
 
 字段保留原因如下：
 
-- Magic：在申请和解释复杂状态前拒绝错误协议，并标识不兼容线协议代次；
+- WireVersion：用一个字节拒绝不兼容线布局，不在每个包重复四字节 ASCII Magic；
 - SourceNodeID：识别调用来源，并拒绝相同 NodeID 的后来重复连接；
-- TargetNodeID：发现连接到了错误地址或错误 Node；
-- HelloAck NodeID：让主动方再次确认远端实际身份；
+- TargetNodeID 与 TargetSessionID：发现错误地址、错误 Node 或陈旧服务发现代次；
 - StatusCode：明确返回重复 NodeID、目标不符、契约目录过大等握手失败；
 - ServiceCount 与各长度：提供有界、无反射的确定性解析；
 - ContractFingerprint：在发送业务 payload 前检查实际 Service 契约兼容性。
 
-Ack 位于同一条有序 TCP 连接上，不存在跨连接匹配问题，所以无需 Nonce。`StatusCode != 0`
-时 `ServiceCount` 必须为零；主动方读取稳定错误码后关闭连接。全部多字节整数使用 Big
-Endian。NodeID 和 ServiceName 都限制为 `1～255` 个 UTF-8 字节，正好使用 `uint8`
-长度；完整握手包仍受 RPC 线协议包上限保护。
+TCP 连接本身已经唯一标识来源连接生命周期，开发期 Hello 中的 SourceSessionID 只被
+保存而没有参与任何判断，因此删除。服务端只有在 TargetNodeID 和 TargetSessionID 都
+命中自身时才返回成功，所以 HelloAck 不再重复 WireVersion、NodeID、SessionID 及对应
+长度。Ack 位于同一条有序 TCP 连接上，不存在跨连接匹配问题，所以也无需 Nonce。
+
+`StatusCode != 0` 时 `ServiceCount` 必须为零；主动方读取稳定错误码后关闭连接。全部多
+字节整数使用 Big Endian。NodeID 和 ServiceName 都限制为 `1～255` 个 UTF-8 字节，
+正好使用 `uint8` 长度；完整握手包仍受 RPC 线协议包上限保护。最终 Hello 和 HelloAck
+固定部分分别为 `11B` 和 `6B`。
 
 ### 10.3 业务包类型
 
-握手完成后首字节 `Kind` 固定为：
+握手完成后，主动方到被连接方的 Request、Notify 和 Ping 使用首字节 Kind：
 
 | Kind | 数值 | 允许方向 |
 |---|---:|---|
 | Request | 1 | 主动方 → 被连接方 |
 | Notify | 2 | 主动方 → 被连接方 |
-| Response | 3 | 被连接方 → 主动方 |
-| Ping | 4 | 主动方 → 被连接方 |
-| Pong | 5 | 被连接方 → 主动方 |
+| Ping | 3 | 主动方 → 被连接方 |
+| Pong | 4 | 被连接方 → 主动方 |
 
-连接阶段和有向角色已经确定允许的包。未知 Kind、错误阶段或错误方向的 Kind 都按协议错误
-关闭连接。M13 不为未来功能保留 Flags、Compression 或 Reserved 字节。
+被连接方到主动方在握手后只可能发送 Response 或一字节 Pong；Response 最小为十二字节，
+因此通过连接角色和帧长度确定，不再携带 Kind。Request 与 Notify 无法从方法契约、payload
+或连接方向推导，继续保留一字节 Kind。未知 Kind、错误阶段、错误方向或非法长度都按协议
+错误关闭连接。协议不为未来功能保留 Flags、Compression 或 Reserved 字节。
 
 ### 10.4 Request 与 Notify
 
@@ -488,17 +499,18 @@ Request 使用：
 Kind                    uint8 = 1
 RequestID               uint64
 MethodID                uint64
-RemainingTimeoutNanos   uint64
+RemainingTimeoutMillis  uint32
 ServiceNameLength       uint8
 ServiceName             []byte
 BusinessPayload         []byte
 ```
 
-固定部分为 `26B`。约束如下：
+固定部分为 `22B`。约束如下：
 
 - `RequestID != 0`；
 - `MethodID != 0`；
-- `RemainingTimeoutNanos > 0`；
+- `RemainingTimeoutMillis > 0`；
+- 剩余时间向上取整到毫秒，最大约 `49.71` 天，超过 `uint32` 上限直接返回参数错误；
 - ServiceName 非空且不超过 255 字节。
 
 Notify 不需要响应关联和执行 Deadline，使用更短的独立布局：
@@ -517,12 +529,14 @@ BusinessPayload         []byte
 握手指纹验证，因此不重复传 ContractID。业务 payload 允许为零字节，外层 M5 长度帧已经
 提供 payload 边界，所以业务包不再单独携带长度。
 
+不使用 `RequestID=0` 表示 Notify，否则每个 Notify 反而增加八字节；也不占用 MethodID
+标志位，避免改变稳定 ID 空间和碰撞规则。
+
 ### 10.5 Response
 
 Response 使用：
 
 ```text
-Kind              uint8 = 3
 RequestID         uint64
 ErrorCode         uint32
 BusinessPayload   []byte
@@ -530,13 +544,17 @@ BusinessPayload   []byte
 
 规则如下：
 
-- 固定 Response 头为 `13B`；
+- 固定 Response 头为 `12B`；
 - `RequestID != 0`；
 - `ErrorCode = 0` 表示成功，payload 可以为空；
 - `ErrorCode != 0` 表示失败，payload 必须为空；
 - 只传 `errs.Code`，不传本地 error 指针、动态 Message、Stack 或底层 cause；
 - 未识别的错误码仍由 `errs.New(code)` 保留数值；
 - 目标业务 panic 只在目标 Node 记录一次 Stack，并返回 `CodeRPCExecutionPanic`。
+
+主动方先识别唯一的一字节 Pong，其余合法帧按 Response 解析；小于十二字节、RequestID
+为零或错误响应携带 payload 都是协议错误。连接方向已经提供类型边界，因此不重复携带
+Response Kind。
 
 ### 10.6 Ping 与 Pong
 
@@ -546,9 +564,12 @@ Ping 和 Pong 都只有一个字节：
 Kind uint8
 ```
 
-主动拨号方发送 `Kind=4` 的 Ping，被连接方通过同一连接回送 `Kind=5` 的 Pong。TCP 本身
+主动拨号方发送 `Kind=3` 的 Ping，被连接方通过同一连接回送 `Kind=4` 的 Pong。TCP 本身
 保证同一连接内有序，不需要心跳 Nonce。它们不进入 Service 队列、不创建 pendingCall，
 也不使用 RPC RequestID。
+
+理论上可以把零长度帧解释为心跳，但心跳不在高频业务热路径，每次节省一字节没有实际
+收益，反而会把意外空帧静默解释为存活信号，因此继续使用显式一字节 Kind。
 
 ### 10.7 压缩调研与结论
 
@@ -566,8 +587,8 @@ Kind uint8
 
 Origin 面向游戏服务器内部低延迟 RPC，主要是已经紧凑编码的小包；当前没有 Benchmark
 证明压缩能抵消算法、Buffer 和分支成本。因此 M13 不支持压缩，也不在线协议中预留压缩
-字段。将来只有真实流量数据证明有收益时，才以新 Magic 设计完整的算法协商、压缩前后
-大小上限和解压炸弹保护。
+字段。将来只有真实流量数据证明有收益时，才以新 WireVersion 设计完整的算法协商、
+压缩前后大小上限和解压炸弹保护。
 
 ## 11. 发送与接收流程
 
@@ -704,7 +725,7 @@ Request 或 Notify 成功进入目标 Service FIFO 后，就已经成为被调�
 
 1. 已排队但尚未开始的任务继续等待并执行，不从 Service FIFO 中扫描或删除；
 2. 已经开始的任务继续执行，不因网络断开取消它的 Context；
-3. Request 仍受原包携带的 `RemainingTimeoutNanos` 限制，Node/Service Stop 仍按各自规则
+3. Request 仍受原包携带的 `RemainingTimeoutMillis` 限制，Node/Service Stop 仍按各自规则
    终止或排空；
 4. 业务中的 Redis、数据库和其他阻塞调用应遵守该 Context，框架不能强杀 Go goroutine；
 5. 执行结束时若原会话已经关闭，直接释放 Response Buffer，不发送、不重试，也不产生
@@ -776,7 +797,7 @@ Async 在实际完成任务进入 Await 前已经执行发送。为避免复制�
 
 M13 为每个 Node RPC Runtime 建立一条共享 M8 DeadlineQueue：
 
-- 每个入站 Request 按 `RemainingTimeoutNanos` 登记一条 Deadline；
+- 每个入站 Request 按 `RemainingTimeoutMillis` 还原相对剩余时间并登记一条 Deadline；
 - 目标 Context 使用 `context.WithCancelCause`，不为每个请求创建 Go Runtime Timer；
 - Deadline watcher 到期后取消对应目标 Context；
 - 请求完成或队列拒绝时取消 Deadline 并清理绑定；
@@ -815,16 +836,16 @@ Service 已经 Ready，不代替业务健康检查，也不决定 Discovery TTL�
 该边界与 gRPC 官方 Keepalive 文档区分“连接 Keepalive”和“Service Health Checking”的
 方式一致：<https://grpc.io/docs/guides/keepalive/>。
 
-当 `read_timeout > 0`：
+当 `read_idle_timeout > 0`：
 
-- 主动拨号方每 `read_timeout / 3` 发送一次 Ping；
+- 主动拨号方每 `read_idle_timeout / 3` 发送一次 Ping；
 - 被连接方收到后立即通过同一连接回送 Pong；
 - 正常 Response 和 Pong 都会刷新主动方读空闲时间；
 - Request、Notify 和 Ping 都会刷新被连接方读空闲时间；
 - 心跳不进入 Service、不产生 pending、不记录普通成功日志；
 - Ping/Pong 无法进入发送队列时关闭连接，让过载快速显现。
 
-当 `read_timeout = 0s` 时不启动应用层心跳，M5 ReadTimeout 也关闭；系统 TCP KeepAlive
+当 `read_idle_timeout = 0s` 时不启动应用层心跳，M5 ReadTimeout 也关闭；系统 TCP KeepAlive
 仍按 M5 默认工作。
 
 ### 14.2 关闭原因
@@ -846,7 +867,7 @@ Service 已经 Ready，不代替业务健康检查，也不决定 Discovery TTL�
 - 远端目录没有 Service；
 - 契约不一致；
 - pending 达到 `65536`；
-- M5 发送帧数或 RPC 内部派生字节额度达到上限；
+- M5 发送帧数达到上限；
 - payload 或完整包超过上限；
 - Context 已取消或已经到期。
 
@@ -861,9 +882,11 @@ Request 无法进入目标 Service FIFO 时，目标端返回对应稳定错误�
 
 - `CodeServiceQueueFull`；
 - `CodeServiceNotReady`；
-- `CodeServiceRetired`；
 - `CodeServiceStopping`；
 - `CodeServiceStopped`。
+
+`Retired` 只是一项服务发现可观察状态。框架在 TCP 与 NATS 下都继续正常准入 Request、
+Notify 和 Broadcast；`CodeServiceRetired` 只保留给业务主动返回。
 
 Notify 无响应，只在目标侧限频记录。
 
@@ -973,8 +996,9 @@ M13 继续服从当前 M7～M11 停止骨架：
 5. 关闭 RPC DeadlineQueue；
 6. 继续既有 Service Scheduler 和 TimerEngine 回收。
 
-M16 会按已经确认的最终语义调整顺序，使 `OnStop(ctx)` 能在独占收尾阶段执行 Await RPC。
-M13 不把当前临时顺序写成最终兼容承诺。
+M15 先把 TCP/NATS Runtime 调整为“停止入站、最终关闭”两个内部阶段；M16 再按已经确认
+的最终语义编排顺序，使 `OnStop(ctx)` 能在独占收尾阶段执行 Await RPC。M13 不把当前
+临时顺序写成最终兼容承诺。
 
 ## 18. 服务发现与事件边界
 
@@ -1047,7 +1071,7 @@ M13 至少保存：
 - 最大长度和超限；
 - 空 NodeID、空 ServiceName、超长名称；
 - 零 RequestID、零 MethodID 和零剩余超时；
-- 未知 Kind、错误方向、错误阶段和错误 Magic；
+- 未知 Kind、错误方向、错误阶段和错误 WireVersion；
 - 错误 Response 携带 payload；
 - 截断包、伪造长度和整数边界；
 - Parser Fuzz 不 panic、不越界。
@@ -1058,7 +1082,7 @@ M13 至少保存：
 
 - 单向关注只建立一条有向连接；
 - 双向关注建立两条相互独立的连接；
-- 握手身份不符、目标 NodeID 不符和错误 Magic；
+- 握手身份不符、目标 NodeID/TargetSessionID 不符和错误 WireVersion；
 - 相同 SourceNodeID 的后来连接被拒绝，旧连接不受影响；
 - 旧连接移除后新连接可以建立；
 - 首次连接、断开、退避、恢复、显式地址迁移和目标 Remove；
@@ -1136,13 +1160,15 @@ M13 确认时已经同步以下细节：
 
 1. M5 文档中“RPC Adapter 同步解码后 Release”调整为“同步解析固定头后，把 Buffer
    唯一所有权转移给 Service Task 或 pendingCall”，避免网络 goroutine 执行业务解码；
-2. 完整配置示例的 TCP RPC `read_timeout` 从 `0s` 调整为建议默认 `15s`；
+2. 完整配置示例的 TCP RPC `read_idle_timeout` 从 `0s` 调整为建议默认 `15s`；
 3. M5 的 RPC 线协议帧上限使用“业务 payload 上限 + 512B 包络余量”；
 4. M11 的 `localCall` 不与远端状态机长期复制：共享一次性完成语义，但同 Node 保持未池化；
    远端 pendingCall 以值存入会话 Map，跨平台零分配基准证明不需要对象池；
 5. 内存复用文档补充 headroom 原地前置和接收端丢弃前缀规则；
 6. 服务发现文档继续保持无正式 static Provider，后续 Provider 驱动同一目标生命周期；
-7. 完整配置只公开 `send_queue_frames`，RPC Adapter 内部派生 M5 字节上限；
+7. 完整配置只公开 `send_queue_messages`；2026-07-29 最终确认进一步删除 RPC Adapter
+   和 M5 发送队列的字节额度，改为只限制消息数量；开发期
+   `send_queue_frames` 由 M15 一次迁移；
 8. 所有“新连接替换旧连接”和 Revision 描述改为“先建立者保留，地址显式迁移”；
 9. 所有“断线取消被调用方任务”描述改为“已准入任务继续执行并安全丢弃响应”。
 
@@ -1156,7 +1182,7 @@ M13 确认时已经同步以下细节：
 | 2 | TCP Adapter 位置 | 放在 `rpc` 包私有实现文件中，不新增只转发的公共包 |
 | 3 | 正式 static 配置 | 不增加；M13 集成夹具驱动内部目标生命周期 |
 | 4 | 握手契约处理 | 返回公开 Service 的 `ServiceName + ContractFingerprint`；单个不匹配不关闭整条连接 |
-| 5 | 线协议代次 | Magic 固定 `ORP1`，不增加独立 ProtocolVersion、Nonce 或 Reserved |
+| 5 | 线协议代次 | M15 最终收敛为 Hello 首字节 `WireVersion=1`；删除 ASCII Magic，不增加 Nonce 或 Reserved |
 | 6 | NodeID 在线协议中的位置 | 只放握手，不进入每个业务包 |
 | 7 | 每次调用的契约字段 | 携带 ServiceName、MethodID；ContractID 不进入 TCP 线协议 |
 | 8 | Context Value | 不跨进程序列化，只传播剩余 Deadline |
@@ -1164,15 +1190,15 @@ M13 确认时已经同步以下细节：
 | 10 | Cancel 包 | M13 不实现；本地立即取消，目标执行到原 Deadline；断线不取消已准入任务 |
 | 11 | pending 上限 | 每条出站会话固定最多 `65536`，不预分配、不增加配置 |
 | 12 | pendingCall 池化 | 以值存入会话 Map；跨平台基准均为 `0 B/op`、`0 allocs/op`，不增加对象池 |
-| 13 | RPC 包长 | `max_message_size` 是业务 payload；M5 完整帧上限额外加固定 `512B` |
+| 13 | RPC 包长 | `max_payload_size` 是业务 payload；M5 完整帧上限额外加固定 `512B` |
 | 14 | 低拷贝封包 | BufferPool 增加 headroom/Prepend/DiscardPrefix，不复制完整 payload |
-| 15 | 发送队列 | 配置只暴露 `send_queue_frames=16384`；内部字节上限至少 `8M`，任一满立即过载 |
-| 16 | ReadTimeout 与心跳 | RPC 默认 `15s`；Ping/Pong 只做传输健康检查；`0s` 显式关闭 |
+| 15 | 发送队列 | 最终公开 `send_queue_messages=16384`；M15 同步迁移旧名并删除历史字节额度 |
+| 16 | ReadIdleTimeout 与心跳 | 最终公开 `read_idle_timeout=15s`；Ping/Pong 只做传输健康检查；`0s` 显式关闭 |
 | 17 | 重连 | `200ms` 指数退避到 `5s`，正负 `20%` 抖动，目标生命周期结束即停止 |
 | 18 | 重复 NodeID | 先建立连接保留，后来连接拒绝；不使用 Revision，不自动替换地址 |
 | 19 | 断线重发 | 一律不自动重发 Request/Notify |
 | 20 | 已接收任务 | 调用方断线后继续执行；响应无法投递时释放，不制造日志风暴 |
-| 21 | 压缩 | M13 不支持、不预留字段；以后由数据驱动并使用新的协议 Magic |
+| 21 | 压缩 | M13 不支持、不预留字段；以后由数据驱动并使用新的 WireVersion |
 | 22 | TCP 连接事件 | 只做内部诊断，不冒充 Discovery Added/Lost 业务事件 |
 | 23 | M13 停止边界 | 完成当前 Runtime 关闭和 pending 清理；最终 `OnStop Await` 顺序留 M16 |
 
@@ -1180,7 +1206,8 @@ M13 确认时已经同步以下细节：
 
 M13 已于 2026-07-28 完成实现和验收：
 
-1. 实现 `ORP1` Hello、HelloAck、Request、Notify、Response、Ping 和 Pong 最小协议；
+1. 实现开发期 `ORP1` Hello、HelloAck、Request、Notify、Response、Ping 和 Pong 最小
+   协议；M15 按第 10 节最终布局迁移，不保留双协议兼容分支；
 2. 实现每个 Node 独立 Listener、显式目标生命周期、契约指纹目录、重复 NodeID 拒绝、
    RequestID、pending、重连、心跳和断线完成；
 3. Request 和 Notify 的网络 goroutine 只解析固定头和执行准入，业务解码及方法调用始终

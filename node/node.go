@@ -4,11 +4,12 @@ package node
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
 	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -31,7 +32,7 @@ type interfaceService = service.IService
 type Node struct {
 	// id、private 和 logger 在构造完成后只读。
 	id        string
-	sessionID string
+	sessionID uint64
 	private   bool
 	labels    map[string]string
 	logger    originlog.Logger
@@ -56,6 +57,9 @@ type Node struct {
 	discoverySource       *internaldiscovery.Source
 	discoverySubscription *internaldiscovery.Subscription
 	discoveryPublished    atomic.Bool
+	// runtimeFailure 只通知 Application 的唯一控制路径；failureOnce 防止重复撤销和停机。
+	runtimeFailure func(nodeID string, cause error)
+	failureOnce    sync.Once
 }
 
 // nodeTimerResources 管理当前 Node 生命周期内唯一 TimerID 和共享活跃额度。
@@ -171,6 +175,7 @@ func New(
 		rpcRuntime:      rpcRuntime,
 		discovery:       discoveryRuntime,
 		discoverySource: options.DiscoverySource,
+		runtimeFailure:  options.RuntimeFailure,
 	}
 	discoveryRuntime.bindNode(instance)
 	if err := rpcRuntime.BindSessionID(sessionID); err != nil {
@@ -178,6 +183,9 @@ func New(
 	}
 	if err := rpcRuntime.BindRemoteResolver(discoveryRuntime); err != nil {
 		return nil, fmt.Errorf("绑定 Node %q RPC 服务发现目录: %w", config.ID, err)
+	}
+	if err := rpcRuntime.BindFailureHandler(instance.handleRuntimeFailure); err != nil {
+		return nil, fmt.Errorf("绑定 Node %q RPC 终态处理器: %w", config.ID, err)
 	}
 	instance.state.Store(uint32(StateCreated))
 
@@ -269,13 +277,33 @@ func New(
 	return instance, nil
 }
 
-// newSessionID 使用系统安全随机源创建不由业务配置控制的 Node 进程会话标识。
-func newSessionID() (string, error) {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
+// handleRuntimeFailure 先撤销当前会话的公开发现，再唤醒 Application 的串行停机路径。
+func (node *Node) handleRuntimeFailure(cause error) {
+	if node == nil || cause == nil {
+		return
 	}
-	return hex.EncodeToString(raw[:]), nil
+	node.failureOnce.Do(func() {
+		node.withdrawDiscovery()
+		if node.runtimeFailure != nil {
+			node.runtimeFailure(node.id, cause)
+		}
+	})
+}
+
+// newSessionID 使用系统安全随机源创建不由业务配置控制的 Node 进程会话标识。
+func newSessionID() (uint64, error) {
+	var raw [8]byte
+	for {
+		// crypto/rand 直接生成不可预测的进程会话；不混入 NodeID、时间或机器信息。
+		if _, err := rand.Read(raw[:]); err != nil {
+			return 0, err
+		}
+		sessionID := binary.BigEndian.Uint64(raw[:])
+		if sessionID != 0 {
+			return sessionID, nil
+		}
+		// 全零概率为 2^-64；显式重试让零值始终保留为“未绑定/非法”语义。
+	}
 }
 
 // cloneLabels 冻结 Node 发布标签，防止配置根 Map 在启动后被外部修改。
@@ -631,9 +659,14 @@ func (node *Node) publishDiscovery() error {
 	}
 	transport := internaldiscovery.TransportNone
 	address := ""
-	if advertised, exists := node.rpcRuntime.AdvertiseAddress(); exists {
-		transport = internaldiscovery.TransportTCP
-		address = advertised
+	if transportName, advertised, exists := node.rpcRuntime.TransportInfo(); exists {
+		switch transportName {
+		case rpc.TransportTCP:
+			transport = internaldiscovery.TransportTCP
+			address = advertised
+		case rpc.TransportNATS:
+			transport = internaldiscovery.TransportNATS
+		}
 	}
 	if err := node.discoverySource.Publish(internaldiscovery.RawNode{
 		NodeID:    node.id,

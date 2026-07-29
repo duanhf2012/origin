@@ -200,7 +200,7 @@ func TestResponseWriterAllocatesOnceAndReleases(t *testing.T) {
 	t.Parallel()
 
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
-	writer := newResponseWriter(pool, DefaultMaxMessageSize, 0)
+	writer := newResponseWriter(pool, DefaultMaxPayloadSize, 0)
 	data, err := writer.Allocate(32)
 	if err != nil || len(data) != 32 {
 		t.Fatalf("Allocate() = (%d, %v)", len(data), err)
@@ -217,8 +217,8 @@ func TestResponseWriterAllocatesOnceAndReleases(t *testing.T) {
 		t.Fatalf("released stats = %+v", stats)
 	}
 
-	failed := newResponseWriter(pool, DefaultMaxMessageSize, 0)
-	if _, err := failed.Allocate(DefaultMaxMessageSize + 1); !errors.Is(
+	failed := newResponseWriter(pool, DefaultMaxPayloadSize, 0)
+	if _, err := failed.Allocate(DefaultMaxPayloadSize + 1); !errors.Is(
 		err,
 		errs.ErrRPCEncodeFailed,
 	) {
@@ -243,19 +243,19 @@ func TestReaderChecksElementMinimumBeforeAllocation(t *testing.T) {
 // TestCodecMessageSizeBoundary 锁定包含四字节长度前缀后的准确 4M 上限。
 func TestCodecMessageSizeBoundary(t *testing.T) {
 	t.Parallel()
-	maximumPayload := make([]byte, DefaultMaxMessageSize-4)
+	maximumPayload := make([]byte, DefaultMaxPayloadSize-4)
 	sizer := NewSizer()
 	if err := sizer.AddBytes(maximumPayload); err != nil {
 		t.Fatalf("maximum AddBytes() error = %v", err)
 	}
 	size, err := sizer.Size()
-	if err != nil || size != DefaultMaxMessageSize {
+	if err != nil || size != DefaultMaxPayloadSize {
 		t.Fatalf("maximum Size() = %d, error = %v", size, err)
 	}
 
 	// 再增加一个内容字节就会使“长度前缀 + 内容”超过整条消息硬上限。
 	oversize := NewSizer()
-	if err := oversize.AddBytes(make([]byte, DefaultMaxMessageSize-3)); !errors.Is(
+	if err := oversize.AddBytes(make([]byte, DefaultMaxPayloadSize-3)); !errors.Is(
 		err,
 		errs.ErrRPCEncodeFailed,
 	) {
@@ -358,7 +358,7 @@ func TestCustomPayloadBoundaryRoundTrip(t *testing.T) {
 		t.Fatalf("short-header ReserveCustom() error = %v", err)
 	}
 	fullSizer := NewSizer()
-	if err := fullSizer.Add(DefaultMaxMessageSize); err != nil {
+	if err := fullSizer.Add(DefaultMaxPayloadSize); err != nil {
 		t.Fatalf("full Sizer.Add() error = %v", err)
 	}
 	if err := fullSizer.AddCustom(0); !errors.Is(
@@ -391,15 +391,15 @@ func TestCustomPayloadBoundaryRoundTrip(t *testing.T) {
 	}
 
 	maximum := NewSizer()
-	if err := maximum.AddCustom(DefaultMaxMessageSize - 4); err != nil {
+	if err := maximum.AddCustom(DefaultMaxPayloadSize - 4); err != nil {
 		t.Fatalf("maximum AddCustom() error = %v", err)
 	}
-	maximumData := make([]byte, DefaultMaxMessageSize)
+	maximumData := make([]byte, DefaultMaxPayloadSize)
 	maximumWriter := NewWriter(maximumData)
 	maximumPayload, err := maximumWriter.ReserveCustom(
-		DefaultMaxMessageSize - 4,
+		DefaultMaxPayloadSize - 4,
 	)
-	if err != nil || len(maximumPayload) != DefaultMaxMessageSize-4 {
+	if err != nil || len(maximumPayload) != DefaultMaxPayloadSize-4 {
 		t.Fatalf(
 			"maximum ReserveCustom() length = %d, error = %v",
 			len(maximumPayload),
@@ -411,7 +411,7 @@ func TestCustomPayloadBoundaryRoundTrip(t *testing.T) {
 	}
 	maximumReader := NewResponseReader(maximumData)
 	maximumDecoded, err := maximumReader.ReadCustomPayload()
-	if err != nil || len(maximumDecoded) != DefaultMaxMessageSize-4 {
+	if err != nil || len(maximumDecoded) != DefaultMaxPayloadSize-4 {
 		t.Fatalf(
 			"maximum ReadCustomPayload() length = %d, error = %v",
 			len(maximumDecoded),
@@ -422,7 +422,7 @@ func TestCustomPayloadBoundaryRoundTrip(t *testing.T) {
 		t.Fatalf("maximum Reader.Done() error = %v", err)
 	}
 	oversize := NewSizer()
-	if err := oversize.AddCustom(DefaultMaxMessageSize - 3); !errors.Is(
+	if err := oversize.AddCustom(DefaultMaxPayloadSize - 3); !errors.Is(
 		err,
 		errs.ErrRPCEncodeFailed,
 	) {

@@ -184,7 +184,6 @@ func TestConnSendRejectsInvalidPayloadWithoutTakingOwnership(t *testing.T) {
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	options := smallConnectionOptions(pool)
 	options.MaxMessageSize = 4
-	options.SendQueueBytes = 4
 	local, remote := net.Pipe()
 	conn := newConn(local, options, newRecordingHandler(), nil)
 	defer local.Close()
@@ -221,7 +220,6 @@ func TestConnSendOverloadAndCloseReleaseEveryBuffer(t *testing.T) {
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	options := smallConnectionOptions(pool)
 	options.SendQueueFrames = 2
-	options.SendQueueBytes = 8
 	raw := newBlockingConn()
 	conn := newConn(raw, options, newRecordingHandler(), nil)
 	conn.start()
@@ -336,7 +334,6 @@ func TestConnConcurrentSendAndClose(t *testing.T) {
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	options := smallConnectionOptions(pool)
 	options.SendQueueFrames = 32
-	options.SendQueueBytes = 512
 	raw := newBlockingConn()
 	conn := newConn(raw, options, newRecordingHandler(), nil)
 	conn.start()
@@ -573,7 +570,6 @@ func smallConnectionOptions(pool *bufferpool.Pool) ConnectionOptions {
 	options := DefaultConnectionOptions(pool)
 	options.MaxMessageSize = 16
 	options.SendQueueFrames = 8
-	options.SendQueueBytes = 128
 	options.WriteTimeout = time.Second
 	return options
 }

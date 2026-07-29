@@ -101,7 +101,7 @@ func TestServiceDiscoveryQueryAndListenerFacade(t *testing.T) {
 		state: StateRunning,
 		instances: []discovery.Instance{{
 			NodeID:      "game-1",
-			SessionID:   "session-1",
+			SessionID:   1,
 			ServiceName: "PlayerService",
 			State:       discovery.StateRunning,
 			Labels:      map[string]string{"region": "cn-east"},
@@ -113,7 +113,7 @@ func TestServiceDiscoveryQueryAndListenerFacade(t *testing.T) {
 	}
 
 	instance, exists := target.FindDiscoveredService("game-1", "PlayerService")
-	if !exists || instance.SessionID != "session-1" {
+	if !exists || instance.SessionID != 1 {
 		t.Fatalf("FindDiscoveredService() = (%+v, %v)", instance, exists)
 	}
 	list := target.ListDiscoveredServices("PlayerService")

@@ -27,16 +27,19 @@ type Listener struct {
 	handler Handler
 	logger  originlog.Logger
 
-	mu            sync.Mutex
-	conns         map[*Conn]struct{}
-	closing       bool
-	acceptStopped bool
-	cause         error
+	mu             sync.Mutex
+	conns          map[*Conn]struct{}
+	acceptStopping bool
+	closing        bool
+	acceptStopped  bool
+	cause          error
 
-	closeOnce sync.Once
-	doneOnce  sync.Once
-	closingCh chan struct{}
-	done      chan struct{}
+	acceptOnce sync.Once
+	closeOnce  sync.Once
+	doneOnce   sync.Once
+	closingCh  chan struct{}
+	acceptDone chan struct{}
+	done       chan struct{}
 
 	// limitLogged 对连接上限告警限频，成功接受新连接后允许下一次告警。
 	limitLogged atomic.Bool
@@ -69,14 +72,15 @@ func Listen(address string, options ListenOptions, handler Handler) (*Listener, 
 
 	// 所有字段完成初始化后才启动唯一 AcceptLoop。
 	listener := &Listener{
-		raw:       raw,
-		addr:      raw.Addr(),
-		options:   options,
-		handler:   handler,
-		logger:    options.Connection.Logger,
-		conns:     make(map[*Conn]struct{}),
-		closingCh: make(chan struct{}),
-		done:      make(chan struct{}),
+		raw:        raw,
+		addr:       raw.Addr(),
+		options:    options,
+		handler:    handler,
+		logger:     options.Connection.Logger,
+		conns:      make(map[*Conn]struct{}),
+		closingCh:  make(chan struct{}),
+		acceptDone: make(chan struct{}),
+		done:       make(chan struct{}),
 	}
 	go listener.acceptLoop()
 	listener.logger.Info(
@@ -90,6 +94,49 @@ func Listen(address string, options ListenOptions, handler Handler) (*Listener, 
 func (listener *Listener) Addr() net.Addr {
 	// 使用 :0 监听时，该地址包含系统选择的真实端口。
 	return listener.addr
+}
+
+// AcceptDone 返回只在 AcceptLoop 已经完全退出后关闭的只读信号。
+//
+// 上层 Transport 可以监听该信号区分“监听仍可用”和“监听已经永久终止”，但不能据此
+// 推断已有 Conn 已经关闭；完整资源退出仍以 Close 返回为准。
+func (listener *Listener) AcceptDone() <-chan struct{} {
+	if listener == nil {
+		closed := make(chan struct{})
+		close(closed)
+		return closed
+	}
+	return listener.acceptDone
+}
+
+// Cause 返回 Listener 首个永久终止原因；主动 StopAccept/Close 的正常终态返回 nil。
+func (listener *Listener) Cause() error {
+	if listener == nil {
+		return nil
+	}
+	return listener.closeCause()
+}
+
+// StopAccept 幂等地停止新连接准入并等待 AcceptLoop 退出。
+//
+// 已经接受并登记的 Conn 继续正常收发，仍由 Listener 最终持有。该能力供上层优雅停止：
+// 先阻止新 RPC 连接，再排空已经进入 Service 的任务，最后调用 Close 关闭旧连接。
+func (listener *Listener) StopAccept(ctx context.Context) error {
+	if ctx == nil {
+		return invalidArgument("tcpnet: Listener.StopAccept Context 不能为空")
+	}
+	listener.initiateStopAccept(nil)
+	select {
+	case <-listener.acceptDone:
+		return listener.closeCause()
+	default:
+	}
+	select {
+	case <-listener.acceptDone:
+		return listener.closeCause()
+	case <-ctx.Done():
+		return contextError(ctx.Err())
+	}
 }
 
 // Close 幂等地停止 Accept、关闭所属 Conn 并等待全部资源退出。
@@ -214,7 +261,7 @@ func (listener *Listener) acceptLoop() {
 func (listener *Listener) hasCapacity() bool {
 	// AcceptLoop 是唯一新增连接者，锁内长度足以避免正常路径的无意义队列分配。
 	listener.mu.Lock()
-	allowed := !listener.closing &&
+	allowed := !listener.acceptStopping &&
 		len(listener.conns) < listener.options.MaxConnections
 	listener.mu.Unlock()
 	return allowed
@@ -225,7 +272,7 @@ func (listener *Listener) registerConn(conn *Conn) bool {
 	// Close 可能发生在预检查之后，因此最终准入必须再次位于同一锁边界。
 	listener.mu.Lock()
 	defer listener.mu.Unlock()
-	if listener.closing ||
+	if listener.acceptStopping ||
 		len(listener.conns) >= listener.options.MaxConnections {
 		return false
 	}
@@ -244,19 +291,42 @@ func (listener *Listener) removeConn(conn *Conn) {
 
 // initiateClose 提交 Listener 关闭，并关闭当前登记的全部 Conn。
 func (listener *Listener) initiateClose(cause error) {
-	// closeOnce 统一正常 Close 和 Accept 永久失败路径。
+	// closeOnce 统一正常 Close 和 Accept 永久失败路径；StopAccept 先执行过也不影响本阶段。
 	listener.closeOnce.Do(func() {
 		listener.mu.Lock()
 		listener.closing = true
-		listener.cause = cause
+		if listener.cause == nil {
+			listener.cause = cause
+		}
 		conns := make([]*Conn, 0, len(listener.conns))
 		for conn := range listener.conns {
 			conns = append(conns, conn)
 		}
+		listener.mu.Unlock()
+
+		// 先保证监听 socket 已停止，再关闭已登记连接；所有破坏性动作都在锁外执行。
+		listener.initiateStopAccept(cause)
+		for _, conn := range conns {
+			conn.Close()
+		}
+		listener.mu.Lock()
+		listener.maybeFinishLocked()
+		listener.mu.Unlock()
+	})
+}
+
+// initiateStopAccept 提交监听阶段关闭；后续完整 Close 仍可单独关闭既有连接。
+func (listener *Listener) initiateStopAccept(cause error) {
+	listener.acceptOnce.Do(func() {
+		listener.mu.Lock()
+		listener.acceptStopping = true
+		if listener.cause == nil {
+			listener.cause = cause
+		}
 		close(listener.closingCh)
 		listener.mu.Unlock()
 
-		// 不在 Listener 锁内执行 socket Close 或 Conn Close，避免回调和注销锁反转。
+		// 关闭监听 socket用于打断 Accept；不触碰已经登记的 Conn。
 		if err := listener.raw.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			wrapped := transportUnavailable(err)
 			listener.recordCause(wrapped)
@@ -266,17 +336,15 @@ func (listener *Listener) initiateClose(cause error) {
 				originlog.Err(err),
 			)
 		}
-		for _, conn := range conns {
-			conn.Close()
-		}
 	})
 }
 
 // finishAccept 发布 AcceptLoop 已经退出，并尝试完成 Listener。
 func (listener *Listener) finishAccept() {
-	// 只有 AcceptLoop 写 acceptStopped；锁保证与最后一个 Conn 注销一致。
+	// 只有 AcceptLoop 写 acceptStopped；acceptDone 只表示监听阶段结束，不等待既有 Conn。
 	listener.mu.Lock()
 	listener.acceptStopped = true
+	close(listener.acceptDone)
 	listener.maybeFinishLocked()
 	listener.mu.Unlock()
 }
@@ -312,9 +380,9 @@ func (listener *Listener) closeCause() error {
 
 // isClosing 报告 Listener 是否已经停止新连接准入。
 func (listener *Listener) isClosing() bool {
-	// 该状态同时供 Accept 错误分类和容量预检查读取。
+	// StopAccept 已经足以把 net.ErrClosed 归类为预期关闭。
 	listener.mu.Lock()
-	closing := listener.closing
+	closing := listener.acceptStopping
 	listener.mu.Unlock()
 	return closing
 }

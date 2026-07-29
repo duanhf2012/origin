@@ -204,7 +204,6 @@ type ReconnectOptions struct {
 
 type SubscriptionDefaults struct {
     PendingMessages int
-    PendingBytes    int
 }
 ```
 
@@ -214,7 +213,7 @@ type SubscriptionDefaults struct {
 |---|---:|---|
 | `NoRandomize` | `false` | 多个 Seed Server 默认随机选择 |
 | `NoEcho` | `false` | 不破坏同一连接可能需要的本地 Subject 投递 |
-| `MaxMessageSize` | `4M` | 与已确认的 RPC 上限一致 |
+| `MaxMessageSize` | `4M` | 通用 NATS 单条 Data 默认上限；RPC Adapter 按业务上限加包络单独覆盖 |
 | `ConnectTimeout` | `2s` | 单次 Server 连接和握手上限 |
 | `DefaultOperationTimeout` | `15s` | Flush、Drain 未带 Deadline 时使用 |
 | `DrainTimeout` | `30s` | NATS 内部排空保底 |
@@ -226,11 +225,11 @@ type SubscriptionDefaults struct {
 | `Reconnect.Jitter` | `500ms` | 减少大量 Node 同时重连 |
 | `Reconnect.TLSJitter` | `1s` | TLS 建连成本更高，使用更大抖动 |
 | `Reconnect.BufferSize` | `8M` | 重连期间本地待发协议缓冲上限 |
-| `Subscription.PendingMessages` | `16384` | 单订阅待处理消息数量上限 |
-| `Subscription.PendingBytes` | `8M` | 单订阅待处理消息字节上限 |
+| `Subscription.PendingMessages` | `16384` | 单订阅待处理消息数量上限；M15 RPC 最大 `65536` |
 
-`Name` 和 `URLs` 必填。M7 创建 Node 时，连接名称建议使用
-`<app-name>.<node-id>`，方便在 NATS 监控中定位。
+M6 通用 Go Options 的 `Name` 和 `URLs` 必填。M15 Node 配置不要求业务重复填写 Name，
+由 RPC Adapter 使用 namespace 与 NodeID 自动生成
+`origin-rpc-{namespace}-{nodeID}`，方便在 NATS 监控中定位。
 
 用户配置继续遵守 v3 规则：
 
@@ -241,32 +240,19 @@ nodes:
       default_await_timeout: 15s
     rpc:
       transport: nats
-      max_message_size: 4M
+      max_payload_size: 4M
       nats:
-        name: game-dev.chat-1
+        namespace: game-prod
         urls:
           - nats://127.0.0.1:4222
-        no_randomize: false
-        no_echo: false
-        connect_timeout: 2s
-        operation_timeout: 15s
-        drain_timeout: 30s
-        ping_interval: 30s
-        max_pings_outstanding: 2
-        reconnect:
-          enabled: true
-          max_attempts: 60
-          wait: 2s
-          jitter: 500ms
-          tls_jitter: 1s
-          buffer_size: 8M
-        subscription:
-          pending_messages: 16384
-          pending_size: 8M
+        receive_queue_messages: 16384
 ```
 
-M6 只实现 Options 和校验，不在本里程碑把该结构接入完整 Node 配置；M7/M15 接入时再把
-对应配置片段解析为 `natsnet.Options`。
+M6 只实现 Options 和校验，不在本里程碑把该结构接入完整 Node 配置；M15 接入时把对应
+配置片段解析为 `natsnet.Options`，并固定 `NoEcho=true`、`Reconnect.BufferSize=-1`。
+`receive_queue_messages` 映射为 Request/Response Subscription 各自的
+`PendingMessages`。M6 通用调用方仍可直接使用其他合法 Options；连接超时、基础操作
+超时、Drain、Ping 和重连参数继续使用 M6 安全默认值，不扩大 M15 RPC 配置。
 
 ## 7. 认证与 TLS
 
@@ -341,7 +327,6 @@ func (conn *Conn) Wait(ctx context.Context) error
 type SubscriptionOptions struct {
     Queue           string
     PendingMessages int
-    PendingBytes    int
 }
 
 func (subscription *Subscription) Subject() string
@@ -393,12 +378,18 @@ type MessageHandler func(message Message)
 `nats.go` 已经为入站 `Msg` 和 `Msg.Data` 分配可由 Go GC 管理的对象。M6 直接把 Subject
 和 Data 组成轻量 Message 值交给 Handler，不再次复制。
 
+> 实施状态说明：当前 M6 代码注释仍使用“Data 只在 Handler 窗口内有效”的原保守约束；
+> 下述跨回调只读移交规则已在 M15 设计中确认，必须由 M15 同步修改代码契约和测试后才
+> 正式生效，不能在此之前由其他组件自行假定。
+
 Handler 把 `Data` 视为只读：
 
 - 同步解码可以直接读取；
-- 需要跨 goroutine 或长期持有时，由新的所有者自行复制；
-- M15 若需要把消息转入异步 Service 调度队列，应在 NATS 回调中完成必要的协议校验，
-  再把明确拥有的数据对象投递给调度器；
+- 固定的 nats.go v1.52.0 为每条入站消息建立独立字节；只要仍有切片引用，Handler 返回
+  后底层数组也不会被下一条消息复用；
+- M15 可以在回调中完成必要协议校验后，把只读业务 payload 切片唯一移交给一个有界
+  Service Task，不必先复制；
+- 需要修改、长期缓存或交给多个并发所有者时，由新的所有者自行复制；
 - M6 不为入站消息增加引用计数或 BufferPool 二次包装。
 
 ### 9.3 GC 压力与 BufferPool 决策
@@ -417,12 +408,13 @@ Handler 把 `Data` 视为只读：
 
 - M6 入站直接使用只读 Data，不复制到 BufferPool；
 - M15 可以用 BufferPool 构建统一 RPC 线协议，Publish 返回后立即归还 Buffer；
-- M15 的 NATS 回调必须快速校验和解码，不能无界持有 Data；
-- RPC Runtime 在回调返回后不得继续引用原始 Data；需要异步调度的数据必须在回调内解码
-  到明确拥有的 Request/参数对象；
+- M15 的 NATS 回调只快速解析和校验固定协议头，不执行静态业务解码；
+- Request/Notify 的只读 BusinessPayload 可以唯一移交给一个已接受的 Service Task，
+  Task 结束后释放最后引用；
+- 成功 Response 只把 BusinessPayload 按准确长度复制一次到现有 RPC BufferPool 完成链；
+  错误、迟到和未知 RequestID Response 不复制；
 - 不为统一 TCP/NATS 所有权而在热路径引入 `Packet` 接口、每消息 Release 闭包或引用计数；
-- 若 M15 基准证明大字节字段复制成为主要瓶颈，再单独 Review“可转移所有权 Packet”方案，
-  不在 M6 预先增加复杂度。
+- 不增加外部 Buffer 模式或两种响应载体；若 M15 基准与上述预期冲突，再交回开发者复核。
 
 ### 9.4 空消息
 
@@ -444,8 +436,8 @@ M6 在 Publish 前检查 `MaxMessageSize`，超过上限返回
 与 TCP 不同，NATS 协议解析和 `Msg.Data` 分配由官方客户端完成，Origin 无法在该客户端
 分配前执行自己的大小检查。不能为了满足表面一致性自行重写 NATS 协议。
 
-因此部署 NATS RPC 时，NATS Server 的 `max_payload` 必须大于或等于 Origin
-`max_message_size`；默认 `4M` 需要在 Server 端同步配置。
+因此部署 NATS RPC 时，NATS Server 的 `max_payload` 必须不小于 Origin
+`max_payload_size` 加固定 RPC 包络；默认业务上限 `4M` 需要在 Server 端同步配置。
 [NATS Server 配置文档](https://docs.nats.io/running-a-nats-service/configuration)不建议把
 `max_payload` 设置得过大，M6 不允许用无限值绕过内存边界。
 
@@ -482,7 +474,8 @@ M15 的 Origin RPC 固定沿用 v2 的核心模式：
 3. 调用方由 M13 补齐的统一远端 RPC Runtime 创建 RequestID、pendingCall 和 Deadline；
 4. 服务发现和 Route 先选出逻辑目标 `NodeID + ServiceName`；
 5. M15 只使用目标 NodeID 计算 Node 级请求 Subject，并通过普通 `Publish` 发送；
-6. 请求数据包携带 RequestID、目标 ServiceName、方法、来源 NodeID 和 Deadline；
+6. 请求数据包携带 RequestID、目标 ServiceName、方法、来源 NodeID 和向上取整的
+   `RemainingTimeoutMillis uint32`；
 7. 目标 Node 的 RPC Runtime 读取 ServiceName，投递到对应 Service 的独立有界调度队列；
 8. 远端处理完成后，使用来源 NodeID 计算 Node 级响应 Subject 并通过普通 `Publish` 返回；
 9. 响应数据包携带原 RequestID，来源 Node 的 RPC Runtime 根据 RequestID 完成 pendingCall；
@@ -505,20 +498,23 @@ NATS 不知道 RequestID，不维护 pendingCall，也不判断某条响应属�
 NATS 异步 Subscription 自带客户端 Pending 队列。M6 不再建立第二层消息队列或每消息
 goroutine，而是在订阅创建后立即调用 `SetPendingLimits`。
 
-双重上限：
-
-- `PendingMessages` 限制待回调消息数；
-- `PendingBytes` 限制待回调 payload 总量；
-- 任一达到上限都可能触发 NATS 慢消费者错误和消息丢弃。
+2026-07-29 最终确认覆盖早期 Pending 数量/字节双重上限：Subscription 只使用
+`PendingMessages` 限制待回调消息数。达到上限可能触发 NATS 慢消费者错误和消息丢弃。
+M15 的 Node 配置使用方向更明确的 `receive_queue_messages`，由 RPC Adapter 映射到
+`PendingMessages`；这不是发送队列，也不是 Await/Async 在途调用数量。单消息大小继续由
+`MaxMessageSize` 独立限制，不能把它误解为 Pending 队列长度。
+M15 迁移后的 M6 实现使用 nats.go `SetPendingLimits(PendingMessages, -1)` 禁用官方字节
+Pending 上限，并从公开 Options、Stats、日志和校验中删除 `PendingBytes`。
 
 M6 不静默处理慢消费者：
 
 1. 通过 `EventAsyncError` 报告 `CodeTransportOverloaded`；
 2. 日志包含 Subject、Queue、Pending 和 Dropped，不记录 payload；
-3. `Subscription.Stats()` 暴露 Pending、PendingBytes 和 Dropped；
+3. `Subscription.Stats()` 暴露 PendingMessages 和 DroppedMessages；
 4. Handler panic 被捕获、记录堆栈并丢弃当前消息，Subscription 继续处理后续消息；
 5. M6 不在慢消费者时自动关闭共享 Connection；
-6. M15 可以根据 RPC 消息分类决定告警、停止 Subscription、让 Node 退休或停服。
+6. M15 根据 RPC 消息分类决定错误响应、丢弃和限频诊断；慢消费者不自动让 Node 退休、
+   停服或重建 Subscription。
 
 M15 的 Handler 已经收到消息、但 Origin RPC 入口队列已满时：
 
@@ -584,12 +580,16 @@ Context-aware Dialer：
 - 重连成功后原 Subscription 继续工作；
 - 达到上限后进入 Closed，Wait 返回 `CodeTransportUnavailable`；
 - 不允许 `MaxAttempts < 0`；
-- 连接正在重连时，Publish 可能进入有界 Reconnect Buffer；
+- 通用 M6 调用方未禁用 Reconnect Buffer 时，重连期间的 Publish 可能进入有界缓冲；
 - Buffer 满时返回 `CodeTransportOverloaded`；
-- M15 的 RPC 请求必须在线协议中携带 Deadline，远端拒绝已经过期的迟到请求。
+- M15 Node 共享 RPC Connection 固定使用 `Reconnect.BufferSize = -1` 禁用重连缓冲，
+  避免携带相对剩余 Deadline 的 RPC 在长时间断线后被延迟重放；
+- M15 实施时允许 `-1` 作为唯一的禁用值，其他负数继续由 M6 配置校验拒绝；
+- RPC 连接正在重连时，新 Request 和 Notify 直接返回
+  `CodeTransportUnavailable`。
 
-M6 不把“重连期间本地接受”描述成“远端已收到”。这属于 NATS 的有界缓冲语义，不是
-RPC 自动重试。
+M6 不把“重连期间本地接受”描述成“远端已收到”。这属于通用 NATS 的有界缓冲语义，
+不是 RPC 自动重试；M15 为保持 Deadline 正确性，明确不采用该能力。
 
 ## 16. 状态和事件
 
@@ -702,7 +702,6 @@ type ConnStats struct {
 
 type SubscriptionStats struct {
     PendingMessages int
-    PendingBytes    int
     DroppedMessages int
 }
 ```
@@ -761,7 +760,7 @@ M15 单独设计：
 - 基于 NodeID 的稳定 RPC Request/Response Subject；
 - App/环境隔离前缀；
 - NodeID、ServiceName、ContractID 和版本；
-- 单 Node 单逻辑广播订阅；
+- Broadcast 根据发现结果逐 Node 使用普通请求 Subject 投递，不增加广播订阅；
 - Deadline、RequestID 和错误码线协议；
 - 退休、路由和服务发现变化。
 
@@ -820,7 +819,8 @@ Origin RPC 首版不这样处理。普通 RPC 已经通过服务发现、`RouteR
 差异：
 
 - TCP 是点到点 Connection，NATS 是 Node 到 Broker 的共享连接；
-- TCP 使用 Origin 自有有界发送队列，NATS 使用官方客户端写缓冲和重连缓冲；
+- TCP 使用 Origin 自有有界发送队列，NATS 使用官方客户端写缓冲；M6 通用连接可以使用
+  重连缓冲，M15 RPC Connection 明确禁用；
 - TCP 可以在分配 payload 前检查长度头，NATS 的首次分配由官方客户端完成；
 - TCP Handler 接管 Buffer 所有权，NATS Handler 接收 GC 管理的只读 Message；
 - TCP 和 M6 都只向 RPC Runtime 提供字节发送与接收，Origin RPC 不使用 NATS Inbox；
@@ -836,18 +836,22 @@ Origin RPC 首版不这样处理。普通 RPC 已经通过服务发现、`RouteR
   自定义静态 Codec；
 - M13 在统一 RPC Runtime 中补齐 RequestID、pendingCall、默认 `15s` Deadline、远端取消、
   统一错误码和响应完成；
-- M13 TCP Adapter 只负责把统一 RPC 帧发送到选定 TCP Connection，并把入站帧交给统一
-  RPC Runtime；
-- M15 NATS Adapter 只负责把同一 RPC 帧发布到选定的稳定 Subject，并把请求/响应订阅收到
-  的数据交给统一 RPC Runtime；
-- 两个 Adapter 使用相同的 Request/Response/Notify/Broadcast 消息分类和 RPC 线协议；
+- M13 TCP Adapter 只负责把 TCP `ORP1` 帧发送到选定 TCP Connection，并把入站帧交给
+  统一 RPC Runtime；
+- M15 NATS Adapter 只负责把 NATS `ORN1` 消息发布到选定的稳定 Subject，并把请求/响应
+  订阅收到的数据交给统一 RPC Runtime；
+- M15 Request 携带相对 `RemainingTimeoutMillis uint32`，目标复用 Node 共享 M8
+  DeadlineQueue；RPC Connection 禁用 Reconnect Buffer，避免迟到重放；
+- 两个 Adapter 使用相同的 Request/Response/Notify/Broadcast 消息分类、调用语义和业务
+  payload 编解码，但分别使用适合自身传输模型的最小包络；
 - 两个 Adapter 进入同一个 Service 调度入口，业务 Service 和生成代码不知道当前使用
   TCP 还是 NATS；
 - `AsyncXxx`、`AwaitXxx`、`NotifyXxx` 和 Broadcast 的用户外观不因 Transport 改变；
 - Transport 发送成功都只表示“本地传输层已接受”，RPC 完成必须等待统一 RPC Runtime 收到响应或
   Deadline；
-- RPC Runtime 的同步入站处理函数在返回后不能继续引用传入的原始字节；TCP Adapter 随后归还
-  BufferPool，NATS Adapter 随后释放对 `Msg.Data` 的引用。
+- TCP Adapter 把 Buffer 唯一移交给 Service Task 并在任务结束后归还 BufferPool；
+  NATS Adapter 把只读 BusinessPayload 切片唯一移交给 Service Task，并在任务结束后释放
+  最后一个 `Msg.Data` 引用。
 
 共同点停在 RPC 语义和线协议层，不强求共同的底层对象：
 
@@ -872,7 +876,7 @@ Origin RPC 首版不这样处理。普通 RPC 已经通过服务发现、`RouteR
 - Subscription 默认值和非法 Pending；
 - Stats 快照；
 - Publish 返回后的源切片复用规则；
-- 入站 Handler 返回后不保留 Data 的所有权约束。
+- 入站 Handler 返回后只读 Data 仍保持稳定、不会被后续消息覆盖的生命周期约束。
 
 ### 23.2 真实 NATS 集成测试
 
@@ -977,7 +981,8 @@ Windows 和 Linux 必须分别执行真实 NATS Server 集成测试。macOS 至�
 6. 初始连接失败直接返回，由 Node 启动层决定重试；连接成功后的重连最多 60 次；
 7. 默认 Ping `30s`、两次未响应判定失活；
 8. 默认重连等待 `2s`，普通 Jitter `500ms`、TLS Jitter `1s`；
-9. 默认 Reconnect Buffer `8M`，其“本地接受但可能延迟发送”语义必须显式；
+9. 默认 Reconnect Buffer `8M`，其“本地接受但可能延迟发送”语义必须显式；M15 RPC
+   Connection 例外，固定传入 `-1` 禁用该缓冲；
 10. 默认单 Subscription Pending 为 `16384` 条和 `8M`；
 11. MessageHandler 不返回 error，panic 只丢当前消息并继续订阅；
 12. Connection 和 Subscription 同时提供立即 `Close` 与有 Deadline 的 `Drain`；
@@ -996,8 +1001,8 @@ Windows 和 Linux 必须分别执行真实 NATS Server 集成测试。macOS 至�
 M6 已于 2026-07-26 按本设计完成实现：
 
 1. 新增内部包 `internal/natsnet`，提供严格配置校验、Context-aware 初始连接、有限重连、
-   Publish、Flush、普通订阅、Queue Group、Pending 双重上限、统计、事件、Close、Drain 和
-   Wait；
+   Publish、Flush、普通订阅、Queue Group、Pending 上限、统计、事件、Close、Drain 和
+   Wait；M6 最初实现同时统计消息数和字节数，M15 按 2026-07-29 最终结论删除字节额度；
 2. 用户名密码、Token、Credentials File、NKey Seed、TLS 与双向 TLS 配置已经接入官方
    `nats.go` 客户端；认证方式互斥，错误、事件与 URL 均执行敏感信息脱敏；
 3. 空 payload 可以正常发布和接收；包装层不对出站 payload 再复制，也不把入站

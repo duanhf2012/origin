@@ -22,7 +22,7 @@ const (
 // Labels 由框架深复制；业务可以在返回后保存或修改，不会污染 Node 内部不可变目录。
 type Instance struct {
 	NodeID      string
-	SessionID   string
+	SessionID   uint64
 	ServiceName string
 	State       State
 	Labels      map[string]string

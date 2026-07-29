@@ -20,7 +20,7 @@ type InstanceKey struct {
 // 同一 Snapshot 的多个索引可以共享该指针。指针不能返回给业务代码，也不能进入对象池。
 type Instance struct {
 	NodeID              string
-	SessionID           string
+	SessionID           uint64
 	ServiceName         string
 	State               ServiceState
 	Labels              map[string]string
@@ -33,7 +33,7 @@ type Instance struct {
 // Target 是 TCP 连接对账需要的最小 Node 会话记录。
 type Target struct {
 	NodeID    string
-	SessionID string
+	SessionID uint64
 	Address   string
 }
 
@@ -428,7 +428,7 @@ func ValidateNodeLabels(labels map[string]string) error {
 
 // validateRawNode 校验一条完整 Node 记录，并拒绝重复 ServiceName。
 func validateRawNode(node RawNode) error {
-	if node.NodeID == "" || node.SessionID == "" {
+	if node.NodeID == "" || node.SessionID == 0 {
 		return fmt.Errorf("NodeID 和 SessionID 不能为空")
 	}
 	if err := validateTransport(node.Transport, node.Address); err != nil {

@@ -42,20 +42,16 @@ type remoteRuntime struct {
 	// retired 只保存已经取消但 goroutine 尚未退出的旧发现目标，退出回调会立即删除。
 	retired map[*remoteTarget]struct{}
 
-	deadlineQueue    *timerwheel.DeadlineQueue
-	deadlineBindings map[timerwheel.DeadlineID]context.CancelCauseFunc
-	deadlineDone     chan struct{}
+	deadlines *inboundDeadlines
 }
 
 // newRemoteRuntime 创建尚未启动、没有后台 goroutine 的远端资源容器。
 func newRemoteRuntime(owner *Runtime, config Config) *remoteRuntime {
 	return &remoteRuntime{
-		owner:            owner,
-		config:           config,
-		targets:          make(map[string]*remoteTarget),
-		retired:          make(map[*remoteTarget]struct{}),
-		deadlineBindings: make(map[timerwheel.DeadlineID]context.CancelCauseFunc),
-		deadlineDone:     make(chan struct{}),
+		owner:   owner,
+		config:  config,
+		targets: make(map[string]*remoteTarget),
+		retired: make(map[*remoteTarget]struct{}),
 	}
 }
 
@@ -65,7 +61,10 @@ func (runtime *Runtime) StartNetwork(engine *timerwheel.Engine) error {
 		return errs.ErrInvalidArgument
 	}
 	if runtime.remote == nil {
-		return nil
+		if runtime.nats == nil {
+			return nil
+		}
+		return runtime.nats.start(engine)
 	}
 	return runtime.remote.start(engine)
 }
@@ -78,6 +77,20 @@ func (runtime *Runtime) AdvertiseAddress() (string, bool) {
 	return runtime.remote.config.TCP.Advertise, true
 }
 
+// TransportInfo 返回当前 Node 对服务发现公开的传输和可选地址。
+func (runtime *Runtime) TransportInfo() (transport string, address string, enabled bool) {
+	if runtime == nil {
+		return "", "", false
+	}
+	if runtime.remote != nil {
+		return TransportTCP, runtime.remote.config.TCP.Advertise, true
+	}
+	if runtime.nats != nil {
+		return TransportNATS, "", true
+	}
+	return "", "", false
+}
+
 // start 一次性发布远端 RPC 资源。
 func (remote *remoteRuntime) start(engine *timerwheel.Engine) error {
 	remote.mu.Lock()
@@ -87,12 +100,12 @@ func (remote *remoteRuntime) start(engine *timerwheel.Engine) error {
 	}
 
 	// DeadlineQueue 必须先于 Listener 建立；入站 Request 一旦可读就能够登记唯一超时。
-	queue, err := engine.NewDeadlineQueue()
+	deadlines, err := newInboundDeadlines(engine)
 	if err != nil {
 		remote.mu.Unlock()
 		return err
 	}
-	remote.deadlineQueue = queue
+	remote.deadlines = deadlines
 	remote.inbound = newInboundHandler(remote)
 	options := remote.listenOptions()
 	listener, err := tcpnet.Listen(
@@ -101,10 +114,10 @@ func (remote *remoteRuntime) start(engine *timerwheel.Engine) error {
 		remote.inbound,
 	)
 	if err != nil {
-		remote.deadlineQueue = nil
+		remote.deadlines = nil
 		remote.inbound = nil
 		remote.mu.Unlock()
-		queue.Close()
+		deadlines.close(errs.ErrServiceStopped)
 		return err
 	}
 
@@ -117,11 +130,30 @@ func (remote *remoteRuntime) start(engine *timerwheel.Engine) error {
 	}
 	remote.mu.Unlock()
 
-	go remote.watchDeadlines(queue)
 	for _, target := range targets {
 		target.start()
 	}
+	// 监听器永久退出属于 Node 级基础设施终态；正常 StopAccept 的 Cause 为 nil，不会误报。
+	go remote.watchListener(listener)
 	return nil
+}
+
+// watchListener 把 TCP AcceptLoop 的永久终态提升到唯一 Application 生命周期路径。
+func (remote *remoteRuntime) watchListener(listener *tcpnet.Listener) {
+	if remote == nil || listener == nil {
+		return
+	}
+	<-listener.AcceptDone()
+	cause := listener.Cause()
+	if cause == nil {
+		return
+	}
+	remote.mu.Lock()
+	unexpected := remote.listener == listener && !remote.stopping
+	remote.mu.Unlock()
+	if unexpected {
+		remote.owner.reportTransportFailure(cause)
+	}
 }
 
 // AddTarget 保留 M13 的底层单目标兼容入口；M14 的 Node/Application 不再调用它，而统一
@@ -129,9 +161,13 @@ func (remote *remoteRuntime) start(engine *timerwheel.Engine) error {
 //
 // 相同 NodeID 和地址重复登记是幂等操作；同一 NodeID 的不同地址不会替换现有连接，
 // 避免误启动实例抢占正在工作的目标。
-func (runtime *Runtime) AddTarget(nodeID, address string) error {
+func (runtime *Runtime) AddTarget(
+	nodeID string,
+	sessionID uint64,
+	address string,
+) error {
 	if runtime == nil || runtime.remote == nil ||
-		!validWireName(nodeID) || nodeID == runtime.nodeID {
+		!validWireName(nodeID) || sessionID == 0 || nodeID == runtime.nodeID {
 		return errs.ErrInvalidArgument
 	}
 	if err := validateAdvertiseAddress(address); err != nil {
@@ -159,7 +195,7 @@ func (runtime *Runtime) AddTarget(nodeID, address string) error {
 		remote.mu.Unlock()
 		return errs.ErrTransportOverloaded
 	}
-	target := newRemoteTarget(remote, nodeID, nodeID, address)
+	target := newRemoteTarget(remote, nodeID, sessionID, address)
 	remote.targets[nodeID] = target
 	started := remote.started
 	remote.mu.Unlock()
@@ -198,7 +234,7 @@ func (runtime *Runtime) RemoveTarget(
 // ConnectionTarget 是发现目录交给 TCP Runtime 的 Node 级连接需求。
 type ConnectionTarget struct {
 	NodeID    string
-	SessionID string
+	SessionID uint64
 	Address   string
 }
 
@@ -219,7 +255,7 @@ func (runtime *Runtime) ReconcileTargets(targets []ConnectionTarget) error {
 	desired := make(map[string]ConnectionTarget, len(targets))
 	for _, target := range targets {
 		if !validWireName(target.NodeID) ||
-			!validWireName(target.SessionID) ||
+			target.SessionID == 0 ||
 			target.NodeID == runtime.nodeID {
 			return errs.ErrInvalidArgument
 		}
@@ -280,23 +316,25 @@ func (runtime *Runtime) ReconcileTargets(targets []ConnectionTarget) error {
 	return nil
 }
 
-// BeginStop 立即拒绝新 RPC、关闭 Listener 和出站连接，但保留入站已接受任务的 Deadline。
+// BeginStop 立即拒绝新入站 RPC，但保留既有连接、出站调用和已接受任务的 Deadline。
 //
-// 目标 Service 随后的 Scheduler Drain 会执行完已经进入 FIFO 的任务；最终 Close 再关闭
-// DeadlineQueue。这样调用方断线不会撤回已经被服务端接受的写操作。
+// 目标 Service 随后的 Scheduler Drain 会执行完已经进入 FIFO 的任务，OnStop 也仍可调用
+// 其他 Service；最终 Close 才关闭既有连接、出站目标和 Deadline。
 func (runtime *Runtime) BeginStop(ctx context.Context) error {
 	if runtime == nil || ctx == nil {
 		return errs.ErrInvalidArgument
 	}
-	runtime.closed.Store(true)
 	runtime.inboundReady.Store(false)
 	if runtime.remote == nil {
-		return nil
+		if runtime.nats == nil {
+			return nil
+		}
+		return runtime.nats.beginStop(ctx)
 	}
 	return runtime.remote.beginStop(ctx)
 }
 
-// beginStop 停止所有网络准入，并聚合资源等待错误。
+// beginStop 只停止新的 TCP 连接与入站业务准入。
 func (remote *remoteRuntime) beginStop(ctx context.Context) error {
 	remote.mu.Lock()
 	if remote.stopping {
@@ -305,8 +343,23 @@ func (remote *remoteRuntime) beginStop(ctx context.Context) error {
 		if listener == nil {
 			return nil
 		}
-		return listener.Close(ctx)
+		return listener.StopAccept(ctx)
 	}
+	remote.stopping = true
+	listener := remote.listener
+	remote.mu.Unlock()
+	if listener == nil {
+		return nil
+	}
+	return listener.StopAccept(ctx)
+}
+
+// closeTransport 在 Service 排空后关闭出站目标和全部已接受 TCP 连接。
+func (remote *remoteRuntime) closeTransport(ctx context.Context) error {
+	if remote == nil || ctx == nil {
+		return errs.ErrInvalidArgument
+	}
+	remote.mu.Lock()
 	remote.stopping = true
 	listener := remote.listener
 	targets := make([]*remoteTarget, 0, len(remote.targets))
@@ -328,30 +381,15 @@ func (remote *remoteRuntime) beginStop(ctx context.Context) error {
 	return result
 }
 
-// closeDeadlines 在所有 Service 已排空后关闭远端 DeadlineQueue 和 watcher。
+// closeDeadlines 在所有 Service 已排空后关闭入站 Deadline 和 watcher。
 func (remote *remoteRuntime) closeDeadlines() {
 	remote.mu.Lock()
-	queue := remote.deadlineQueue
-	if queue == nil {
-		remote.mu.Unlock()
-		return
-	}
-	remote.deadlineQueue = nil
-
-	// Queue.Close 不回调每个 ID；先取得绑定并在锁外取消 Context。
-	cancels := make([]context.CancelCauseFunc, 0, len(remote.deadlineBindings))
-	for _, cancel := range remote.deadlineBindings {
-		cancels = append(cancels, cancel)
-	}
-	clear(remote.deadlineBindings)
-	done := remote.deadlineDone
+	deadlines := remote.deadlines
+	remote.deadlines = nil
 	remote.mu.Unlock()
-
-	queue.Close()
-	for _, cancel := range cancels {
-		cancel(errs.ErrServiceStopped)
+	if deadlines != nil {
+		deadlines.close(errs.ErrServiceStopped)
 	}
-	<-done
 }
 
 // publicCatalog 返回按 ServiceName 排序的稳定公开目录。
@@ -376,7 +414,7 @@ func (remote *remoteRuntime) publicCatalog() []wireServiceEntry {
 // targetSession 返回目标当前已经握手完成的出站会话。
 func (remote *remoteRuntime) targetSession(
 	nodeID string,
-	sessionID string,
+	sessionID uint64,
 ) *outboundSession {
 	remote.mu.Lock()
 	target := remote.targets[nodeID]
@@ -399,9 +437,8 @@ func (remote *remoteRuntime) connectionOptions() tcpnet.ConnectionOptions {
 	options := tcpnet.DefaultConnectionOptions(remote.owner.pool)
 	options.Logger = remote.owner.logger
 	options.MaxMessageSize = remote.config.frameLimit()
-	options.SendQueueFrames = remote.config.TCP.SendQueueFrames
-	options.SendQueueBytes = remote.config.sendQueueBytes()
-	options.ReadTimeout = remote.config.TCP.ReadTimeout
+	options.SendQueueFrames = remote.config.TCP.SendQueueMessages
+	options.ReadTimeout = remote.config.TCP.ReadIdleTimeout
 	options.WriteTimeout = remote.config.TCP.WriteTimeout
 	return options
 }
@@ -416,91 +453,14 @@ func (remote *remoteRuntime) listenOptions() tcpnet.ListenOptions {
 
 // heartbeatInterval 返回应用层 Ping 周期；零表示关闭。
 func (remote *remoteRuntime) heartbeatInterval() time.Duration {
-	if remote.config.TCP.ReadTimeout <= 0 {
+	if remote.config.TCP.ReadIdleTimeout <= 0 {
 		return 0
 	}
-	interval := remote.config.TCP.ReadTimeout / heartbeatDivisor
+	interval := remote.config.TCP.ReadIdleTimeout / heartbeatDivisor
 	if interval <= 0 {
 		return time.Millisecond
 	}
 	return interval
-}
-
-// watchDeadlines 批量消费入站 Request 的 M8 到期 ID。
-func (remote *remoteRuntime) watchDeadlines(queue *timerwheel.DeadlineQueue) {
-	defer close(remote.deadlineDone)
-	expired := make([]timerwheel.DeadlineID, 0, 64)
-	for range queue.ExpiredSignal() {
-		expired = expired[:0]
-		for {
-			var err error
-			expired, err = queue.DrainExpired(expired[:0], 256)
-			if err != nil {
-				return
-			}
-			if len(expired) == 0 {
-				break
-			}
-
-			// 每个 ID 在同一锁下唯一取得对应取消函数；业务取消动作在锁外执行。
-			cancels := make([]context.CancelCauseFunc, 0, len(expired))
-			remote.mu.Lock()
-			for _, id := range expired {
-				if cancel := remote.deadlineBindings[id]; cancel != nil {
-					delete(remote.deadlineBindings, id)
-					cancels = append(cancels, cancel)
-				}
-			}
-			remote.mu.Unlock()
-			for _, cancel := range cancels {
-				cancel(errs.ErrDeadlineExceeded)
-			}
-			if len(expired) < 256 {
-				break
-			}
-		}
-	}
-}
-
-// bindDeadline 登记一次入站 Request 的唯一 M8 超时。
-func (remote *remoteRuntime) bindDeadline(
-	delay time.Duration,
-	cancel context.CancelCauseFunc,
-) (timerwheel.DeadlineID, error) {
-	if delay <= 0 || cancel == nil {
-		return timerwheel.InvalidDeadlineID, errs.ErrInvalidArgument
-	}
-	remote.mu.Lock()
-	queue := remote.deadlineQueue
-	if queue == nil || remote.stopping {
-		remote.mu.Unlock()
-		return timerwheel.InvalidDeadlineID, errs.ErrServiceStopped
-	}
-
-	// ScheduleAfter 与绑定发布都位于 remote.mu 内。watcher 即使已经收到到期信号，也必须
-	// 在 Drain 后取得同一把锁，因此不可能先消费 ID、再看到尚未登记的空绑定。
-	id, err := queue.ScheduleAfter(delay)
-	if err != nil {
-		remote.mu.Unlock()
-		return timerwheel.InvalidDeadlineID, err
-	}
-	remote.deadlineBindings[id] = cancel
-	remote.mu.Unlock()
-	return id, nil
-}
-
-// unbindDeadline 取消仍未到期的 ID，并删除可能已被 watcher 取得的绑定。
-func (remote *remoteRuntime) unbindDeadline(id timerwheel.DeadlineID) {
-	if id == timerwheel.InvalidDeadlineID {
-		return
-	}
-	remote.mu.Lock()
-	queue := remote.deadlineQueue
-	delete(remote.deadlineBindings, id)
-	remote.mu.Unlock()
-	if queue != nil {
-		queue.Cancel(id)
-	}
 }
 
 // logReconnectFailure 记录目标冷路径失败，不在每次业务调用热路径写日志。

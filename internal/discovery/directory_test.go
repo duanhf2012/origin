@@ -25,7 +25,7 @@ func TestDirectoryApplyAndQuery(t *testing.T) {
 	raw := RawSnapshot{Nodes: []RawNode{
 		{
 			NodeID:    "game-2",
-			SessionID: "session-game-2",
+			SessionID: 2,
 			Labels:    map[string]string{"region": "cn-north"},
 			Transport: TransportTCP,
 			Address:   "127.0.0.1:20002",
@@ -38,7 +38,7 @@ func TestDirectoryApplyAndQuery(t *testing.T) {
 		},
 		{
 			NodeID:    "gateway-1",
-			SessionID: "session-self",
+			SessionID: 99,
 			Transport: TransportTCP,
 			Address:   "127.0.0.1:20001",
 			Services: []RawService{{
@@ -48,7 +48,7 @@ func TestDirectoryApplyAndQuery(t *testing.T) {
 		},
 		{
 			NodeID:    "game-1",
-			SessionID: "session-game-1",
+			SessionID: 1,
 			Labels:    map[string]string{"region": "cn-east"},
 			Transport: TransportTCP,
 			Address:   "127.0.0.1:20003",
@@ -72,7 +72,7 @@ func TestDirectoryApplyAndQuery(t *testing.T) {
 		t.Fatal("目录没有过滤当前 Node 自身")
 	}
 	first, exists := directory.Find("game-1", "PlayerService")
-	if !exists || first.SessionID != "session-game-1" {
+	if !exists || first.SessionID != 1 {
 		t.Fatalf("精确查询错误: exists=%v instance=%+v", exists, first)
 	}
 	list := directory.List("PlayerService")
@@ -92,8 +92,8 @@ func TestDirectoryApplyAndQuery(t *testing.T) {
 
 	// 使用等价的新对象再次提交不得推进内部版本或制造业务变化。
 	equivalent := RawSnapshot{Nodes: []RawNode{
-		rawNode("game-1", "session-game-1", "127.0.0.1:20003", "PlayerService", 1),
-		rawNodeRetired("game-2", "session-game-2", "127.0.0.1:20002", "PlayerService", 2),
+		rawNode("game-1", 1, "127.0.0.1:20003", "PlayerService", 1),
+		rawNodeRetired("game-2", 2, "127.0.0.1:20002", "PlayerService", 2),
 	}}
 	equivalent.Nodes[0].Labels = map[string]string{"region": "cn-east"}
 	equivalent.Nodes[1].Labels = map[string]string{"region": "cn-north"}
@@ -113,14 +113,14 @@ func TestDirectorySessionReplacementOrder(t *testing.T) {
 	filter, _ := CompileFilter(false, nil)
 	directory, _ := NewDirectory("gateway-1", filter)
 	oldSnapshot := RawSnapshot{Nodes: []RawNode{
-		rawNode("game-1", "old-session", "127.0.0.1:20001", "PlayerService", 1),
+		rawNode("game-1", 10, "127.0.0.1:20001", "PlayerService", 1),
 	}}
 	if _, _, err := directory.ApplySnapshot(oldSnapshot); err != nil {
 		t.Fatalf("首次 ApplySnapshot() error = %v", err)
 	}
 
 	newSnapshot := RawSnapshot{Nodes: []RawNode{
-		rawNode("game-1", "new-session", "127.0.0.1:20001", "PlayerService", 1),
+		rawNode("game-1", 11, "127.0.0.1:20001", "PlayerService", 1),
 	}}
 	changes, published, err := directory.ApplySnapshot(newSnapshot)
 	if err != nil {
@@ -130,11 +130,11 @@ func TestDirectorySessionReplacementOrder(t *testing.T) {
 		t.Fatalf("会话替换变化数错误: published=%v changes=%+v", published, changes)
 	}
 	if changes.Entries[0].Kind != ChangeLost ||
-		changes.Entries[0].Before.SessionID != "old-session" {
+		changes.Entries[0].Before.SessionID != 10 {
 		t.Fatalf("第一项不是旧会话 Lost: %+v", changes.Entries[0])
 	}
 	if changes.Entries[1].Kind != ChangeDiscovered ||
-		changes.Entries[1].After.SessionID != "new-session" {
+		changes.Entries[1].After.SessionID != 11 {
 		t.Fatalf("第二项不是新会话 Discovered: %+v", changes.Entries[1])
 	}
 }
@@ -148,7 +148,7 @@ func TestDirectoryTargetsDeduplicateServicesByNode(t *testing.T) {
 	directory, _ := NewDirectory("gateway-1", filter)
 	node := rawNode(
 		"game-1",
-		"session-game",
+		12,
 		"127.0.0.1:20001",
 		"PlayerService",
 		1,
@@ -167,7 +167,7 @@ func TestDirectoryTargetsDeduplicateServicesByNode(t *testing.T) {
 	targets := directory.Targets()
 	if len(targets) != 1 ||
 		targets[0].NodeID != "game-1" ||
-		targets[0].SessionID != "session-game" {
+		targets[0].SessionID != 12 {
 		t.Fatalf("Targets() = %+v", targets)
 	}
 }
@@ -179,14 +179,14 @@ func TestDirectoryRejectsInvalidSnapshotAtomically(t *testing.T) {
 	filter, _ := CompileFilter(false, nil)
 	directory, _ := NewDirectory("gateway-1", filter)
 	valid := RawSnapshot{Nodes: []RawNode{
-		rawNode("game-1", "session-1", "127.0.0.1:20001", "PlayerService", 1),
+		rawNode("game-1", 1, "127.0.0.1:20001", "PlayerService", 1),
 	}}
 	if _, _, err := directory.ApplySnapshot(valid); err != nil {
 		t.Fatalf("首次 ApplySnapshot() error = %v", err)
 	}
 
 	invalid := RawSnapshot{Nodes: []RawNode{
-		rawNode("game-1", "session-2", "", "PlayerService", 1),
+		rawNode("game-1", 2, "", "PlayerService", 1),
 	}}
 	if _, _, err := directory.ApplySnapshot(invalid); !errors.Is(
 		err,
@@ -195,7 +195,7 @@ func TestDirectoryRejectsInvalidSnapshotAtomically(t *testing.T) {
 		t.Fatalf("非法 ApplySnapshot() error = %v", err)
 	}
 	instance, exists := directory.Find("game-1", "PlayerService")
-	if !exists || instance.SessionID != "session-1" || directory.Version() != 1 {
+	if !exists || instance.SessionID != 1 || directory.Version() != 1 {
 		t.Fatalf("非法快照污染了旧状态: exists=%v instance=%+v version=%d",
 			exists, instance, directory.Version())
 	}
@@ -211,10 +211,10 @@ func TestDirectoryConcurrentApplyAndRead(t *testing.T) {
 	filter, _ := CompileFilter(false, nil)
 	directory, _ := NewDirectory("gateway-1", filter)
 	first := RawSnapshot{Nodes: []RawNode{
-		rawNode("game-1", "session-a", "127.0.0.1:20001", "PlayerService", 1),
+		rawNode("game-1", 21, "127.0.0.1:20001", "PlayerService", 1),
 	}}
 	second := RawSnapshot{Nodes: []RawNode{
-		rawNode("game-1", "session-b", "127.0.0.1:20002", "PlayerService", 1),
+		rawNode("game-1", 22, "127.0.0.1:20002", "PlayerService", 1),
 	}}
 	if _, _, err := directory.ApplySnapshot(first); err != nil {
 		t.Fatalf("首次 ApplySnapshot() error = %v", err)
@@ -231,14 +231,14 @@ func TestDirectoryConcurrentApplyAndRead(t *testing.T) {
 			for !stop.Load() {
 				instance, exists := directory.Find("game-1", "PlayerService")
 				if !exists ||
-					(instance.SessionID != "session-a" &&
-						instance.SessionID != "session-b") {
+					(instance.SessionID != 21 &&
+						instance.SessionID != 22) {
 					invalid.Store(true)
 					return
 				}
 				candidates := directory.List("PlayerService")
 				if len(candidates) != 1 ||
-					candidates[0].SessionID == "" {
+					candidates[0].SessionID == 0 {
 					invalid.Store(true)
 					return
 				}
@@ -268,7 +268,7 @@ func TestDirectoryConcurrentApplyAndRead(t *testing.T) {
 // rawNode 创建一个具有有效 TCP RPC 契约的测试 Node。
 func rawNode(
 	nodeID string,
-	sessionID string,
+	sessionID uint64,
 	address string,
 	serviceName string,
 	contract byte,
@@ -290,7 +290,7 @@ func rawNode(
 // rawNodeRetired 创建一个处于 Retired、但仍具有 RPC 路由能力的测试 Node。
 func rawNodeRetired(
 	nodeID string,
-	sessionID string,
+	sessionID uint64,
 	address string,
 	serviceName string,
 	contract byte,

@@ -70,17 +70,46 @@ func (values *discoveryLabelValues) UnmarshalJSON(data []byte) error {
 // rpcConfigMirror 只负责把配置文本转换成 rpc.Config 的冻结值。
 type rpcConfigMirror struct {
 	Transport      string                 `json:"transport"`
-	MaxMessageSize *originconfig.ByteSize `json:"max_message_size"`
+	MaxPayloadSize *originconfig.ByteSize `json:"max_payload_size"`
 	TCP            *rpcTCPConfigMirror    `json:"tcp"`
+	NATS           *rpcNATSConfigMirror   `json:"nats"`
 }
 
 // rpcTCPConfigMirror 使用指针保留“省略字段沿用默认值”的明确语义。
 type rpcTCPConfigMirror struct {
-	Listen          string                 `json:"listen"`
-	Advertise       string                 `json:"advertise"`
-	SendQueueFrames *int                   `json:"send_queue_frames"`
-	ReadTimeout     *originconfig.Duration `json:"read_timeout"`
-	WriteTimeout    *originconfig.Duration `json:"write_timeout"`
+	Listen            string                 `json:"listen"`
+	Advertise         string                 `json:"advertise"`
+	SendQueueMessages *int                   `json:"send_queue_messages"`
+	ReadIdleTimeout   *originconfig.Duration `json:"read_idle_timeout"`
+	WriteTimeout      *originconfig.Duration `json:"write_timeout"`
+}
+
+// rpcNATSConfigMirror 只暴露项目确实需要选择的 Namespace、Server、接收队列、认证和 TLS。
+type rpcNATSConfigMirror struct {
+	Namespace            string                  `json:"namespace"`
+	URLs                 []string                `json:"urls"`
+	ReceiveQueueMessages *int                    `json:"receive_queue_messages"`
+	Auth                 rpcNATSAuthConfigMirror `json:"auth"`
+	TLS                  rpcNATSTLSConfigMirror  `json:"tls"`
+}
+
+// rpcNATSAuthConfigMirror 与 NATS 官方四种互斥认证方式一一对应。
+type rpcNATSAuthConfigMirror struct {
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	Token           string `json:"token"`
+	CredentialsFile string `json:"credentials_file"`
+	NKeySeedFile    string `json:"nkey_seed_file"`
+}
+
+// rpcNATSTLSConfigMirror 使用与其他 TLS 配置一致的稳定字段名。
+type rpcNATSTLSConfigMirror struct {
+	Enabled            bool   `json:"enabled"`
+	CAFile             string `json:"ca_file"`
+	CertFile           string `json:"cert_file"`
+	KeyFile            string `json:"key_file"`
+	ServerName         string `json:"server_name"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify"`
 }
 
 // schedulerConfigMirror 使用指针区分“字段省略”和用户显式写入的零值。
@@ -312,33 +341,87 @@ func decodeNodeRPCConfig(
 	if mirror == nil {
 		return nil, nil
 	}
-	result := rpc.DefaultConfig()
-	if mirror.Transport != "" {
-		result.Transport = strings.ToLower(strings.TrimSpace(mirror.Transport))
+	transport := strings.ToLower(strings.TrimSpace(mirror.Transport))
+	if transport == "" {
+		transport = rpc.TransportTCP
 	}
-	if mirror.MaxMessageSize != nil {
-		size := mirror.MaxMessageSize.Bytes()
+
+	// 两种传输共享业务 payload 上限，但传输配置块必须严格互斥。
+	maxPayloadSize := rpc.DefaultMaxPayloadSize
+	if mirror.MaxPayloadSize != nil {
+		size := mirror.MaxPayloadSize.Bytes()
 		if size <= 0 || uint64(size) > uint64(^uint(0)>>1) {
 			return nil, invalidConfigf(
-				"Node %q 的 rpc.max_message_size 无法由当前平台 int 表达",
+				"Node %q 的 rpc.max_payload_size 无法由当前平台 int 表达",
 				nodeID,
 			)
 		}
-		result.MaxMessageSize = int(size)
+		maxPayloadSize = int(size)
 	}
-	if mirror.TCP == nil {
-		return nil, invalidConfigf("Node %q 的 rpc.tcp 不能为空", nodeID)
+
+	result := rpc.Config{
+		Transport:      transport,
+		MaxPayloadSize: maxPayloadSize,
 	}
-	result.TCP.Listen = strings.TrimSpace(mirror.TCP.Listen)
-	result.TCP.Advertise = strings.TrimSpace(mirror.TCP.Advertise)
-	if mirror.TCP.SendQueueFrames != nil {
-		result.TCP.SendQueueFrames = *mirror.TCP.SendQueueFrames
-	}
-	if mirror.TCP.ReadTimeout != nil {
-		result.TCP.ReadTimeout = mirror.TCP.ReadTimeout.Duration()
-	}
-	if mirror.TCP.WriteTimeout != nil {
-		result.TCP.WriteTimeout = mirror.TCP.WriteTimeout.Duration()
+	switch transport {
+	case rpc.TransportTCP:
+		if mirror.TCP == nil {
+			return nil, invalidConfigf("Node %q 的 rpc.tcp 不能为空", nodeID)
+		}
+		if mirror.NATS != nil {
+			return nil, invalidConfigf(
+				"Node %q 的 rpc.transport 为 tcp 时不能配置 rpc.nats",
+				nodeID,
+			)
+		}
+		result.TCP = rpc.DefaultTCPConfig()
+		result.TCP.Listen = strings.TrimSpace(mirror.TCP.Listen)
+		result.TCP.Advertise = strings.TrimSpace(mirror.TCP.Advertise)
+		if mirror.TCP.SendQueueMessages != nil {
+			result.TCP.SendQueueMessages = *mirror.TCP.SendQueueMessages
+		}
+		if mirror.TCP.ReadIdleTimeout != nil {
+			result.TCP.ReadIdleTimeout = mirror.TCP.ReadIdleTimeout.Duration()
+		}
+		if mirror.TCP.WriteTimeout != nil {
+			result.TCP.WriteTimeout = mirror.TCP.WriteTimeout.Duration()
+		}
+	case rpc.TransportNATS:
+		if mirror.NATS == nil {
+			return nil, invalidConfigf("Node %q 的 rpc.nats 不能为空", nodeID)
+		}
+		if mirror.TCP != nil {
+			return nil, invalidConfigf(
+				"Node %q 的 rpc.transport 为 nats 时不能配置 rpc.tcp",
+				nodeID,
+			)
+		}
+		result.NATS = rpc.DefaultNATSConfig()
+		result.NATS.Namespace = strings.TrimSpace(mirror.NATS.Namespace)
+		result.NATS.URLs = append([]string(nil), mirror.NATS.URLs...)
+		if mirror.NATS.ReceiveQueueMessages != nil {
+			result.NATS.ReceiveQueueMessages = *mirror.NATS.ReceiveQueueMessages
+		}
+		result.NATS.Auth = rpc.NATSAuthConfig{
+			Username:        mirror.NATS.Auth.Username,
+			Password:        mirror.NATS.Auth.Password,
+			Token:           mirror.NATS.Auth.Token,
+			CredentialsFile: mirror.NATS.Auth.CredentialsFile,
+			NKeySeedFile:    mirror.NATS.Auth.NKeySeedFile,
+		}
+		result.NATS.TLS = rpc.NATSTLSConfig{
+			Enabled:            mirror.NATS.TLS.Enabled,
+			CAFile:             mirror.NATS.TLS.CAFile,
+			CertFile:           mirror.NATS.TLS.CertFile,
+			KeyFile:            mirror.NATS.TLS.KeyFile,
+			ServerName:         mirror.NATS.TLS.ServerName,
+			InsecureSkipVerify: mirror.NATS.TLS.InsecureSkipVerify,
+		}
+	default:
+		return nil, invalidConfigf(
+			"Node %q 的 rpc.transport 必须是 tcp 或 nats",
+			nodeID,
+		)
 	}
 	if err := result.Validate(); err != nil {
 		return nil, invalidConfigf("Node %q 的 rpc 配置无效: %v", nodeID, err)

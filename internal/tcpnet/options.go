@@ -19,8 +19,6 @@ const (
 	defaultMaxMessageSize = 4 * 1024 * 1024
 	// 通用 TCP 默认预留 4096 个发送槽位；M10 RPC 会显式覆盖为 16384。
 	defaultSendQueueFrames = 4096
-	// 待发送 payload 总量默认限制为 8M。
-	defaultSendQueueBytes = 8 * 1024 * 1024
 	// 写入一个完整帧最多等待 15 秒。
 	defaultWriteTimeout = 15 * time.Second
 	// 系统 TCP KeepAlive 默认使用 30 秒周期。
@@ -59,8 +57,6 @@ type ConnectionOptions struct {
 	MaxMessageSize int
 	// SendQueueFrames 限制每条连接等待发送的帧数量。
 	SendQueueFrames int
-	// SendQueueBytes 限制每条连接等待发送的 payload 总字节数。
-	SendQueueBytes int
 	// ReadTimeout 是读一个完整帧的空闲上限；零表示关闭。
 	ReadTimeout time.Duration
 	// WriteTimeout 是写一个完整帧的上限，必须大于零。
@@ -105,7 +101,6 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions {
 		},
 		MaxMessageSize:  defaultMaxMessageSize,
 		SendQueueFrames: defaultSendQueueFrames,
-		SendQueueBytes:  defaultSendQueueBytes,
 		ReadTimeout:     0,
 		WriteTimeout:    defaultWriteTimeout,
 		KeepAlive:       defaultKeepAlive,
@@ -147,12 +142,9 @@ func validateConnectionOptions(options ConnectionOptions) error {
 		return invalidConfig("tcpnet: MaxMessageSize 超出长度字段可表达范围")
 	}
 
-	// 帧数和字节数缺一不可；字节额度至少要容纳一条最大合法消息。
+	// 发送队列只按完整消息数量形成一个明确上限。
 	if options.SendQueueFrames <= 0 {
 		return invalidConfig("tcpnet: SendQueueFrames 必须大于零")
-	}
-	if options.SendQueueBytes < options.MaxMessageSize {
-		return invalidConfig("tcpnet: SendQueueBytes 不能小于 MaxMessageSize")
 	}
 
 	// 读超时允许零值关闭，写超时必须存在以避免 WriteLoop 永久挂起。

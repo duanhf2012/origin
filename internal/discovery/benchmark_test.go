@@ -83,7 +83,7 @@ func BenchmarkDirectoryApply(b *testing.B) {
 		first, _ := benchmarkRawSnapshot(size)
 		second, _ := benchmarkRawSnapshot(size)
 		for nodeIndex := range second.Nodes {
-			second.Nodes[nodeIndex].SessionID += "-next"
+			second.Nodes[nodeIndex].SessionID += uint64(size + 1)
 		}
 		if _, _, err := directory.ApplySnapshot(first); err != nil {
 			b.Fatal(err)
@@ -166,7 +166,7 @@ func benchmarkRawSnapshot(size int) (RawSnapshot, []string) {
 		nodeIDs[index] = nodeID
 		result.Nodes[index] = rawNode(
 			nodeID,
-			fmt.Sprintf("session-%05d", index),
+			uint64(index+1),
 			fmt.Sprintf("127.0.0.1:%d", 10_000+index),
 			"PlayerService",
 			1,

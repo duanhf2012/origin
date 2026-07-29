@@ -17,7 +17,7 @@ func FuzzDirectoryApplySnapshot(f *testing.F) {
 			t.Fatalf("NewDirectory() error = %v", err)
 		}
 		baseline := RawSnapshot{Nodes: []RawNode{
-			rawNode("baseline-1", "session-baseline", "127.0.0.1:1", "BaseService", 1),
+			rawNode("baseline-1", 1, "127.0.0.1:1", "BaseService", 1),
 		}}
 		if _, _, err := directory.ApplySnapshot(baseline); err != nil {
 			t.Fatalf("baseline ApplySnapshot() error = %v", err)
@@ -63,9 +63,9 @@ func fuzzRawSnapshot(data []byte) RawSnapshot {
 		if next()%7 == 0 {
 			nodeID = ""
 		}
-		sessionID := fuzzIdentifier("session", nodeIndex, next())
+		sessionID := uint64(next()) + 1
 		if next()%7 == 0 {
-			sessionID = ""
+			sessionID = 0
 		}
 		transport := Transport(next() % 4)
 		address := ""

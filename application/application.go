@@ -47,6 +47,8 @@ type Application struct {
 	done          chan struct{}
 	doneOnce      sync.Once
 	lifecycleErr  error
+	// runtimeFailure 保存第一个 Node 级 Transport 永久终态，由 run 在完成统一 Stop 后返回。
+	runtimeFailure error
 }
 
 // New 创建一个尚未绑定配置和 Service 类型的 Application。
@@ -323,13 +325,27 @@ func (app *Application) run(
 	err = app.startNodes(startCtx, nodes)
 	startCancel()
 	if err != nil {
+		// Transport 可能在某个长 OnStart 期间进入终态并取消启动 Context；保留首个真实
+		// 基础设施原因，避免最终日志只剩没有定位信息的 context canceled。
+		app.mu.Lock()
+		runtimeFailure := app.runtimeFailure
+		app.mu.Unlock()
+		err = errors.Join(err, runtimeFailure)
 		return app.rollbackStartup(err)
 	}
 
 	app.state.Store(uint32(StateRunning))
 	app.logger.Info("application running")
 	<-lifecycleCtx.Done()
-	return app.stopStartedNodes()
+	stopErr := app.stopStartedNodes()
+	app.mu.Lock()
+	runtimeFailure := app.runtimeFailure
+	app.mu.Unlock()
+	if runtimeFailure == nil {
+		return stopErr
+	}
+	app.state.Store(uint32(StateFailed))
+	return app.report(errors.Join(runtimeFailure, stopErr))
 }
 
 // Stop 请求当前 Application 停止，并等待唯一生命周期路径完成清理。
@@ -457,6 +473,7 @@ func (app *Application) buildNodes(
 				TimerLocation:    app.options.Timer.Location,
 				BufferPool:       app.bufferPool,
 				DiscoverySource:  discoverySource,
+				RuntimeFailure:   app.handleRuntimeFailure,
 			},
 		)
 		if err != nil {
@@ -465,6 +482,28 @@ func (app *Application) buildNodes(
 		result = append(result, current)
 	}
 	return result, nil
+}
+
+// handleRuntimeFailure 记录首个 Node 级基础设施终态并只取消运行 Context。
+//
+// 网络回调不会在这里直接 Stop Node，从而避免等待自身网络 goroutine 形成死锁；run 被唤醒后
+// 仍按真实启动顺序的严格反序执行统一优雅关闭。
+func (app *Application) handleRuntimeFailure(nodeID string, cause error) {
+	if app == nil || cause == nil {
+		return
+	}
+	wrapped := fmt.Errorf("Node %q RPC 基础设施终态: %w", nodeID, cause)
+	app.mu.Lock()
+	if app.runtimeFailure != nil {
+		app.mu.Unlock()
+		return
+	}
+	app.runtimeFailure = wrapped
+	cancel := app.runCancel
+	app.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // rollbackBuiltNodes 释放装配阶段已经创建、但尚未启动的 Node 底层资源。

@@ -203,7 +203,7 @@ func testRPCConfig(t testing.TB) rpc.Config {
 	config := rpc.DefaultConfig()
 	config.TCP.Listen = address
 	config.TCP.Advertise = address
-	config.TCP.ReadTimeout = time.Second
+	config.TCP.ReadIdleTimeout = time.Second
 	config.TCP.WriteTimeout = time.Second
 	return config
 }
@@ -536,7 +536,7 @@ func TestRemoteRetiredServiceRemainsRoutable(t *testing.T) {
 	}
 }
 
-func TestRemoteAcceptedRequestSurvivesCallerDisconnect(t *testing.T) {
+func TestRemoteGracefulStopWaitsAcceptedRequest(t *testing.T) {
 	fixture := newRemoteRPCFixture(t)
 	_ = awaitRemoteEcho(t, fixture, "ready")
 
@@ -575,12 +575,27 @@ func TestRemoteAcceptedRequestSurvivesCallerDisconnect(t *testing.T) {
 		t.Fatal("远端请求没有进入目标业务方法")
 	}
 
-	// 调用端关闭连接并完成自身 pending；目标业务仍占有已经接受的任务，不被连接取消。
-	stopTestNode(t, fixture.callerNode)
-	if err := <-callDone; !errors.Is(err, errs.ErrTransportUnavailable) {
-		t.Fatalf("caller disconnect Await error = %v", err)
+	// 优雅停止先阻止新入站，再等待已经存在的 Await；此时不能提前关闭出站连接。
+	stopDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		stopDone <- fixture.callerNode.Stop(ctx)
+	}()
+	select {
+	case err := <-stopDone:
+		t.Fatalf("目标尚未完成时 Stop 提前返回: %v", err)
+	case <-time.After(30 * time.Millisecond):
 	}
+
+	// 目标完成后响应仍可沿旧连接返回，随后调用端完成排空并关闭连接。
 	close(gate)
+	if err := <-callDone; err != nil {
+		t.Fatalf("优雅停止中的 Await error = %v", err)
+	}
+	if err := <-stopDone; err != nil {
+		t.Fatalf("等待已接受请求后的 Stop error = %v", err)
+	}
 
 	completed := make(chan int, 1)
 	if err := fixture.player.DispatchAsync(func(context.Context) {

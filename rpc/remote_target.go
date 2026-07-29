@@ -16,7 +16,7 @@ import (
 type remoteTarget struct {
 	remote    *remoteRuntime
 	nodeID    string
-	sessionID string
+	sessionID uint64
 	address   string
 
 	ctx    context.Context
@@ -32,7 +32,7 @@ type remoteTarget struct {
 func newRemoteTarget(
 	remote *remoteRuntime,
 	nodeID string,
-	sessionID string,
+	sessionID uint64,
 	address string,
 ) *remoteTarget {
 	ctx, cancel := context.WithCancel(context.Background())

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -20,6 +21,53 @@ import (
 )
 
 const integrationTimeout = 5 * time.Second
+
+// TestMessageDataCanOutliveHandler 锁定 M15 依赖的 nats.go 所有权边界：异步 Handler 返回后，
+// Message.Data 仍由接收者持有，natsnet 不会池化或复用底层切片。
+func TestMessageDataCanOutliveHandler(t *testing.T) {
+	t.Parallel()
+
+	running := startServer(t, defaultServerOptions())
+	options := testOptions("integration.message-ownership", running.ClientURL())
+	conn := connectForTest(t, options, nil)
+	defer closeConn(t, conn)
+
+	subject := "origin.integration.message-ownership"
+	retained := make(chan []byte, 1)
+	_, err := conn.Subscribe(
+		context.Background(),
+		subject,
+		natsnet.SubscriptionOptions{},
+		func(message natsnet.Message) {
+			// 故意只转移 Slice Header，不复制 payload。
+			select {
+			case retained <- message.Data:
+			default:
+			}
+		},
+	)
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+
+	expected := bytes.Repeat([]byte{0x5a}, 1024)
+	if err = conn.Publish(subject, expected); err != nil {
+		t.Fatalf("first Publish() error = %v", err)
+	}
+	first := <-retained
+	for index := 0; index < 1024; index++ {
+		if err = conn.Publish(subject, bytes.Repeat([]byte{byte(index)}, 1024)); err != nil {
+			t.Fatalf("noise Publish() error = %v", err)
+		}
+	}
+	if err = conn.Flush(context.Background()); err != nil {
+		t.Fatalf("Flush() error = %v", err)
+	}
+	runtime.GC()
+	if !bytes.Equal(first, expected) {
+		t.Fatal("Handler 返回后 Message.Data 被复用或修改")
+	}
+}
 
 // TestPublishSubscribeAndLifecycle 验证普通消息、空 payload、源切片复用、统计和立即关闭。
 func TestPublishSubscribeAndLifecycle(t *testing.T) {
@@ -300,11 +348,15 @@ func TestAuthenticationAndMessageLimit(t *testing.T) {
 	options := testOptions("integration.auth", running.ClientURL())
 	options.MaxMessageSize = 64
 	options.Reconnect.BufferSize = 128
-	options.Subscription.PendingBytes = 128
 	options.Auth.Username = "origin"
 	options.Auth.Password = "test-password"
 	conn := connectForTest(t, options, nil)
 	defer closeConn(t, conn)
+
+	// RPC Adapter 依赖该冷路径信息在创建订阅前校验完整 Origin 包络上限。
+	if got := conn.MaxPayload(); got != 128 {
+		t.Fatalf("MaxPayload() = %d，期望 128", got)
+	}
 
 	if err := conn.Publish("origin.integration.limit", make([]byte, 65)); !errors.Is(
 		err,
@@ -422,7 +474,6 @@ func TestReconnectExhaustedAndBufferOverload(t *testing.T) {
 	)
 	options.MaxMessageSize = 32
 	options.Reconnect.BufferSize = 64
-	options.Subscription.PendingBytes = 64
 	options.Reconnect.MaxAttempts = 100
 	options.Reconnect.Wait = 200 * time.Millisecond
 	events := make(chan natsnet.Event, 16)
@@ -482,7 +533,6 @@ func TestPendingLimitReportsSlowConsumer(t *testing.T) {
 	options := testOptions("integration.pending", running.ClientURL())
 	options.MaxMessageSize = 64
 	options.Reconnect.BufferSize = 128
-	options.Subscription.PendingBytes = 128
 	events := make(chan natsnet.Event, 128)
 	conn := connectForTest(
 		t,
@@ -498,7 +548,6 @@ func TestPendingLimitReportsSlowConsumer(t *testing.T) {
 		"origin.integration.pending",
 		natsnet.SubscriptionOptions{
 			PendingMessages: 1,
-			PendingBytes:    64,
 		},
 		func(natsnet.Message) {
 			select {

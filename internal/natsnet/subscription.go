@@ -95,13 +95,12 @@ func (subscription *Subscription) Queue() string {
 	return subscription.queue
 }
 
-// Stats 返回当前 Pending 消息数、字节数和累计丢弃数。
+// Stats 返回当前 Pending 消息数和累计丢弃数。
 func (subscription *Subscription) Stats() SubscriptionStats {
 	// 官方 API 在订阅关闭后返回 ErrBadSubscription；统计快照使用零值而不向日志制造错误。
-	pendingMessages, pendingBytes, pendingErr := subscription.raw.Pending()
+	pendingMessages, _, pendingErr := subscription.raw.Pending()
 	if pendingErr != nil {
 		pendingMessages = 0
-		pendingBytes = 0
 	}
 	dropped, droppedErr := subscription.raw.Dropped()
 	if droppedErr != nil {
@@ -109,7 +108,6 @@ func (subscription *Subscription) Stats() SubscriptionStats {
 	}
 	return SubscriptionStats{
 		PendingMessages: pendingMessages,
-		PendingBytes:    pendingBytes,
 		DroppedMessages: dropped,
 	}
 }

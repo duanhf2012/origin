@@ -28,7 +28,7 @@ type serviceEndpoint struct {
 // 查找普通 Map 不需要锁；每个 Node 使用独立 Runtime，不存在跨 Node 隐式共享状态。
 type Runtime struct {
 	nodeID    string
-	sessionID string
+	sessionID uint64
 	pool      *bufferpool.Pool
 	logger    originlog.Logger
 
@@ -41,16 +41,24 @@ type Runtime struct {
 	inboundReady atomic.Bool
 	// remoteResolver 由所属 Node 的不可变发现目录实现，Freeze 后保持只读。
 	remoteResolver RemoteResolver
+	// failureHandler 把 Node 级 Transport 永久终态上报给唯一生命周期控制路径。
+	// failureOnce 保证 TCP Listener 与 NATS Connection 的竞态故障只触发一次停机。
+	failureHandler func(error)
+	failureOnce    sync.Once
 
 	// remote 在配置启用 TCP 时保存连接、监听和 Deadline 资源；未配置时保持 nil，
 	// 本地调用热路径只需一次 nil 判断。
 	remote *remoteRuntime
+	// nats 在配置启用 NATS 时保存 Node 共享 Connection、两个 Subscription 和 pending。
+	// TCP 与 NATS 直接使用不同字段，不在逐调用热路径引入接口分派。
+	nats *natsRuntime
 }
 
-// RemoteRoute 是发现目录为一次精确远端 RPC 解析出的 TCP 会话目标。
+// RemoteRoute 是发现目录为一次精确远端 RPC 解析出的传输与进程会话目标。
 type RemoteRoute struct {
 	NodeID    string
-	SessionID string
+	SessionID uint64
+	Transport string
 	Address   string
 }
 
@@ -75,7 +83,6 @@ func NewRuntime(
 	}
 	return &Runtime{
 		nodeID:    nodeID,
-		sessionID: nodeID,
 		pool:      pool,
 		logger:    logger,
 		endpoints: make(map[string]serviceEndpoint),
@@ -83,8 +90,8 @@ func NewRuntime(
 }
 
 // BindSessionID 在 Freeze 前绑定当前 Node 进程会话，供 TCP Hello/Ack 校验。
-func (runtime *Runtime) BindSessionID(sessionID string) error {
-	if runtime == nil || !validWireName(sessionID) {
+func (runtime *Runtime) BindSessionID(sessionID uint64) error {
+	if runtime == nil || sessionID == 0 {
 		return errs.ErrInvalidArgument
 	}
 	runtime.mu.Lock()
@@ -109,6 +116,39 @@ func (runtime *Runtime) BindRemoteResolver(resolver RemoteResolver) error {
 	}
 	runtime.remoteResolver = resolver
 	return nil
+}
+
+// BindFailureHandler 在 Freeze 前绑定 Transport 永久终态的唯一上报入口。
+//
+// Handler 必须快速返回；Runtime 在网络回调 goroutine 中调用它，真正的生命周期清理由
+// Application 的串行控制路径执行。
+func (runtime *Runtime) BindFailureHandler(handler func(error)) error {
+	if runtime == nil || handler == nil {
+		return errs.ErrInvalidArgument
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.frozen.Load() || runtime.closed.Load() ||
+		runtime.failureHandler != nil {
+		return errs.ErrServiceNotReady
+	}
+	runtime.failureHandler = handler
+	return nil
+}
+
+// reportTransportFailure 只把第一个永久故障交给生命周期层，避免重复 Stop。
+func (runtime *Runtime) reportTransportFailure(cause error) {
+	if runtime == nil || cause == nil || runtime.closed.Load() {
+		return
+	}
+	runtime.failureOnce.Do(func() {
+		runtime.mu.Lock()
+		handler := runtime.failureHandler
+		runtime.mu.Unlock()
+		if handler != nil {
+			handler(cause)
+		}
+	})
 }
 
 // OpenInbound 在整个 Node 的全部 OnStart 成功后开放远端业务请求准入。
@@ -146,9 +186,19 @@ func (runtime *Runtime) resolveRemote(
 	if err != nil {
 		return RemoteRoute{}, err
 	}
-	if route.NodeID != nodeID ||
-		!validWireName(route.SessionID) ||
-		validateAdvertiseAddress(route.Address) != nil {
+	if route.NodeID != nodeID || route.SessionID == 0 {
+		return RemoteRoute{}, errs.ErrTransportUnavailable
+	}
+	switch route.Transport {
+	case TransportTCP:
+		if runtime.remote == nil || validateAdvertiseAddress(route.Address) != nil {
+			return RemoteRoute{}, errs.ErrTransportUnavailable
+		}
+	case TransportNATS:
+		if runtime.nats == nil || route.Address != "" {
+			return RemoteRoute{}, errs.ErrTransportUnavailable
+		}
+	default:
 		return RemoteRoute{}, errs.ErrTransportUnavailable
 	}
 	return route, nil
@@ -209,7 +259,8 @@ func (runtime *Runtime) Configure(config *Config) error {
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
-	if runtime.frozen.Load() || runtime.closed.Load() || runtime.remote != nil {
+	if runtime.frozen.Load() || runtime.closed.Load() ||
+		runtime.remote != nil || runtime.nats != nil {
 		return errs.ErrInvalidArgument
 	}
 	if config == nil {
@@ -218,7 +269,14 @@ func (runtime *Runtime) Configure(config *Config) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
-	runtime.remote = newRemoteRuntime(runtime, *config)
+	switch config.Transport {
+	case TransportTCP:
+		runtime.remote = newRemoteRuntime(runtime, *config)
+	case TransportNATS:
+		runtime.nats = newNATSRuntime(runtime, *config)
+	default:
+		return errs.ErrInvalidArgument
+	}
 	return nil
 }
 
@@ -242,17 +300,25 @@ func (runtime *Runtime) Close() {
 		return
 	}
 	runtime.BeginStop(context.Background())
+	runtime.closed.Store(true)
 	if runtime.remote != nil {
+		_ = runtime.remote.closeTransport(context.Background())
 		runtime.remote.closeDeadlines()
+	}
+	if runtime.nats != nil {
+		runtime.nats.close()
 	}
 }
 
 // maxMessageSize 返回当前 Node 冻结的业务 payload 上限。
 func (runtime *Runtime) maxMessageSize() int {
 	if runtime != nil && runtime.remote != nil {
-		return runtime.remote.config.MaxMessageSize
+		return runtime.remote.config.MaxPayloadSize
 	}
-	return DefaultMaxMessageSize
+	if runtime != nil && runtime.nats != nil {
+		return runtime.nats.config.MaxPayloadSize
+	}
+	return DefaultMaxPayloadSize
 }
 
 // AllocateRequest 为生成代码取得准确 payload，并只为远端目标保留对应调用头空间。
@@ -272,9 +338,20 @@ func (runtime *Runtime) AllocateRequest(
 	if target.mode != targetServiceOnNode || target.nodeID == runtime.nodeID {
 		return runtime.pool.Acquire(size), nil
 	}
-	headroom := wireNotifyFixedSize + len(target.serviceName)
-	if kind == CallRequest {
+	headroom := 0
+	switch {
+	case runtime.remote != nil && kind == CallRequest:
 		headroom = wireRequestFixedSize + len(target.serviceName)
+	case runtime.remote != nil:
+		headroom = wireNotifyFixedSize + len(target.serviceName)
+	case runtime.nats != nil && kind == CallRequest:
+		headroom = natsRequestFixedSize +
+			len(runtime.nodeID) +
+			len(target.serviceName)
+	case runtime.nats != nil:
+		headroom = natsNotifyFixedSize + len(target.serviceName)
+	default:
+		return nil, errs.ErrRPCNoRoute
 	}
 	if headroom > wireEnvelopeSize || !validWireName(target.serviceName) {
 		return nil, errs.ErrRPCEncodeFailed
@@ -341,7 +418,7 @@ func (runtime *Runtime) submit(
 		return remoteRequestHandle{}, errs.ErrServiceStopped
 	}
 
-	// 指定其他 Node 时只走真实 TCP 会话；同进程 Runtime 之间也不做指针短路。
+	// 指定其他 Node 时只走所选真实 Transport；同进程 Runtime 之间也不做指针短路。
 	if target.mode == targetServiceOnNode && target.nodeID != runtime.nodeID {
 		// 服务发现是远端调用的唯一事实来源；历史连接不能绕过当前可见快照。
 		route, err := runtime.resolveRemote(
@@ -353,38 +430,68 @@ func (runtime *Runtime) submit(
 		if err != nil {
 			return remoteRequestHandle{}, err
 		}
-		if runtime.remote == nil {
-			return remoteRequestHandle{}, errs.ErrTransportUnavailable
-		}
-		session := runtime.remote.targetSession(target.nodeID, route.SessionID)
-		if session == nil {
-			return remoteRequestHandle{}, errs.ErrTransportUnavailable
-		}
-		if kind == CallNotify {
-			err := session.sendNotify(
+		switch route.Transport {
+		case TransportTCP:
+			session := runtime.remote.targetSession(target.nodeID, route.SessionID)
+			if session == nil {
+				return remoteRequestHandle{}, errs.ErrTransportUnavailable
+			}
+			if kind == CallNotify {
+				err := session.sendNotify(
+					target.serviceName,
+					fingerprint,
+					methodID,
+					request,
+				)
+				return remoteRequestHandle{}, err
+			}
+			timeout, err := service.AwaitTimeoutOf(owner)
+			if err != nil {
+				return remoteRequestHandle{}, err
+			}
+			remaining, err := remoteRemainingTimeout(timeout, ctx)
+			if err != nil {
+				return remoteRequestHandle{}, err
+			}
+			return session.sendRequest(
 				target.serviceName,
 				fingerprint,
 				methodID,
+				remaining,
 				request,
+				complete,
 			)
-			return remoteRequestHandle{}, err
+		case TransportNATS:
+			if kind == CallNotify {
+				err := runtime.nats.sendNotify(
+					target.nodeID,
+					route.SessionID,
+					target.serviceName,
+					methodID,
+					request,
+				)
+				return remoteRequestHandle{}, err
+			}
+			timeout, err := service.AwaitTimeoutOf(owner)
+			if err != nil {
+				return remoteRequestHandle{}, err
+			}
+			remaining, err := remoteRemainingTimeout(timeout, ctx)
+			if err != nil {
+				return remoteRequestHandle{}, err
+			}
+			return runtime.nats.sendRequest(
+				target.nodeID,
+				route.SessionID,
+				target.serviceName,
+				methodID,
+				remaining,
+				request,
+				complete,
+			)
+		default:
+			return remoteRequestHandle{}, errs.ErrTransportUnavailable
 		}
-		timeout, err := service.AwaitTimeoutOf(owner)
-		if err != nil {
-			return remoteRequestHandle{}, err
-		}
-		remaining, err := remoteRemainingTimeout(timeout, ctx)
-		if err != nil {
-			return remoteRequestHandle{}, err
-		}
-		return session.sendRequest(
-			target.serviceName,
-			fingerprint,
-			methodID,
-			remaining,
-			request,
-			complete,
-		)
 	}
 	endpoint, err := runtime.resolve(target, contractID, fingerprint)
 	if err != nil {
