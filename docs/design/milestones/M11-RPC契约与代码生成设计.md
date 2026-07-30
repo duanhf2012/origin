@@ -5,8 +5,9 @@
 > 最后更新：2026-07-30
 > 当前结论：M11 已完成实现、测试、性能基线和 Windows/Linux 验收
 
-> 后续语义：M19 保持 M11 业务方法与 payload 不变，增加 `BindXxxRPC`、路由派生和
-> `Prepare -> Encode -> Submit` 生成 ABI；旧生成物需统一重新生成。
+> 后续语义：M19 保持 M11 业务方法与 payload 不变，增加默认 `BindXxxRPC`、显式名称
+> `BindXxxRPCTo`、`OnNode`、路由派生和 `Prepare -> Encode -> Submit` 生成 ABI；旧生成物
+> 需统一重新生成。
 
 ## 1. 文档目的
 

@@ -25,17 +25,57 @@ M19 不实现 Broadcast、多目标部分成功、自动重试、权重、健康
 
 ## 2. 已确认的公共外观
 
-### 2.1 规范构造函数
+### 2.1 最终业务外观
+
+RPC 契约建议放在能表达业务含义的包中，例如 `playerapi`。`contract` 只曾是设计示例中的
+占位包名，不是 Origin 要求的固定包名。
+
+普通业务在 `OnInit` 中绑定一次默认目标并保存为字段：
+
+```go
+type GatewayService struct {
+    service.Service
+
+    playerRPC playerapi.PlayerRPCClient
+}
+
+func (s *GatewayService) OnInit() error {
+    s.playerRPC = playerapi.BindPlayerRPC(s)
+    return nil
+}
+```
+
+调用点只表达真正变化的业务参数和可选路由策略：
+
+```go
+// 默认 RoundRobin。
+player, err := s.playerRPC.AwaitGetPlayer(ctx, playerID)
+
+// 按业务 Key 稳定选择。
+player, err := s.playerRPC.
+    Route(playerID).
+    AwaitGetPlayer(ctx, playerID)
+
+// 精确调用已知归属 Node；沿用已经绑定的 ServiceName。
+player, err := s.playerRPC.
+    OnNode(playerNodeID).
+    AwaitGetPlayer(ctx, playerID)
+```
+
+`playerRPC` 是调用方 Service 的字段，类型为生成的轻量 `PlayerRPCClient` 值；它不是玩家
+集合、全局对象或连接池。`Route` 与 `OnNode` 都返回新的值客户端，不修改字段本身。
+
+### 2.2 规范构造函数
 
 M11 已有的规范构造函数保持不变：
 
 ```go
-client := contract.NewPlayerRPCClient(
+client := playerapi.NewPlayerRPCClient(
     owner,
     rpc.ToService("PlayerService"),
 )
 
-exact := contract.NewPlayerRPCClient(
+exact := playerapi.NewPlayerRPCClient(
     owner,
     rpc.ToServiceOnNode("player-2", "PlayerService"),
 )
@@ -43,40 +83,61 @@ exact := contract.NewPlayerRPCClient(
 
 它仍是构造任意 `rpc.Target` 客户端的唯一通用入口。
 
-### 2.2 常用自动目标的便捷绑定
+### 2.3 默认 ServiceName 与显式覆盖
 
-`origingen` 为每个 RPC 契约额外生成一个常用入口：
+`origingen` 为每个 RPC 契约生成默认名称绑定和显式名称覆盖两个入口：
 
 ```go
 func BindPlayerRPC(
+    owner service.IService,
+) PlayerRPCClient
+
+func BindPlayerRPCTo(
     owner service.IService,
     serviceName string,
 ) PlayerRPCClient
 ```
 
-它等价于：
+默认 ServiceName 只由契约名确定，不扫描当前实现类型，也不依赖生成命令覆盖了哪些包：
 
-```go
-NewPlayerRPCClient(owner, rpc.ToService(serviceName))
+```text
+PlayerRPC       -> PlayerService
+DBRPC           -> DBService
+SceneManagerRPC -> SceneManagerService
 ```
 
-`BindXxxRPC` 只服务最常见的自动实例选择，不再生成 `BindXxxRPCOnNode`、字符串策略名、
-全局注册表或 Options 变体。精确调用继续使用规范构造函数，避免生成 API 成倍膨胀。
+确定性规则为：契约名以非空 `RPC` 后缀结束时去掉该后缀并追加 `Service`；否则直接追加
+`Service`。因此 `BindPlayerRPC(owner)` 等价于：
 
-推荐在 Service 启动冷路径绑定并长期复用：
+```go
+NewPlayerRPCClient(owner, rpc.ToService("PlayerService"))
+```
+
+运行时实际 ServiceName 由配置决定。模板 `SceneService` 可以实例化为
+`scene-1:SceneService`；调用这种改名实例时使用：
+
+```go
+sceneRPC := sceneapi.BindSceneRPCTo(s, "scene-1")
+```
+
+`BindXxxRPCTo` 等价于 `NewXxxRPCClient(owner, rpc.ToService(serviceName))`。不使用可变参数，
+避免多余名称可以编译却只能延迟到首次 RPC 才报错；也不按 ContractID 在运行时猜测任意
+实现，避免把不同 ServiceName 的业务边界合并。
+
+推荐在 Service `OnInit` 冷路径绑定并长期复用：
 
 ```go
 type GatewayService struct {
     service.Service
 
-    players      contract.PlayerRPCClient
-    localPlayers contract.PlayerRPCClient
-    zoneSelector *ZoneSelector
+    playerRPC      playerapi.PlayerRPCClient
+    zonePlayerRPC  playerapi.PlayerRPCClient
+    zoneSelector   *ZoneSelector
 }
 
-func (s *GatewayService) OnStart(ctx context.Context) error {
-    s.players = contract.BindPlayerRPC(s, "PlayerService")
-    s.localPlayers = s.players.RouteBy(s.zoneSelector)
+func (s *GatewayService) OnInit() error {
+    s.playerRPC = playerapi.BindPlayerRPC(s)
+    s.zonePlayerRPC = s.playerRPC.RouteBy(s.zoneSelector)
     return nil
 }
 ```
@@ -84,13 +145,13 @@ func (s *GatewayService) OnStart(ctx context.Context) error {
 普通调用不再重复构造 Target 或设置策略：
 
 ```go
-player, err := s.players.AwaitGetPlayer(ctx, playerID)
+player, err := s.playerRPC.AwaitGetPlayer(ctx, playerID)
 ```
 
 按每次业务 Key 选择时只派生一个值客户端：
 
 ```go
-player, err := s.players.
+player, err := s.playerRPC.
     Route(playerID).
     AwaitGetPlayer(ctx, playerID)
 ```
@@ -99,19 +160,22 @@ player, err := s.players.
 字段长期保存，也可以安全按值复制。业务不能把客户端跨 Service 共用，因为客户端保存
 owner，并据此确定 Await、Async 回调和停止归属。
 
-### 2.3 路由方法
+### 2.4 路由与精确节点派生
 
 每个生成客户端提供：
 
 ```go
+func (c PlayerRPCClient) OnNode(nodeID string) PlayerRPCClient
 func (c PlayerRPCClient) RouteRoundRobin() PlayerRPCClient
 func (c PlayerRPCClient) RouteRandom() PlayerRPCClient
 func (c PlayerRPCClient) Route(key any) PlayerRPCClient
 func (c PlayerRPCClient) RouteBy(selector rpc.RouteSelector) PlayerRPCClient
 ```
 
-所有方法都使用值接收者并返回同一强类型客户端，不修改原客户端。内置策略保存紧凑枚举
-和归一化后的 `uint64`，不保存闭包、原始 Key、候选切片或运行时连接。
+所有方法都使用值接收者并返回同一强类型客户端，不修改原客户端。`OnNode` 保留当前
+ServiceName 与契约，只把目标收窄为指定 Node；它等价于使用同一 ServiceName 构造
+`ToServiceOnNode`，不执行发现查询、拨号或等待。内置策略保存紧凑枚举和归一化后的
+`uint64`，不保存闭包、原始 Key、候选切片或运行时连接。
 
 `ToService` 未显式选择策略时默认使用 RoundRobin。`RouteRoundRobin` 主要用于显式表达
 意图以及从其他策略派生回默认策略。
@@ -128,8 +192,8 @@ func (c PlayerRPCClient) RouteBy(selector rpc.RouteSelector) PlayerRPCClient
 本地实例不享受优先级，也不作为远端失败时的隐式回退。它按 NodeID 插入相同的稳定顺序，
 与远端实例一起参与所选策略。
 
-如果业务必须调用本地实例，应使用当前 NodeID 的 `ToServiceOnNode`；如果必须调用特定远端
-实例，也使用 `ToServiceOnNode`。M19 不引入“优先本地”这种隐藏策略。
+如果业务必须调用本地实例，应使用当前 NodeID 的 `OnNode` 或 `ToServiceOnNode`；如果必须
+调用特定远端实例，同样使用精确目标。M19 不引入“优先本地”这种隐藏策略。
 
 ### 3.2 自动候选过滤
 
@@ -137,14 +201,14 @@ func (c PlayerRPCClient) RouteBy(selector rpc.RouteSelector) PlayerRPCClient
 
 1. ServiceName 完全相同；
 2. ContractID 和完整 ContractFingerprint 与生成客户端一致；
-3. 实现当前生成方法；
-4. 本地 Service 已 Ready，或远端实例已经通过 `allow_discovery` 进入当前快照；
-5. Service 当前为 Running；
-6. 没有进入 Failed、Stopping、Stopped 或 Lost；
-7. 实例声明的 Transport 与调用方 Node 的 RPC Transport 一致；
-8. 选择瞬间 Transport 已知连通。
+3. 本地 Service 已 Ready，或远端实例已经通过 `allow_discovery` 进入当前快照；
+4. Service 当前为 Running；
+5. 没有进入 Failed、Stopping、Stopped 或 Lost；
+6. 实例声明的 Transport 与调用方 Node 的 RPC Transport 一致；
+7. 选择瞬间 Transport 已知连通。
 
-第 8 条的具体含义：
+完整 ContractFingerprint 已经覆盖契约的全部方法集合，因此不再为“实现当前方法”增加
+一项重复扫描。第 7 条的具体含义：
 
 - 本地实例：本地 Runtime 与目标 Dispatcher 可提交；
 - TCP：目标 Node 当前存在与发现 SessionID 匹配、已经完成握手的活动会话；
@@ -303,8 +367,12 @@ Random 使用每 Node RPC Runtime 的低竞争伪随机状态，只在当前候�
 - `string`；
 - `[]byte`；
 - `int`、`int8`、`int16`、`int32`、`int64`；
-- `uint`、`uint8`、`uint16`、`uint32`、`uint64`、`uintptr`；
-- 以上整数底层类型的命名类型。
+- `uint`、`uint8`、`uint16`、`uint32`、`uint64`。
+
+`uintptr` 不支持，因为其位宽依赖目标平台，不能作为跨 Windows/Linux/macOS 的稳定路由
+Key。自定义命名整数类型在调用点显式转换为对应基础类型，例如
+`Route(uint64(playerID))`。Go 的 `any` 类型分支不能直接匹配任意命名类型；为了支持该
+语法引入反射会与零分配、低延迟和实现简洁目标冲突，因此 M19 不做隐式底层类型识别。
 
 字符串和字节使用 FNV-1a 64 位哈希。整数按数值确定性归一化到 `uint64`，不依赖本机
 Map hash、指针地址或随机 seed。选择时：
@@ -316,8 +384,8 @@ index = normalizedKey mod candidateCount
 `Route` 调用完成类型识别和归一化，客户端只保存结果。非法类型不 panic，派生客户端记录
 `CodeRPCInvalidRouteKey`，后续方法在 Prepare 阶段立即返回。
 
-简单取模不保证候选变化时最小迁移。有稳定所有权要求的业务使用 `ToServiceOnNode` 或未来
-单独设计的一致性哈希，不把简单取模误当作所有权协议。
+简单取模不保证候选变化时最小迁移。有稳定所有权要求的业务使用 `OnNode`、
+`ToServiceOnNode` 或未来单独设计的一致性哈希，不把简单取模误当作所有权协议。
 
 连接断开会把实例移出候选，因此 Key 可能暂时映射到其他 Connected 实例；连接恢复后又按
 恢复后的稳定候选重新计算。这是可用性路由，不是粘性会话或分片所有权承诺。
@@ -373,15 +441,16 @@ Random 和 Key 路由不经过接口分派或 panic 恢复。
 自定义 Selector 应在 Service 启动时创建并绑定，避免每次 RPC 构造闭包：
 
 ```go
-s.players = contract.
-    BindPlayerRPC(s, "PlayerService").
+s.playerRPC = playerapi.
+    BindPlayerRPC(s).
     RouteBy(s.zoneSelector)
 ```
 
 ## 7. 精确目标
 
-`ToServiceOnNode(nodeID, serviceName)` 的目标范围最多一个实例，永远不会因为路由策略扩大
-到其他 Node。
+`OnNode(nodeID)` 和 `ToServiceOnNode(nodeID, serviceName)` 的目标范围最多一个实例，永远
+不会因为路由策略扩大到其他 Node。`OnNode` 只是复用客户端已经绑定的 ServiceName；
+模板改名客户端先用 `BindXxxRPCTo` 绑定实际名称，再使用相同的 `OnNode`。
 
 - RoundRobin、Random 和 Key 对单候选自然选择该实例；
 - 自定义 Selector 收到零个或一个候选，可以接受或拒绝；
@@ -405,6 +474,10 @@ RPC Runtime 与当前 Node 的 Discovery Runtime 增加一个内部只读候选�
 - 不复制候选切片、标签或地址；
 - 不把 `internal/discovery` 类型泄漏到公开 `rpc` API；
 - 继续保留精确 `ResolveRemote`，供 `ToServiceOnNode` 和提交复核使用。
+
+该接缝返回一次原子读取取得的不可变快照视图；一次 Prepare 的全部远端扫描始终读取同一
+快照，不能对每个候选重新读取当前目录。视图按索引返回标量和不可变标签 Map 引用，不在
+热路径复制 Slice、Instance 或标签。第三方 Provider SPI 不接触该内部视图。
 
 RPC Runtime 负责合并本地候选、过滤契约与 Running 状态、检查 Transport 连通性和执行
 策略。Discovery Runtime 不保存轮询计数、随机状态或业务 Selector。
@@ -450,19 +523,21 @@ TCP/NATS Wire。
 
 M19 的性能要求是验收门禁：
 
-1. `BindXxxRPC`、`RouteRoundRobin`、`RouteRandom` 和合法基础类型 `Route` 返回值不产生
-   堆分配；
+1. `BindXxxRPC`、`BindXxxRPCTo`、`OnNode`、`RouteRoundRobin`、`RouteRandom` 和合法
+   基础类型 `Route` 返回值不产生堆分配；
 2. RoundRobin、Random、整数 Key、字符串 Key 的准备成功热路径达到 `0 allocs/op`；
 3. 本地、TCP、NATS 候选选择不复制候选切片、标签 Map、ServiceName 或地址；
 4. `rpc.Client.Prepare` 返回小型值副本，不返回每次调用新建的指针对象；
 5. 内置策略不使用闭包、反射、`fmt`、临时 `[]byte` 或 Selector 接口；
-6. `Route(any)` 对基础类型和命名整数类型分别执行编译器逃逸分析与 Benchmark；如果
-   `any` 装箱导致稳定堆分配，实施必须增加无分配快速入口或调整内部签名，不能接受该回归；
+6. `Route(any)` 对全部支持的精确基础类型执行编译器逃逸分析与 Benchmark；如果 `any`
+   装箱导致稳定堆分配，实施必须增加无分配快速入口或调整内部签名，不能接受该回归；
 7. 自定义 Selector 只允许业务自身造成的分配，框架包装与候选视图不额外分配；
 8. 100、1000 和 8192 Node 候选下分别记录延迟、分配和锁竞争；
 9. TCP 连接状态读取不逐候选争用连接生命周期互斥锁；
 10. 路由状态只为成功出现过合法候选的组惰性创建，错误 ServiceName 不增长 Runtime Map。
 11. Await 缺连接慢路径不轮询、不创建每目标 goroutine，取消后等待项和引用全部释放。
+12. TCP 目标表与 Listener 连接上限从历史 4096 同步为 Provider 的 8192 Node 上限；本地
+    候选不占远端连接额度。
 
 性能优化不得改变一次选择、无重试、Session 固定和错误语义。
 
@@ -471,7 +546,8 @@ M19 的性能要求是验收门禁：
 M19 至少覆盖：
 
 1. `ToService` 默认 RoundRobin；
-2. `BindXxxRPC` 与规范构造函数完全等价；
+2. `BindXxxRPC` 使用生成的默认 ServiceName，`BindXxxRPCTo` 与显式 `ToService` 规范
+   构造完全等价；
 3. 长期保存客户端和临时构造客户端共享 Runtime 轮询状态；
 4. 本地公开、私有及远端实例进入统一稳定顺序；
 5. 自动路由排除 Retired，精确调用 Retired 仍可提交；
@@ -483,16 +559,17 @@ M19 至少覆盖：
 10. 选择与提交之间 SessionID 替换不把请求发给新进程；
 11. 相同 Key 和相同候选快照稳定选择相同实例；
 12. 候选增减后 Key 对新数量重新取模；
-13. 所有整数、命名整数、string 和 `[]byte`；
+13. 所有受支持的基础整数、string、`[]byte`，以及命名整数显式转换后的结果；
 14. 非法 Key 不 panic 且不分配请求 Buffer；
 15. Selector 读取 NodeID、ServiceName、State 和 Label；
 16. Selector `ok=false`、nil、越界和 panic；
-17. `ToServiceOnNode` 应用任意策略后不扩大范围；
+17. `OnNode` 与 `ToServiceOnNode` 应用任意策略后不扩大范围；
 18. 无同名、契约不匹配、Retired、Transport 不兼容，以及 Async/Notify 全部断开的错误
     区分；
 19. Prepare 前后快照高频替换与连接高频抖动的 Race 测试；
 20. 本地、真实双 Node TCP、真实三 Node NATS 端到端调用；
-21. `origingen -check` 对旧 ABI 和新生成物的诊断；
+21. 默认名称派生、模板改名的 `BindXxxRPCTo`、`OnNode` 保留已绑定 ServiceName，以及
+    `origingen -check` 对旧 ABI 和新生成物的诊断；
 22. RoundRobin、Random、Key、自定义 Selector 和 Prepare 的 Benchmark；
 23. 编译器 `-gcflags=-m` 逃逸基线；
 24. Windows/Linux 原生测试、Race、Vet 和 macOS 交叉构建；
@@ -502,8 +579,9 @@ M19 至少覆盖：
 
 1. M19 只完成单目标路由，Broadcast 后置；
 2. 路由方法位于生成强类型客户端，不扩张 `rpc.Target` 策略 API；
-3. 增加 `BindXxxRPC(owner, serviceName)` 作为最常用便捷入口；
-4. 生成客户端可作为 Service 字段长期复用，派生策略保持值语义；
+3. 增加无名称参数的 `BindXxxRPC(owner)` 默认入口和显式覆盖
+   `BindXxxRPCTo(owner, serviceName)`；
+4. 生成客户端推荐以 `playerRPC` 这类字段名长期复用，`OnNode` 与策略派生保持值语义；
 5. `ToService` 合并本地与远端候选，本地不优先；
 6. 本地私有 Service 保留为当前 Node 候选；
 7. 自动候选只接受 Running，排除 Retired；
@@ -518,4 +596,6 @@ M19 至少覆盖：
 16. 不自动重选、重试或重发 Notify；
 17. M17 Provider SPI 不因 M19 改动；
 18. 提升生成 ABI，但不改变业务方法签名、payload 或 TCP/NATS Wire；
-19. 内置成功热路径、值客户端派生和候选读取以零堆分配作为硬门禁。
+19. 内置成功热路径、值客户端派生和候选读取以零堆分配作为硬门禁；
+20. 命名整数显式转换，避免为了语法糖引入反射；`uintptr` 不作为跨平台稳定 Key；
+21. TCP 目标和 Listener 上限与 8192 Node 固定容量一致。
