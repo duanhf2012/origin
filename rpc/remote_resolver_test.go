@@ -101,3 +101,25 @@ func TestRuntimeRemoteResolverReturnsSessionBoundRoute(t *testing.T) {
 		t.Fatalf("resolveRemote() route = %+v", route)
 	}
 }
+
+func TestRuntimeBindLocalLabelsFreezesCallerMap(t *testing.T) {
+	runtime, _ := NewRuntime(
+		"gateway-1",
+		bufferpool.NewPool(bufferpool.Options{}),
+		originlog.NewNop(),
+	)
+	source := map[string]string{"region": "cn-east"}
+	if err := runtime.BindLocalLabels(source); err != nil {
+		t.Fatalf("BindLocalLabels() error = %v", err)
+	}
+	source["region"] = "modified"
+	if runtime.localLabels["region"] != "cn-east" {
+		t.Fatalf("local labels = %v", runtime.localLabels)
+	}
+	if err := runtime.BindLocalLabels(nil); !errors.Is(
+		err,
+		errs.ErrServiceNotReady,
+	) {
+		t.Fatalf("second BindLocalLabels() error = %v", err)
+	}
+}

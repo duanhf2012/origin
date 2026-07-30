@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	publicdiscovery "github.com/duanhf2012/origin/v3/discovery"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	originlog "github.com/duanhf2012/origin/v3/log"
@@ -42,6 +43,9 @@ type Runtime struct {
 	inboundReady atomic.Bool
 	// remoteResolver 由所属 Node 的不可变发现目录实现，Freeze 后保持只读。
 	remoteResolver RemoteResolver
+	// localLabels 在 Node 装配冷路径深复制一次，Freeze 后只读。
+	localLabels      map[string]string
+	localLabelsBound bool
 	// transportObserver 把整体入站状态变化交给 Node。网络回调只发布常数大小快照，
 	// 不在这里执行发现发布、Service Stop 或 Application Stop。
 	transportObserver func(TransportEvent)
@@ -62,6 +66,26 @@ type RemoteRoute struct {
 	Address   string
 }
 
+// RemoteCandidate 是 RPC Runtime 从一次固定发现快照读取的远端候选标量。
+type RemoteCandidate struct {
+	NodeID      string
+	SessionID   uint64
+	ServiceName string
+	State       publicdiscovery.State
+	Labels      map[string]string
+	Transport   string
+	Address     string
+	ContractID  ContractID
+	Fingerprint ContractFingerprint
+}
+
+// RemoteSnapshot 是一次 Prepare 全程复用的不可变远端候选视图。
+type RemoteSnapshot interface {
+	Len(serviceName string) int
+	Candidate(serviceName string, index int) (RemoteCandidate, bool)
+	Find(nodeID string, serviceName string) (RemoteCandidate, bool)
+}
+
 // RemoteResolver 是 RPC 对所属 Node 发现目录定义的最小热路径接口。
 type RemoteResolver interface {
 	ResolveRemote(
@@ -70,6 +94,14 @@ type RemoteResolver interface {
 		contractID ContractID,
 		fingerprint ContractFingerprint,
 	) (RemoteRoute, error)
+}
+
+// RemoteSnapshotResolver 是发现目录为自动实例选择提供的可选只读扩展。
+//
+// 精确远端解析仍只要求 RemoteResolver，保持既有测试和窄实现兼容。
+type RemoteSnapshotResolver interface {
+	RemoteResolver
+	Snapshot() RemoteSnapshot
 }
 
 // NewRuntime 创建尚未发布的 Node RPC Runtime。
@@ -101,6 +133,33 @@ func (runtime *Runtime) BindSessionID(sessionID uint64) error {
 	}
 	runtime.sessionID = sessionID
 	return nil
+}
+
+// BindLocalLabels 在 Freeze 前冻结当前 Node 的本地候选标签。
+func (runtime *Runtime) BindLocalLabels(labels map[string]string) error {
+	if runtime == nil {
+		return errs.ErrInvalidArgument
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.frozen.Load() || runtime.closed.Load() ||
+		runtime.localLabelsBound {
+		return errs.ErrServiceNotReady
+	}
+	runtime.localLabels = cloneRouteLabels(labels)
+	runtime.localLabelsBound = true
+	return nil
+}
+
+func cloneRouteLabels(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 // BindRemoteResolver 在 Freeze 前绑定当前 Node 唯一的服务发现解析器。

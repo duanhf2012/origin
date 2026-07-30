@@ -56,6 +56,26 @@ func (snapshot *Snapshot) Version() uint64 {
 	return snapshot.version
 }
 
+// Find 在该固定 Snapshot 内执行精确查询，不重新读取 Directory 当前指针。
+func (snapshot *Snapshot) Find(nodeID, serviceName string) (*Instance, bool) {
+	if snapshot == nil || nodeID == "" || serviceName == "" {
+		return nil, false
+	}
+	instance, exists := snapshot.byInstance[InstanceKey{
+		NodeID:      nodeID,
+		ServiceName: serviceName,
+	}]
+	return instance, exists
+}
+
+// List 返回该固定 Snapshot 内部按 NodeID 排序的只读候选。
+func (snapshot *Snapshot) List(serviceName string) []*Instance {
+	if snapshot == nil || serviceName == "" {
+		return nil
+	}
+	return snapshot.byService[serviceName]
+}
+
 // ChangeKind 区分监听交付和连接对账需要观察的目录变化。
 type ChangeKind uint8
 
@@ -99,6 +119,14 @@ type Directory struct {
 	filter      Filter
 	applyMu     sync.Mutex
 	current     atomic.Pointer[Snapshot]
+}
+
+// Snapshot 原子取得当前不可变目录，调用方可在后续发布发生后继续安全读取。
+func (directory *Directory) Snapshot() *Snapshot {
+	if directory == nil {
+		return nil
+	}
+	return directory.current.Load()
 }
 
 // NewDirectory 创建包含版本零空快照的 Node 私有目录。

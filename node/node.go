@@ -215,6 +215,9 @@ func New(
 		}
 		instance.discoveryProvider = discoveryProvider
 	}
+	if err := rpcRuntime.BindLocalLabels(instance.labels); err != nil {
+		return nil, fmt.Errorf("绑定 Node %q RPC 本地标签: %w", config.ID, err)
+	}
 	if err := rpcRuntime.BindSessionID(sessionID); err != nil {
 		return nil, fmt.Errorf("绑定 Node %q RPC SessionID: %w", config.ID, err)
 	}

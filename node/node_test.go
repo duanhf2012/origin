@@ -30,6 +30,54 @@ func TestNewSessionIDReturnsNonZeroUint64(t *testing.T) {
 	}
 }
 
+// TestDiscoveryRuntimeRPCSnapshotPinsPublishedDirectory 验证 RPC 桥一次 Prepare 只看到一份
+// 已发布目录，后续完整快照替换不会污染旧视图。
+func TestDiscoveryRuntimeRPCSnapshotPinsPublishedDirectory(t *testing.T) {
+	filter, _ := internaldiscovery.CompileFilter(false, nil)
+	runtime, err := newDiscoveryRuntime("gateway-1", filter)
+	if err != nil {
+		t.Fatalf("newDiscoveryRuntime() error = %v", err)
+	}
+	firstRaw := internaldiscovery.RawSnapshot{Nodes: []internaldiscovery.RawNode{{
+		NodeID:    "player-1",
+		SessionID: 41,
+		Labels:    map[string]string{"region": "cn-east"},
+		Transport: internaldiscovery.TransportNATS,
+		Services: []internaldiscovery.RawService{{
+			ServiceName:         "PlayerService",
+			State:               internaldiscovery.ServiceStateRunning,
+			ContractID:          11,
+			ContractFingerprint: [32]byte{11},
+		}},
+	}}}
+	if err := runtime.apply(firstRaw); err != nil {
+		t.Fatalf("first apply() error = %v", err)
+	}
+	first := runtime.Snapshot()
+
+	secondRaw := firstRaw
+	secondRaw.Nodes = append([]internaldiscovery.RawNode(nil), firstRaw.Nodes...)
+	secondRaw.Nodes[0].SessionID = 42
+	if err := runtime.apply(secondRaw); err != nil {
+		t.Fatalf("second apply() error = %v", err)
+	}
+	second := runtime.Snapshot()
+
+	oldCandidate, oldOK := first.Candidate("PlayerService", 0)
+	newCandidate, newOK := second.Candidate("PlayerService", 0)
+	if !oldOK || oldCandidate.SessionID != 41 {
+		t.Fatalf("old candidate = %+v, %v", oldCandidate, oldOK)
+	}
+	if !newOK || newCandidate.SessionID != 42 {
+		t.Fatalf("new candidate = %+v, %v", newCandidate, newOK)
+	}
+	if oldCandidate.State != publicdiscovery.StateRunning ||
+		oldCandidate.Labels["region"] != "cn-east" ||
+		oldCandidate.Transport != rpc.TransportNATS {
+		t.Fatalf("candidate mapping = %+v", oldCandidate)
+	}
+}
+
 // nodeDiscoveryListener 记录公开发现回调，并验证回调 Context 可以执行协作式 Await。
 type nodeDiscoveryListener struct {
 	owner  *lifecycleService

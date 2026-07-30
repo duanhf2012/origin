@@ -106,6 +106,40 @@ func TestDirectoryApplyAndQuery(t *testing.T) {
 	}
 }
 
+// TestDirectorySnapshotPinsOneAtomicView 验证一次取得的 Snapshot 不会在后续发布中混入新会话。
+func TestDirectorySnapshotPinsOneAtomicView(t *testing.T) {
+	t.Parallel()
+
+	filter, _ := CompileFilter(false, nil)
+	directory, _ := NewDirectory("gateway-1", filter)
+	if _, _, err := directory.ApplySnapshot(RawSnapshot{Nodes: []RawNode{
+		rawNode("game-1", 31, "127.0.0.1:20001", "PlayerService", 1),
+	}}); err != nil {
+		t.Fatalf("首次 ApplySnapshot() error = %v", err)
+	}
+	first := directory.Snapshot()
+
+	if _, _, err := directory.ApplySnapshot(RawSnapshot{Nodes: []RawNode{
+		rawNode("game-1", 32, "127.0.0.1:20002", "PlayerService", 1),
+	}}); err != nil {
+		t.Fatalf("替换 ApplySnapshot() error = %v", err)
+	}
+	second := directory.Snapshot()
+
+	oldInstance, oldExists := first.Find("game-1", "PlayerService")
+	newInstance, newExists := second.Find("game-1", "PlayerService")
+	if !oldExists || oldInstance.SessionID != 31 {
+		t.Fatalf("旧 Snapshot = exists %v, instance %+v", oldExists, oldInstance)
+	}
+	if !newExists || newInstance.SessionID != 32 {
+		t.Fatalf("新 Snapshot = exists %v, instance %+v", newExists, newInstance)
+	}
+	oldList := first.List("PlayerService")
+	if len(oldList) != 1 || oldList[0] != oldInstance {
+		t.Fatalf("旧 Snapshot List = %+v", oldList)
+	}
+}
+
 // TestDirectorySessionReplacementOrder 锁定同一逻辑位置会话替换的 Lost/Discovered 顺序。
 func TestDirectorySessionReplacementOrder(t *testing.T) {
 	t.Parallel()

@@ -24,12 +24,18 @@ import (
 type discoveryRuntime struct {
 	node      *Node
 	directory *internaldiscovery.Directory
+	rpcView   atomic.Pointer[rpcDiscoverySnapshot]
 
 	mu        sync.Mutex
 	listeners map[*serviceEntry]map[publicdiscovery.ListenerID]*listenerRegistration
 	waiters   map[uint64]*discoveryWaiter
 	nextID    uint64
 	closed    atomic.Bool
+}
+
+// rpcDiscoverySnapshot 只包装一个固定的内部目录指针，不复制候选或标签。
+type rpcDiscoverySnapshot struct {
+	snapshot *internaldiscovery.Snapshot
 }
 
 // listenerRegistration 保存一个监听器上次已经同步的不可变实例集合。
@@ -70,13 +76,15 @@ func newDiscoveryRuntime(
 	if err != nil {
 		return nil, err
 	}
-	return &discoveryRuntime{
+	result := &discoveryRuntime{
 		directory: directory,
 		listeners: make(
 			map[*serviceEntry]map[publicdiscovery.ListenerID]*listenerRegistration,
 		),
 		waiters: make(map[uint64]*discoveryWaiter),
-	}, nil
+	}
+	result.rpcView.Store(&rpcDiscoverySnapshot{snapshot: directory.Snapshot()})
+	return result, nil
 }
 
 // bindNode 在 Node 主对象完成构造后建立只读反向所有权。
@@ -107,6 +115,9 @@ func (runtime *discoveryRuntime) apply(
 		runtime.mu.Unlock()
 		return nil
 	}
+	runtime.rpcView.Store(&rpcDiscoverySnapshot{
+		snapshot: runtime.directory.Snapshot(),
+	})
 
 	// 已满足等待项在线性化锁内删除并发布成功，Context 取消路径据此裁决唯一结果。
 	for id, waiter := range runtime.waiters {
@@ -130,6 +141,80 @@ func (runtime *discoveryRuntime) apply(
 		runtime.markOwnerDirty(owner)
 	}
 	return nil
+}
+
+// Snapshot 实现 rpc.RemoteSnapshotResolver，并固定一次 Prepare 使用的完整目录版本。
+func (runtime *discoveryRuntime) Snapshot() rpc.RemoteSnapshot {
+	if runtime == nil {
+		return nil
+	}
+	return runtime.rpcView.Load()
+}
+
+func (snapshot *rpcDiscoverySnapshot) Len(serviceName string) int {
+	if snapshot == nil || snapshot.snapshot == nil {
+		return 0
+	}
+	return len(snapshot.snapshot.List(serviceName))
+}
+
+func (snapshot *rpcDiscoverySnapshot) Candidate(
+	serviceName string,
+	index int,
+) (rpc.RemoteCandidate, bool) {
+	if snapshot == nil || snapshot.snapshot == nil || index < 0 {
+		return rpc.RemoteCandidate{}, false
+	}
+	candidates := snapshot.snapshot.List(serviceName)
+	if index >= len(candidates) {
+		return rpc.RemoteCandidate{}, false
+	}
+	return mapRPCCandidate(candidates[index]), true
+}
+
+func (snapshot *rpcDiscoverySnapshot) Find(
+	nodeID string,
+	serviceName string,
+) (rpc.RemoteCandidate, bool) {
+	if snapshot == nil || snapshot.snapshot == nil {
+		return rpc.RemoteCandidate{}, false
+	}
+	instance, exists := snapshot.snapshot.Find(nodeID, serviceName)
+	if !exists {
+		return rpc.RemoteCandidate{}, false
+	}
+	return mapRPCCandidate(instance), true
+}
+
+func mapRPCCandidate(instance *internaldiscovery.Instance) rpc.RemoteCandidate {
+	if instance == nil {
+		return rpc.RemoteCandidate{}
+	}
+	state := publicdiscovery.StateUnknown
+	switch instance.State {
+	case internaldiscovery.ServiceStateRunning:
+		state = publicdiscovery.StateRunning
+	case internaldiscovery.ServiceStateRetired:
+		state = publicdiscovery.StateRetired
+	}
+	transport := ""
+	switch instance.Transport {
+	case internaldiscovery.TransportTCP:
+		transport = rpc.TransportTCP
+	case internaldiscovery.TransportNATS:
+		transport = rpc.TransportNATS
+	}
+	return rpc.RemoteCandidate{
+		NodeID:      instance.NodeID,
+		SessionID:   instance.SessionID,
+		ServiceName: instance.ServiceName,
+		State:       state,
+		Labels:      instance.Labels,
+		Transport:   transport,
+		Address:     instance.Address,
+		ContractID:  rpc.ContractID(instance.ContractID),
+		Fingerprint: rpc.ContractFingerprint(instance.ContractFingerprint),
+	}
 }
 
 // reconcileTargets 把目录去重后的 Node 会话集合交给 TCP Runtime，不回滚发现事实。
