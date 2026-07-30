@@ -20,6 +20,7 @@ type Client struct {
 	contractID  ContractID
 	fingerprint ContractFingerprint
 	route       routeSpec
+	prepared    preparedTarget
 }
 
 // NewGeneratedClient 创建供 origingen 生成代码保存的底层客户端。
@@ -54,6 +55,25 @@ func (client Client) AllocateRequest(size int, kind CallKind) (*Buffer, error) {
 		return nil, err
 	}
 	return client.runtime.AllocateRequest(client.target, size, kind)
+}
+
+// PrepareNotify 在编码前选择并固定一次无响应调用目标。
+func (client Client) PrepareNotify(
+	ctx context.Context,
+	methodID MethodID,
+) (Client, error) {
+	if ctx == nil || methodID == 0 {
+		return Client{}, errs.ErrInvalidArgument
+	}
+	if err := client.validate(); err != nil {
+		return Client{}, err
+	}
+	prepared, err := client.runtime.prepareNotify(ctx, client, methodID)
+	if err != nil {
+		return Client{}, err
+	}
+	client.prepared = prepared
+	return client, nil
 }
 
 // Await 执行一次有响应本地调用，并在 owner 的原任务调用栈恢复后解码结果。

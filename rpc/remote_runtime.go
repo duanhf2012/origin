@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
@@ -15,7 +16,7 @@ import (
 
 const (
 	// maxRemoteTargets 给 M13 的显式 Node 地址表设置固定安全边界。
-	maxRemoteTargets = 4096
+	maxRemoteTargets = 8192
 	// reconnectInitialDelay 在远端尚未启动时保持快速恢复。
 	reconnectInitialDelay = 200 * time.Millisecond
 	// reconnectMaximumDelay 防止长期故障形成高频 Dial 风暴。
@@ -33,12 +34,13 @@ type remoteRuntime struct {
 	owner  *Runtime
 	config Config
 
-	mu       sync.Mutex
-	started  bool
-	stopping bool
-	listener *tcpnet.Listener
-	inbound  *inboundHandler
-	targets  map[string]*remoteTarget
+	mu         sync.Mutex
+	started    bool
+	stopping   bool
+	listener   *tcpnet.Listener
+	inbound    *inboundHandler
+	targets    map[string]*remoteTarget
+	targetView atomic.Pointer[remoteTargetTable]
 	// retired 只保存已经取消但 goroutine 尚未退出的旧发现目标，退出回调会立即删除。
 	retired map[*remoteTarget]struct{}
 
@@ -53,14 +55,31 @@ type remoteRuntime struct {
 	listenerFailures   uint64
 }
 
+type remoteTargetTable struct {
+	byNode map[string]*remoteTarget
+}
+
 // newRemoteRuntime 创建尚未启动、没有后台 goroutine 的远端资源容器。
 func newRemoteRuntime(owner *Runtime, config Config) *remoteRuntime {
-	return &remoteRuntime{
+	result := &remoteRuntime{
 		owner:   owner,
 		config:  config,
 		targets: make(map[string]*remoteTarget),
 		retired: make(map[*remoteTarget]struct{}),
 	}
+	result.targetView.Store(&remoteTargetTable{
+		byNode: make(map[string]*remoteTarget),
+	})
+	return result
+}
+
+// publishTargetsLocked 在目标写侧变化后建立新的只读索引；调用方必须持有 remote.mu。
+func (remote *remoteRuntime) publishTargetsLocked() {
+	next := make(map[string]*remoteTarget, len(remote.targets))
+	for nodeID, target := range remote.targets {
+		next[nodeID] = target
+	}
+	remote.targetView.Store(&remoteTargetTable{byNode: next})
 }
 
 // StartNetwork 在 Node 时间轮已经运行后启动整体入站 Transport。
@@ -380,6 +399,7 @@ func (runtime *Runtime) AddTarget(
 	}
 	target := newRemoteTarget(remote, nodeID, sessionID, address)
 	remote.targets[nodeID] = target
+	remote.publishTargetsLocked()
 	started := remote.started
 	remote.mu.Unlock()
 
@@ -410,6 +430,7 @@ func (runtime *Runtime) RemoveTarget(
 	}
 	delete(remote.targets, nodeID)
 	remote.retired[target] = struct{}{}
+	remote.publishTargetsLocked()
 	remote.mu.Unlock()
 	return target.stop(ctx)
 }
@@ -484,6 +505,7 @@ func (runtime *Runtime) ReconcileTargets(targets []ConnectionTarget) error {
 		remote.targets[nodeID] = created
 		starting = append(starting, created)
 	}
+	remote.publishTargetsLocked()
 	started := remote.started
 	remote.mu.Unlock()
 
@@ -622,9 +644,11 @@ func (remote *remoteRuntime) targetSession(
 	nodeID string,
 	sessionID uint64,
 ) *outboundSession {
-	remote.mu.Lock()
-	target := remote.targets[nodeID]
-	remote.mu.Unlock()
+	view := remote.targetView.Load()
+	if view == nil {
+		return nil
+	}
+	target := view.byNode[nodeID]
 	if target == nil || target.sessionID != sessionID {
 		return nil
 	}

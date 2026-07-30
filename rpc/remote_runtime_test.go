@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"testing"
@@ -13,6 +14,35 @@ import (
 	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
+
+func TestRemoteTargetCapacityMatchesPublishedNodeLimit(t *testing.T) {
+	runtime := newPrepareTestRuntime(t, "gateway-1", TransportTCP, nil)
+	targets := make([]ConnectionTarget, 8192)
+	for index := range targets {
+		targets[index] = ConnectionTarget{
+			NodeID:    fmt.Sprintf("node-%04d", index),
+			SessionID: uint64(index + 1),
+			Address:   "127.0.0.1:26001",
+		}
+	}
+	if err := runtime.ReconcileTargets(targets); err != nil {
+		t.Fatalf("8192 targets error = %v", err)
+	}
+	targets = append(targets, ConnectionTarget{
+		NodeID:    "node-overflow",
+		SessionID: 8193,
+		Address:   "127.0.0.1:26001",
+	})
+	if err := runtime.ReconcileTargets(targets); !errors.Is(
+		err,
+		errs.ErrTransportOverloaded,
+	) {
+		t.Fatalf("8193 targets error = %v", err)
+	}
+	if got := runtime.remote.listenOptions().MaxConnections; got != 8192 {
+		t.Fatalf("listener max connections = %d", got)
+	}
+}
 
 func TestRemoteTargetAddressLifecycle(t *testing.T) {
 	pool := bufferpool.NewPool(bufferpool.Options{})

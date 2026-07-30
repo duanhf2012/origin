@@ -1,6 +1,9 @@
 package rpc
 
-import "github.com/duanhf2012/origin/v3/errs"
+import (
+	publicdiscovery "github.com/duanhf2012/origin/v3/discovery"
+	"github.com/duanhf2012/origin/v3/errs"
+)
 
 type routeMode uint8
 
@@ -29,23 +32,85 @@ type RouteSelector interface {
 // RouteCandidates 是自定义 RouteSelector 可读取的候选视图。
 //
 // 候选字段和实际存储由 Runtime 管理，业务只能通过只读方法访问。
-type RouteCandidates struct{}
+type RouteCandidates struct {
+	set *candidateSet
+}
+
+// Len 返回当前已过滤候选数量。
+func (candidates RouteCandidates) Len() int {
+	if candidates.set == nil {
+		return 0
+	}
+	return candidates.set.count
+}
+
+// NodeID 返回指定候选的稳定 NodeID；越界时返回空字符串。
+func (candidates RouteCandidates) NodeID(index int) string {
+	candidate, exists := candidates.candidate(index)
+	if !exists {
+		return ""
+	}
+	return candidate.nodeID
+}
+
+// ServiceName 返回指定候选的实际 ServiceName；越界时返回空字符串。
+func (candidates RouteCandidates) ServiceName(index int) string {
+	candidate, exists := candidates.candidate(index)
+	if !exists {
+		return ""
+	}
+	return candidate.serviceName
+}
+
+// State 返回指定候选的发现状态；越界时返回 StateUnknown。
+func (candidates RouteCandidates) State(index int) publicdiscovery.State {
+	candidate, exists := candidates.candidate(index)
+	if !exists {
+		return publicdiscovery.StateUnknown
+	}
+	return candidate.state
+}
+
+// Label 返回指定候选的不可变标签值。
+func (candidates RouteCandidates) Label(
+	index int,
+	name string,
+) (string, bool) {
+	candidate, exists := candidates.candidate(index)
+	if !exists || name == "" {
+		return "", false
+	}
+	value, exists := candidate.labels[name]
+	return value, exists
+}
+
+func (candidates RouteCandidates) candidate(
+	index int,
+) (routeCandidate, bool) {
+	if candidates.set == nil {
+		return routeCandidate{}, false
+	}
+	return candidates.set.eligibleAt(index)
+}
 
 // OnNode 保留当前客户端绑定的 ServiceName，并把目标收窄到指定 Node。
 func (client Client) OnNode(nodeID string) Client {
 	client.target = ToServiceOnNode(nodeID, client.target.serviceName)
+	client.prepared = preparedTarget{}
 	return client
 }
 
 // RouteRoundRobin 派生显式使用 Runtime 级轮询策略的值客户端。
 func (client Client) RouteRoundRobin() Client {
 	client.route = routeSpec{mode: routeRoundRobin}
+	client.prepared = preparedTarget{}
 	return client
 }
 
 // RouteRandom 派生使用 Runtime 级低竞争随机策略的值客户端。
 func (client Client) RouteRandom() Client {
 	client.route = routeSpec{mode: routeRandom}
+	client.prepared = preparedTarget{}
 	return client
 }
 
@@ -57,6 +122,7 @@ func (client Client) Route(key any) Client {
 		hash: hash,
 		err:  err,
 	}
+	client.prepared = preparedTarget{}
 	return client
 }
 
@@ -66,6 +132,7 @@ func (client Client) RouteBy(selector RouteSelector) Client {
 		mode:     routeCustom,
 		selector: selector,
 	}
+	client.prepared = preparedTarget{}
 	return client
 }
 

@@ -137,6 +137,9 @@ func (runtime *discoveryRuntime) apply(
 
 	// 新快照已经原子可见后先非阻塞对齐 TCP 目标，再提交业务同步任务。
 	runtime.reconcileTargets()
+	if runtime.node != nil && runtime.node.rpcRuntime != nil {
+		runtime.node.rpcRuntime.NotifyRoutesChanged()
+	}
 	for _, owner := range owners {
 		runtime.markOwnerDirty(owner)
 	}

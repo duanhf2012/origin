@@ -41,6 +41,7 @@ type natsRuntime struct {
 	// 保持不变。recoveryWake 容量为 1，用于合并重复 Closed 回调。
 	generation          uint64
 	activeGeneration    atomic.Uint64
+	activeConnection    atomic.Pointer[natsConnectionView]
 	reconnects          uint64
 	consecutiveFailures uint64
 	recoveryCancel      context.CancelFunc
@@ -55,6 +56,11 @@ type natsRuntime struct {
 	responseSubjects map[string]string
 	localRequest     string
 	localResponse    string
+}
+
+type natsConnectionView struct {
+	conn       *natsnet.Conn
+	generation uint64
 }
 
 // newNATSRuntime 创建尚未连接 Broker、没有后台资源的 NATS Runtime。
@@ -264,7 +270,12 @@ func (runtime *natsRuntime) connectGeneration(
 		)
 		return errs.ErrTransportUnavailable
 	}
+	runtime.activeConnection.Store(&natsConnectionView{
+		conn:       conn,
+		generation: generation,
+	})
 	runtime.mu.Unlock()
+	runtime.owner.NotifyRoutesChanged()
 	return nil
 }
 
@@ -283,6 +294,9 @@ func (runtime *natsRuntime) discardGeneration(
 	responseSub *natsnet.Subscription,
 	deadlines *inboundDeadlines,
 ) {
+	if runtime.clearActiveConnection(generation, conn) {
+		runtime.owner.NotifyRoutesChanged()
+	}
 	runtime.mu.Lock()
 	if runtime.generation == generation {
 		if runtime.conn == conn {
@@ -311,6 +325,23 @@ func (runtime *natsRuntime) discardGeneration(
 	}
 	if deadlines != nil {
 		deadlines.close(errs.ErrTransportUnavailable)
+	}
+}
+
+func (runtime *natsRuntime) clearActiveConnection(
+	generation uint64,
+	conn *natsnet.Conn,
+) bool {
+	for {
+		current := runtime.activeConnection.Load()
+		if current == nil ||
+			current.generation != generation ||
+			(conn != nil && current.conn != conn) {
+			return false
+		}
+		if runtime.activeConnection.CompareAndSwap(current, nil) {
+			return true
+		}
 	}
 }
 
@@ -468,6 +499,7 @@ func (runtime *natsRuntime) close(ctx context.Context) error {
 	runtime.closed = true
 	runtime.stopping = true
 	runtime.activeGeneration.Store(0)
+	hadActive := runtime.activeConnection.Swap(nil) != nil
 	cancelRecovery := runtime.recoveryCancel
 	recoveryDone := runtime.recoveryDone
 	recoveryStarted := runtime.started
@@ -480,6 +512,9 @@ func (runtime *natsRuntime) close(ctx context.Context) error {
 	runtime.conn = nil
 	runtime.deadlines = nil
 	runtime.mu.Unlock()
+	if hadActive {
+		runtime.owner.NotifyRoutesChanged()
+	}
 	if cancelRecovery != nil {
 		cancelRecovery()
 	}
@@ -911,6 +946,12 @@ func (runtime *natsRuntime) handleGenerationEvent(
 	switch event.Type {
 	case natsnet.EventDisconnected:
 		// 不缓存、不重放已经在途的调用；新调用由 connectedConn 快速失败。
+		runtime.mu.Lock()
+		conn := runtime.conn
+		runtime.mu.Unlock()
+		if runtime.clearActiveConnection(generation, conn) {
+			runtime.owner.NotifyRoutesChanged()
+		}
 		runtime.pending.failCurrent(errs.ErrTransportUnavailable)
 		runtime.mu.Lock()
 		runtime.consecutiveFailures++
@@ -927,16 +968,30 @@ func (runtime *natsRuntime) handleGenerationEvent(
 		})
 	case natsnet.EventReconnected:
 		runtime.mu.Lock()
+		conn := runtime.conn
 		runtime.reconnects++
 		runtime.consecutiveFailures = 0
 		reconnects = runtime.reconnects
 		runtime.mu.Unlock()
+		if conn != nil && conn.Status() == natsnet.StatusConnected {
+			runtime.activeConnection.Store(&natsConnectionView{
+				conn:       conn,
+				generation: generation,
+			})
+			runtime.owner.NotifyRoutesChanged()
+		}
 		runtime.owner.reportTransportEvent(TransportEvent{
 			Kind:       TransportKindNATS,
 			State:      TransportStateReady,
 			Reconnects: reconnects,
 		})
 	case natsnet.EventClosed:
+		runtime.mu.Lock()
+		conn := runtime.conn
+		runtime.mu.Unlock()
+		if runtime.clearActiveConnection(generation, conn) {
+			runtime.owner.NotifyRoutesChanged()
+		}
 		runtime.pending.failCurrent(errs.ErrTransportUnavailable)
 		if !started {
 			return

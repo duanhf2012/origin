@@ -46,6 +46,12 @@ type Runtime struct {
 	// localLabels 在 Node 装配冷路径深复制一次，Freeze 后只读。
 	localLabels      map[string]string
 	localLabelsBound bool
+	// routeChanged 唤醒 Await 的缺连接慢路径；读写只在短临界区交换 Channel。
+	routeMu      sync.Mutex
+	routeChanged chan struct{}
+	// routeCounters 只为确实出现过合法候选的契约组惰性建立。
+	routeCounters sync.Map
+	routeRandom   atomic.Uint64
 	// transportObserver 把整体入站状态变化交给 Node。网络回调只发布常数大小快照，
 	// 不在这里执行发现发布、Service Stop 或 Application Stop。
 	transportObserver func(TransportEvent)
@@ -114,11 +120,30 @@ func NewRuntime(
 		return nil, errs.ErrInvalidArgument
 	}
 	return &Runtime{
-		nodeID:    nodeID,
-		pool:      pool,
-		logger:    logger,
-		endpoints: make(map[string]serviceEndpoint),
+		nodeID:       nodeID,
+		pool:         pool,
+		logger:       logger,
+		endpoints:    make(map[string]serviceEndpoint),
+		routeChanged: make(chan struct{}),
 	}, nil
+}
+
+// NotifyRoutesChanged 发布发现或连接可用性变化，并唤醒当前全部路由等待者。
+func (runtime *Runtime) NotifyRoutesChanged() {
+	if runtime == nil {
+		return
+	}
+	runtime.routeMu.Lock()
+	close(runtime.routeChanged)
+	runtime.routeChanged = make(chan struct{})
+	runtime.routeMu.Unlock()
+}
+
+func (runtime *Runtime) routeChangeSignal() <-chan struct{} {
+	runtime.routeMu.Lock()
+	signal := runtime.routeChanged
+	runtime.routeMu.Unlock()
+	return signal
 }
 
 // BindSessionID 在 Freeze 前绑定当前 Node 进程会话，供 TCP Hello/Ack 校验。

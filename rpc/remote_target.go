@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
@@ -24,8 +25,7 @@ type remoteTarget struct {
 	done   chan struct{}
 
 	startOnce sync.Once
-	mu        sync.Mutex
-	current   *outboundSession
+	current   atomic.Pointer[outboundSession]
 }
 
 // newRemoteTarget 创建尚未运行的目标管理器。
@@ -51,9 +51,7 @@ func newRemoteTarget(
 func (target *remoteTarget) requestStop() {
 	target.start()
 	target.cancel()
-	target.mu.Lock()
-	session := target.current
-	target.mu.Unlock()
+	session := target.current.Load()
 	if session != nil {
 		session.close()
 	}
@@ -73,9 +71,7 @@ func (target *remoteTarget) stop(ctx context.Context) error {
 	}
 	target.start()
 	target.cancel()
-	target.mu.Lock()
-	session := target.current
-	target.mu.Unlock()
+	session := target.current.Load()
 	if session != nil {
 		session.close()
 	}
@@ -89,10 +85,7 @@ func (target *remoteTarget) stop(ctx context.Context) error {
 
 // currentSession 返回当前握手完成且仍属于目标的会话。
 func (target *remoteTarget) currentSession() *outboundSession {
-	target.mu.Lock()
-	session := target.current
-	target.mu.Unlock()
-	return session
+	return target.current.Load()
 }
 
 // run 串行执行 Dial、握手、运行、断线和退避。
@@ -125,15 +118,12 @@ func (target *remoteTarget) run() {
 
 		// 一次成功连接即重置退避；后续偶发断线可以快速恢复。
 		delay = reconnectInitialDelay
-		target.mu.Lock()
-		target.current = session
-		target.mu.Unlock()
+		target.current.Store(session)
+		target.remote.owner.NotifyRoutesChanged()
 		target.runConnected(session)
-		target.mu.Lock()
-		if target.current == session {
-			target.current = nil
+		if target.current.CompareAndSwap(session, nil) {
+			target.remote.owner.NotifyRoutesChanged()
 		}
-		target.mu.Unlock()
 		session.close()
 	}
 }
