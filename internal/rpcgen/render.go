@@ -81,6 +81,68 @@ func renderContract(
 		contractPrefix,
 		contractPrefix,
 	)
+	defaultName := defaultServiceName(item.name)
+	fmt.Fprintf(
+		body,
+		"// Bind%s 使用契约默认 ServiceName %q 绑定轻量客户端。\n"+
+			"func Bind%s(owner %s.IService) %s {\n"+
+			"\treturn New%s(owner, %s.ToService(%q))\n"+
+			"}\n\n"+
+			"// Bind%sTo 使用实际 ServiceName 绑定模板改名后的轻量客户端。\n"+
+			"func Bind%sTo(owner %s.IService, serviceName string) %s {\n"+
+			"\treturn New%s(owner, %s.ToService(serviceName))\n"+
+			"}\n\n"+
+			"// OnNode 保留已绑定 ServiceName 并把目标收窄到指定 Node。\n"+
+			"func (client %s) OnNode(nodeID string) %s {\n"+
+			"\tclient.client = client.client.OnNode(nodeID)\n"+
+			"\treturn client\n"+
+			"}\n\n"+
+			"// RouteRoundRobin 派生显式轮询路由客户端。\n"+
+			"func (client %s) RouteRoundRobin() %s {\n"+
+			"\tclient.client = client.client.RouteRoundRobin()\n"+
+			"\treturn client\n"+
+			"}\n\n"+
+			"// RouteRandom 派生随机路由客户端。\n"+
+			"func (client %s) RouteRandom() %s {\n"+
+			"\tclient.client = client.client.RouteRandom()\n"+
+			"\treturn client\n"+
+			"}\n\n"+
+			"// Route 派生稳定业务 Key 路由客户端。\n"+
+			"func (client %s) Route(key any) %s {\n"+
+			"\tclient.client = client.client.Route(key)\n"+
+			"\treturn client\n"+
+			"}\n\n"+
+			"// RouteBy 派生自定义 Selector 路由客户端。\n"+
+			"func (client %s) RouteBy(selector %s.RouteSelector) %s {\n"+
+			"\tclient.client = client.client.RouteBy(selector)\n"+
+			"\treturn client\n"+
+			"}\n\n",
+		item.name,
+		defaultName,
+		item.name,
+		serviceAlias,
+		clientName,
+		clientName,
+		rpcAlias,
+		defaultName,
+		item.name,
+		item.name,
+		serviceAlias,
+		clientName,
+		clientName,
+		rpcAlias,
+		clientName,
+		clientName,
+		clientName,
+		clientName,
+		clientName,
+		clientName,
+		clientName,
+		clientName,
+		clientName,
+		rpcAlias,
+		clientName,
+	)
 	for _, candidate := range item.methods {
 		renderCodecFunctions(
 			body,
@@ -102,6 +164,14 @@ func renderContract(
 	}
 	renderDispatcher(body, imports, contextAlias, rpcAlias, item, contractPrefix)
 	return nil
+}
+
+func defaultServiceName(contractName string) string {
+	if strings.HasSuffix(contractName, "RPC") &&
+		len(contractName) > len("RPC") {
+		return strings.TrimSuffix(contractName, "RPC") + "Service"
+	}
+	return contractName + "Service"
 }
 
 // renderCodecFunctions 为一个方法生成请求编解码，并按调用分类决定是否生成响应编解码。
@@ -343,7 +413,13 @@ func renderClientMethods(
 		body.WriteString("err error) {\n")
 		fmt.Fprintf(
 			body,
-			"\trequest, err := %s(client.client, %s.CallRequest%s)\n",
+			"\tpreparedClient, err := client.client.PrepareAwait(ctx, %s)\n",
+			methodID,
+		)
+		body.WriteString("\tif err != nil {\n\t\treturn\n\t}\n")
+		fmt.Fprintf(
+			body,
+			"\trequest, err := %s(preparedClient, %s.CallRequest%s)\n",
 			encodeName,
 			rpcAlias,
 			inputNames,
@@ -351,7 +427,7 @@ func renderClientMethods(
 		body.WriteString("\tif err != nil {\n\t\treturn\n\t}\n")
 		fmt.Fprintf(
 			body,
-			"\terr = client.client.Await(ctx, %s, request, func(data []byte) error {\n",
+			"\terr = preparedClient.Await(ctx, %s, request, func(data []byte) error {\n",
 			methodID,
 		)
 		if len(candidate.outputs) == 0 {
@@ -392,7 +468,13 @@ func renderClientMethods(
 		body.WriteString("\tif callback == nil {\n\t\treturn errs.ErrInvalidArgument\n\t}\n")
 		fmt.Fprintf(
 			body,
-			"\trequest, err := %s(client.client, %s.CallRequest%s)\n",
+			"\tpreparedClient, err := client.client.PrepareAsync(ctx, %s)\n",
+			methodID,
+		)
+		body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
+		fmt.Fprintf(
+			body,
+			"\trequest, err := %s(preparedClient, %s.CallRequest%s)\n",
 			encodeName,
 			rpcAlias,
 			inputNames,
@@ -400,7 +482,7 @@ func renderClientMethods(
 		body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
 		fmt.Fprintf(
 			body,
-			"\treturn client.client.Async(ctx, %s, request, func(callbackCtx %s.Context, data []byte, callErr error) {\n",
+			"\treturn preparedClient.Async(ctx, %s, request, func(callbackCtx %s.Context, data []byte, callErr error) {\n",
 			methodID,
 			contextAlias,
 		)
@@ -447,17 +529,29 @@ func renderClientMethods(
 			contextAlias,
 			inputDecl,
 		)
+		clientExpression := "client.client"
+		if prefix == "Notify" {
+			fmt.Fprintf(
+				body,
+				"\tpreparedClient, err := client.client.PrepareNotify(ctx, %s)\n",
+				methodID,
+			)
+			body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
+			clientExpression = "preparedClient"
+		}
 		fmt.Fprintf(
 			body,
-			"\trequest, err := %s(client.client, %s.CallNotify%s)\n",
+			"\trequest, err := %s(%s, %s.CallNotify%s)\n",
 			encodeName,
+			clientExpression,
 			rpcAlias,
 			inputNames,
 		)
 		body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
 		fmt.Fprintf(
 			body,
-			"\treturn client.client.%s(ctx, %s, request)\n}\n\n",
+			"\treturn %s.%s(ctx, %s, request)\n}\n\n",
+			clientExpression,
 			prefix,
 			methodID,
 		)

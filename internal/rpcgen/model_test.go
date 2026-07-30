@@ -360,6 +360,81 @@ func TestRenderServiceOnlyPackageHasNoUnusedContextImport(t *testing.T) {
 	}
 }
 
+func TestDefaultServiceNameUsesDeterministicContractRule(t *testing.T) {
+	tests := []struct {
+		contract string
+		want     string
+	}{
+		{contract: "PlayerRPC", want: "PlayerService"},
+		{contract: "DBRPC", want: "DBService"},
+		{contract: "Scene", want: "SceneService"},
+		{contract: "RPC", want: "RPCService"},
+	}
+	for _, test := range tests {
+		if got := defaultServiceName(test.contract); got != test.want {
+			t.Fatalf("defaultServiceName(%q) = %q", test.contract, got)
+		}
+	}
+}
+
+func TestRenderContractIncludesM19BindingRoutingAndPrepare(t *testing.T) {
+	contractTypes := types.NewPackage("example.com/game/playerapi", "playerapi")
+	contractPackage := &packages.Package{
+		PkgPath: "example.com/game/playerapi",
+		Name:    "playerapi",
+		Types:   contractTypes,
+	}
+	item := &contract{
+		pkg:         contractPackage,
+		name:        "PlayerRPC",
+		fullName:    "example.com/game/playerapi.PlayerRPC",
+		id:          7,
+		fingerprint: [32]byte{9},
+		methods: []*method{{
+			name: "Echo",
+			id:   8,
+			outputs: []parameter{{
+				name: "result1",
+				typ:  types.Typ[types.String],
+			}},
+		}},
+	}
+	content, err := renderPackage(packageOutput{
+		pkg:       contractPackage,
+		contracts: []*contract{item},
+	})
+	if err != nil {
+		t.Fatalf("renderPackage() error = %v", err)
+	}
+	source := string(content)
+	required := []string{
+		"rpc.GeneratedABIVersion - 2",
+		"2 - rpc.GeneratedABIVersion",
+		"func BindPlayerRPC(owner service.IService) PlayerRPCClient",
+		`rpc.ToService("PlayerService")`,
+		"func BindPlayerRPCTo(owner service.IService, serviceName string) PlayerRPCClient",
+		"func (client PlayerRPCClient) OnNode(nodeID string) PlayerRPCClient",
+		"func (client PlayerRPCClient) RouteRoundRobin() PlayerRPCClient",
+		"func (client PlayerRPCClient) RouteRandom() PlayerRPCClient",
+		"func (client PlayerRPCClient) Route(key any) PlayerRPCClient",
+		"func (client PlayerRPCClient) RouteBy(selector rpc.RouteSelector) PlayerRPCClient",
+		"client.client.PrepareAwait(ctx, playerRPCEchoMethodID)",
+		"client.client.PrepareAsync(ctx, playerRPCEchoMethodID)",
+		"client.client.PrepareNotify(ctx, playerRPCEchoMethodID)",
+	}
+	for _, expected := range required {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("generated source missing %q:\n%s", expected, source)
+		}
+	}
+	if strings.Count(
+		source,
+		"client.client.PrepareNotify(ctx, playerRPCEchoMethodID)",
+	) != 1 {
+		t.Fatalf("Broadcast 被错误加入 PrepareNotify:\n%s", source)
+	}
+}
+
 func TestCheckedIntegrationGenerationIsCurrent(t *testing.T) {
 	err := Run(Options{
 		Patterns: []string{"./tests/integration/rpcfixture"},

@@ -9,7 +9,7 @@ import (
 
 const (
 	// GeneratedABIVersion 由生成文件在编译期校验，防止旧生成代码静默连接新 Runtime。
-	GeneratedABIVersion = 1
+	GeneratedABIVersion = 2
 	// DefaultMaxPayloadSize 是 Origin RPC 固定的默认业务载荷上限。
 	DefaultMaxPayloadSize = 4 * 1024 * 1024
 	// MaxContainerElements 限制单个 Slice 或 Map 声明的元素数量。

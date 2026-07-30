@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	_ uint = rpc.GeneratedABIVersion - 1
-	_ uint = 1 - rpc.GeneratedABIVersion
+	_ uint = rpc.GeneratedABIVersion - 2
+	_ uint = 2 - rpc.GeneratedABIVersion
 )
 
 const playerRPCContractID rpc.ContractID = 0xb3ca21d38db4b2fc
@@ -37,6 +37,46 @@ type PlayerRPCClient struct {
 // NewPlayerRPCClient 创建绑定 owner 和逻辑目标的轻量客户端。
 func NewPlayerRPCClient(owner service.IService, target rpc.Target) PlayerRPCClient {
 	return PlayerRPCClient{client: rpc.NewGeneratedClient(owner, target, playerRPCContractID, playerRPCFingerprint)}
+}
+
+// BindPlayerRPC 使用契约默认 ServiceName "PlayerService" 绑定轻量客户端。
+func BindPlayerRPC(owner service.IService) PlayerRPCClient {
+	return NewPlayerRPCClient(owner, rpc.ToService("PlayerService"))
+}
+
+// BindPlayerRPCTo 使用实际 ServiceName 绑定模板改名后的轻量客户端。
+func BindPlayerRPCTo(owner service.IService, serviceName string) PlayerRPCClient {
+	return NewPlayerRPCClient(owner, rpc.ToService(serviceName))
+}
+
+// OnNode 保留已绑定 ServiceName 并把目标收窄到指定 Node。
+func (client PlayerRPCClient) OnNode(nodeID string) PlayerRPCClient {
+	client.client = client.client.OnNode(nodeID)
+	return client
+}
+
+// RouteRoundRobin 派生显式轮询路由客户端。
+func (client PlayerRPCClient) RouteRoundRobin() PlayerRPCClient {
+	client.client = client.client.RouteRoundRobin()
+	return client
+}
+
+// RouteRandom 派生随机路由客户端。
+func (client PlayerRPCClient) RouteRandom() PlayerRPCClient {
+	client.client = client.client.RouteRandom()
+	return client
+}
+
+// Route 派生稳定业务 Key 路由客户端。
+func (client PlayerRPCClient) Route(key any) PlayerRPCClient {
+	client.client = client.client.Route(key)
+	return client
+}
+
+// RouteBy 派生自定义 Selector 路由客户端。
+func (client PlayerRPCClient) RouteBy(selector rpc.RouteSelector) PlayerRPCClient {
+	client.client = client.client.RouteBy(selector)
+	return client
 }
 
 // encodePlayerRPCEchoNameRequest 计算并一次写入当前方法请求载荷。
@@ -114,11 +154,15 @@ func decodePlayerRPCEchoNameResponse(data []byte) (result1 string, decodeErr err
 
 // AwaitEchoName 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitEchoName(ctx context.Context, arg1 string) (result1 string, err error) {
-	request, err := encodePlayerRPCEchoNameRequest(client.client, rpc.CallRequest, arg1)
+	preparedClient, err := client.client.PrepareAwait(ctx, playerRPCEchoNameMethodID)
 	if err != nil {
 		return
 	}
-	err = client.client.Await(ctx, playerRPCEchoNameMethodID, request, func(data []byte) error {
+	request, err := encodePlayerRPCEchoNameRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Await(ctx, playerRPCEchoNameMethodID, request, func(data []byte) error {
 		result1, err = decodePlayerRPCEchoNameResponse(data)
 		return err
 	})
@@ -130,11 +174,15 @@ func (client PlayerRPCClient) AsyncEchoName(ctx context.Context, arg1 string, ca
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCEchoNameRequest(client.client, rpc.CallRequest, arg1)
+	preparedClient, err := client.client.PrepareAsync(ctx, playerRPCEchoNameMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Async(ctx, playerRPCEchoNameMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
+	request, err := encodePlayerRPCEchoNameRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Async(ctx, playerRPCEchoNameMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(string), callErr)
 			return
@@ -146,11 +194,15 @@ func (client PlayerRPCClient) AsyncEchoName(ctx context.Context, arg1 string, ca
 
 // NotifyEchoName 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyEchoName(ctx context.Context, arg1 string) error {
-	request, err := encodePlayerRPCEchoNameRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareNotify(ctx, playerRPCEchoNameMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Notify(ctx, playerRPCEchoNameMethodID, request)
+	request, err := encodePlayerRPCEchoNameRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Notify(ctx, playerRPCEchoNameMethodID, request)
 }
 
 // BroadcastEchoName 提交通知并主动放弃业务结果。
@@ -646,11 +698,15 @@ func decodePlayerRPCGetPlayerResponse(data []byte) (result1 PlayerData, result2 
 
 // AwaitGetPlayer 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitGetPlayer(ctx context.Context, arg1 int64, arg2 PlayerData, arg3 *structpb.Struct) (result1 PlayerData, result2 *structpb.Struct, err error) {
-	request, err := encodePlayerRPCGetPlayerRequest(client.client, rpc.CallRequest, arg1, arg2, arg3)
+	preparedClient, err := client.client.PrepareAwait(ctx, playerRPCGetPlayerMethodID)
 	if err != nil {
 		return
 	}
-	err = client.client.Await(ctx, playerRPCGetPlayerMethodID, request, func(data []byte) error {
+	request, err := encodePlayerRPCGetPlayerRequest(preparedClient, rpc.CallRequest, arg1, arg2, arg3)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Await(ctx, playerRPCGetPlayerMethodID, request, func(data []byte) error {
 		result1, result2, err = decodePlayerRPCGetPlayerResponse(data)
 		return err
 	})
@@ -662,11 +718,15 @@ func (client PlayerRPCClient) AsyncGetPlayer(ctx context.Context, arg1 int64, ar
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCGetPlayerRequest(client.client, rpc.CallRequest, arg1, arg2, arg3)
+	preparedClient, err := client.client.PrepareAsync(ctx, playerRPCGetPlayerMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Async(ctx, playerRPCGetPlayerMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
+	request, err := encodePlayerRPCGetPlayerRequest(preparedClient, rpc.CallRequest, arg1, arg2, arg3)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Async(ctx, playerRPCGetPlayerMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(PlayerData), *new(*structpb.Struct), callErr)
 			return
@@ -678,11 +738,15 @@ func (client PlayerRPCClient) AsyncGetPlayer(ctx context.Context, arg1 int64, ar
 
 // NotifyGetPlayer 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyGetPlayer(ctx context.Context, arg1 int64, arg2 PlayerData, arg3 *structpb.Struct) error {
-	request, err := encodePlayerRPCGetPlayerRequest(client.client, rpc.CallNotify, arg1, arg2, arg3)
+	preparedClient, err := client.client.PrepareNotify(ctx, playerRPCGetPlayerMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Notify(ctx, playerRPCGetPlayerMethodID, request)
+	request, err := encodePlayerRPCGetPlayerRequest(preparedClient, rpc.CallNotify, arg1, arg2, arg3)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Notify(ctx, playerRPCGetPlayerMethodID, request)
 }
 
 // BroadcastGetPlayer 提交通知并主动放弃业务结果。
@@ -735,11 +799,15 @@ func decodePlayerRPCPlayerOnlineRequest(data []byte) (arg1 int64, decodeErr erro
 
 // NotifyPlayerOnline 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyPlayerOnline(ctx context.Context, arg1 int64) error {
-	request, err := encodePlayerRPCPlayerOnlineRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareNotify(ctx, playerRPCPlayerOnlineMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Notify(ctx, playerRPCPlayerOnlineMethodID, request)
+	request, err := encodePlayerRPCPlayerOnlineRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Notify(ctx, playerRPCPlayerOnlineMethodID, request)
 }
 
 // BroadcastPlayerOnline 提交通知并主动放弃业务结果。
@@ -862,11 +930,15 @@ func decodePlayerRPCRoundTripBlobResponse(data []byte) (result1 OwnedBlob, decod
 
 // AwaitRoundTripBlob 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitRoundTripBlob(ctx context.Context, arg1 OwnedBlob) (result1 OwnedBlob, err error) {
-	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, rpc.CallRequest, arg1)
+	preparedClient, err := client.client.PrepareAwait(ctx, playerRPCRoundTripBlobMethodID)
 	if err != nil {
 		return
 	}
-	err = client.client.Await(ctx, playerRPCRoundTripBlobMethodID, request, func(data []byte) error {
+	request, err := encodePlayerRPCRoundTripBlobRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Await(ctx, playerRPCRoundTripBlobMethodID, request, func(data []byte) error {
 		result1, err = decodePlayerRPCRoundTripBlobResponse(data)
 		return err
 	})
@@ -878,11 +950,15 @@ func (client PlayerRPCClient) AsyncRoundTripBlob(ctx context.Context, arg1 Owned
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, rpc.CallRequest, arg1)
+	preparedClient, err := client.client.PrepareAsync(ctx, playerRPCRoundTripBlobMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Async(ctx, playerRPCRoundTripBlobMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
+	request, err := encodePlayerRPCRoundTripBlobRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Async(ctx, playerRPCRoundTripBlobMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(OwnedBlob), callErr)
 			return
@@ -894,11 +970,15 @@ func (client PlayerRPCClient) AsyncRoundTripBlob(ctx context.Context, arg1 Owned
 
 // NotifyRoundTripBlob 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyRoundTripBlob(ctx context.Context, arg1 OwnedBlob) error {
-	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareNotify(ctx, playerRPCRoundTripBlobMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Notify(ctx, playerRPCRoundTripBlobMethodID, request)
+	request, err := encodePlayerRPCRoundTripBlobRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Notify(ctx, playerRPCRoundTripBlobMethodID, request)
 }
 
 // BroadcastRoundTripBlob 提交通知并主动放弃业务结果。
@@ -1021,11 +1101,15 @@ func decodePlayerRPCRoundTripPackedIDResponse(data []byte) (result1 PackedPlayer
 
 // AwaitRoundTripPackedID 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) (result1 PackedPlayerID, err error) {
-	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, rpc.CallRequest, arg1)
+	preparedClient, err := client.client.PrepareAwait(ctx, playerRPCRoundTripPackedIDMethodID)
 	if err != nil {
 		return
 	}
-	err = client.client.Await(ctx, playerRPCRoundTripPackedIDMethodID, request, func(data []byte) error {
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Await(ctx, playerRPCRoundTripPackedIDMethodID, request, func(data []byte) error {
 		result1, err = decodePlayerRPCRoundTripPackedIDResponse(data)
 		return err
 	})
@@ -1037,11 +1121,15 @@ func (client PlayerRPCClient) AsyncRoundTripPackedID(ctx context.Context, arg1 P
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, rpc.CallRequest, arg1)
+	preparedClient, err := client.client.PrepareAsync(ctx, playerRPCRoundTripPackedIDMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Async(ctx, playerRPCRoundTripPackedIDMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Async(ctx, playerRPCRoundTripPackedIDMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(PackedPlayerID), callErr)
 			return
@@ -1053,11 +1141,15 @@ func (client PlayerRPCClient) AsyncRoundTripPackedID(ctx context.Context, arg1 P
 
 // NotifyRoundTripPackedID 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) error {
-	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareNotify(ctx, playerRPCRoundTripPackedIDMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Notify(ctx, playerRPCRoundTripPackedIDMethodID, request)
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Notify(ctx, playerRPCRoundTripPackedIDMethodID, request)
 }
 
 // BroadcastRoundTripPackedID 提交通知并主动放弃业务结果。
@@ -1582,11 +1674,15 @@ func decodePlayerRPCRoundTripTimeResponse(data []byte) (result1 TimeEnvelope, de
 
 // AwaitRoundTripTime 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) (result1 TimeEnvelope, err error) {
-	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, rpc.CallRequest, arg1, arg2)
+	preparedClient, err := client.client.PrepareAwait(ctx, playerRPCRoundTripTimeMethodID)
 	if err != nil {
 		return
 	}
-	err = client.client.Await(ctx, playerRPCRoundTripTimeMethodID, request, func(data []byte) error {
+	request, err := encodePlayerRPCRoundTripTimeRequest(preparedClient, rpc.CallRequest, arg1, arg2)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Await(ctx, playerRPCRoundTripTimeMethodID, request, func(data []byte) error {
 		result1, err = decodePlayerRPCRoundTripTimeResponse(data)
 		return err
 	})
@@ -1598,11 +1694,15 @@ func (client PlayerRPCClient) AsyncRoundTripTime(ctx context.Context, arg1 TimeE
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, rpc.CallRequest, arg1, arg2)
+	preparedClient, err := client.client.PrepareAsync(ctx, playerRPCRoundTripTimeMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Async(ctx, playerRPCRoundTripTimeMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
+	request, err := encodePlayerRPCRoundTripTimeRequest(preparedClient, rpc.CallRequest, arg1, arg2)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Async(ctx, playerRPCRoundTripTimeMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(TimeEnvelope), callErr)
 			return
@@ -1614,11 +1714,15 @@ func (client PlayerRPCClient) AsyncRoundTripTime(ctx context.Context, arg1 TimeE
 
 // NotifyRoundTripTime 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifyRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) error {
-	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, rpc.CallNotify, arg1, arg2)
+	preparedClient, err := client.client.PrepareNotify(ctx, playerRPCRoundTripTimeMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Notify(ctx, playerRPCRoundTripTimeMethodID, request)
+	request, err := encodePlayerRPCRoundTripTimeRequest(preparedClient, rpc.CallNotify, arg1, arg2)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Notify(ctx, playerRPCRoundTripTimeMethodID, request)
 }
 
 // BroadcastRoundTripTime 提交通知并主动放弃业务结果。
@@ -1864,11 +1968,15 @@ func decodePlayerRPCSavePlayerResponse(data []byte) (decodeErr error) {
 
 // AwaitSavePlayer 以顺序编程外观等待 RPC 结果。
 func (client PlayerRPCClient) AwaitSavePlayer(ctx context.Context, arg1 PlayerData) (err error) {
-	request, err := encodePlayerRPCSavePlayerRequest(client.client, rpc.CallRequest, arg1)
+	preparedClient, err := client.client.PrepareAwait(ctx, playerRPCSavePlayerMethodID)
 	if err != nil {
 		return
 	}
-	err = client.client.Await(ctx, playerRPCSavePlayerMethodID, request, func(data []byte) error {
+	request, err := encodePlayerRPCSavePlayerRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Await(ctx, playerRPCSavePlayerMethodID, request, func(data []byte) error {
 		return decodePlayerRPCSavePlayerResponse(data)
 	})
 	return
@@ -1879,11 +1987,15 @@ func (client PlayerRPCClient) AsyncSavePlayer(ctx context.Context, arg1 PlayerDa
 	if callback == nil {
 		return errs.ErrInvalidArgument
 	}
-	request, err := encodePlayerRPCSavePlayerRequest(client.client, rpc.CallRequest, arg1)
+	preparedClient, err := client.client.PrepareAsync(ctx, playerRPCSavePlayerMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Async(ctx, playerRPCSavePlayerMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
+	request, err := encodePlayerRPCSavePlayerRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Async(ctx, playerRPCSavePlayerMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, callErr)
 			return
@@ -1895,11 +2007,15 @@ func (client PlayerRPCClient) AsyncSavePlayer(ctx context.Context, arg1 PlayerDa
 
 // NotifySavePlayer 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) NotifySavePlayer(ctx context.Context, arg1 PlayerData) error {
-	request, err := encodePlayerRPCSavePlayerRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareNotify(ctx, playerRPCSavePlayerMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Notify(ctx, playerRPCSavePlayerMethodID, request)
+	request, err := encodePlayerRPCSavePlayerRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Notify(ctx, playerRPCSavePlayerMethodID, request)
 }
 
 // BroadcastSavePlayer 提交通知并主动放弃业务结果。

@@ -823,7 +823,13 @@ func TestRemoteDuplicateNodeIDKeepsFirstConnection(t *testing.T) {
 			secondCaller,
 			rpc.ToServiceOnNode("player-1", "PlayerService"),
 		)
-		_, callErr := client.AwaitEchoName(ctx, "rejected")
+		callErr := client.AsyncEchoName(
+			ctx,
+			"rejected",
+			func(context.Context, string, error) {
+				t.Error("提交失败的 Async 不应执行 callback")
+			},
+		)
 		secondResult <- callErr
 	}); err != nil {
 		t.Fatal(err)
