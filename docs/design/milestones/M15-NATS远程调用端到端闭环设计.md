@@ -2,8 +2,11 @@
 
 > 文档类型：里程碑设计（已确认，原 M14 顺延）
 > 创建日期：2026-07-29
-> 最后更新：2026-07-29
+> 最后更新：2026-07-30
 > 当前状态：已实现并完成 Windows、Linux 与真实三节点 NATS 集群验收
+
+> 后续语义：M15 继续允许 Retired 的精确调用与普通入站处理；M19 的 `ToService`
+> 自动选择排除 Retired，并在 NATS Disconnected/Reconnecting 时不把远端实例列为候选。
 
 ## 1. 顺延原因
 
@@ -471,7 +474,8 @@ NATS Request Subscription 回调完成固定头校验和目标查找后，只尝
 准入。不同结果使用以下稳定规则：
 
 - `Running` 与 `Retired` 都按普通规则准入 Request、Notify 和 Broadcast；
-- `Retired` 只是服务发现可观察状态，框架不得自动拒绝、丢弃或移出普通路由；
+- `Retired` 只是服务发现可观察状态，M15 的入站准入和精确路由不得自动拒绝或丢弃；
+  M19 的 `ToService` 自动路由会排除；
 - 业务若希望退休期间拒绝特定操作，可以主动返回 `CodeServiceRetired`；
 - Service FIFO 已满时，Request 返回 `CodeServiceQueueFull`；
 - Service 尚未就绪时，Request 返回 `CodeServiceNotReady`；

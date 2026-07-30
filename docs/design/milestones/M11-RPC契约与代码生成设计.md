@@ -2,8 +2,11 @@
 
 > 文档状态：已实现并验收
 > 创建日期：2026-07-27  
-> 最后更新：2026-07-28
+> 最后更新：2026-07-30
 > 当前结论：M11 已完成实现、测试、性能基线和 Windows/Linux 验收
+
+> 后续语义：M19 保持 M11 业务方法与 payload 不变，增加 `BindXxxRPC`、路由派生和
+> `Prepare -> Encode -> Submit` 生成 ABI；旧生成物需统一重新生成。
 
 ## 1. 文档目的
 
@@ -116,9 +119,10 @@ M11 必须同时遵守：
 | NATS RPC Transport | M15 |
 | OnStart 生命周期 Await、AwaitService 和 AwaitNodeService | M14 |
 | OnStop 独占生命周期 Await、完整 Stop 排空和异常进程收尾 | M16 |
-| Origin/etcd 服务发现 Provider 和完整退休状态 | M16 后独立里程碑 |
-| RoundRobin、Rand、ModKey、自定义路由和多 Node 发现范围 Broadcast | 服务发现之后独立里程碑 |
-| 外部 gRPC 插件 | M16 后独立里程碑 |
+| Origin/etcd 服务发现 Provider | M17/M18 已实现 |
+| RoundRobin、Random、稳定 Key 和自定义单目标路由 | M19 |
+| 完整退休 API 和多 Node 发现范围 Broadcast | M19 后独立里程碑 |
+| 外部 gRPC 插件 | M19 后独立里程碑 |
 | 流式 RPC | 首版不支持，有真实需求后重新设计 |
 | RPC 压缩 | 基准证明有净收益后单独立项 |
 
