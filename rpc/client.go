@@ -19,6 +19,7 @@ type Client struct {
 	target      Target
 	contractID  ContractID
 	fingerprint ContractFingerprint
+	route       routeSpec
 }
 
 // NewGeneratedClient 创建供 origingen 生成代码保存的底层客户端。
