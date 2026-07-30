@@ -471,6 +471,48 @@ func (runtime *Runtime) AllocateRequest(
 	return runtime.pool.AcquireWithHeadroom(size, headroom), nil
 }
 
+// AllocatePreparedRequest 按 Prepare 固定的最终 Transport 分配唯一请求 Buffer。
+func (runtime *Runtime) AllocatePreparedRequest(
+	prepared preparedTarget,
+	size int,
+	kind CallKind,
+) (*Buffer, error) {
+	if runtime == nil || runtime.pool == nil || size < 0 ||
+		size > runtime.maxMessageSize() ||
+		prepared.transport == preparedInvalid ||
+		prepared.methodID == 0 ||
+		prepared.kind != kind ||
+		(kind != CallRequest && kind != CallNotify) ||
+		!validWireName(prepared.serviceName) {
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	headroom := 0
+	switch prepared.transport {
+	case preparedLocal:
+		// 本地 Dispatcher 直接借用 payload，不承担网络包络。
+	case preparedTCP:
+		if kind == CallRequest {
+			headroom = wireRequestFixedSize + len(prepared.serviceName)
+		} else {
+			headroom = wireNotifyFixedSize + len(prepared.serviceName)
+		}
+	case preparedNATS:
+		if kind == CallRequest {
+			headroom = natsRequestFixedSize +
+				len(runtime.nodeID) +
+				len(prepared.serviceName)
+		} else {
+			headroom = natsNotifyFixedSize + len(prepared.serviceName)
+		}
+	default:
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	if headroom > wireEnvelopeSize {
+		return nil, errs.ErrRPCEncodeFailed
+	}
+	return runtime.pool.AcquireWithHeadroom(size, headroom), nil
+}
+
 // resolve 把逻辑 Target 解析为当前 Node 内唯一端点，并校验完整契约。
 func (runtime *Runtime) resolve(
 	target Target,
@@ -609,6 +651,181 @@ func (runtime *Runtime) submit(
 	if err != nil {
 		return remoteRequestHandle{}, err
 	}
+	return runtime.submitLocal(
+		ctx,
+		endpoint,
+		methodID,
+		kind,
+		request,
+		complete,
+	)
+}
+
+func (runtime *Runtime) submitPrepared(
+	ctx context.Context,
+	owner service.IService,
+	prepared preparedTarget,
+	contractID ContractID,
+	fingerprint ContractFingerprint,
+	methodID MethodID,
+	kind CallKind,
+	request *Buffer,
+	complete func(*Buffer, error),
+) (remoteRequestHandle, error) {
+	if ctx == nil || owner == nil || request == nil ||
+		prepared.transport == preparedInvalid ||
+		prepared.methodID != methodID ||
+		prepared.kind != kind ||
+		methodID == 0 ||
+		contractID == 0 ||
+		fingerprint == (ContractFingerprint{}) ||
+		(kind != CallRequest && kind != CallNotify) ||
+		(kind == CallRequest && complete == nil) ||
+		(kind == CallNotify && complete != nil) {
+		return remoteRequestHandle{}, errs.ErrInvalidArgument
+	}
+	if !runtime.frozen.Load() {
+		return remoteRequestHandle{}, errs.ErrServiceNotReady
+	}
+	if runtime.closed.Load() {
+		return remoteRequestHandle{}, errs.ErrServiceStopped
+	}
+
+	switch prepared.transport {
+	case preparedLocal:
+		return runtime.submitLocal(
+			ctx,
+			prepared.endpoint,
+			methodID,
+			kind,
+			request,
+			complete,
+		)
+	case preparedTCP, preparedNATS:
+		if err := runtime.validatePreparedRemote(
+			prepared,
+			contractID,
+			fingerprint,
+		); err != nil {
+			return remoteRequestHandle{}, err
+		}
+	default:
+		return remoteRequestHandle{}, errs.ErrInvalidArgument
+	}
+
+	if prepared.transport == preparedTCP {
+		current := runtime.remote.targetSession(
+			prepared.nodeID,
+			prepared.sessionID,
+		)
+		if current == nil || current != prepared.tcpSession {
+			return remoteRequestHandle{}, errs.ErrTransportUnavailable
+		}
+		if kind == CallNotify {
+			return remoteRequestHandle{}, current.sendNotify(
+				prepared.serviceName,
+				fingerprint,
+				methodID,
+				request,
+			)
+		}
+		timeout, err := service.AwaitTimeoutOf(owner)
+		if err != nil {
+			return remoteRequestHandle{}, err
+		}
+		remaining, err := remoteRemainingTimeout(timeout, ctx)
+		if err != nil {
+			return remoteRequestHandle{}, err
+		}
+		return current.sendRequest(
+			prepared.serviceName,
+			fingerprint,
+			methodID,
+			remaining,
+			request,
+			complete,
+		)
+	}
+
+	conn, err := runtime.nats.preparedConn(prepared.natsView)
+	if err != nil {
+		return remoteRequestHandle{}, err
+	}
+	if kind == CallNotify {
+		return remoteRequestHandle{}, runtime.nats.sendNotifyWithConn(
+			conn,
+			prepared.nodeID,
+			prepared.sessionID,
+			prepared.serviceName,
+			methodID,
+			request,
+		)
+	}
+	timeout, err := service.AwaitTimeoutOf(owner)
+	if err != nil {
+		return remoteRequestHandle{}, err
+	}
+	remaining, err := remoteRemainingTimeout(timeout, ctx)
+	if err != nil {
+		return remoteRequestHandle{}, err
+	}
+	return runtime.nats.sendRequestWithConn(
+		conn,
+		prepared.nodeID,
+		prepared.sessionID,
+		prepared.serviceName,
+		methodID,
+		remaining,
+		request,
+		complete,
+	)
+}
+
+func (runtime *Runtime) validatePreparedRemote(
+	prepared preparedTarget,
+	contractID ContractID,
+	fingerprint ContractFingerprint,
+) error {
+	resolver, ok := runtime.remoteResolver.(RemoteSnapshotResolver)
+	if !ok {
+		return errs.ErrRPCNoRoute
+	}
+	snapshot := resolver.Snapshot()
+	if snapshot == nil {
+		return errs.ErrRPCNoRoute
+	}
+	candidate, exists := snapshot.Find(
+		prepared.nodeID,
+		prepared.serviceName,
+	)
+	if !exists || candidate.SessionID != prepared.sessionID {
+		return errs.ErrRPCNoRoute
+	}
+	if candidate.ContractID != contractID ||
+		candidate.Fingerprint != fingerprint {
+		return errs.ErrRPCContractMismatch
+	}
+	switch prepared.transport {
+	case preparedTCP:
+		if candidate.Transport != TransportTCP {
+			return errs.ErrTransportUnavailable
+		}
+	case preparedNATS:
+		if candidate.Transport != TransportNATS {
+			return errs.ErrTransportUnavailable
+		}
+	}
+	return nil
+}
+
+func (runtime *Runtime) submitLocal(
+	ctx context.Context,
+	endpoint serviceEndpoint,
+	methodID MethodID,
+	kind CallKind,
+	request *Buffer,
+	complete func(*Buffer, error),
+) (remoteRequestHandle, error) {
 
 	// caller Context 只提供业务值；目标任务自身的生命周期和执行令牌由目标 Scheduler
 	// 创建。WithoutCancel 防止 Notify 在准入成功后又被调用方撤回。
@@ -617,7 +834,7 @@ func (runtime *Runtime) submit(
 		control = context.WithoutCancel(ctx)
 	}
 	values := context.WithoutCancel(ctx)
-	err = endpoint.target.DispatchAsync(func(targetCtx context.Context) {
+	err := endpoint.target.DispatchAsync(func(targetCtx context.Context) {
 		// Dispatcher 只能在本任务期间借用请求字节；释放动作覆盖所有退出路径。
 		defer request.Release()
 		dispatchCtx := &rpcContext{

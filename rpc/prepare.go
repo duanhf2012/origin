@@ -84,17 +84,95 @@ func (runtime *Runtime) prepareNotify(
 	client Client,
 	methodID MethodID,
 ) (preparedTarget, error) {
+	prepared, err, _ := runtime.prepareOnce(
+		ctx,
+		client,
+		methodID,
+		CallNotify,
+	)
+	return prepared, err
+}
+
+func (runtime *Runtime) prepareAsync(
+	ctx context.Context,
+	client Client,
+	methodID MethodID,
+) (preparedTarget, error) {
+	prepared, err, _ := runtime.prepareOnce(
+		ctx,
+		client,
+		methodID,
+		CallRequest,
+	)
+	return prepared, err
+}
+
+func (runtime *Runtime) prepareAwait(
+	ctx context.Context,
+	client Client,
+	methodID MethodID,
+) (preparedTarget, error) {
+	signal := runtime.routeChangeSignal()
+	prepared, err, waitable := runtime.prepareOnce(
+		ctx,
+		client,
+		methodID,
+		CallRequest,
+	)
+	if err == nil || !waitable {
+		return prepared, err
+	}
+
+	var result preparedTarget
+	err = client.owner.Await(ctx, func(waitCtx context.Context) error {
+		for {
+			select {
+			case <-signal:
+			case <-waitCtx.Done():
+				return contextError(context.Cause(waitCtx))
+			}
+			signal = runtime.routeChangeSignal()
+			current, currentErr, currentWaitable := runtime.prepareOnce(
+				waitCtx,
+				client,
+				methodID,
+				CallRequest,
+			)
+			if currentErr == nil {
+				result = current
+				return nil
+			}
+			if !currentWaitable {
+				return currentErr
+			}
+		}
+	})
+	if err != nil {
+		return preparedTarget{}, err
+	}
+	return result, nil
+}
+
+func (runtime *Runtime) prepareOnce(
+	ctx context.Context,
+	client Client,
+	methodID MethodID,
+	kind CallKind,
+) (preparedTarget, error, bool) {
 	if runtime == nil || ctx == nil || methodID == 0 {
-		return preparedTarget{}, errs.ErrInvalidArgument
+		return preparedTarget{}, errs.ErrInvalidArgument, false
+	}
+	if kind != CallRequest && kind != CallNotify {
+		return preparedTarget{}, errs.ErrInvalidArgument, false
 	}
 	if !runtime.frozen.Load() {
-		return preparedTarget{}, errs.ErrServiceNotReady
+		return preparedTarget{}, errs.ErrServiceNotReady, false
 	}
 	if runtime.closed.Load() {
-		return preparedTarget{}, errs.ErrServiceStopped
+		return preparedTarget{}, errs.ErrServiceStopped, false
 	}
 	if client.route.err != nil {
-		return preparedTarget{}, client.route.err
+		return preparedTarget{}, client.route.err, false
 	}
 
 	set := runtime.buildCandidateSet(
@@ -104,15 +182,19 @@ func (runtime *Runtime) prepareNotify(
 	)
 	set.scanEligible()
 	if set.count == 0 {
-		return preparedTarget{}, set.routeError()
+		waitable := set.scan.contract &&
+			set.scan.lifecycle &&
+			set.scan.transport &&
+			!set.scan.connected
+		return preparedTarget{}, set.routeError(), waitable
 	}
 	index, err := runtime.selectCandidateIndex(&set, client.route)
 	if err != nil {
-		return preparedTarget{}, err
+		return preparedTarget{}, err, false
 	}
 	candidate, exists := set.eligibleAt(index)
 	if !exists {
-		return preparedTarget{}, errs.ErrRPCRouteSelectorFailed
+		return preparedTarget{}, errs.ErrRPCRouteSelectorFailed, false
 	}
 	return preparedTarget{
 		transport:   candidate.transport,
@@ -120,11 +202,11 @@ func (runtime *Runtime) prepareNotify(
 		sessionID:   candidate.sessionID,
 		serviceName: candidate.serviceName,
 		methodID:    methodID,
-		kind:        CallNotify,
+		kind:        kind,
 		endpoint:    candidate.endpoint,
 		tcpSession:  candidate.tcpSession,
 		natsView:    candidate.natsView,
-	}, nil
+	}, nil, false
 }
 
 func (runtime *Runtime) buildCandidateSet(

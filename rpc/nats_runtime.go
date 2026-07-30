@@ -566,6 +566,31 @@ func (runtime *natsRuntime) sendRequest(
 	if err != nil {
 		return remoteRequestHandle{}, err
 	}
+	return runtime.sendRequestWithConn(
+		conn,
+		targetNodeID,
+		targetSessionID,
+		serviceName,
+		methodID,
+		remaining,
+		request,
+		complete,
+	)
+}
+
+func (runtime *natsRuntime) sendRequestWithConn(
+	conn *natsnet.Conn,
+	targetNodeID string,
+	targetSessionID uint64,
+	serviceName string,
+	methodID MethodID,
+	remaining time.Duration,
+	request *Buffer,
+	complete func(*Buffer, error),
+) (remoteRequestHandle, error) {
+	if runtime == nil || conn == nil || request == nil {
+		return remoteRequestHandle{}, errs.ErrInvalidArgument
+	}
 	subject, err := runtime.requestSubject(targetNodeID)
 	if err != nil {
 		return remoteRequestHandle{}, err
@@ -622,6 +647,27 @@ func (runtime *natsRuntime) sendNotify(
 	if err != nil {
 		return err
 	}
+	return runtime.sendNotifyWithConn(
+		conn,
+		targetNodeID,
+		targetSessionID,
+		serviceName,
+		methodID,
+		request,
+	)
+}
+
+func (runtime *natsRuntime) sendNotifyWithConn(
+	conn *natsnet.Conn,
+	targetNodeID string,
+	targetSessionID uint64,
+	serviceName string,
+	methodID MethodID,
+	request *Buffer,
+) error {
+	if runtime == nil || conn == nil || request == nil {
+		return errs.ErrInvalidArgument
+	}
 	subject, err := runtime.requestSubject(targetNodeID)
 	if err != nil {
 		return err
@@ -643,14 +689,33 @@ func (runtime *natsRuntime) sendNotify(
 
 // connectedConn 只允许当前确实连通 Broker 时提交新调用，重连期间不缓冲或重放。
 func (runtime *natsRuntime) connectedConn() (*natsnet.Conn, error) {
-	runtime.mu.Lock()
-	conn := runtime.conn
-	closed := runtime.closed
-	runtime.mu.Unlock()
-	if closed || conn == nil || conn.Status() != natsnet.StatusConnected {
+	if runtime == nil {
 		return nil, errs.ErrTransportUnavailable
 	}
-	return conn, nil
+	view := runtime.activeConnection.Load()
+	if view == nil ||
+		view.conn == nil ||
+		view.generation == 0 ||
+		view.conn.Status() != natsnet.StatusConnected {
+		return nil, errs.ErrTransportUnavailable
+	}
+	return view.conn, nil
+}
+
+func (runtime *natsRuntime) preparedConn(
+	prepared *natsConnectionView,
+) (*natsnet.Conn, error) {
+	if runtime == nil || prepared == nil {
+		return nil, errs.ErrTransportUnavailable
+	}
+	current := runtime.activeConnection.Load()
+	if current != prepared ||
+		current.conn == nil ||
+		current.generation == 0 ||
+		current.conn.Status() != natsnet.StatusConnected {
+		return nil, errs.ErrTransportUnavailable
+	}
+	return current.conn, nil
 }
 
 // handleInbound 在 nats.go 的顺序回调 goroutine 中完成轻量解析和 Service 队列准入。

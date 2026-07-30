@@ -541,3 +541,201 @@ func TestNATSDisconnectedClearsRouteConnectionImmediately(t *testing.T) {
 		t.Fatal("Disconnected 没有唤醒路由等待者")
 	}
 }
+
+type countingPrepareTestSelector struct {
+	calls int
+}
+
+func (selector *countingPrepareTestSelector) Select(
+	RouteCandidates,
+) (int, bool) {
+	selector.calls++
+	return 0, true
+}
+
+func TestPreparedNotifyRejectsSessionReplacementWithoutReselect(t *testing.T) {
+	first := RemoteCandidate{
+		NodeID:      "player-1",
+		SessionID:   101,
+		ServiceName: "PlayerService",
+		State:       publicdiscovery.StateRunning,
+		Transport:   TransportTCP,
+		Address:     "127.0.0.1:27001",
+		ContractID:  1,
+		Fingerprint: runtimeTestFingerprint,
+	}
+	snapshot := &prepareTestSnapshot{candidates: []RemoteCandidate{first}}
+	runtime := newPrepareTestRuntime(t, "gateway-1", TransportTCP, snapshot)
+	addPrepareTestTCPConnection(t, runtime, "player-1", 101, first.Address)
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	selector := &countingPrepareTestSelector{}
+	prepared, err := prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).RouteBy(selector).PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("PrepareNotify() error = %v", err)
+	}
+	request, err := prepared.AllocateRequest(0, CallNotify)
+	if err != nil {
+		t.Fatalf("AllocateRequest() error = %v", err)
+	}
+	if got := request.Headroom(); got != wireNotifyFixedSize+len("PlayerService") {
+		request.Release()
+		t.Fatalf("headroom = %d", got)
+	}
+
+	second := first
+	second.SessionID = 102
+	runtime.remoteResolver.(*prepareTestResolver).snapshot =
+		&prepareTestSnapshot{candidates: []RemoteCandidate{second}}
+	runtime.remote.mu.Lock()
+	runtime.remote.targets = make(map[string]*remoteTarget)
+	runtime.remote.publishTargetsLocked()
+	runtime.remote.mu.Unlock()
+
+	err = prepared.Notify(context.Background(), 1, request)
+	if !errors.Is(err, errs.ErrRPCNoRoute) {
+		t.Fatalf("Notify() error = %v", err)
+	}
+	if selector.calls != 1 {
+		t.Fatalf("selector calls = %d", selector.calls)
+	}
+}
+
+type prepareAwaitTestOwner struct {
+	service.Service
+	awaitCalls int
+	entered    chan struct{}
+}
+
+func (owner *prepareAwaitTestOwner) Await(
+	ctx context.Context,
+	fn func(context.Context) error,
+) error {
+	owner.awaitCalls++
+	if owner.entered != nil {
+		close(owner.entered)
+		owner.entered = nil
+	}
+	return fn(ctx)
+}
+
+func addPrepareTestDisconnectedTCP(
+	runtime *Runtime,
+	nodeID string,
+	sessionID uint64,
+	address string,
+) (*remoteTarget, *outboundSession) {
+	target := newRemoteTarget(runtime.remote, nodeID, sessionID, address)
+	session := newOutboundSession(runtime.remote, nodeID, sessionID)
+	runtime.remote.mu.Lock()
+	runtime.remote.targets[nodeID] = target
+	runtime.remote.publishTargetsLocked()
+	runtime.remote.mu.Unlock()
+	return target, session
+}
+
+func TestPrepareAwaitWaitsForConnectedRouteEvent(t *testing.T) {
+	candidate := RemoteCandidate{
+		NodeID:      "player-1",
+		SessionID:   111,
+		ServiceName: "PlayerService",
+		State:       publicdiscovery.StateRunning,
+		Transport:   TransportTCP,
+		Address:     "127.0.0.1:28001",
+		ContractID:  1,
+		Fingerprint: runtimeTestFingerprint,
+	}
+	runtime := newPrepareTestRuntime(
+		t,
+		"gateway-1",
+		TransportTCP,
+		&prepareTestSnapshot{candidates: []RemoteCandidate{candidate}},
+	)
+	target, session := addPrepareTestDisconnectedTCP(
+		runtime,
+		candidate.NodeID,
+		candidate.SessionID,
+		candidate.Address,
+	)
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	owner := &prepareAwaitTestOwner{entered: make(chan struct{})}
+	client := prepareTestClient(runtime, ToService("PlayerService"))
+	client.owner = owner
+	type result struct {
+		client Client
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		prepared, err := client.PrepareAwait(context.Background(), 1)
+		done <- result{client: prepared, err: err}
+	}()
+
+	select {
+	case <-owner.entered:
+	case <-time.After(time.Second):
+		t.Fatal("PrepareAwait 没有进入连接等待")
+	}
+	target.current.Store(session)
+	runtime.NotifyRoutesChanged()
+
+	select {
+	case current := <-done:
+		if current.err != nil {
+			t.Fatalf("PrepareAwait() error = %v", current.err)
+		}
+		if current.client.prepared.tcpSession != session {
+			t.Fatalf("prepared session = %p", current.client.prepared.tcpSession)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("连接事件没有唤醒 PrepareAwait")
+	}
+	if owner.awaitCalls != 1 {
+		t.Fatalf("Await calls = %d", owner.awaitCalls)
+	}
+}
+
+func TestPrepareAsyncDoesNotWaitForDisconnectedRoute(t *testing.T) {
+	candidate := RemoteCandidate{
+		NodeID:      "player-1",
+		SessionID:   121,
+		ServiceName: "PlayerService",
+		State:       publicdiscovery.StateRunning,
+		Transport:   TransportTCP,
+		Address:     "127.0.0.1:29001",
+		ContractID:  1,
+		Fingerprint: runtimeTestFingerprint,
+	}
+	runtime := newPrepareTestRuntime(
+		t,
+		"gateway-1",
+		TransportTCP,
+		&prepareTestSnapshot{candidates: []RemoteCandidate{candidate}},
+	)
+	addPrepareTestDisconnectedTCP(
+		runtime,
+		candidate.NodeID,
+		candidate.SessionID,
+		candidate.Address,
+	)
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	owner := &prepareAwaitTestOwner{}
+	client := prepareTestClient(runtime, ToService("PlayerService"))
+	client.owner = owner
+
+	_, err := client.PrepareAsync(context.Background(), 1)
+	if !errors.Is(err, errs.ErrTransportUnavailable) {
+		t.Fatalf("PrepareAsync() error = %v", err)
+	}
+	if owner.awaitCalls != 0 {
+		t.Fatalf("Await calls = %d", owner.awaitCalls)
+	}
+}

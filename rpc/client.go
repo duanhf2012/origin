@@ -54,7 +54,52 @@ func (client Client) AllocateRequest(size int, kind CallKind) (*Buffer, error) {
 	if err := client.validate(); err != nil {
 		return nil, err
 	}
+	if client.prepared.transport != preparedInvalid {
+		return client.runtime.AllocatePreparedRequest(
+			client.prepared,
+			size,
+			kind,
+		)
+	}
 	return client.runtime.AllocateRequest(client.target, size, kind)
+}
+
+// PrepareAwait 在编码前选择一次有响应目标；只有合法候选仅缺连接时才协作等待。
+func (client Client) PrepareAwait(
+	ctx context.Context,
+	methodID MethodID,
+) (Client, error) {
+	if ctx == nil || methodID == 0 {
+		return Client{}, errs.ErrInvalidArgument
+	}
+	if err := client.validate(); err != nil {
+		return Client{}, err
+	}
+	prepared, err := client.runtime.prepareAwait(ctx, client, methodID)
+	if err != nil {
+		return Client{}, err
+	}
+	client.prepared = prepared
+	return client, nil
+}
+
+// PrepareAsync 在编码前选择一次有响应目标，当前没有可发送候选时立即失败。
+func (client Client) PrepareAsync(
+	ctx context.Context,
+	methodID MethodID,
+) (Client, error) {
+	if ctx == nil || methodID == 0 {
+		return Client{}, errs.ErrInvalidArgument
+	}
+	if err := client.validate(); err != nil {
+		return Client{}, err
+	}
+	prepared, err := client.runtime.prepareAsync(ctx, client, methodID)
+	if err != nil {
+		return Client{}, err
+	}
+	client.prepared = prepared
+	return client, nil
 }
 
 // PrepareNotify 在编码前选择并固定一次无响应调用目标。
@@ -98,12 +143,8 @@ func (client Client) Await(
 	started := false
 	err := client.owner.Await(ctx, func(waitCtx context.Context) error {
 		started = true
-		handle, err := client.runtime.submit(
+		handle, err := client.submit(
 			waitCtx,
-			client.owner,
-			client.target,
-			client.contractID,
-			client.fingerprint,
 			methodID,
 			CallRequest,
 			request,
@@ -214,12 +255,8 @@ func (client Client) Async(
 		return err
 	}
 
-	submittedHandle, err := client.runtime.submit(
+	submittedHandle, err := client.submit(
 		ctx,
-		client.owner,
-		client.target,
-		client.contractID,
-		client.fingerprint,
 		methodID,
 		CallRequest,
 		request,
@@ -255,12 +292,8 @@ func (client Client) Notify(
 		request.Release()
 		return contextError(cause)
 	}
-	if _, err := client.runtime.submit(
+	if _, err := client.submit(
 		ctx,
-		client.owner,
-		client.target,
-		client.contractID,
-		client.fingerprint,
 		methodID,
 		CallNotify,
 		request,
@@ -270,6 +303,39 @@ func (client Client) Notify(
 		return err
 	}
 	return nil
+}
+
+func (client Client) submit(
+	ctx context.Context,
+	methodID MethodID,
+	kind CallKind,
+	request *Buffer,
+	complete func(*Buffer, error),
+) (remoteRequestHandle, error) {
+	if client.prepared.transport != preparedInvalid {
+		return client.runtime.submitPrepared(
+			ctx,
+			client.owner,
+			client.prepared,
+			client.contractID,
+			client.fingerprint,
+			methodID,
+			kind,
+			request,
+			complete,
+		)
+	}
+	return client.runtime.submit(
+		ctx,
+		client.owner,
+		client.target,
+		client.contractID,
+		client.fingerprint,
+		methodID,
+		kind,
+		request,
+		complete,
+	)
 }
 
 // Broadcast 在 M11 当前本地目标范围执行通知投递。
