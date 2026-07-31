@@ -1,0 +1,39 @@
+# MongoDB 单实例编排（本地开发与集成测试用，不面向生产）。
+#
+# 与 base-compose.yml 解耦，可单独启动：
+#   docker compose -f mongo-compose.yml up -d
+#   docker compose -f mongo-compose.yml down
+#
+# 鉴权：--auth 开启，仅创建一个管理员账号 admin（角色 userAdminAnyDatabase
+# 与 readWriteAnyDatabase，可管理任意库并读写数据）。不预建业务库，库按需自行创建。
+#
+# 默认连接串（authSource 必须为 admin）：
+#   mongodb://admin:origin_pwd@localhost:27017/?authSource=admin
+
+networks:
+  origin-net:
+    name: origin-net
+    driver: bridge
+    # 复用 base-compose.yml 的 origin-net 名称，便于同时启动时容器互通；
+    # 单独启动 mongo 时也会创建同名网络（已存在则复用，不报错）。
+
+services:
+  mongo:
+    image: mongo:8
+    container_name: origin-mongo
+    # --auth 开启鉴权；admin 账号在首次启动空数据卷时由内置初始化流程创建。
+    command: ["--auth"]
+    environment:
+      # 仅在数据卷为空（首次启动）时生效，用于初始化管理员账号。
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-origin_pwd}
+    ports:
+      # 0.0.0.0 显式绑定到所有网卡，确保部署到测试服务器后可从本机远程访问。
+      - "0.0.0.0:27017:27017"
+    volumes:
+      - origin-mongo-data:/data/db
+    networks:
+      - origin-net
+
+volumes:
+  origin-mongo-data:

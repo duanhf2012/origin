@@ -1,0 +1,181 @@
+# Origin v3 基础设施编排：etcd 3 节点集群 + NATS 3 节点集群（Core NATS）。
+#
+# 仅用于本地开发与集成测试，不面向生产部署。两者相互独立，可整体启动，
+# 也可单独启动其中一个集群：
+#   docker compose -f base-compose.yml up -d              # 启动 etcd + nats
+#   docker compose -f base-compose.yml up -d etcd1 n1     # 仅启动部分服务
+#   docker compose -f base-compose.yml down               # 停止并移除容器与网络
+#
+# 网络拓扑：
+#   - 所有服务接入共享网络 origin-net，容器间通过服务名互通。
+#   - 宿主机仅暴露必要端口：etcd1 的 2379(client)/2380(peer)、
+#     n1 的 4222(client)/8222(监控)。其余节点仅集群内部通信，避免端口冲突。
+#
+# 版本固定：etcd v3.7.1、nats 2.14.3，与 go.mod 中 etcd v3.7.1、nats-server v2.14.3 严格对齐。
+# 说明：nats-server/v2 中的 v2 只是 Go module 主版本后缀，产品真实版本是 2.14.3。
+
+# 顶层 networks 定义共享桥接网络，供 etcd 与 nats 集群内部互联。
+networks:
+  origin-net:
+    name: origin-net
+    driver: bridge
+
+# 集群初始成员列表：三个节点在启动时共同引用，构成 etcd 初始集群与 NATS 路由集群。
+x-etcd-cluster: &etcd-cluster "etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380"
+x-nats-routes: &nats-routes "nats://n1:6222,nats://n2:6222,nats://n3:6222"
+
+services:
+  # ---------------------------------------------------------------------------
+  # etcd 集群（3 节点）
+  # ---------------------------------------------------------------------------
+  # 三个节点配置基本一致，仅 name / 宿主机端口 / 数据卷不同。
+  # ETCD_INITIAL_CLUSTER_STATE=new 表示作为全新集群启动（重启后仍生效，
+  # 因为数据卷里已记录集群成员，etcd 会优先使用已有数据）。
+
+  etcd1:
+    image: quay.io/coreos/etcd:v3.7.1
+    container_name: origin-etcd1
+    # --name 必须与 INITIAL_CLUSTER 中的成员名一致，否则节点无法加入集群。
+    command:
+      - etcd
+      - --name=etcd1
+      - --data-dir=/etcd-data
+      # 集群内peer通信地址，使用容器名+2380。
+      - --initial-advertise-peer-urls=http://etcd1:2380
+      # 对客户端广播的地址，集群内部容器互相访问用 2379。
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd1:2379
+      # 初始集群成员列表，引用顶部锚点，三节点共享同一份配置。
+      - --initial-cluster=*etcd-cluster
+      - --initial-cluster-state=new
+      - --initial-cluster-token=origin-etcd-token
+    ports:
+      # 0.0.0.0 显式绑定到所有网卡，确保部署到测试服务器后可从本机远程访问。
+      - "0.0.0.0:2379:2379"
+      - "0.0.0.0:2380:2380"
+    volumes:
+      - origin-etcd1-data:/etcd-data
+    networks:
+      - origin-net
+
+  etcd2:
+    image: quay.io/coreos/etcd:v3.7.1
+    container_name: origin-etcd2
+    command:
+      - etcd
+      - --name=etcd2
+      - --data-dir=/etcd-data
+      - --initial-advertise-peer-urls=http://etcd2:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd2:2379
+      - --initial-cluster=*etcd-cluster
+      - --initial-cluster-state=new
+      - --initial-cluster-token=origin-etcd-token
+    # etcd2/etcd3 不映射宿主机端口，避免与 etcd1 冲突；仅在 origin-net 内互通。
+    volumes:
+      - origin-etcd2-data:/etcd-data
+    networks:
+      - origin-net
+
+  etcd3:
+    image: quay.io/coreos/etcd:v3.7.1
+    container_name: origin-etcd3
+    command:
+      - etcd
+      - --name=etcd3
+      - --data-dir=/etcd-data
+      - --initial-advertise-peer-urls=http://etcd3:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd3:2379
+      - --initial-cluster=*etcd-cluster
+      - --initial-cluster-state=new
+      - --initial-cluster-token=origin-etcd-token
+    volumes:
+      - origin-etcd3-data:/etcd-data
+    networks:
+      - origin-net
+
+  # ---------------------------------------------------------------------------
+  # NATS 集群（3 节点，Core NATS，不开 JetStream）
+  # ---------------------------------------------------------------------------
+  # 通过 --routes 互相发现并组成集群；--cluster 暴露集群路由端口 6222。
+  # 不传 -js，因此不启用 JetStream 持久化（符合当前选择）。
+
+  n1:
+    image: nats:2.14.3
+    container_name: origin-nats1
+    command:
+      - "-cluster=nats://0.0.0.0:6222"
+      - "-routes=*nats-routes"
+      # 关闭重新连接时的自动抖动，使三节点集群在本地稳定快速成型。
+      - "-no_advertise"
+      # 开启 HTTP 监控端口（默认不启用）；三节点均开启，便于容器内互相观察，
+      # 仅 n1 映射到宿主机供外部访问。
+      - "-m=8222"
+    ports:
+      # 0.0.0.0 显式绑定到所有网卡，确保部署到测试服务器后可从本机远程访问。
+      - "0.0.0.0:4222:4222"
+      - "0.0.0.0:8222:8222"
+    networks:
+      - origin-net
+
+  n2:
+    image: nats:2.14.3
+    container_name: origin-nats2
+    command:
+      - "-cluster=nats://0.0.0.0:6222"
+      - "-routes=*nats-routes"
+      - "-no_advertise"
+      # 开启 HTTP 监控端口；n2 不映射到宿主机，仅在 origin-net 内可访问。
+      - "-m=8222"
+    networks:
+      - origin-net
+
+  n3:
+    image: nats:2.14.3
+    container_name: origin-nats3
+    command:
+      - "-cluster=nats://0.0.0.0:6222"
+      - "-routes=*nats-routes"
+      - "-no_advertise"
+      # 开启 HTTP 监控端口；n3 不映射到宿主机，仅在 origin-net 内可访问。
+      - "-m=8222"
+    networks:
+      - origin-net
+
+  # ---------------------------------------------------------------------------
+  # etcdkeeper：etcd 的 Web UI 键值浏览器
+  # ---------------------------------------------------------------------------
+  # 访问地址：http://localhost:8080
+  # 在浏览器顶部输入框填 etcd 连接地址 http://etcd1:2379 即可浏览/编辑 key。
+  # 说明：etcdkeeper 默认使用 v3 API；本项目仅使用 v3，无需切换。
+  # 该项目维护不活跃，对 etcd 3.7 的兼容性以实测为准；命令行可直接用容器自带的
+  # etcdctl（见下方注释），无需依赖本服务。
+
+  etcdkeeper:
+    image: evildecay/etcdkeeper
+    container_name: origin-etcdkeeper
+    # etcdkeeper 默认以 -h 0.0.0.0 监听所有网卡，无需额外配置即可供外部访问；
+    # 它不读取环境变量（README 仅支持命令行 -h 标志），故不设置 environment。
+    ports:
+      # 0.0.0.0 显式绑定到所有网卡，确保部署到测试服务器后可从本机远程访问 Web UI。
+      - "0.0.0.0:8080:8080"
+    depends_on:
+      - etcd1
+    networks:
+      - origin-net
+
+# 常用命令（容器自带 etcdctl，无需额外安装）：
+#   docker exec origin-etcd1 etcdctl member list
+#   docker exec origin-etcd1 etcdctl put foo bar
+#   docker exec origin-etcd1 etcdctl get --prefix /
+
+# 命名数据卷：etcd 数据落盘，容器删除后仍保留，便于反复重启不丢数据。
+# 需要彻底清空时执行：docker compose -f base-compose.yml down -v
+volumes:
+  origin-etcd1-data:
+  origin-etcd2-data:
+  origin-etcd3-data:
