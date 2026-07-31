@@ -20,9 +20,13 @@ networks:
     name: origin-net
     driver: bridge
 
-# 集群初始成员列表：三个节点在启动时共同引用，构成 etcd 初始集群与 NATS 路由集群。
-x-etcd-cluster: &etcd-cluster "etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380"
-x-nats-routes: &nats-routes "nats://n1:6222,nats://n2:6222,nats://n3:6222"
+# 集群初始成员列表（三节点共享同一份）：
+#   etcd 集群：etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+#   nats 路由：nats://n1:6222,nats://n2:6222,nats://n3:6222
+# 注意：曾在顶层用 YAML 锚点 &etcd-cluster / &nats-routes 定义并在 command
+# 列表项里以 *etcd-cluster 引用，但 docker compose 不会在列表标量值内展开别名，
+# 会把字面字符串 "*etcd-cluster" 传给 etcd 导致启动失败。因此直接把成员列表
+# 显式写入每个节点的 command，不依赖锚点。
 
 services:
   # ---------------------------------------------------------------------------
@@ -46,8 +50,8 @@ services:
       - --listen-peer-urls=http://0.0.0.0:2380
       - --listen-client-urls=http://0.0.0.0:2379
       - --advertise-client-urls=http://etcd1:2379
-      # 初始集群成员列表，引用顶部锚点，三节点共享同一份配置。
-      - --initial-cluster=*etcd-cluster
+      # 初始集群成员列表，三节点共享同一份，直接显式写入（不依赖锚点）。
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
       - --initial-cluster-state=new
       - --initial-cluster-token=origin-etcd-token
     ports:
@@ -70,7 +74,7 @@ services:
       - --listen-peer-urls=http://0.0.0.0:2380
       - --listen-client-urls=http://0.0.0.0:2379
       - --advertise-client-urls=http://etcd2:2379
-      - --initial-cluster=*etcd-cluster
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
       - --initial-cluster-state=new
       - --initial-cluster-token=origin-etcd-token
     # etcd2/etcd3 不映射宿主机端口，避免与 etcd1 冲突；仅在 origin-net 内互通。
@@ -90,7 +94,7 @@ services:
       - --listen-peer-urls=http://0.0.0.0:2380
       - --listen-client-urls=http://0.0.0.0:2379
       - --advertise-client-urls=http://etcd3:2379
-      - --initial-cluster=*etcd-cluster
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
       - --initial-cluster-state=new
       - --initial-cluster-token=origin-etcd-token
     volumes:
@@ -109,7 +113,7 @@ services:
     container_name: origin-nats1
     command:
       - "-cluster=nats://0.0.0.0:6222"
-      - "-routes=*nats-routes"
+      - "-routes=nats://n1:6222,nats://n2:6222,nats://n3:6222"
       # 关闭重新连接时的自动抖动，使三节点集群在本地稳定快速成型。
       - "-no_advertise"
       # 开启 HTTP 监控端口（默认不启用）；三节点均开启，便于容器内互相观察，
@@ -127,7 +131,7 @@ services:
     container_name: origin-nats2
     command:
       - "-cluster=nats://0.0.0.0:6222"
-      - "-routes=*nats-routes"
+      - "-routes=nats://n1:6222,nats://n2:6222,nats://n3:6222"
       - "-no_advertise"
       # 开启 HTTP 监控端口；n2 不映射到宿主机，仅在 origin-net 内可访问。
       - "-m=8222"
@@ -139,7 +143,7 @@ services:
     container_name: origin-nats3
     command:
       - "-cluster=nats://0.0.0.0:6222"
-      - "-routes=*nats-routes"
+      - "-routes=nats://n1:6222,nats://n2:6222,nats://n3:6222"
       - "-no_advertise"
       # 开启 HTTP 监控端口；n3 不映射到宿主机，仅在 origin-net 内可访问。
       - "-m=8222"
