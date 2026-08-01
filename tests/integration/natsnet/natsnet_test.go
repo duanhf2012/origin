@@ -653,6 +653,10 @@ func TestExternalClusterReconnect(t *testing.T) {
 	options.Auth.Password = os.Getenv("ORIGIN_NATS_PASSWORD")
 	options.Reconnect.Wait = 100 * time.Millisecond
 	options.Reconnect.Jitter = 0
+	// Docker bridge 停止容器时可能形成无 FIN/RST 的黑洞；外部故障测试缩短主动探活，
+	// 在 20s 验收窗口内覆盖 Ping 判死和集群转移，而不依赖宿主网络的关闭表现。
+	options.PingInterval = time.Second
+	options.MaxPingsOutstanding = 2
 
 	events := make(chan natsnet.Event, 64)
 	conn := connectForTest(
