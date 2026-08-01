@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -294,6 +295,49 @@ func BenchmarkNotifyEventAsync(b *testing.B) {
 	}
 }
 
+func BenchmarkNotifyEventLatency(b *testing.B) {
+	for _, listeners := range []int{0, 1, 10, 100, 1000} {
+		b.Run(fmt.Sprintf("sync_listeners_%d", listeners), func(b *testing.B) {
+			owner := &Service{}
+			slot := benchmarkEventSlot(listeners)
+			event := &testEvent{id: 1}
+			samples := measureLatencySamples(b, func() error {
+				result, failures := owner.notifyEventHandlers(context.Background(), slot, event)
+				if result != nil || failures != 0 {
+					return fmt.Errorf("notify event: failures=%d result=%v", failures, result)
+				}
+				return nil
+			})
+			reportLatencyPercentiles(b, samples)
+		})
+
+		b.Run(fmt.Sprintf("async_listeners_%d", listeners), func(b *testing.B) {
+			fixture := newEventFixture(b, DefaultSchedulerConfig(), func(target *testService) error {
+				for range listeners {
+					if err := target.SubscribeEvent(1, func(context.Context, Event) error { return nil }); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			event := &testEvent{id: 1}
+			completed := make(chan struct{}, 1)
+			barrier := func(context.Context) { completed <- struct{}{} }
+			samples := measureLatencySamples(b, func() error {
+				if err := fixture.service.NotifyEventAsync(event); err != nil {
+					return err
+				}
+				if err := fixture.service.DispatchAsync(barrier); err != nil {
+					return err
+				}
+				<-completed
+				return nil
+			})
+			reportLatencyPercentiles(b, samples)
+		})
+	}
+}
+
 func BenchmarkEventPayloadOwnership(b *testing.B) {
 	owner := &Service{}
 	slot := benchmarkEventSlot(1)
@@ -383,6 +427,79 @@ func benchmarkModuleService(modules int) *testService {
 		}
 	}
 	return target
+}
+
+func reportLatencyPercentiles(b *testing.B, samples []int64) {
+	b.Helper()
+	if len(samples) < 10 {
+		return
+	}
+	sort.Slice(samples, func(left, right int) bool { return samples[left] < samples[right] })
+	var total int64
+	for _, sample := range samples {
+		total += sample
+	}
+	p50 := samples[(len(samples)-1)*50/100]
+	p99 := samples[(len(samples)-1)*99/100]
+	b.ReportMetric(float64(total)/float64(len(samples)), "ns/op")
+	b.ReportMetric(float64(p50), "p50-sample-ns/op")
+	b.ReportMetric(float64(p99), "p99-sample-ns/op")
+}
+
+func measureLatencySamples(b *testing.B, operation func() error) []int64 {
+	b.Helper()
+	b.StopTimer()
+	batchSize := calibrateLatencyBatch(b, operation)
+	samples := make([]int64, b.N)
+	b.ResetTimer()
+	for index := range samples {
+		started := time.Now()
+		for range batchSize {
+			if err := operation(); err != nil {
+				b.Fatal(err)
+			}
+		}
+		samples[index] = time.Since(started).Nanoseconds() / int64(batchSize)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(batchSize), "latency-batch")
+	return samples
+}
+
+func calibrateLatencyBatch(b *testing.B, operation func() error) int {
+	b.Helper()
+	// Measure calibrated batches rather than individual sub-microsecond calls so
+	// percentile samples remain meaningful on hosts with coarse monotonic clocks.
+	const (
+		minimumSampleTime    = 2 * time.Millisecond
+		minimumBatchSize     = 1 << 10
+		maximumBatchSize     = 1 << 24
+		warmupOperations     = 32
+		calibrationRepeats   = 3
+		unmeasuredSampleTime = time.Duration(1<<63 - 1)
+	)
+	for range warmupOperations {
+		if err := operation(); err != nil {
+			b.Fatal(err)
+		}
+	}
+	for batchSize := 1; ; batchSize *= 2 {
+		minimumElapsed := unmeasuredSampleTime
+		for range calibrationRepeats {
+			started := time.Now()
+			for range batchSize {
+				if err := operation(); err != nil {
+					b.Fatal(err)
+				}
+			}
+			if elapsed := time.Since(started); elapsed < minimumElapsed {
+				minimumElapsed = elapsed
+			}
+		}
+		if batchSize >= minimumBatchSize && (minimumElapsed >= minimumSampleTime || batchSize >= maximumBatchSize) {
+			return batchSize
+		}
+	}
 }
 
 func BenchmarkTaskPoolComparison(b *testing.B) {
