@@ -2,9 +2,11 @@ package node
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/duanhf2012/origin/v3/errs"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 )
 
 // TestDiagnosticsPreservesNodeAndServiceOrder 防止聚合时使用 Map 遍历打乱声明顺序，
@@ -58,5 +60,58 @@ func TestNilNodeDiagnostics(t *testing.T) {
 	snapshot := current.Diagnostics()
 	if snapshot.State != "failed" || snapshot.Health.ErrorCode != errs.CodeInternal {
 		t.Fatalf("nil diagnostics = %+v", snapshot)
+	}
+}
+
+// TestDiagnosticsConcurrentRetireResumeAndStop 验证冷路径快照不会与 Service 状态切换、
+// Discovery 发布或最终停止争用可变对象；Race 模式下可直接检查所有权边界。
+func TestDiagnosticsConcurrentRetireResumeAndStop(t *testing.T) {
+	source := internaldiscovery.NewSource()
+	var changes []string
+	first := &retirementService{label: "First", changes: &changes}
+	second := &retirementService{label: "Second", changes: &changes}
+	current := newRetirementNode(t, source, first, second)
+
+	stopReading := make(chan struct{})
+	readerDone := make(chan struct{})
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stopReading:
+					return
+				default:
+					snapshot := current.Diagnostics()
+					if snapshot.NodeID != "retirement-node" || len(snapshot.Services) != 2 {
+						t.Errorf("concurrent Diagnostics() = %+v", snapshot)
+						return
+					}
+				}
+			}
+		}()
+	}
+	go func() {
+		readers.Wait()
+		close(readerDone)
+	}()
+
+	for range 10 {
+		if err := current.Retire(context.Background()); err != nil {
+			t.Fatalf("Retire() error = %v", err)
+		}
+		if err := current.Resume(context.Background()); err != nil {
+			t.Fatalf("Resume() error = %v", err)
+		}
+	}
+	if err := current.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	close(stopReading)
+	<-readerDone
+	if snapshot := current.Diagnostics(); snapshot.State != "stopped" {
+		t.Fatalf("final Diagnostics() = %+v", snapshot)
 	}
 }
