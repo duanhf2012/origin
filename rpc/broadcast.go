@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/duanhf2012/origin/v3/errs"
+	originlog "github.com/duanhf2012/origin/v3/log"
 )
 
 // broadcastPlan 保存一次多目标广播从 Prepare 到 Submit 必须复用的固定视图。
@@ -91,11 +92,19 @@ func (runtime *Runtime) prepareBroadcast(
 		if intentCount == 1 {
 			return preparedTarget{}, nil, errs.ErrTransportUnavailable
 		}
-		return preparedTarget{}, nil, newBroadcastError(
+		broadcastErr := newBroadcastError(
 			intentCount,
 			0,
 			broadcastUnavailableFailures(&set, intentCount),
 		)
+		runtime.logBroadcastFailure(&broadcastPlan{
+			set:             set,
+			methodID:        methodID,
+			intentCount:     intentCount,
+			sendableCount:   0,
+			lastSendableRaw: -1,
+		}, 0, 0, broadcastErr)
+		return preparedTarget{}, nil, broadcastErr
 	}
 
 	// 唯一合法目标继续使用原有 prepared target 和 Notify 提交路径，避免新增 plan 分配。
@@ -277,7 +286,9 @@ func (runtime *Runtime) submitBroadcast(
 	if len(failures) == 0 {
 		return nil
 	}
-	return newBroadcastError(plan.intentCount, succeeded, failures)
+	broadcastErr := newBroadcastError(plan.intentCount, succeeded, failures)
+	runtime.logBroadcastFailure(plan, payloadSize, succeeded, broadcastErr)
+	return broadcastErr
 }
 
 // broadcastIntentAt 判断固定原始位置是否属于本次契约和生命周期范围。
@@ -357,4 +368,52 @@ func (runtime *Runtime) submitFrozenBroadcastNotify(
 	default:
 		return errs.ErrTransportUnavailable
 	}
+}
+
+// logBroadcastFailure 只在聚合失败时记录一条不含业务参数和逐目标详情的结构化摘要。
+func (runtime *Runtime) logBroadcastFailure(
+	plan *broadcastPlan,
+	payloadSize int,
+	succeeded int,
+	broadcastErr *BroadcastError,
+) {
+	if runtime == nil || plan == nil || broadcastErr == nil {
+		return
+	}
+	localTargets := 0
+	tcpTargets := 0
+	natsTargets := 0
+	for rawIndex := 0; rawIndex < plan.set.rawCount(); rawIndex++ {
+		candidate, intent := broadcastIntentAt(&plan.set, rawIndex)
+		if !intent {
+			continue
+		}
+		switch candidate.transport {
+		case preparedLocal:
+			localTargets++
+		case preparedTCP:
+			tcpTargets++
+		case preparedNATS:
+			natsTargets++
+		}
+	}
+	runtime.logger.Warn(
+		"rpc broadcast completed with target failures",
+		originlog.String("service_name", plan.set.target.serviceName),
+		originlog.Uint64("method_id", uint64(plan.methodID)),
+		originlog.Int("intent_targets", plan.intentCount),
+		originlog.Int("sendable_targets", plan.sendableCount),
+		originlog.Int("succeeded_targets", succeeded),
+		originlog.Int("failed_targets", broadcastErr.FailureCount()),
+		originlog.Int("local_targets", localTargets),
+		originlog.Int("tcp_targets", tcpTargets),
+		originlog.Int("nats_targets", natsTargets),
+		originlog.Bool("include_retired", plan.set.includeRetired),
+		originlog.Int("payload_bytes", payloadSize),
+		originlog.Int64(
+			"amplified_bytes",
+			int64(payloadSize)*int64(plan.intentCount),
+		),
+		originlog.Uint32("error_code", uint32(broadcastErr.Code())),
+	)
 }

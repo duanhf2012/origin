@@ -355,7 +355,7 @@ func TestPrepareBroadcastRejectsGlobalPreflightErrors(t *testing.T) {
 		t.Fatalf("已取消 Context error = %v", err)
 	}
 
-	// 8193 个合法意图即使全部断开也必须先返回容量过载，不能截断为 8192 个失败。
+	// 8192 个合法断开意图仍是允许的完整计划，必须返回逐目标 2011 而不是容量过载。
 	candidates := make([]RemoteCandidate, maxRemoteTargets+1)
 	for index := range candidates {
 		candidates[index] = newBroadcastTestCandidate(
@@ -364,6 +364,26 @@ func TestPrepareBroadcastRejectsGlobalPreflightErrors(t *testing.T) {
 			publicdiscovery.StateRunning,
 		)
 	}
+	runtime = newPrepareTestRuntime(t, "gateway-1", TransportTCP, nil)
+	if err := runtime.BindRemoteResolver(&broadcastTestResolver{
+		snapshot: &broadcastTestSnapshot{candidates: candidates[:maxRemoteTargets]},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Freeze(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).PrepareBroadcast(context.Background(), 1)
+	var maximumErr *BroadcastError
+	if !errors.As(err, &maximumErr) || maximumErr.Total() != maxRemoteTargets ||
+		maximumErr.Code() != errs.CodeRPCBroadcastFailed {
+		t.Fatalf("8192 目标 error = %v", err)
+	}
+
+	// 8193 个合法意图即使全部断开也必须先返回容量过载，不能截断为 8192 个失败。
 	runtime = newPrepareTestRuntime(t, "gateway-1", TransportTCP, nil)
 	if err := runtime.BindRemoteResolver(&broadcastTestResolver{
 		snapshot: &broadcastTestSnapshot{candidates: candidates},

@@ -9,8 +9,10 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
+	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/rpc"
+	"github.com/duanhf2012/origin/v3/service"
 )
 
 type broadcastIntegrationCluster struct {
@@ -232,6 +234,22 @@ func verifyBroadcastRetiredRange(
 	for _, player := range cluster.players {
 		awaitPlayerOnlineID(t, player, 303)
 	}
+	if err := runBroadcastClient(t, cluster.caller, func(
+		ctx context.Context,
+		client PlayerRPCClient,
+	) error {
+		value, callErr := client.IncludeRetired().Route(uint64(0)).
+			AwaitEchoName(ctx, "included")
+		if callErr != nil {
+			return callErr
+		}
+		if value != "included-player-1" {
+			return errs.NewMessage(errs.CodeInternal, "IncludeRetired 单目标选择错误")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("IncludeRetired 单目标 error = %v", err)
+	}
 }
 
 // TestM20TCPBroadcastFanoutAndPartialFailure 使用真实 TCP 连接验证多目标、Retired 和断线详情。
@@ -323,4 +341,77 @@ func TestM20NATSBroadcastFanoutAndRetired(t *testing.T) {
 		awaitPlayerOnlineID(t, player, 401)
 	}
 	verifyBroadcastRetiredRange(t, cluster)
+}
+
+// TestM20BroadcastCombinesPrivateLocalAndTCP 验证本地私有端点和远端公开端点共享一次计划。
+func TestM20BroadcastCombinesPrivateLocalAndTCP(t *testing.T) {
+	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
+	discoverySource := internaldiscovery.NewSource()
+	remotePlayer := &PlayerService{EchoSuffix: "player-1"}
+	localPlayer := &PlayerService{EchoSuffix: "gateway-1"}
+	caller := &CallerService{}
+	remoteNode := newRemoteFixtureNode(
+		t,
+		"player-1",
+		testRPCConfig(t),
+		pool,
+		discoverySource,
+		node.ServiceBinding{
+			Name: "PlayerService", Template: "PlayerService", Service: remotePlayer,
+		},
+	)
+	gatewayConfig := testRPCConfig(t)
+	gatewayNode, err := node.New(
+		node.Config{
+			ID:        "gateway-1",
+			Scheduler: service.DefaultSchedulerConfig(),
+			RPC:       &gatewayConfig,
+		},
+		[]node.ServiceBinding{
+			{
+				Name: "CallerService", Template: "CallerService", Service: caller,
+			},
+			{
+				Name: "PlayerService", Template: "PlayerService", Private: true, Service: localPlayer,
+			},
+		},
+		originlog.NewNop(),
+		node.Options{
+			MaxTimersPerNode: 1024,
+			TimerLocation:    time.Local,
+			BufferPool:       pool,
+			DiscoverySource:  discoverySource,
+		},
+	)
+	if err != nil {
+		t.Fatalf("node.New(gateway-1) error = %v", err)
+	}
+	if err := remoteNode.Start(context.Background()); err != nil {
+		t.Fatalf("remote Start() error = %v", err)
+	}
+	if err := gatewayNode.Start(context.Background()); err != nil {
+		stopTestNode(t, remoteNode)
+		t.Fatalf("gateway Start() error = %v", err)
+	}
+	t.Cleanup(func() {
+		stopTestNode(t, gatewayNode)
+		stopTestNode(t, remoteNode)
+		if stats := pool.Stats(); stats.InUseBuffers != 0 {
+			t.Errorf("本地+TCP Broadcast Buffer 未全部归还: %+v", stats)
+		}
+	})
+
+	if err := runBroadcastClient(t, caller, func(
+		ctx context.Context,
+		client PlayerRPCClient,
+	) error {
+		if _, callErr := client.OnNode("player-1").AwaitEchoName(ctx, "warm"); callErr != nil {
+			return callErr
+		}
+		return client.BroadcastPlayerOnline(ctx, 501)
+	}); err != nil {
+		t.Fatalf("本地+TCP Broadcast error = %v", err)
+	}
+	awaitPlayerOnlineID(t, localPlayer, 501)
+	awaitPlayerOnlineID(t, remotePlayer, 501)
 }
