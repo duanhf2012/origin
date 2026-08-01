@@ -118,18 +118,34 @@ func (runtime *serviceRuntime) TransitionServiceState(
 	}
 }
 
-// PublishServiceState 等待当前或更新发现发布代次获得 ACK。
-func (runtime *serviceRuntime) PublishServiceState(ctx context.Context) error {
+// ReserveServiceStatePublication 在 Service 释放执行槽前预留发布代次。
+func (runtime *serviceRuntime) ReserveServiceStatePublication(
+	ctx context.Context,
+) (uint64, error) {
+	if runtime == nil || runtime.node == nil {
+		return 0, errs.ErrInvalidArgument
+	}
+	if runtime.DeferServiceStatePublication(ctx) {
+		return 0, nil
+	}
+	if runtime.node.discoveryPublication == nil {
+		return 0, nil
+	}
+	return runtime.node.discoveryPublication.enqueue()
+}
+
+// AwaitServiceStatePublication 等待预留代次或更新代次获得 ACK。
+func (runtime *serviceRuntime) AwaitServiceStatePublication(
+	ctx context.Context,
+	generation uint64,
+) error {
 	if runtime == nil || runtime.node == nil {
 		return errs.ErrInvalidArgument
 	}
-	if runtime.DeferServiceStatePublication(ctx) {
+	if generation == 0 || runtime.node.discoveryPublication == nil {
 		return nil
 	}
-	if runtime.node.discoveryPublication == nil {
-		return nil
-	}
-	return runtime.node.discoveryPublication.request(ctx)
+	return runtime.node.discoveryPublication.wait(ctx, generation)
 }
 
 func (*serviceRuntime) DeferServiceStatePublication(ctx context.Context) bool {

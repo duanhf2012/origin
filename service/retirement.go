@@ -24,7 +24,8 @@ func (ServiceStateChanged) EventID() EventID { return ServiceStateChangedEventID
 // retirementRuntime 是 Node 提供的可选状态线性化和发现发布适配面。
 type retirementRuntime interface {
 	TransitionServiceState(from State, to State) (time.Time, bool, error)
-	PublishServiceState(context.Context) error
+	ReserveServiceStatePublication(context.Context) (uint64, error)
+	AwaitServiceStatePublication(context.Context, uint64) error
 }
 
 // Retire 把 Running Service 转换为 Retired，并等待对应发现快照发布确认。
@@ -62,15 +63,24 @@ func (service *Service) changeRunningState(
 			return errs.Wrap(errs.CodeOf(err), err)
 		}
 		changedAt, changed, err := runtime.TransitionServiceState(from, to)
-		if err != nil || !changed {
+		if err != nil {
 			return err
 		}
-		eventErr := service.NotifyEventAsync(ServiceStateChanged{
-			Previous:  from,
-			Current:   to,
-			ChangedAt: changedAt,
+		var eventErr error
+		if changed {
+			eventErr = service.NotifyEventAsync(ServiceStateChanged{
+				Previous:  from,
+				Current:   to,
+				ChangedAt: changedAt,
+			})
+		}
+		generation, reserveErr := runtime.ReserveServiceStatePublication(taskCtx)
+		if reserveErr != nil {
+			return errors.Join(eventErr, reserveErr)
+		}
+		publishErr := service.Await(taskCtx, func(waitCtx context.Context) error {
+			return runtime.AwaitServiceStatePublication(waitCtx, generation)
 		})
-		publishErr := service.Await(taskCtx, runtime.PublishServiceState)
 		// 本地状态已经提交；事件队列或远端发布失败都只作为结果返回，绝不回滚。
 		return errors.Join(eventErr, publishErr)
 	})

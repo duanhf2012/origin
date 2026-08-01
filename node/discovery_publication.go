@@ -62,7 +62,16 @@ func (publication *discoveryPublication) request(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return publication.wait(ctx, target)
+}
 
+func (publication *discoveryPublication) wait(ctx context.Context, target uint64) error {
+	if publication == nil || target == 0 {
+		return nil
+	}
+	if ctx == nil {
+		return errs.ErrInvalidArgument
+	}
 	for {
 		publication.mu.Lock()
 		if publication.acknowledged >= target {

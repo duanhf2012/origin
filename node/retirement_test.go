@@ -425,6 +425,91 @@ func TestTransportRecoveryWithdrawsAfterInflightGeneration(t *testing.T) {
 	}
 }
 
+func TestRetireReservesPublicationBeforeAwaitCapacityCheck(t *testing.T) {
+	var changes []string
+	target := &retirementService{label: "Only", changes: &changes}
+	scheduler := service.DefaultSchedulerConfig()
+	scheduler.MaxAwaitTasks = 1
+	current, err := New(
+		Config{
+			ID:        "publication-before-await",
+			Services:  []string{"Only"},
+			Scheduler: scheduler,
+		},
+		[]ServiceBinding{{Name: "Only", Template: "Only", Service: target}},
+		originlog.NewNop(),
+		Options{
+			MaxTimersPerNode: 64,
+			TimerLocation:    time.UTC,
+			DiscoverySource:  internaldiscovery.NewSource(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = current.Stop(context.Background()) })
+
+	awaitEntered := make(chan struct{})
+	releaseAwait := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseAwait) }) }
+	t.Cleanup(release)
+	awaitResult := make(chan error, 1)
+	if err := target.DispatchAsync(func(ctx context.Context) {
+		awaitResult <- target.Await(ctx, func(context.Context) error {
+			close(awaitEntered)
+			<-releaseAwait
+			return nil
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-awaitEntered:
+	case <-time.After(time.Second):
+		t.Fatal("capacity holder did not enter Await")
+	}
+
+	if err := target.Retire(t.Context()); !errors.Is(err, errs.ErrServiceQueueFull) {
+		t.Fatalf("Retire() error = %v, want ErrServiceQueueFull", err)
+	}
+	if target.State() != service.StateRetired {
+		t.Fatalf("State = %v, want Retired", target.State())
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		current.discoveryPublication.mu.Lock()
+		desired := current.discoveryPublication.desired
+		acknowledged := current.discoveryPublication.acknowledged
+		current.discoveryPublication.mu.Unlock()
+		if desired == 1 && acknowledged == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("publication desired=%d acknowledged=%d, want 1/1", desired, acknowledged)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	release()
+	if err := <-awaitResult; err != nil {
+		t.Fatalf("capacity holder Await() error = %v", err)
+	}
+	if err := target.Retire(t.Context()); err != nil {
+		t.Fatalf("idempotent Retire() error = %v", err)
+	}
+	current.discoveryPublication.mu.Lock()
+	desired := current.discoveryPublication.desired
+	acknowledged := current.discoveryPublication.acknowledged
+	current.discoveryPublication.mu.Unlock()
+	if desired != 2 || acknowledged != 2 {
+		t.Fatalf("idempotent publication desired=%d acknowledged=%d, want 2/2", desired, acknowledged)
+	}
+}
+
 func (provider *coalescingPublicationProvider) Withdraw(context.Context) error {
 	provider.mu.Lock()
 	provider.withdraws++
