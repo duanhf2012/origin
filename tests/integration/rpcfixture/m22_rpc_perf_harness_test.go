@@ -93,12 +93,13 @@ type m22RPCPerfFixture struct {
 }
 
 type m22RPCPerfProcess struct {
-	stdin     io.WriteCloser
-	process   *os.Process
-	done      <-chan error
-	stdout    *m22RPCPerfOutput
-	stderr    *bytes.Buffer
-	closeOnce sync.Once
+	stdin      io.WriteCloser
+	process    *os.Process
+	done       <-chan error
+	stdout     *m22RPCPerfOutput
+	stdoutDone <-chan struct{}
+	stderr     *bytes.Buffer
+	closeOnce  sync.Once
 }
 
 // m22RPCPerfOutput 允许就绪扫描器和后续排空 goroutine 共用同一份诊断输出；Close 只在
@@ -779,7 +780,12 @@ func startM22RPCPerfProcess(
 	scanner := bufio.NewScanner(io.TeeReader(stdout, stdoutOutput))
 	for scanner.Scan() {
 		if strings.HasPrefix(scanner.Text(), m22RPCPerfReadyLine+" ") {
-			go func() { _, _ = io.Copy(stdoutOutput, stdout) }()
+			stdoutDone := make(chan struct{})
+			process.stdoutDone = stdoutDone
+			go func() {
+				defer close(stdoutDone)
+				_, _ = io.Copy(stdoutOutput, stdout)
+			}()
 			return process
 		}
 	}
@@ -801,6 +807,9 @@ func (process *m22RPCPerfProcess) Close(t testing.TB) {
 		_ = process.stdin.Close()
 		select {
 		case err := <-process.done:
+			if process.stdoutDone != nil {
+				<-process.stdoutDone
+			}
 			if err != nil {
 				t.Errorf(
 					"M22 target process exit: %v\nstdout=%s\nstderr=%s",
