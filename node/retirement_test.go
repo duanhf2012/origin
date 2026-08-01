@@ -109,7 +109,7 @@ func TestNodeRetireReverseResumeForwardAndPublishState(t *testing.T) {
 	desired := current.discoveryPublication.desired
 	acknowledged := current.discoveryPublication.acknowledged
 	current.discoveryPublication.mu.Unlock()
-	if desired != 4 || acknowledged != desired {
+	if desired != 3 || acknowledged != desired {
 		t.Fatalf("publication generations desired=%d acknowledged=%d", desired, acknowledged)
 	}
 	want := []string{
@@ -154,6 +154,16 @@ func TestReadyDynamicPublicationUsesSingleCoordinator(t *testing.T) {
 	if after != before+1 {
 		t.Fatalf("dynamic generation = %d, want %d", after, before+1)
 	}
+	current.handleTransportEvent(rpc.TransportEvent{
+		Kind:  rpc.TransportKindTCP,
+		State: rpc.TransportStateRecovering,
+	})
+	current.discoveryPublication.mu.Lock()
+	afterWithdraw := current.discoveryPublication.desired
+	current.discoveryPublication.mu.Unlock()
+	if afterWithdraw != before+2 {
+		t.Fatalf("withdraw generation = %d, want %d", afterWithdraw, before+2)
+	}
 }
 
 func TestServiceEntryPublishesStateAndEnteredAtAsOneSnapshot(t *testing.T) {
@@ -171,6 +181,14 @@ func TestServiceEntryPublishesStateAndEnteredAtAsOneSnapshot(t *testing.T) {
 	}
 	if after.EnteredAt.Before(before.EnteredAt) {
 		t.Fatalf("entered time moved backwards: before=%v after=%v", before.EnteredAt, after.EnteredAt)
+	}
+	entry.setState(service.StateStopping)
+	stopping := entry.loadState()
+	time.Sleep(time.Millisecond)
+	entry.setState(service.StateStopping)
+	repeated := entry.loadState()
+	if !repeated.EnteredAt.Equal(stopping.EnteredAt) {
+		t.Fatalf("repeated Stopping changed EnteredAt: first=%v repeated=%v", stopping.EnteredAt, repeated.EnteredAt)
 	}
 }
 
@@ -210,6 +228,7 @@ type failingPublicationProvider struct {
 	mu      sync.Mutex
 	fail    bool
 	panic   bool
+	calls   int
 }
 
 type blockingPublicationProvider struct {
@@ -220,11 +239,13 @@ type blockingPublicationProvider struct {
 }
 
 type coalescingPublicationProvider struct {
-	context publicprovider.Context
-	mu      sync.Mutex
-	calls   int
-	started chan struct{}
-	release chan struct{}
+	context   publicprovider.Context
+	mu        sync.Mutex
+	calls     int
+	withdraws int
+	started   chan struct{}
+	release   chan struct{}
+	fail      bool
 }
 
 func (provider *coalescingPublicationProvider) Start(context.Context) error {
@@ -252,14 +273,165 @@ func (provider *coalescingPublicationProvider) Publish(
 	close(provider.started)
 	select {
 	case <-provider.release:
+		if provider.fail {
+			return errs.ErrDiscoveryUnavailable
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (*coalescingPublicationProvider) Withdraw(context.Context) error { return nil }
-func (*coalescingPublicationProvider) Close(context.Context) error    { return nil }
+func TestFailedGenerationWaiterAcceptsNewerSuccessfulAck(t *testing.T) {
+	var changes []string
+	target := &retirementService{label: "Only", changes: &changes}
+	var provider *coalescingPublicationProvider
+	current, err := New(
+		Config{ID: "publication-upgraded-ack", Services: []string{"Only"}},
+		[]ServiceBinding{{Name: "Only", Template: "Only", Service: target}},
+		originlog.NewNop(),
+		Options{
+			MaxTimersPerNode: 64,
+			TimerLocation:    time.UTC,
+			DiscoveryKind:    "upgraded-ack",
+			DiscoveryFactory: func(context publicprovider.Context) (publicprovider.Provider, error) {
+				provider = &coalescingPublicationProvider{
+					context: context,
+					started: make(chan struct{}),
+					release: make(chan struct{}),
+					fail:    true,
+				}
+				return provider, nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = current.Stop(context.Background()) })
+
+	first := make(chan error, 1)
+	go func() { first <- target.Retire(context.Background()) }()
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("failed generation did not start")
+	}
+	second := make(chan error, 1)
+	go func() { second <- current.requestDiscoveryPublication(context.Background()) }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		current.discoveryPublication.mu.Lock()
+		desired := current.discoveryPublication.desired
+		current.discoveryPublication.mu.Unlock()
+		if desired == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("desired generation = %d, want 2", desired)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(provider.release)
+	if err := <-first; err != nil {
+		t.Fatalf("first waiter error = %v", err)
+	}
+	if err := <-second; err != nil {
+		t.Fatalf("second waiter error = %v", err)
+	}
+	current.discoveryPublication.mu.Lock()
+	acknowledged := current.discoveryPublication.acknowledged
+	current.discoveryPublication.mu.Unlock()
+	if acknowledged != 2 {
+		t.Fatalf("acknowledged generation = %d, want 2", acknowledged)
+	}
+}
+
+func TestTransportRecoveryWithdrawsAfterInflightGeneration(t *testing.T) {
+	var changes []string
+	target := &retirementService{label: "Only", changes: &changes}
+	var provider *coalescingPublicationProvider
+	current, err := New(
+		Config{ID: "publication-withdraw-order", Services: []string{"Only"}},
+		[]ServiceBinding{{Name: "Only", Template: "Only", Service: target}},
+		originlog.NewNop(),
+		Options{
+			MaxTimersPerNode: 64,
+			TimerLocation:    time.UTC,
+			DiscoveryKind:    "withdraw-order",
+			DiscoveryFactory: func(context publicprovider.Context) (publicprovider.Provider, error) {
+				provider = &coalescingPublicationProvider{
+					context: context,
+					started: make(chan struct{}),
+					release: make(chan struct{}),
+				}
+				return provider, nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = current.Stop(context.Background()) })
+
+	retireResult := make(chan error, 1)
+	go func() { retireResult <- target.Retire(context.Background()) }()
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("inflight generation did not start")
+	}
+	recoveryDone := make(chan struct{})
+	go func() {
+		current.handleTransportEvent(rpc.TransportEvent{
+			Kind:  rpc.TransportKindTCP,
+			State: rpc.TransportStateRecovering,
+		})
+		close(recoveryDone)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		current.discoveryPublication.mu.Lock()
+		desired := current.discoveryPublication.desired
+		current.discoveryPublication.mu.Unlock()
+		if desired == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("desired generation = %d, want 2", desired)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(provider.release)
+	if err := <-retireResult; err != nil {
+		t.Fatalf("Retire() error = %v", err)
+	}
+	select {
+	case <-recoveryDone:
+	case <-time.After(time.Second):
+		t.Fatal("transport recovery withdrawal did not finish")
+	}
+	provider.mu.Lock()
+	withdraws := provider.withdraws
+	provider.mu.Unlock()
+	if withdraws != 1 || current.discoveryPublished.Load() {
+		t.Fatalf("withdraws=%d discoveryPublished=%v", withdraws, current.discoveryPublished.Load())
+	}
+}
+
+func (provider *coalescingPublicationProvider) Withdraw(context.Context) error {
+	provider.mu.Lock()
+	provider.withdraws++
+	provider.mu.Unlock()
+	return nil
+}
+func (*coalescingPublicationProvider) Close(context.Context) error { return nil }
 
 func (provider *blockingPublicationProvider) Start(context.Context) error {
 	if err := provider.context.Host.SetTTL(3 * time.Second); err != nil {
@@ -307,6 +479,7 @@ func (provider *failingPublicationProvider) Start(context.Context) error {
 
 func (provider *failingPublicationProvider) Publish(context.Context, publicprovider.Node) error {
 	provider.mu.Lock()
+	provider.calls++
 	fail := provider.fail
 	panicPublish := provider.panic
 	provider.mu.Unlock()
@@ -317,6 +490,55 @@ func (provider *failingPublicationProvider) Publish(context.Context, publicprovi
 		return errs.ErrDiscoveryUnavailable
 	}
 	return nil
+}
+
+func TestNodeBatchRetireResumePublishesOneSnapshotPerBatch(t *testing.T) {
+	var changes []string
+	services := []*retirementService{
+		{label: "First", changes: &changes},
+		{label: "Second", changes: &changes},
+		{label: "Third", changes: &changes},
+	}
+	bindings := make([]ServiceBinding, len(services))
+	names := make([]string, len(services))
+	for index, target := range services {
+		names[index] = target.label
+		bindings[index] = ServiceBinding{Name: target.label, Template: "retirementService", Service: target}
+	}
+	var provider *failingPublicationProvider
+	current, err := New(
+		Config{ID: "publication-batch", Services: names},
+		bindings,
+		originlog.NewNop(),
+		Options{
+			MaxTimersPerNode: 64,
+			TimerLocation:    time.UTC,
+			DiscoveryKind:    "batch",
+			DiscoveryFactory: func(context publicprovider.Context) (publicprovider.Provider, error) {
+				provider = &failingPublicationProvider{context: context}
+				return provider, nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = current.Stop(context.Background()) })
+	if err := current.Retire(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Resume(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	provider.mu.Lock()
+	calls := provider.calls
+	provider.mu.Unlock()
+	if calls != 3 {
+		t.Fatalf("Provider.Publish calls = %d, want startup + retire batch + resume batch", calls)
+	}
 }
 
 func TestProviderPublishPanicIsIsolatedAndLockRemainsUsable(t *testing.T) {

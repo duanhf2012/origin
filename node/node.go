@@ -347,10 +347,16 @@ func New(
 }
 
 func (entry *serviceEntry) setState(state service.State) {
-	entry.state.Store(&serviceStateSnapshot{
-		State:     state,
-		EnteredAt: time.Now(),
-	})
+	for {
+		current := entry.state.Load()
+		if current != nil && current.State == state {
+			return
+		}
+		next := &serviceStateSnapshot{State: state, EnteredAt: time.Now()}
+		if entry.state.CompareAndSwap(current, next) {
+			return
+		}
+	}
 }
 
 func (entry *serviceEntry) loadState() serviceStateSnapshot {
@@ -861,6 +867,10 @@ func (node *Node) publishDiscovery() error {
 func (node *Node) publishDiscoveryContext(ctx context.Context) error {
 	if node.private {
 		return nil
+	}
+	transportState := node.TransportStatus().State
+	if transportState == TransportRecovering || transportState == TransportFailed {
+		return node.withdrawDiscovery(ctx)
 	}
 	services := make([]internaldiscovery.RawService, 0, len(node.services))
 	for _, entry := range node.services {

@@ -76,7 +76,7 @@ func newProviderRuntime(
 		runtime.replaceSnapshot,
 		runtime.report,
 	)
-	instance, err := factory(publicprovider.Context{
+	instance, err := callProviderFactory(factory, publicprovider.Context{
 		NodeID:    node.id,
 		SessionID: node.sessionID,
 		Config:    config,
@@ -205,18 +205,35 @@ func (runtime *providerRuntime) callProvider(
 	defer runtime.callMu.Unlock()
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			result = errs.NewMessage(
-				errs.CodeDiscoveryUnavailable,
-				fmt.Sprintf(
-					"Discovery Provider %s panic: %v\n%s",
-					operation,
-					recovered,
-					debug.Stack(),
-				),
-			)
+			result = providerPanicError(operation, recovered)
 		}
 	}()
 	return call()
+}
+
+func callProviderFactory(
+	factory publicprovider.Factory,
+	providerContext publicprovider.Context,
+) (instance publicprovider.Provider, result error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			instance = nil
+			result = providerPanicError("Factory", recovered)
+		}
+	}()
+	return factory(providerContext)
+}
+
+func providerPanicError(operation string, recovered any) error {
+	return errs.NewMessage(
+		errs.CodeDiscoveryUnavailable,
+		fmt.Sprintf(
+			"Discovery Provider %s panic: %v\n%s",
+			operation,
+			recovered,
+			debug.Stack(),
+		),
+	)
 }
 
 // setTTL 冻结 Provider TTL；它必须先于其他 Host 能力调用。

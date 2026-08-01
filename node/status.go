@@ -230,13 +230,14 @@ func (node *Node) handleTransportEvent(event rpc.TransportEvent) {
 	switch status.State {
 	case TransportRecovering, TransportFailed:
 		operationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := node.withdrawDiscovery(operationCtx); err != nil {
+		err := node.requestDiscoveryPublication(operationCtx)
+		cancel()
+		if err != nil {
 			node.logger.Error(
 				"Transport 不可用时撤销服务发现失败",
 				originlog.Err(err),
 			)
 		}
-		cancel()
 	case TransportReady:
 		// 初次启动尚未越过统一就绪屏障，因此只在已经 Ready 的 Node 上重新发布。
 		if node.State() == StateReady {

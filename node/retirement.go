@@ -10,6 +10,8 @@ import (
 	"github.com/duanhf2012/origin/v3/service"
 )
 
+type batchDiscoveryPublicationKey struct{}
+
 // Retire 按 Service 启动顺序的严格逆序退休当前 Node 的全部 Service。
 func (node *Node) Retire(ctx context.Context) error {
 	return node.changeServices(ctx, true)
@@ -27,22 +29,23 @@ func (node *Node) changeServices(ctx context.Context, retire bool) error {
 	if node.State() != StateReady {
 		return nodeStateControlError(node.State())
 	}
+	batchCtx := context.WithValue(ctx, batchDiscoveryPublicationKey{}, struct{}{})
 	var result error
 	if retire {
 		for index := len(node.services) - 1; index >= 0; index-- {
 			entry := node.services[index]
-			if err := entry.instance.Retire(ctx); err != nil {
+			if err := entry.instance.Retire(batchCtx); err != nil {
 				result = errors.Join(result, fmt.Errorf("Service %q Retire: %w", entry.name, err))
 			}
 		}
-		return result
-	}
-	for _, entry := range node.services {
-		if err := entry.instance.Resume(ctx); err != nil {
-			result = errors.Join(result, fmt.Errorf("Service %q Resume: %w", entry.name, err))
+	} else {
+		for _, entry := range node.services {
+			if err := entry.instance.Resume(batchCtx); err != nil {
+				result = errors.Join(result, fmt.Errorf("Service %q Resume: %w", entry.name, err))
+			}
 		}
 	}
-	return result
+	return errors.Join(result, node.requestDiscoveryPublication(ctx))
 }
 
 func nodeStateControlError(state State) error {
@@ -120,8 +123,19 @@ func (runtime *serviceRuntime) PublishServiceState(ctx context.Context) error {
 	if runtime == nil || runtime.node == nil {
 		return errs.ErrInvalidArgument
 	}
+	if runtime.DeferServiceStatePublication(ctx) {
+		return nil
+	}
 	if runtime.node.discoveryPublication == nil {
 		return nil
 	}
 	return runtime.node.discoveryPublication.request(ctx)
+}
+
+func (*serviceRuntime) DeferServiceStatePublication(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	_, deferred := ctx.Value(batchDiscoveryPublicationKey{}).(struct{})
+	return deferred
 }

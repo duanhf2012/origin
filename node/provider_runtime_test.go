@@ -2,13 +2,39 @@ package node
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
+	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/service"
 )
+
+func TestDiscoveryProviderFactoryPanicIsIsolated(t *testing.T) {
+	local := &lifecycleService{label: "LocalService", events: &[]string{}}
+	_, err := New(
+		Config{ID: "factory-panic", Services: []string{"LocalService"}},
+		[]ServiceBinding{{
+			Name:     "LocalService",
+			Template: "lifecycleService",
+			Service:  local,
+		}},
+		originlog.NewNop(),
+		Options{
+			MaxTimersPerNode: 64,
+			TimerLocation:    time.UTC,
+			DiscoveryKind:    "panic",
+			DiscoveryFactory: func(publicprovider.Context) (publicprovider.Provider, error) {
+				panic("factory panic")
+			},
+		},
+	)
+	if !errors.Is(err, errs.ErrDiscoveryUnavailable) {
+		t.Fatalf("New() error = %v", err)
+	}
+}
 
 type providerRuntimeFixture struct {
 	context publicprovider.Context
