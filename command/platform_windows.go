@@ -80,6 +80,11 @@ func requestPlatformStop(_ int, stopPath string) error {
 		// 只有已经存在的普通文件才表示另一个 stop 已发出同一请求。目录、设备或其他
 		// 文件类型不能伪装成幂等请求，否则目标永远收不到可删除的空控制文件。
 		info, statErr := os.Stat(stopPath)
+		if os.IsNotExist(statErr) {
+			// 监听协程可能在 O_EXCL 确认请求存在后立即消费并删除它；此时停止请求
+			// 已经成功送达，继续按幂等成功处理，不能把并发消费误报成失败。
+			return nil
+		}
 		if statErr != nil {
 			return statErr
 		}
