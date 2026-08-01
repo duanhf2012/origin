@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"strconv"
 	"testing"
+	"time"
 
 	publicdiscovery "github.com/duanhf2012/origin/v3/discovery"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	"github.com/duanhf2012/origin/v3/internal/natsnet"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/service"
+	"github.com/nats-io/nats-server/v2/server"
 )
 
 var benchmarkClientSink Client
@@ -244,6 +247,175 @@ func newRemotePrepareBenchmarkClient(
 		runtime,
 		ToService("PlayerService"),
 	).Route(uint64(count / 2))
+}
+
+func newBroadcastPrepareBenchmarkClient(
+	b *testing.B,
+	count int,
+) Client {
+	b.Helper()
+	candidates := make([]RemoteCandidate, count)
+	runtime := newPrepareTestRuntime(b, "gateway-1", TransportTCP, nil)
+	for index := range candidates {
+		nodeID := fmt.Sprintf("player-%05d", index)
+		sessionID := uint64(index + 1)
+		address := fmt.Sprintf("127.0.0.1:%d", 30000+index)
+		candidates[index] = RemoteCandidate{
+			NodeID:      nodeID,
+			SessionID:   sessionID,
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportTCP,
+			Address:     address,
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		}
+		target := newRemoteTarget(runtime.remote, nodeID, sessionID, address)
+		target.current.Store(newOutboundSession(runtime.remote, nodeID, sessionID))
+		runtime.remote.targets[nodeID] = target
+	}
+	runtime.remote.publishTargetsLocked()
+	if err := runtime.BindRemoteResolver(&broadcastTestResolver{
+		snapshot: &broadcastTestSnapshot{candidates: candidates},
+	}); err != nil {
+		b.Fatalf("BindRemoteResolver() error = %v", err)
+	}
+	if err := runtime.Freeze(); err != nil {
+		b.Fatalf("Freeze() error = %v", err)
+	}
+	return prepareTestClient(runtime, ToService("PlayerService"))
+}
+
+// BenchmarkPrepareBroadcast 记录 1、100、1000 和 8192 个固定目标的 O(N) Prepare 成本。
+func BenchmarkPrepareBroadcast(b *testing.B) {
+	for _, count := range []int{1, 100, 1000, maxRemoteTargets} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			client := newBroadcastPrepareBenchmarkClient(b, count)
+			ctx := context.Background()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				prepared, err := client.PrepareBroadcast(ctx, 1)
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkClientSink = prepared
+			}
+		})
+	}
+}
+
+func startBroadcastBenchmarkNATS(b *testing.B) *server.Server {
+	b.Helper()
+	running, err := server.NewServer(&server.Options{
+		Host:   "127.0.0.1",
+		Port:   -1,
+		NoLog:  true,
+		NoSigs: true,
+	})
+	if err != nil {
+		b.Fatalf("server.NewServer() error = %v", err)
+	}
+	running.Start()
+	if !running.ReadyForConnections(5 * time.Second) {
+		running.Shutdown()
+		b.Fatal("NATS benchmark server 未就绪")
+	}
+	b.Cleanup(func() {
+		running.Shutdown()
+		running.WaitForShutdown()
+	})
+	return running
+}
+
+func newNATSBroadcastBenchmarkClient(
+	b *testing.B,
+	running *server.Server,
+	count int,
+) Client {
+	b.Helper()
+	pool := bufferpool.NewPool(bufferpool.Options{})
+	runtime, err := NewRuntime("gateway-1", pool, originlog.NewNop())
+	if err != nil {
+		b.Fatal(err)
+	}
+	config := Config{
+		Transport:        TransportNATS,
+		MaxPayloadSize:   DefaultMaxPayloadSize,
+		MaxBroadcastSize: DefaultMaxBroadcastSize,
+		NATS:             DefaultNATSConfig(),
+	}
+	config.NATS.Namespace = "m20-bench"
+	config.NATS.URLs = []string{running.ClientURL()}
+	if err := runtime.Configure(&config); err != nil {
+		b.Fatal(err)
+	}
+	options := natsnet.DefaultOptions("m20.broadcast.benchmark", running.ClientURL())
+	conn, err := natsnet.Connect(context.Background(), options, nil)
+	if err != nil {
+		b.Fatalf("natsnet.Connect() error = %v", err)
+	}
+	b.Cleanup(conn.Close)
+	view := &natsConnectionView{conn: conn, generation: 1}
+	runtime.nats.activeConnection.Store(view)
+
+	candidates := make([]RemoteCandidate, count)
+	for index := range candidates {
+		candidates[index] = RemoteCandidate{
+			NodeID:      fmt.Sprintf("player-%05d", index),
+			SessionID:   uint64(index + 1),
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportNATS,
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		}
+	}
+	if err := runtime.BindRemoteResolver(&broadcastTestResolver{
+		snapshot: &broadcastTestSnapshot{candidates: candidates},
+	}); err != nil {
+		b.Fatal(err)
+	}
+	if err := runtime.Freeze(); err != nil {
+		b.Fatal(err)
+	}
+	return prepareTestClient(runtime, ToService("PlayerService"))
+}
+
+// BenchmarkBroadcastFanoutNATS 通过真实 Broker 记录 1/100/1000/8192 目标完整扇出成本。
+func BenchmarkBroadcastFanoutNATS(b *testing.B) {
+	running := startBroadcastBenchmarkNATS(b)
+	for _, count := range []int{1, 100, 1000, maxRemoteTargets} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			client := newNATSBroadcastBenchmarkClient(b, running, count)
+			ctx := context.Background()
+			send := func() error {
+				prepared, err := client.PrepareBroadcast(ctx, 1)
+				if err != nil {
+					return err
+				}
+				request, err := prepared.AllocateRequest(32, CallNotify)
+				if err != nil {
+					return err
+				}
+				for index := range request.Bytes() {
+					request.Bytes()[index] = byte(index)
+				}
+				return prepared.Broadcast(ctx, 1, request)
+			}
+			if err := send(); err != nil {
+				b.Fatalf("warm Broadcast() error = %v", err)
+			}
+			b.ReportAllocs()
+			b.SetBytes(int64(32 * count))
+			b.ResetTimer()
+			for b.Loop() {
+				if err := send(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func BenchmarkPrepareCandidateScale(b *testing.B) {
