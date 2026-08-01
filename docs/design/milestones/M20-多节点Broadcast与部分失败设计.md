@@ -1,8 +1,10 @@
 # Origin 第三版 M20 多节点 Broadcast 与部分失败设计
 
-> 文档状态：已按确认方案落档，待最终书面复核
+> 文档状态：已实现并通过最终代码复核与验收
 >
 > 确认日期：2026-08-01
+>
+> 实施日期：2026-08-01
 >
 > 前置里程碑：M11、M13、M14、M15、M16、M17、M18、M19
 
@@ -389,12 +391,18 @@ rpc:
 - 本地、TCP、NATS 目标数量；
 - Retired 是否显式包含；
 - 编码 payload 大小和总放大大小；
-- 总 Prepare、编码、复制和提交耗时；
-- 各稳定错误码数量。
+- payload 总放大字节和稳定聚合错误码。
 
-全成功不逐目标记录日志。部分或全部失败记录一条汇总日志，逐目标详情由返回错误和受控
-诊断采样读取，避免 8192 目标同时失败形成日志风暴。日志不得包含 payload、认证信息或
-业务参数。
+全成功不逐目标记录日志。部分或全部失败只记录一条结构化汇总日志，包含 ServiceName、
+MethodID、意图/可发送/成功/失败数、本地/TCP/NATS 数量、Retired 范围、payload/放大字节
+和稳定错误码；逐目标详情只由返回错误读取，避免 8192 目标同时失败形成日志风暴。日志
+不得包含 payload、认证信息或业务参数。
+
+最终实现没有在每个目标前后调用 `time.Now` 统计复制和提交分段耗时。8192 目标的热路径若
+为每个副本增加两次系统时钟读取，会直接破坏本文的低延迟和常数额外工作约束；仓库当前也
+没有统一指标注册边界。阶段耗时改由可重复的 Prepare/fan-out Benchmark、CPU/Heap Profile
+和 M22 统一观测门禁采集。该收敛不改变失败日志、公开错误或业务语义，也避免在 M20 私建
+第二套指标框架。
 
 ## 12. 性能与内存门禁
 
@@ -410,11 +418,11 @@ M20 热路径固定：
 - 失败详情只在失败路径分配；
 - Route 派生和 `IncludeRetired()` 保持 `0 allocs/op`。
 
-实施前后必须保存：
+实施验收保存：
 
 - 1、100、1000、8192 目标的 Prepare 和 fan-out Benchmark；
 - 32B、1KB、64KB 和 4M payload 的编码/复制/容量边界；
-- `ns/op`、`B/op`、`allocs/op`、吞吐量和 P50/P95/P99；
+- `ns/op`、`B/op`、`allocs/op` 和吞吐量；尾延迟统一由 M22 端到端发布压测记录；
 - 单目标与 M19 Notify 基线对比；
 - 多目标全成功、首个失败、随机失败、全部失败和 Context 中断；
 - Race、GC 压力、队列积压和 64M/1G 边界；
@@ -422,6 +430,23 @@ M20 热路径固定：
 
 4M payload 在默认 64M 限制下最多覆盖 16 个意图目标；更大 fan-out 必须由项目显式提高
 上限。不得为了让容量测试通过而绕过或分批隐藏一次广播的总放大。
+
+Windows/amd64、Ryzen 7 7840HS、`-benchtime=100ms -count=5` 的代表性结果：
+
+| 路径 | 目标数 | 代表耗时 | B/op | allocs/op |
+|---|---:|---:|---:|---:|
+| `IncludeRetired` 值派生 | 1 | 11.13～13.86 ns | 0 | 0 |
+| `PrepareBroadcast` | 1 | 318～341 ns | 0 | 0 |
+| `PrepareBroadcast` | 100 | 10.8～11.3 µs | 448 | 1 |
+| `PrepareBroadcast` | 1000 | 120～127 µs | 448 | 1 |
+| `PrepareBroadcast` | 8192 | 1.03～1.31 ms | 448 | 1 |
+| 真实 NATS 32B fan-out | 100 | 137～152 µs | 11.6～12.4 KB | 101 |
+| 真实 NATS 32B fan-out | 1000 | 1.11～1.33 ms | 113～124 KB | 1004～1008 |
+| 真实 NATS 32B fan-out | 8192 | 10.6～12.1 ms | 1.19～1.32 MB | 16406～16488 |
+
+Prepare 的多目标额外内存固定为一个 448B plan，不随目标数增长。真实 NATS fan-out 的逐目标
+分配统计包含 nats.go 协议写缓冲；Origin 自身不建立逐目标成功对象、goroutine 或结果 Slice，
+消息 Buffer 继续来自 BufferPool。
 
 ## 13. 兼容性
 
@@ -485,6 +510,18 @@ M20 保持：
 4. Origin 与 etcd Provider 各形成相同目标结果；
 5. 自定义最小 Provider/Consul 映射测试证明 SPI 无变化；
 6. Windows、Linux、macOS，普通测试、全仓 Race、Vet、生成检查和跨平台构建。
+
+### 14.5 实施验收结果
+
+- `rpcgen` ABI 已提升到 3，`origingen rpc --check ./...` 二次生成无漂移；
+- 单元测试覆盖默认/显式 Retired、Route 忽略、单目标快路径、2010/2011、Context、连接替换、
+  Buffer 所有权、64M/1G、8192/8193 和配置严格解析；
+- 真实 TCP 覆盖两个公开远端、断开意图部分失败，以及本地私有 PlayerService 与远端公开
+  PlayerService 同时参与一次广播；
+- 真实 NATS 覆盖两个 Node 的逐 Node Subject fan-out、Retired 默认排除和显式纳入；
+- `IncludeRetired` 自动单目标选择也通过 TCP/NATS 生成客户端外观验证；
+- 定向 Race、全仓测试、Vet、覆盖率审计、逃逸分析和性能 Benchmark 已通过；
+- M17 Provider SPI、M14 Directory、TCP `ORP1`、NATS `ORN1` 与 Subject 数量均无变化。
 
 ## 15. 里程碑边界与编号封顶
 

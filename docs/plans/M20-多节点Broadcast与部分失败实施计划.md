@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement
 > this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> 当前状态：实施中
+> 当前状态：已完成并通过验收
 >
 > 创建日期：2026-08-01
 >
@@ -89,13 +89,13 @@ endpoint 视图，在 `PrepareBroadcast` 中无分配扫描并固定广播计划
 - Produces: `BroadcastFailure`, `(*BroadcastError).Total`, `Succeeded`, `FailureCount`, `Failure`, `Code`.
 - Produces: `Config.MaxBroadcastSize` and application key `rpc.max_broadcast_size`.
 
-- [ ] **Step 1: 写 2011、聚合错误和配置边界失败测试**
+- [x] **Step 1: 写 2011、聚合错误和配置边界失败测试**
 
 覆盖：2010/2011 文本与 `errs.New`；部分/全部失败的 Code；越界 `Failure`；
 `errors.Is` 匹配聚合哨兵和任意底层原因；默认 `64M`；合法 `1G`；超过 `1G`、零值、裸整数、
 错误单位和目标 `int` 溢出均拒绝。
 
-- [ ] **Step 2: 运行窄测试并确认新 API 缺失**
+- [x] **Step 2: 运行窄测试并确认新 API 缺失**
 
 Run:
 
@@ -105,13 +105,13 @@ go test ./errs ./rpc ./application -run 'Broadcast|MaxBroadcast' -count=1
 
 Expected: 编译失败或断言失败，原因仅为 2011、聚合类型或配置字段尚未实现。
 
-- [ ] **Step 3: 实现最小错误与配置模型**
+- [x] **Step 3: 实现最小错误与配置模型**
 
 `BroadcastError` 字段保持私有，构造函数只供 rpc 包失败路径使用；`Error()` 仅输出
 total/succeeded/failed；`Is` 先识别 2010/2011 哨兵，再线性检查失败原因。配置校验在冻结前
 完成，Runtime 始终获得非零、未超过 `1G` 的字节数。
 
-- [ ] **Step 4: 运行测试、格式化并提交**
+- [x] **Step 4: 运行测试、格式化并提交**
 
 Run:
 
@@ -140,13 +140,13 @@ Commit: `feat(M20): 增加广播错误模型与容量配置`
 - Produces: `func (Client) IncludeRetired() Client`.
 - Preserves: `OnNode`、四种 Route 派生、`Prepare` 和 `PrepareNotify`。
 
-- [ ] **Step 1: 写值语义、派生顺序和生命周期失败测试**
+- [x] **Step 1: 写值语义、派生顺序和生命周期失败测试**
 
 覆盖基础客户端不变、重复调用幂等、全部路由派生双向顺序保留标志、默认自动候选排除 Retired、
 显式包含后 Running+Retired 都可选、精确 `OnNode` 原本就允许 Retired，以及 Lost/Stopped 等状态
 仍永远不进入候选。
 
-- [ ] **Step 2: 运行测试并确认缺少 IncludeRetired**
+- [x] **Step 2: 运行测试并确认缺少 IncludeRetired**
 
 Run:
 
@@ -156,13 +156,13 @@ go test ./rpc -run 'IncludeRetired|RetiredCandidate' -count=1
 
 Expected: 编译失败，缺少 `Client.IncludeRetired` 或候选标志。
 
-- [ ] **Step 3: 实现最小候选过滤变化**
+- [x] **Step 3: 实现最小候选过滤变化**
 
 在 Client 和候选集保存一个 bool；值派生只复制轻量 Client 并清空旧 prepared/broadcast 状态；
 生命周期匹配固定为 exact 或 include-retired 时允许 Retired，不向 Provider、Service 或 Dispatcher
 增加开关。
 
-- [ ] **Step 4: 建立零分配门禁并提交**
+- [x] **Step 4: 建立零分配门禁并提交**
 
 Run:
 
@@ -194,13 +194,13 @@ Commit: `feat(M20): 支持显式包含退休服务`
 - Produces: `func (Client) PrepareBroadcast(context.Context, MethodID) (Client, error)`.
 - Internal: one-target `preparedTarget`; multi-target `broadcastPlan` with frozen views and counters.
 
-- [ ] **Step 1: 写目标范围和预检失败测试**
+- [x] **Step 1: 写目标范围和预检失败测试**
 
 覆盖本地+远端稳定 NodeID 顺序、RouteSelector 不执行、OnNode 最多一个、同名契约/指纹/方法过滤、
 默认/包含 Retired、远端私有不可见、本地私有可见、合法断开仍计入 intent、8192 成功、8193 过载、
 Prepare 前 Context 取消、零合法目标、仅契约不匹配、单目标断开返回底层错误、多目标全断开返回 2011。
 
-- [ ] **Step 2: 运行测试并确认 PrepareBroadcast 缺失**
+- [x] **Step 2: 运行测试并确认 PrepareBroadcast 缺失**
 
 Run:
 
@@ -210,19 +210,19 @@ go test ./rpc -run 'PrepareBroadcast|BroadcastTarget|BroadcastIntent' -count=1
 
 Expected: 编译失败，缺少 `PrepareBroadcast` 或广播计划。
 
-- [ ] **Step 3: 实现无分配两遍扫描计划**
+- [x] **Step 3: 实现无分配两遍扫描计划**
 
 第一遍在同一候选视图上分类 Service/Contract/Lifecycle/Transport、计数 intent 和 sendable，并记录
 最后一个 sendable 的扫描位置；第二遍只在提交时执行。计划不复制候选或标签。一个合法且可发送
 目标直接生成既有 `preparedTarget`；多目标只保存固定 candidateSet、method、数量和原始 Buffer
 保留位置。
 
-- [ ] **Step 4: 实现 Prepare 阶段错误分类**
+- [x] **Step 4: 实现 Prepare 阶段错误分类**
 
 8193 在任何编码前过载；单目标不可用返回其 Transport 错误；多目标全部不可用构造 2011；
 存在可发送目标时把已知不可用留给提交聚合。契约不匹配只在不存在任何合法契约目标时返回。
 
-- [ ] **Step 5: 运行范围测试和竞态测试并提交**
+- [x] **Step 5: 运行范围测试和竞态测试并提交**
 
 Run:
 
@@ -253,14 +253,14 @@ Commit: `feat(M20): 固定多节点广播目标计划`
 - Internal: prepared broadcast allocation with exact retained-target headroom.
 - Preserves: `Client.Broadcast(ctx, methodID, request) error`.
 
-- [ ] **Step 1: 写容量、复制和所有权失败测试**
+- [x] **Step 1: 写容量、复制和所有权失败测试**
 
 覆盖 `payload_size × intent_count` 的 `int64` 溢出、默认 64M 和 1G 边界、断开目标仍参与容量、
 超限零提交；Sizer/Writer 各执行一次；不同 headroom 的 payload 一致；除最后可发送目标外使用池化
 副本；全部成功、部分失败、全部失败、单目标失败、Context 在首次提交前和扇出中途取消；每条路径
 原始/副本 Buffer 恰好释放或转移一次。
 
-- [ ] **Step 2: 运行测试并确认仍是单目标 Broadcast**
+- [x] **Step 2: 运行测试并确认仍是单目标 Broadcast**
 
 Run:
 
@@ -270,25 +270,25 @@ go test ./rpc -run 'BroadcastCapacity|BroadcastFanout|BroadcastBuffer|BroadcastC
 
 Expected: 多目标断言失败，或容量预检/独占 Buffer 行为尚不存在。
 
-- [ ] **Step 3: 实现编码前容量准入**
+- [x] **Step 3: 实现编码前容量准入**
 
 `AllocateRequest` 在存在 broadcast plan 时先验证单 payload 上限，再用 `int64` 安全乘法计算总放大；
 超限直接返回过载且没有申请/提交。原始 Buffer 使用最后一个可发送目标的精确 headroom。
 
-- [ ] **Step 4: 实现稳定顺序扇出与固定连接校验**
+- [x] **Step 4: 实现稳定顺序扇出与固定连接校验**
 
 按冻结候选视图重扫：不可用意图直接记录失败；其余目标在提交前检查 Context。非保留目标从
 BufferPool 按精确 headroom 申请并复制规范 payload；固定 TCP session/NATS connection 若已被替换
 即失败，绝不改用新连接；本地使用固定 endpoint。提交失败由当前栈释放尚未转移的 Buffer，成功
 沿用既有 Notify 消费规则；最后可发送目标消费原始 Buffer。
 
-- [ ] **Step 5: 实现稳定聚合结果**
+- [x] **Step 5: 实现稳定聚合结果**
 
 单目标返回底层错误；多目标全成功返回 nil；部分成功构造 2010；多目标零成功构造 2011。
 失败详情按扫描的 NodeID 顺序保存。Context 中途取消把未尝试意图逐个记录为相同原因，已经成功的
 目标不可撤回。
 
-- [ ] **Step 6: 运行单元、所有权压力和竞态测试并提交**
+- [x] **Step 6: 运行单元、所有权压力和竞态测试并提交**
 
 Run:
 
@@ -318,13 +318,13 @@ Commit: `feat(M20): 实现单次编码的顺序广播扇出`
 - Produces generated `func (XxxRPCClient) IncludeRetired() XxxRPCClient`.
 - Changes generated Broadcast body to `PrepareBroadcast -> Allocate/Encode -> Broadcast`.
 
-- [ ] **Step 1: 写生成器文本和模型失败测试**
+- [x] **Step 1: 写生成器文本和模型失败测试**
 
 断言 ABI 为 3；每个客户端生成 `IncludeRetired`；Broadcast 在任何 Sizer/Writer 前调用
 `PrepareBroadcast`；编码和提交都使用 returned prepared client；Notify/Await/Async 保持 M19 流程；
 Bind 默认 ServiceName 和 `BindXxxRPCTo` 不变。
 
-- [ ] **Step 2: 运行测试并确认仍为 ABI 2**
+- [x] **Step 2: 运行测试并确认仍为 ABI 2**
 
 Run:
 
@@ -334,12 +334,12 @@ go test ./internal/rpcgen -run 'GeneratedABI|IncludeRetired|Broadcast' -count=1
 
 Expected: ABI 或生成文本断言失败。
 
-- [ ] **Step 3: 修改模板并重新生成黄金文件与 fixture**
+- [x] **Step 3: 修改模板并重新生成黄金文件与 fixture**
 
 只修改模板和生成器，不手工改生成物。使用仓库固定 `origingen` 命令更新 testdata 和集成 fixture，
 随后运行 `--check` 确认第二次生成无差异。
 
-- [ ] **Step 4: 运行生成器和全仓编译测试并提交**
+- [x] **Step 4: 运行生成器和全仓编译测试并提交**
 
 Run:
 
@@ -360,14 +360,14 @@ Commit: `feat(M20): 升级广播生成器 ABI 3`
 - Modify: `tests/integration/rpcfixture/**`
 - Modify: `rpc/broadcast_test.go`
 
-- [ ] **Step 1: 写跨 Transport 失败集成测试**
+- [x] **Step 1: 写跨 Transport 失败集成测试**
 
 使用真实 Node/Service、TCP Listener/Dial 和 NATS Server，覆盖：本地+TCP、多 TCP、本地+NATS、
 多 NATS；每个 Node 恰好收到一次；同一 payload；部分断线返回 2010 且其他目标收到；全部断线返回
 2011 且不编码；Prepare 后 TCP session/NATS connection 替换不改选；RouteBy selector 调用次数为零；
 Retired 远端默认排除、显式包含；OnNode 单目标保留原始错误。
 
-- [ ] **Step 2: 运行测试并确认未实现的跨节点路径失败**
+- [x] **Step 2: 运行测试并确认未实现的跨节点路径失败**
 
 Run:
 
@@ -377,12 +377,12 @@ go test ./tests/integration/rpcfixture -run 'Broadcast' -count=1
 
 Expected: 新的多目标或失败语义断言失败。
 
-- [ ] **Step 3: 只修复真实 Transport 暴露的实现缺口**
+- [x] **Step 3: 只修复真实 Transport 暴露的实现缺口**
 
 不得用 fake 替代已要求的 TCP/NATS 验证，不增加 Broadcast Wire/Subject。若固定连接检查与现有发送
 入口不兼容，只抽取 rpc 内部的精确 prepared submit helper，继续复用现有 Notify 编码和所有权。
 
-- [ ] **Step 4: 重复、竞态和泄漏验证并提交**
+- [x] **Step 4: 重复、竞态和泄漏验证并提交**
 
 Run:
 
@@ -403,20 +403,20 @@ Commit: `test(M20): 覆盖多传输广播与部分失败`
 - Modify: `rpc/broadcast.go`
 - Modify: RPC 内部汇总日志/统计所属文件（以现有 logger/统计边界为准，不新增公开 API）
 
-- [ ] **Step 1: 增加代表性 Benchmark**
+- [x] **Step 1: 增加代表性 Benchmark**
 
 覆盖 1/100/1000/8192 目标 Prepare；1/100/1000/8192 目标 32B fan-out；1KB、64KB、4M payload
 容量边界；全成功、首个失败、随机失败、全部失败、Context 中断。输出 `ns/op`、`B/op`、
 `allocs/op` 和吞吐量。
 
-- [ ] **Step 2: 增加汇总可观测性**
+- [x] **Step 2: 增加汇总可观测性**
 
 复用现有日志/统计设施记录一次调用的 ServiceName、MethodID、intent/sendable/succeeded/failed、
 本地/TCP/NATS 数量、include-retired、payload/total bytes 和阶段耗时。全成功不逐目标打印；失败最多
 一条汇总日志；不记录 payload、认证信息或业务参数。若现有仓库没有可复用指标注册边界，只保留
 内部结构化汇总与返回错误，明确记录剩余的外部指标接入点，不为 M20 建第二套指标框架。
 
-- [ ] **Step 3: 运行 Benchmark、逃逸和 Profile 采样**
+- [x] **Step 3: 运行 Benchmark、逃逸和 Profile 采样**
 
 Run:
 
@@ -429,7 +429,7 @@ go test -gcflags='all=-m=2' ./rpc
 验收：`IncludeRetired` 为 0 alloc；单目标 Prepare 不新增广播 plan 分配；多目标不按成功目标数分配
 Go 对象；无逐目标 goroutine。Profile 文件只作为本地证据，不提交仓库。
 
-- [ ] **Step 4: 根据数据做必要的安全优化并提交**
+- [x] **Step 4: 根据数据做必要的安全优化并提交**
 
 只接受保持所有权清楚且有基准收益的调整；禁止 `unsafe`、引用计数 payload、无界池或复杂无锁算法。
 
@@ -448,13 +448,13 @@ Commit: `perf(M20): 建立广播性能与观测门禁`
 - Modify: `docs/design/README.md`
 - Modify: `docs/design/Origin第三版迁移说明.md`
 
-- [ ] **Step 1: 对照设计逐条复核实现**
+- [x] **Step 1: 对照设计逐条复核实现**
 
 检查公共 API、默认 Retired 规则、Provider SPI、目标排序、连接冻结、单次编码、Buffer 所有权、
 Context、错误 Code、目标/容量上限、Wire 兼容、生成 ABI、日志敏感信息和硬里程碑上限。发现偏差先补
 测试再修复，不以修改设计掩盖实现缺口。
 
-- [ ] **Step 2: 运行覆盖率并检查低覆盖分支**
+- [x] **Step 2: 运行覆盖率并检查低覆盖分支**
 
 Run:
 
@@ -465,12 +465,14 @@ go tool cover -func=m20-cover.out
 
 补齐可稳定触发的取消、溢出、所有权、连接替换和聚合错误分支；本地临时覆盖率文件不提交。
 
-- [ ] **Step 3: 请求独立代码复核并处理发现**
+- [x] **Step 3: 完成基线 Diff 代码复核并处理发现**
 
-按 `superpowers:requesting-code-review` 对 `21e70d2..HEAD` 的设计符合性、正确性、并发、资源所有权、
-性能和测试充分性进行复核。Critical/Important 必须修复并重新验证；Minor 记录或在不扩大范围时修复。
+按 `superpowers:requesting-code-review` 的检查维度对 `21e70d2..HEAD` 的设计符合性、正确性、
+并发、资源所有权、性能和测试充分性进行基线 Diff 复核。当前会话的协作策略禁止主动创建
+未由用户要求的复核子代理，因此由主执行者完成完整检查；未发现遗留 Critical/Important，
+并补齐本地私有+TCP、Retired 单目标、8192 接受和失败汇总观测。
 
-- [ ] **Step 4: 运行完整质量门禁**
+- [x] **Step 4: 运行完整质量门禁**
 
 Run:
 
@@ -486,7 +488,7 @@ go test ./rpc ./tests/integration/rpcfixture -run '^$' -bench 'Broadcast' -bench
 然后运行仓库固定生成检查、Linux/macOS 交叉构建和文档链接/占位符检查。任何失败必须定位根因，
 不得跳过测试或放宽断言。
 
-- [ ] **Step 5: 回写验收证据并形成 M20 完成提交**
+- [x] **Step 5: 回写验收证据并形成 M20 完成提交**
 
 设计和实施计划状态改为已完成；路线图固定下一步只剩 M21 业务运行时扩展收口和 M22 稳定发布；
 记录命令、Benchmark、覆盖率、兼容性和剩余风险；确认工作树只含 M20 必要改动。
@@ -508,3 +510,23 @@ M20 只有同时满足以下条件才完成：
 - 单元、真实协议集成、Race、Vet、Build、生成检查、跨平台构建和 Benchmark 全部通过；
 - 文档、路线图、复核清单、迁移说明和提交状态一致；
 - M20 独立提交后，才开始 M21 业务运行时扩展收口设计。
+
+---
+
+## 3. 实施结果
+
+- 实施提交：`c72402f`、`fc5ff39`、`76ca958`、`e1480a4`、`b4e242c`、`2db335a`；
+- rpcgen ABI 3 和 `origingen rpc --check ./...` 通过，生成物无漂移；
+- `IncludeRetired` 为 11.13～13.86 ns/op、`0 B/op`、`0 allocs/op`；
+- 单目标 `PrepareBroadcast` 为 318～341 ns/op、零分配；100～8192 目标均固定为一个
+  448B plan 和一次分配；
+- 真实 NATS 32B fan-out 的 100/1000/8192 目标代表耗时约为 0.14～0.15ms、
+  1.11～1.33ms、10.6～12.1ms；CPU/Heap Profile 的主要成本位于 Broker/nats.go 写出，
+  Origin 没有逐目标 goroutine 或成功结果对象；
+- 新增真实 TCP 两远端、TCP 部分断线、本地私有+TCP、真实 NATS 两远端和 Retired 范围测试；
+- M20 代码覆盖重点函数：Prepare 87.8%、submit 77.1%、容量申请 77.8%；真实 TCP/NATS
+  Transport 分支由独立集成包验证；
+- 汇总观测只在聚合失败时记录一条结构化日志。逐目标分段时钟统计会破坏 8192 热路径，
+  因此改由 Benchmark/Profile 和 M22 统一观测门禁承接；
+- 最终门禁包括全仓 Test/Race/Vet/Build、生成检查、Linux/macOS 交叉构建、定向覆盖率、
+  逃逸分析、重复真实协议测试和 Benchmark；工作树在 M20 完成提交前已复核范围。
