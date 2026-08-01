@@ -521,9 +521,22 @@ func (node *Node) Start(ctx context.Context) error {
 			})
 		}
 		entry.state.Store(uint32(service.StateInitializing))
+		if err := service.BeginModuleInitialization(entry.instance); err != nil {
+			entry.state.Store(uint32(service.StateFailed))
+			entry.recordFailure(err)
+			initializationErrors = errors.Join(initializationErrors, &lifecycleContext{
+				nodeID:      node.id,
+				serviceName: entry.name,
+				phase:       "module_init_prepare",
+				cause:       err,
+			})
+			continue
+		}
 		err := callLifecycle(entry, "on_init", func() error {
 			return entry.instance.OnInit()
 		})
+		moduleErr := service.CompleteModuleInitialization(entry.instance, err == nil)
+		err = errors.Join(err, moduleErr)
 		if err != nil {
 			entry.state.Store(uint32(service.StateFailed))
 			entry.recordFailure(err)
@@ -639,7 +652,7 @@ func (node *Node) Start(ctx context.Context) error {
 			}
 		}
 		err = callLifecycle(entry, "on_start", func() error {
-			return entry.instance.OnStart(startContext)
+			return service.StartWithModules(startContext, entry.instance)
 		})
 		finishStart()
 		if err != nil {
@@ -947,7 +960,9 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 		if err := service.FinalizeScheduler(
 			ctx,
 			entry.instance,
-			entry.instance.OnStop,
+			func(finalizerContext context.Context) error {
+				return service.StopWithModules(finalizerContext, entry.instance)
+			},
 		); err != nil {
 			result = errors.Join(result, &lifecycleContext{
 				nodeID:      node.id,

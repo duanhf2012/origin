@@ -28,6 +28,7 @@ type IService interface {
 	ExecutionStats() ExecutionStats
 	GoSafe(fn func()) error
 	RunSafe(fn func()) error
+	AddModule(module IModule) error
 
 	baseService() *Service
 }
@@ -45,6 +46,15 @@ type Service struct {
 	defaultAwaitTimeout time.Duration
 	// scheduler 使用原子指针连接冷路径装配和并发业务热路径，避免每次查询 bindMu。
 	scheduler atomic.Pointer[serviceScheduler]
+
+	// modules 及其生命周期标记只在 Node 启停冷路径和同步 OnInit 注册栈中访问，
+	// 复用 bindMu 串行化，不为每个 Service 额外分配管理器或集合。
+	modules             []*moduleEntry
+	moduleTarget        IService
+	moduleInitActive    bool
+	moduleSealed        bool
+	moduleInitErr       error
+	serviceStartEntered bool
 }
 
 // OnInit 是不需要初始化逻辑时使用的默认空实现。
