@@ -111,6 +111,73 @@ func BenchmarkLoadDirRejectsUnknownField(b *testing.B) {
 	}
 }
 
+func BenchmarkFrozenSnapshotReads(b *testing.B) {
+	dir := b.TempDir()
+	writeBenchmarkFile(b, dir, "business.yaml", `
+shared:
+  timeout: 9
+services:
+  PlayerService:
+    timeout: 7
+    nested:
+      enabled: true
+    labels:
+      zone: east
+`)
+	snapshot, err := LoadSnapshot(dir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	serviceView, err := snapshot.Root().Lookup("services.PlayerService")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.Run("root_path", func(b *testing.B) {
+		var timeout int
+		b.ReportAllocs()
+		for b.Loop() {
+			view, lookupErr := snapshot.Root().Lookup("shared.timeout")
+			if lookupErr != nil {
+				b.Fatal(lookupErr)
+			}
+			if decodeErr := view.Decode(&timeout); decodeErr != nil {
+				b.Fatal(decodeErr)
+			}
+		}
+	})
+
+	b.Run("service_field", func(b *testing.B) {
+		var enabled bool
+		b.ReportAllocs()
+		for b.Loop() {
+			view, lookupErr := serviceView.Lookup("nested.enabled")
+			if lookupErr != nil {
+				b.Fatal(lookupErr)
+			}
+			if decodeErr := view.Decode(&enabled); decodeErr != nil {
+				b.Fatal(decodeErr)
+			}
+		}
+	})
+
+	b.Run("full_service", func(b *testing.B) {
+		target := struct {
+			Timeout int `config:"timeout"`
+			Nested  struct {
+				Enabled bool `config:"enabled"`
+			} `config:"nested"`
+			Labels map[string]string `config:"labels"`
+		}{}
+		b.ReportAllocs()
+		for b.Loop() {
+			if decodeErr := serviceView.Decode(&target); decodeErr != nil {
+				b.Fatal(decodeErr)
+			}
+		}
+	})
+}
+
 func writeBenchmarkFile(b *testing.B, root, relative, content string) {
 	b.Helper()
 	// 基准样本直接位于临时根目录，不把文件创建计入计时循环。

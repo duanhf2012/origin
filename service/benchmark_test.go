@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"sync"
 	"testing"
@@ -217,39 +218,171 @@ func BenchmarkSchedulerStats(b *testing.B) {
 	}
 }
 
-func BenchmarkEventHandlerFanout(b *testing.B) {
-	owner := &Service{}
-	slot := &eventSlot{id: 1}
-	listener := &eventListener{handler: func(context.Context, Event) error { return nil }}
-	listener.active.Store(true)
-	slot.listeners = []*eventListener{listener}
-	event := &testEvent{id: 1}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for index := 0; index < b.N; index++ {
-		if result, failures := owner.notifyEventHandlers(context.Background(), slot, event); result != nil || failures != 0 {
-			b.Fatal(result)
-		}
+func BenchmarkNotifyEventSyncHandlerFanout(b *testing.B) {
+	for _, listeners := range []int{0, 1, 10, 100, 1000} {
+		b.Run(fmt.Sprintf("listeners_%d", listeners), func(b *testing.B) {
+			owner := &Service{}
+			slot := benchmarkEventSlot(listeners)
+			event := &testEvent{id: 1}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				if result, failures := owner.notifyEventHandlers(context.Background(), slot, event); result != nil || failures != 0 {
+					b.Fatal(result)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkNotifyEventSync(b *testing.B) {
+	for _, listeners := range []int{0, 1, 10, 100, 1000} {
+		b.Run(fmt.Sprintf("listeners_%d", listeners), func(b *testing.B) {
+			fixture := newEventFixture(b, DefaultSchedulerConfig(), func(target *testService) error {
+				for range listeners {
+					if err := target.SubscribeEvent(1, func(context.Context, Event) error { return nil }); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			event := &testEvent{id: 1}
+			completed := make(chan error, 1)
+			notify := func(ctx context.Context) {
+				completed <- fixture.service.NotifyEventSync(ctx, event)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				if err := fixture.service.DispatchAsync(notify); err != nil {
+					b.Fatal(err)
+				}
+				if err := <-completed; err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
 func BenchmarkNotifyEventAsync(b *testing.B) {
-	completed := make(chan struct{}, 1)
-	fixture := newEventFixture(b, DefaultSchedulerConfig(), func(target *testService) error {
-		return target.SubscribeEvent(1, func(context.Context, Event) error {
-			completed <- struct{}{}
-			return nil
+	for _, listeners := range []int{0, 1, 10, 100, 1000} {
+		b.Run(fmt.Sprintf("listeners_%d", listeners), func(b *testing.B) {
+			fixture := newEventFixture(b, DefaultSchedulerConfig(), func(target *testService) error {
+				for range listeners {
+					if err := target.SubscribeEvent(1, func(context.Context, Event) error { return nil }); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			event := &testEvent{id: 1}
+			completed := make(chan struct{}, 1)
+			barrier := func(context.Context) { completed <- struct{}{} }
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				if err := fixture.service.NotifyEventAsync(event); err != nil {
+					b.Fatal(err)
+				}
+				if err := fixture.service.DispatchAsync(barrier); err != nil {
+					b.Fatal(err)
+				}
+				<-completed
+			}
 		})
-	})
-	event := &testEvent{id: 1}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for index := 0; index < b.N; index++ {
-		if err := fixture.service.NotifyEventAsync(event); err != nil {
-			b.Fatal(err)
-		}
-		<-completed
 	}
+}
+
+func BenchmarkEventPayloadOwnership(b *testing.B) {
+	owner := &Service{}
+	slot := benchmarkEventSlot(1)
+	benchmarks := []struct {
+		name  string
+		event Event
+	}{
+		{name: "small_value", event: benchmarkSmallEvent{value: 1}},
+		{name: "pointer", event: &benchmarkPointerEvent{value: 1}},
+		{name: "large_64KiB_pointer", event: &benchmarkLargeEvent{}},
+	}
+	for _, benchmark := range benchmarks {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if result, failures := owner.notifyEventHandlers(context.Background(), slot, benchmark.event); result != nil || failures != 0 {
+					b.Fatal(result)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkModuleLifecycle(b *testing.B) {
+	for _, modules := range []int{1, 100, 1000, MaxModulesPerService} {
+		b.Run(fmt.Sprintf("modules_%d", modules), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				target := benchmarkModuleService(modules)
+				if err := StartWithModules(context.Background(), target); err != nil {
+					b.Fatal(err)
+				}
+				if err := StopWithModules(context.Background(), target); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkModuleDirectService(b *testing.B) {
+	owner := &testService{}
+	module := &Module{owner: &owner.Service, target: owner}
+	b.ReportAllocs()
+	for b.Loop() {
+		if module.Service() == nil {
+			b.Fatal("Module.Service() returned nil")
+		}
+	}
+}
+
+type benchmarkSmallEvent struct{ value uint64 }
+
+func (benchmarkSmallEvent) EventID() EventID { return 1 }
+
+type benchmarkPointerEvent struct{ value uint64 }
+
+func (*benchmarkPointerEvent) EventID() EventID { return 1 }
+
+type benchmarkLargeEvent struct{ payload [64 << 10]byte }
+
+func (*benchmarkLargeEvent) EventID() EventID { return 1 }
+
+func benchmarkEventSlot(listeners int) *eventSlot {
+	slot := &eventSlot{id: 1, listeners: make([]*eventListener, listeners)}
+	for index := range slot.listeners {
+		listener := &eventListener{handler: func(context.Context, Event) error { return nil }}
+		listener.active.Store(true)
+		slot.listeners[index] = listener
+	}
+	return slot
+}
+
+func benchmarkModuleService(modules int) *testService {
+	target := &testService{}
+	target.moduleSealed = true
+	target.moduleTarget = target
+	target.modules = make([]*moduleEntry, modules)
+	for index := range target.modules {
+		module := &testModule{}
+		module.owner = &target.Service
+		module.target = target
+		target.modules[index] = &moduleEntry{
+			target:      module,
+			base:        &module.Module,
+			initialized: true,
+		}
+	}
+	return target
 }
 
 func BenchmarkTaskPoolComparison(b *testing.B) {
