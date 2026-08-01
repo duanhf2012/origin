@@ -25,6 +25,10 @@ M19 完成：
 M19 不实现 Broadcast、多目标部分成功、自动重试、权重、健康评分、负载反馈、一致性
 哈希、熔断、流量镜像或动态配置策略。这些能力需要独立里程碑和单独错误语义。
 
+后续 M20 已固定：默认自动单目标与 Broadcast 都排除 Retired，`IncludeRetired()` 显式纳入
+Running 与 Retired；精确 `OnNode` 继续允许 Retired。该补充不改变 M19 的策略算法、候选
+排序或单目标 Prepare。
+
 ## 2. 已确认的公共外观
 
 ### 2.1 最终业务外观
@@ -419,10 +423,10 @@ func (c RouteCandidates) State(index int) discovery.State
 func (c RouteCandidates) Label(index int, name string) (string, bool)
 ```
 
-`ToService` 自动候选已经排除 Retired，因此其 State 当前恒为 Running；精确
-`ToServiceOnNode` 的单候选可以是 Running 或 Retired。保留 State 访问既兑现统一只读视图，
-也让精确目标 Selector 无需另查发现目录。Selector 不能借此把被自动路由排除的 Retired
-重新加入候选。
+M19 默认 `ToService` 自动候选排除 Retired，因此其 State 恒为 Running；M20 的
+`IncludeRetired()` 派生以及精确 `ToServiceOnNode` 的单候选可以是 Running 或 Retired。
+保留 State 访问既兑现统一只读视图，也让业务在已显式扩展范围时区分状态。Selector 仍
+不能自行把范围外的 Retired 重新加入候选。
 
 `RouteCandidates` 不复制候选切片或标签 Map，不允许修改，也不能在 `Select` 返回后保存。
 越界访问返回零值和 `false`，不 panic。

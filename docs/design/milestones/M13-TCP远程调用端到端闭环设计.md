@@ -4,6 +4,8 @@
 >
 > 创建日期：2026-07-28
 >
+> 最后更新：2026-08-01
+>
 > 前置里程碑：M5 TCP 网络基础库、M8 Node 时间轮内核、M9 Service 调度与协作式等待、
 > M11 RPC 契约与代码生成、M12 Origin 自定义静态编解码扩展
 
@@ -1231,5 +1233,5 @@ M13 已于 2026-07-28 完成实现和验收：
     `78.377µs`、`276.217µs`、`7.670ms`；
 12. `pendingCall` 值类型 Map 热路径在 Windows/Linux 均为零分配，最终不增加对象池。
 
-M13 已关闭。服务发现 Provider、NATS RPC、完整 Stop/OnStop Await、自动路由和跨 Node
-Broadcast 继续按路线图进入后续独立里程碑。
+M13 已关闭。服务发现 Provider、NATS RPC、完整 Stop/OnStop Await 和自动路由已分别在
+M17/M18、M15、M16、M19 完成；跨 Node Broadcast 进入 M20。

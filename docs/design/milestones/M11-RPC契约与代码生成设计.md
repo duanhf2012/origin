@@ -2,12 +2,15 @@
 
 > 文档状态：已实现并验收
 > 创建日期：2026-07-27  
-> 最后更新：2026-07-30
+> 最后更新：2026-08-01
 > 当前结论：M11 已完成实现、测试、性能基线和 Windows/Linux 验收
 
 > 后续语义：M19 保持 M11 业务方法与 payload 不变，增加默认 `BindXxxRPC`、显式名称
 > `BindXxxRPCTo`、`OnNode`、路由派生和 `Prepare -> Encode -> Submit` 生成 ABI；旧生成物
 > 需统一重新生成。
+>
+> M20 继续保持业务方法和 payload 不变，增加 `IncludeRetired()`，并把 Broadcast 内部
+> 调整为 `PrepareBroadcast -> Encode Once -> Submit Fan-out`；rpcgen ABI 提升到 3。
 
 ## 1. 文档目的
 
@@ -122,8 +125,9 @@ M11 必须同时遵守：
 | OnStop 独占生命周期 Await、完整 Stop 排空和异常进程收尾 | M16 |
 | Origin/etcd 服务发现 Provider | M17/M18 已实现 |
 | RoundRobin、Random、稳定 Key 和自定义单目标路由 | M19 |
-| 完整退休 API 和多 Node 发现范围 Broadcast | M19 后独立里程碑 |
-| 外部 gRPC 插件 | M19 后独立里程碑 |
+| 多 Node 发现范围 Broadcast、显式包含 Retired 和部分失败 | M20 |
+| 完整退休 API | M21 运行时扩展收口工作包 |
+| 外部 gRPC 插件 | v3.0 后独立组件提案 |
 | 流式 RPC | 首版不支持，有真实需求后重新设计 |
 | RPC 压缩 | 基准证明有净收益后单独立项 |
 
@@ -1206,8 +1210,8 @@ M11 不建立“伪广播成功”或返回“不支持”的空壳方法。当�
 - Await/Async 响应由完成状态持有；生成解码器必须先把业务可见的 `[]byte` 复制为独立
   Slice，再释放响应 Buffer 和投递返回值或回调；
 - Notify 目标任务处理完成后释放；
-- Broadcast 在 M11 本地范围内与 Notify 使用相同单一所有权；后续多目标广播必须对同一
-  只读编码结果建立明确的目标投递所有权，不能把一个可释放 Buffer 同时交给多个所有者；
+- Broadcast 在 M11 本地范围内与 Notify 使用相同单一所有权；M20 多目标广播对同一
+  只读编码结果建立每目标独立 Buffer 所有权，不把一个可释放 Buffer 同时交给多个所有者；
 - Protobuf 解码结果不能引用即将释放的输入 Buffer；
 - 不因为本地调用而直接共享可变业务对象指针。
 
@@ -1291,7 +1295,8 @@ M11 还需要在 RPC 与编解码编号区间补充最小错误：
 - `CodeRPCBroadcastPartialFailed = 2010`。
 
 完整语义见[统一错误码设计](../details/2026-07-24-统一错误码设计.md)。M11 本地 Broadcast
-候选最多一个，不会产生部分成功；`2010` 先固定编号，供后续多 Node 广播聚合错误复用。
+候选最多一个，不会产生部分成功；M20 正式使用 `2010` 表示部分成功，并新增 `2011`
+表示多目标全部失败。
 
 固定错误优先复用只读哨兵。具体 NodeID、ServiceName、契约名、方法名和生成字段路径只
 进入结构化日志或生成期诊断，不为高频失败构造通用 Details Map。
