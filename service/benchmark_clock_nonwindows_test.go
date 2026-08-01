@@ -18,3 +18,8 @@ func benchmarkLatencyNow() benchmarkLatencyTimestamp {
 func benchmarkLatencyElapsed(started benchmarkLatencyTimestamp) int64 {
 	return time.Since(started.value).Nanoseconds()
 }
+
+// benchmarkLatencyFrequency 返回纳秒时钟的固定频率。
+func benchmarkLatencyFrequency() int64 {
+	return int64(time.Second)
+}

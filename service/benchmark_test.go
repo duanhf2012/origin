@@ -475,15 +475,25 @@ func measureOperationLatencies(b *testing.B, operation func() error) []int64 {
 	// NotifyEventAsync 接受后到同一 FIFO barrier 到达。不得用批次均值替代单次尾延迟。
 	samples := make([]int64, b.N)
 	b.ResetTimer()
+	b.StartTimer()
 	for index := range samples {
 		started := benchmarkLatencyNow()
 		if err := operation(); err != nil {
+			b.StopTimer()
 			b.Fatal(err)
 		}
 		samples[index] = benchmarkLatencyElapsed(started)
 	}
 	b.StopTimer()
 	return samples
+}
+
+// BenchmarkLatencyClockOverhead 记录逐次采样时钟自身的读取开销，验证它没有主导事件
+// 尾延迟样本；空操作仍走与事件基准完全相同的两次高分辨率时钟读取路径。
+func BenchmarkLatencyClockOverhead(b *testing.B) {
+	samples := measureOperationLatencies(b, func() error { return nil })
+	b.ReportMetric(float64(benchmarkLatencyFrequency()), "clock-Hz")
+	reportLatencyPercentiles(b, samples)
 }
 
 func BenchmarkTaskPoolComparison(b *testing.B) {
