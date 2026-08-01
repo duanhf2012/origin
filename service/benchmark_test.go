@@ -295,23 +295,33 @@ func BenchmarkNotifyEventAsync(b *testing.B) {
 	}
 }
 
+// BenchmarkNotifyEventLatency 逐次采样同步和异步公开事件语义从提交到完成的端到端延迟。
 func BenchmarkNotifyEventLatency(b *testing.B) {
 	for _, listeners := range []int{0, 1, 10, 100, 1000} {
-		b.Run(fmt.Sprintf("sync_listeners_%d", listeners), func(b *testing.B) {
-			owner := &Service{}
-			slot := benchmarkEventSlot(listeners)
-			event := &testEvent{id: 1}
-			samples := measureLatencySamples(b, func() error {
-				result, failures := owner.notifyEventHandlers(context.Background(), slot, event)
-				if result != nil || failures != 0 {
-					return fmt.Errorf("notify event: failures=%d result=%v", failures, result)
+		b.Run(fmt.Sprintf("sync_e2e_listeners_%d", listeners), func(b *testing.B) {
+			fixture := newEventFixture(b, DefaultSchedulerConfig(), func(target *testService) error {
+				for range listeners {
+					if err := target.SubscribeEvent(1, func(context.Context, Event) error { return nil }); err != nil {
+						return err
+					}
 				}
 				return nil
+			})
+			event := &testEvent{id: 1}
+			completed := make(chan error, 1)
+			notify := func(ctx context.Context) {
+				completed <- fixture.service.NotifyEventSync(ctx, event)
+			}
+			samples := measureOperationLatencies(b, func() error {
+				if err := fixture.service.DispatchAsync(notify); err != nil {
+					return err
+				}
+				return <-completed
 			})
 			reportLatencyPercentiles(b, samples)
 		})
 
-		b.Run(fmt.Sprintf("async_listeners_%d", listeners), func(b *testing.B) {
+		b.Run(fmt.Sprintf("async_e2e_listeners_%d", listeners), func(b *testing.B) {
 			fixture := newEventFixture(b, DefaultSchedulerConfig(), func(target *testService) error {
 				for range listeners {
 					if err := target.SubscribeEvent(1, func(context.Context, Event) error { return nil }); err != nil {
@@ -323,7 +333,7 @@ func BenchmarkNotifyEventLatency(b *testing.B) {
 			event := &testEvent{id: 1}
 			completed := make(chan struct{}, 1)
 			barrier := func(context.Context) { completed <- struct{}{} }
-			samples := measureLatencySamples(b, func() error {
+			samples := measureOperationLatencies(b, func() error {
 				if err := fixture.service.NotifyEventAsync(event); err != nil {
 					return err
 				}
@@ -431,75 +441,49 @@ func benchmarkModuleService(modules int) *testService {
 
 func reportLatencyPercentiles(b *testing.B, samples []int64) {
 	b.Helper()
-	if len(samples) < 10 {
+	// P99 至少需要一百个独立调用样本；较短的试探轮次只保留 testing 的平均值。
+	if len(samples) < 100 {
 		return
 	}
 	sort.Slice(samples, func(left, right int) bool { return samples[left] < samples[right] })
-	var total int64
+	zeroSamples := 0
 	for _, sample := range samples {
-		total += sample
-	}
-	p50 := samples[(len(samples)-1)*50/100]
-	p99 := samples[(len(samples)-1)*99/100]
-	b.ReportMetric(float64(total)/float64(len(samples)), "ns/op")
-	b.ReportMetric(float64(p50), "p50-sample-ns/op")
-	b.ReportMetric(float64(p99), "p99-sample-ns/op")
-}
-
-func measureLatencySamples(b *testing.B, operation func() error) []int64 {
-	b.Helper()
-	b.StopTimer()
-	batchSize := calibrateLatencyBatch(b, operation)
-	samples := make([]int64, b.N)
-	b.ResetTimer()
-	for index := range samples {
-		started := time.Now()
-		for range batchSize {
-			if err := operation(); err != nil {
-				b.Fatal(err)
-			}
+		if sample == 0 {
+			zeroSamples++
 		}
-		samples[index] = time.Since(started).Nanoseconds() / int64(batchSize)
 	}
-	b.StopTimer()
-	b.ReportMetric(float64(batchSize), "latency-batch")
-	return samples
+	// 使用 nearest-rank：ceil(N*P/100)-1，100 个样本的 P99 对应第 99 个顺序统计量。
+	p50 := samples[(len(samples)*50+99)/100-1]
+	p99 := samples[(len(samples)*99+99)/100-1]
+	b.ReportMetric(float64(p50), "p50-ns/op")
+	b.ReportMetric(float64(p99), "p99-ns/op")
+	b.ReportMetric(float64(zeroSamples), "clock-zero-samples")
 }
 
-func calibrateLatencyBatch(b *testing.B, operation func() error) int {
+func measureOperationLatencies(b *testing.B, operation func() error) []int64 {
 	b.Helper()
-	// Measure calibrated batches rather than individual sub-microsecond calls so
-	// percentile samples remain meaningful on hosts with coarse monotonic clocks.
-	const (
-		minimumSampleTime    = 2 * time.Millisecond
-		minimumBatchSize     = 1 << 10
-		maximumBatchSize     = 1 << 24
-		warmupOperations     = 32
-		calibrationRepeats   = 3
-		unmeasuredSampleTime = time.Duration(1<<63 - 1)
-	)
+	// 先在计时区外预热 Scheduler、Channel 和事件类型绑定，避免首调冷路径污染尾延迟。
+	const warmupOperations = 32
+	b.StopTimer()
 	for range warmupOperations {
 		if err := operation(); err != nil {
 			b.Fatal(err)
 		}
 	}
-	for batchSize := 1; ; batchSize *= 2 {
-		minimumElapsed := unmeasuredSampleTime
-		for range calibrationRepeats {
-			started := time.Now()
-			for range batchSize {
-				if err := operation(); err != nil {
-					b.Fatal(err)
-				}
-			}
-			if elapsed := time.Since(started); elapsed < minimumElapsed {
-				minimumElapsed = elapsed
-			}
+
+	// 每个样本只包围一次完整公开语义：同步为投递到 NotifyEventSync 返回，异步为
+	// NotifyEventAsync 接受后到同一 FIFO barrier 到达。不得用批次均值替代单次尾延迟。
+	samples := make([]int64, b.N)
+	b.ResetTimer()
+	for index := range samples {
+		started := benchmarkLatencyNow()
+		if err := operation(); err != nil {
+			b.Fatal(err)
 		}
-		if batchSize >= minimumBatchSize && (minimumElapsed >= minimumSampleTime || batchSize >= maximumBatchSize) {
-			return batchSize
-		}
+		samples[index] = benchmarkLatencyElapsed(started)
 	}
+	b.StopTimer()
+	return samples
 }
 
 func BenchmarkTaskPoolComparison(b *testing.B) {
