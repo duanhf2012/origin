@@ -96,8 +96,28 @@ type m22RPCPerfProcess struct {
 	stdin     io.WriteCloser
 	process   *os.Process
 	done      <-chan error
+	stdout    *m22RPCPerfOutput
 	stderr    *bytes.Buffer
 	closeOnce sync.Once
+}
+
+// m22RPCPerfOutput 允许就绪扫描器和后续排空 goroutine 共用同一份诊断输出；Close 只在
+// 子进程退出后读取，但互斥仍固定了失败路径的并发可见性，避免测试工具自身触发 Race。
+type m22RPCPerfOutput struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (output *m22RPCPerfOutput) Write(payload []byte) (int, error) {
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	return output.buffer.Write(payload)
+}
+
+func (output *m22RPCPerfOutput) String() string {
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	return output.buffer.String()
 }
 
 type m22RPCPerfWorker struct {
@@ -740,6 +760,7 @@ func startM22RPCPerfProcess(
 		t.Fatal(err)
 	}
 	stderr := &bytes.Buffer{}
+	stdoutOutput := &m22RPCPerfOutput{}
 	command.Stderr = stderr
 	if err := command.Start(); err != nil {
 		t.Fatalf("start M22 target process: %v", err)
@@ -750,21 +771,23 @@ func startM22RPCPerfProcess(
 		stdin:   stdin,
 		process: command.Process,
 		done:    done,
+		stdout:  stdoutOutput,
 		stderr:  stderr,
 	}
 	t.Cleanup(func() { process.Close(t) })
 
-	scanner := bufio.NewScanner(stdout)
+	scanner := bufio.NewScanner(io.TeeReader(stdout, stdoutOutput))
 	for scanner.Scan() {
 		if strings.HasPrefix(scanner.Text(), m22RPCPerfReadyLine+" ") {
-			go func() { _, _ = io.Copy(io.Discard, stdout) }()
+			go func() { _, _ = io.Copy(stdoutOutput, stdout) }()
 			return process
 		}
 	}
 	process.Close(t)
 	t.Fatalf(
-		"M22 target process did not become ready: scan=%v stderr=%s",
+		"M22 target process did not become ready: scan=%v stdout=%s stderr=%s",
 		scanner.Err(),
+		stdoutOutput.String(),
 		stderr.String(),
 	)
 	return nil
@@ -779,11 +802,20 @@ func (process *m22RPCPerfProcess) Close(t testing.TB) {
 		select {
 		case err := <-process.done:
 			if err != nil {
-				t.Errorf("M22 target process exit: %v\n%s", err, process.stderr.String())
+				t.Errorf(
+					"M22 target process exit: %v\nstdout=%s\nstderr=%s",
+					err,
+					process.stdout.String(),
+					process.stderr.String(),
+				)
 			}
 		case <-time.After(15 * time.Second):
 			_ = process.process.Kill()
-			t.Errorf("M22 target process did not stop\n%s", process.stderr.String())
+			t.Errorf(
+				"M22 target process did not stop\nstdout=%s\nstderr=%s",
+				process.stdout.String(),
+				process.stderr.String(),
+			)
 		}
 	})
 }
