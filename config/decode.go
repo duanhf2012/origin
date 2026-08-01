@@ -15,6 +15,8 @@ var textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 type valueDecoder struct {
 	// fields 只缓存本次加载中实际遇到的结构体类型。
 	fields map[reflect.Type]structFields
+	// rejectUnknown 区分框架配置的严格语义和业务配置的前向兼容语义。
+	rejectUnknown bool
 }
 
 // decode 把单个内部节点严格写入可设置的目标值。
@@ -166,6 +168,10 @@ func (decoder *valueDecoder) decodeStruct(destination reflect.Value, node *value
 	for _, entry := range node.mapping {
 		field, exists := fields.byName[entry.key]
 		if !exists {
+			if !decoder.rejectUnknown {
+				// 业务配置允许新版本增加调用方暂不认识的字段。
+				continue
+			}
 			// 未知字段错误定位到 Key 本身。
 			return invalidConfigAt(entry.keySource, "未知配置字段 %q（目标 %s）", entry.key, destination.Type())
 		}

@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	originconfig "github.com/duanhf2012/origin/v3/config"
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
@@ -37,6 +38,8 @@ type Node struct {
 	private   bool
 	labels    map[string]string
 	logger    originlog.Logger
+	// config 是 Application 一次加载后冻结的根视图；所有 Service 仅持有派生 View。
+	config originconfig.View
 	// schedulerConfig 是当前 Node 为每个 ServiceScheduler 提供的冻结默认策略。
 	schedulerConfig service.SchedulerConfig
 
@@ -90,6 +93,7 @@ type serviceEntry struct {
 	template            string
 	private             bool
 	instance            service.IService
+	config              originconfig.View
 	logger              originlog.Logger
 	state               atomic.Uint32
 	startError          bool
@@ -179,6 +183,7 @@ func New(
 		private:         config.Private,
 		labels:          cloneLabels(config.Labels),
 		logger:          logger.With(originlog.String("node_id", config.ID)),
+		config:          options.Config.Root(),
 		schedulerConfig: config.Scheduler,
 		services:        make([]*serviceEntry, 0, len(bindings)),
 		byName:          make(map[string]*serviceEntry, len(bindings)),
@@ -249,6 +254,7 @@ func New(
 			template: binding.Template,
 			private:  binding.Private,
 			instance: binding.Service,
+			config:   selectServiceConfig(options.Config, config.ID, binding.Name),
 			logger: instance.logger.With(
 				originlog.String("service_name", binding.Name),
 			),
@@ -328,6 +334,29 @@ func New(
 	}
 	instance.initializeStatus(rpcRuntime.TransportKind())
 	return instance, nil
+}
+
+// selectServiceConfig 只按实际 ServiceName 选择一块完整业务配置。
+//
+// Node 专属块优先；不存在时才使用全局块。两个块绝不合并，也不读取模板名。
+func selectServiceConfig(
+	snapshot *originconfig.Snapshot,
+	nodeID string,
+	serviceName string,
+) originconfig.View {
+	if snapshot == nil {
+		return originconfig.View{}
+	}
+	root := snapshot.Root()
+	if configured, err := root.Lookup(
+		"node_services." + nodeID + "." + serviceName,
+	); err == nil {
+		return configured
+	}
+	if configured, err := root.Lookup("services." + serviceName); err == nil {
+		return configured
+	}
+	return originconfig.View{}
 }
 
 // newSessionID 使用系统安全随机源创建不由业务配置控制的 Node 进程会话标识。
@@ -960,6 +989,16 @@ func (runtime *serviceRuntime) Logger() originlog.Logger {
 // LookupService 实现 service.Runtime，只查询当前 Node。
 func (runtime *serviceRuntime) LookupService(name string) (service.IService, bool) {
 	return runtime.node.Service(name)
+}
+
+// RootConfig 实现 service 的可选配置适配面。
+func (runtime *serviceRuntime) RootConfig() originconfig.View {
+	return runtime.node.config
+}
+
+// ServiceConfig 实现 service 的可选配置适配面。
+func (runtime *serviceRuntime) ServiceConfig() originconfig.View {
+	return runtime.entry.config
 }
 
 // AcquireTimerSlot 实现 service.Runtime，并委托当前 Node 的唯一 ID 与共享额度。

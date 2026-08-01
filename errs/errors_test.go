@@ -27,6 +27,7 @@ func TestStableCodes(t *testing.T) {
 		{name: "invalid config", code: errs.CodeInvalidConfig, want: 5},
 		{name: "process already running", code: errs.CodeProcessAlreadyRunning, want: 6},
 		{name: "process control failed", code: errs.CodeProcessControlFailed, want: 7},
+		{name: "config path not found", code: errs.CodeConfigNotFound, want: 8},
 		{name: "service retired", code: errs.CodeServiceRetired, want: 1001},
 		{name: "service stopping", code: errs.CodeServiceStopping, want: 1002},
 		{name: "service stopped", code: errs.CodeServiceStopped, want: 1003},
@@ -71,6 +72,15 @@ func TestStableCodes(t *testing.T) {
 		if test.code != test.want {
 			t.Errorf("%s code = %d, want %d", test.name, test.code, test.want)
 		}
+	}
+}
+
+func TestConfigNotFoundSentinel(t *testing.T) {
+	if got := errs.New(errs.CodeConfigNotFound); got != errs.ErrConfigNotFound {
+		t.Fatalf("New(CodeConfigNotFound) = %v", got)
+	}
+	if errs.ErrConfigNotFound.Error() != "config path not found" {
+		t.Fatalf("ErrConfigNotFound.Error() = %q", errs.ErrConfigNotFound.Error())
 	}
 }
 

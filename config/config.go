@@ -13,55 +13,14 @@ import (
 // dst 必须是非 nil 指针。加载或解码失败时，dst 保持调用前的值。
 func LoadDir(dir string, dst any) error {
 	// 在读取文件前验证目标，避免目录错误掩盖调用方 API 使用错误。
-	target, err := validateTarget(dst)
+	if _, err := validateTarget(dst); err != nil {
+		return err
+	}
+	snapshot, err := LoadSnapshot(dir)
 	if err != nil {
 		return err
 	}
-
-	// 一次性发现并稳定排序全部候选文件，后续合并顺序只依赖相对路径。
-	files, err := scanDir(dir)
-	if err != nil {
-		return err
-	}
-
-	// root 只在本次调用内存在，逐文件解析、展开并合并来源树。
-	var root *valueNode
-	for _, file := range files {
-		// 每个文件按扩展名严格解析，同时保留逻辑相对路径和行列。
-		current, err := parseFile(file)
-		if err != nil {
-			return err
-		}
-		// 环境变量必须在单文件语法解析后、跨文件合并前展开字符串值。
-		if err := expandEnvironment(current); err != nil {
-			return err
-		}
-		// 第一个根节点直接成为合并目标，避免一次无意义深拷贝。
-		if root == nil {
-			root = current
-			continue
-		}
-		// 后续根 Mapping 按确定规则递归合并，重复 Scalar 立即失败。
-		if err := mergeNodes(root, current, ""); err != nil {
-			return err
-		}
-	}
-
-	// 先在临时值中完成全部解码，保证任何错误都不会留下半更新结果。
-	temporary := reflect.New(target.Type()).Elem()
-	// 浅复制调用方默认值；解码器会在修改 Pointer、Map、Slice 前建立独立对象。
-	temporary.Set(target)
-	// 字段缓存仅属于本次加载，避免包级反射状态污染多个 Application。
-	decoder := valueDecoder{
-		fields: make(map[reflect.Type]structFields),
-	}
-	// 严格解码完整合并树，未知字段和类型错误均带来源位置返回。
-	if err := decoder.decode(temporary, root); err != nil {
-		return err
-	}
-	// 只有全部步骤成功后才原子式提交到调用方目标。
-	target.Set(temporary)
-	return nil
+	return snapshot.Decode(dst)
 }
 
 // validateTarget 验证公开 dst 参数并返回实际可写元素。

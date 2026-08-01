@@ -21,6 +21,8 @@ const (
 	CodeProcessAlreadyRunning
 	// CodeProcessControlFailed 表示本地进程锁、控制文件或停止通知操作失败。
 	CodeProcessControlFailed
+	// CodeConfigNotFound 表示显式请求的配置路径不存在。
+	CodeConfigNotFound
 
 	// CodeServiceRetired 表示业务主动拒绝退休期间不允许执行的操作。
 	//
@@ -110,6 +112,8 @@ func codeText(code Code) string {
 		return "process already running"
 	case CodeProcessControlFailed:
 		return "process control failed"
+	case CodeConfigNotFound:
+		return "config path not found"
 	case CodeServiceRetired:
 		return "service retired"
 	case CodeServiceStopping:

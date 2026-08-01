@@ -3,6 +3,7 @@ package node
 import (
 	"time"
 
+	originconfig "github.com/duanhf2012/origin/v3/config"
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
@@ -14,6 +15,10 @@ import (
 //
 // 它不属于 YAML/JSON 配置模型；默认值统一由 Application 处理。
 type Options struct {
+	// Config 是 Application 一次加载后冻结的完整配置快照。
+	//
+	// 省略时 Node 及其 Service 获得空业务配置，便于独立使用和单元测试。
+	Config *originconfig.Snapshot
 	// MaxTimersPerNode 是当前 Node 全部 Service 共享的业务 Timer 总额度。
 	MaxTimersPerNode int
 	// TimerLocation 是当前 Node 全部 Cron Timer 使用的统一只读时区。

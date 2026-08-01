@@ -23,7 +23,7 @@ import (
 
 // loadedConfig 是 M7 真正消费的框架配置快照。
 type loadedConfig struct {
-	root            map[string]any
+	root            *originconfig.Snapshot
 	log             originlog.Config
 	trackBufferPool bool
 	nodes           []node.Config
@@ -171,8 +171,12 @@ type retentionConfigMirror struct {
 
 // loadConfig 读取整个配置目录，再只解析 M7 已经拥有运行语义的框架字段。
 func loadConfig(directory string) (loadedConfig, error) {
+	snapshot, err := originconfig.LoadSnapshot(directory)
+	if err != nil {
+		return loadedConfig{}, err
+	}
 	var root map[string]any
-	if err := originconfig.LoadDir(directory, &root); err != nil {
+	if err := snapshot.Decode(&root); err != nil {
 		return loadedConfig{}, err
 	}
 
@@ -187,7 +191,7 @@ func loadConfig(directory string) (loadedConfig, error) {
 	}
 
 	result := loadedConfig{
-		root: root,
+		root: snapshot,
 		log:  originlog.DefaultConfig(),
 	}
 	if raw, exists := root["discovery"]; exists {

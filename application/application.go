@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/command"
+	originconfig "github.com/duanhf2012/origin/v3/config"
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
@@ -41,7 +42,7 @@ type Application struct {
 
 	nodes         []*node.Node
 	started       []*node.Node
-	config        map[string]any
+	config        *originconfig.Snapshot
 	bufferPool    *bufferpool.Pool
 	logRuntime    *originlog.Runtime
 	crashOutput   *originlog.CrashOutput
@@ -632,6 +633,7 @@ func (app *Application) buildNodes(
 			bindings,
 			app.logger,
 			node.Options{
+				Config:           app.config,
 				MaxTimersPerNode: app.options.Timer.MaxTimersPerNode,
 				TimerLocation:    app.options.Timer.Location,
 				BufferPool:       app.bufferPool,

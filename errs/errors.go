@@ -26,6 +26,8 @@ var (
 	ErrProcessAlreadyRunning error = newCodeError(CodeProcessAlreadyRunning)
 	// ErrProcessControlFailed 表示本地进程控制操作失败。
 	ErrProcessControlFailed error = newCodeError(CodeProcessControlFailed)
+	// ErrConfigNotFound 表示显式请求的配置路径不存在。
+	ErrConfigNotFound error = newCodeError(CodeConfigNotFound)
 	// ErrServiceRetired 供业务主动拒绝退休期间不允许执行的操作。
 	//
 	// 框架不会仅因 Service 处于 Retired 自动返回该错误。
@@ -177,6 +179,8 @@ func New(code Code) error {
 		return ErrProcessAlreadyRunning
 	case CodeProcessControlFailed:
 		return ErrProcessControlFailed
+	case CodeConfigNotFound:
+		return ErrConfigNotFound
 	case CodeServiceRetired:
 		return ErrServiceRetired
 	case CodeServiceStopping:
