@@ -22,7 +22,7 @@ Origin Node 通过真实 TCP 完成 Await、Async 和 Notify 调用：
 
 ## 2. 实施约束
 
-- 严格遵守 [开发指导原则](../../../AGENTS.md)和已确认 M13 设计；
+- 严格遵守 [开发指导原则](../../../../AGENTS.md)和已确认 M13 设计；
 - 不实现服务发现 Provider、NATS RPC、压缩、Cancel 包、流式 RPC、自动路由或自动重试；
 - 跨 Node 调用不允许使用 Go 指针短路，同一 Application 内也必须经过真实 TCP；
 - 网络 goroutine 只解析固定头和执行准入，不运行生成解码器或业务回调；
