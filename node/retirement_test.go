@@ -493,6 +493,16 @@ func TestRetireReservesPublicationBeforeAwaitCapacityCheck(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+	if err := current.Retire(t.Context()); err != nil {
+		t.Fatalf("idempotent batch Retire() with full Await capacity error = %v", err)
+	}
+	current.discoveryPublication.mu.Lock()
+	batchDesired := current.discoveryPublication.desired
+	batchAcknowledged := current.discoveryPublication.acknowledged
+	current.discoveryPublication.mu.Unlock()
+	if batchDesired != 2 || batchAcknowledged != 2 {
+		t.Fatalf("batch publication desired=%d acknowledged=%d, want 2/2", batchDesired, batchAcknowledged)
+	}
 
 	release()
 	if err := <-awaitResult; err != nil {
@@ -505,8 +515,8 @@ func TestRetireReservesPublicationBeforeAwaitCapacityCheck(t *testing.T) {
 	desired := current.discoveryPublication.desired
 	acknowledged := current.discoveryPublication.acknowledged
 	current.discoveryPublication.mu.Unlock()
-	if desired != 2 || acknowledged != 2 {
-		t.Fatalf("idempotent publication desired=%d acknowledged=%d, want 2/2", desired, acknowledged)
+	if desired != 3 || acknowledged != 3 {
+		t.Fatalf("idempotent publication desired=%d acknowledged=%d, want 3/3", desired, acknowledged)
 	}
 }
 

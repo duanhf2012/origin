@@ -78,6 +78,9 @@ func (service *Service) changeRunningState(
 		if reserveErr != nil {
 			return errors.Join(eventErr, reserveErr)
 		}
+		if !changed && generation == 0 {
+			return nil
+		}
 		publishErr := service.Await(taskCtx, func(waitCtx context.Context) error {
 			return runtime.AwaitServiceStatePublication(waitCtx, generation)
 		})
