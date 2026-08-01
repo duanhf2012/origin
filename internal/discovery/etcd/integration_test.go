@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -842,6 +843,80 @@ func TestEtcdProviderExternalServerCompatibility(t *testing.T) {
 	if err := instance.Close(context.Background()); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
+}
+
+// TestEtcdProviderExternalClusterRecovery 使用显式启用的真实三节点集群固定完整断线、
+// 恢复和待提交 Publish 重放语义。测试日志中的两个标记供外部编排器确定停、启容器的时机；
+// 普通测试不操作部署环境，也不会因未配置外部集群而变慢。
+func TestEtcdProviderExternalClusterRecovery(t *testing.T) {
+	if os.Getenv("ORIGIN_ETCD_RECOVERY_TEST") != "1" {
+		t.Skip("设置 ORIGIN_ETCD_RECOVERY_TEST=1 后执行外部故障恢复测试")
+	}
+	rawEndpoints := strings.TrimSpace(os.Getenv("ORIGIN_ETCD_TEST_ENDPOINTS"))
+	if rawEndpoints == "" {
+		t.Fatal("ORIGIN_ETCD_TEST_ENDPOINTS is not configured")
+	}
+	parts := strings.Split(rawEndpoints, ",")
+	endpoints := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if endpoint := strings.TrimSpace(part); endpoint != "" {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	if len(endpoints) < 3 {
+		t.Fatalf("ORIGIN_ETCD_TEST_ENDPOINTS 需要至少三个地址，实际 %d", len(endpoints))
+	}
+
+	raw, _ := publicprovider.NewConfig(map[string]any{
+		"endpoints":       endpoints,
+		"namespace":       "/origin-m22-recovery",
+		"local_network":   "origin",
+		"ttl":             "3s",
+		"dial_timeout":    "2s",
+		"request_timeout": "2s",
+	})
+	recorder := newIntegrationRecorder()
+	instance, err := NewFactory(t.TempDir())(publicprovider.Context{
+		NodeID:    "m22-recovery-1",
+		SessionID: 22001,
+		Config:    raw,
+		Host:      recorder.host(),
+		Logger:    originlog.NewNop(),
+	})
+	if err != nil {
+		t.Fatalf("Factory() error = %v", err)
+	}
+	t.Cleanup(func() { _ = instance.Close(context.Background()) })
+	startProviderForTest(t, instance)
+
+	initial := recordTestNode("m22-recovery-1", 22001)
+	if err := instance.Publish(context.Background(), initial); err != nil {
+		t.Fatalf("initial Publish() error = %v", err)
+	}
+	recorder.awaitNode(t, initial.NodeID, true, 10*time.Second)
+	t.Logf("EXTERNAL_ETCD_RECOVERY_READY endpoints=%s", strings.Join(endpoints, ","))
+
+	// 外部编排器在 READY 后停止全部三个成员；Provider 必须报告 Recovering，不能保持
+	// 虚假的 Ready。编排器看到 RECOVERING 后恢复集群，下面的 Publish 必须在恢复后完成。
+	recorder.awaitState(t, publicprovider.StateRecovering, 30*time.Second)
+	t.Log("EXTERNAL_ETCD_RECOVERING")
+	updated := recordTestNode("m22-recovery-1", 22001)
+	updated.Labels["revision"] = "recovered"
+	publishResult := make(chan error, 1)
+	go func() {
+		publishCtx, cancelPublish := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancelPublish()
+		publishResult <- instance.Publish(publishCtx, updated)
+	}()
+	recorder.awaitState(t, publicprovider.StateReady, 60*time.Second)
+	if err := <-publishResult; err != nil {
+		t.Fatalf("recovery Publish() error = %v", err)
+	}
+	recorder.awaitNode(t, updated.NodeID, true, 10*time.Second)
+	if err := instance.Withdraw(context.Background()); err != nil {
+		t.Fatalf("recovered Withdraw() error = %v", err)
+	}
+	recorder.awaitNode(t, updated.NodeID, false, 10*time.Second)
 }
 
 func startProviderForTest(t *testing.T, provider publicprovider.Provider) {
