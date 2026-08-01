@@ -510,6 +510,57 @@ func TestConnHandlerFailuresAreIsolated(t *testing.T) {
 	}
 }
 
+func TestOnMessagePanicWithoutReleaseLeaksBuffer(t *testing.T) {
+	t.Parallel()
+
+	// 本测试固化 tcpnet 的 packet 所有权契约：所有权在调用 OnMessage 时转移给
+	// Handler，tcpnet 不在 panic 恢复路径兜底释放。
+	//
+	// 不能兜底的原因是 bufferpool.Buffer 是唯一所有权模型——Handler 可能在 panic 前
+	// 已经把 packet 转交给业务队列（合法的所有权转移）。此时 tcpnet 再 Release 会
+	// 对一个已经被另一个所有者持有的活对象二次释放，引发 use-after-free。
+	//
+	// 因此正确的契约是：Handler 实现必须自行保证在 panic 前释放或转移 packet。
+	// 对比 TestConnHandlerFailuresAreIsolated 中 "OnMessage panic" 子用例总是先
+	// Release 再 panic，本用例故意不 Release，断言 Pool 未配平（有泄漏），从而把
+	// “tcpnet 不兜底、Release 是 Handler 的责任”这一契约变成可执行的回归守护。
+	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
+	options := smallConnectionOptions(pool)
+	handler := newRecordingHandler()
+	// 故意只记录事件，既不 Release 也不转移所有权，直接 panic。
+	handler.onMessage = func(*Conn, *bufferpool.Buffer) error {
+		panic("未释放即 panic")
+	}
+
+	local, remote := net.Pipe()
+	conn := newConn(local, options, handler, nil)
+	conn.start()
+
+	// 发送一个零长度帧触发 OnMessage；零长度 Buffer 仍计入 ZeroSizeInUse。
+	if _, err := remote.Write([]byte{0, 0, 0, 0}); err != nil {
+		t.Fatalf("写入触发帧失败：%v", err)
+	}
+
+	// Handler panic 必须被转换为连接终态并关闭连接，不能越过 goroutine。
+	if err := waitConn(t, conn); !errs.IsCode(err, errs.CodeInternal) {
+		t.Fatalf("未释放 panic 终态=%v，期望 CodeInternal", err)
+	}
+	_ = remote.Close()
+
+	// 关键断言：tcpnet 没有兜底释放 packet，Pool 因此未配平。
+	// 若未来有人误加兜底 Release，这里会变成配平（零），本测试失败，强制重新确认契约。
+	stats := pool.Stats()
+	if stats.InUseBuffers == 0 {
+		t.Fatal("Pool 意外配平：tcpnet 在 OnMessage panic 时兜底释放了 packet，" +
+			"违反唯一所有权契约（参见 bufferpool.Buffer 文档）")
+	}
+	// 事件序列确认 OnMessage 确实被调用并触发 panic：OnMessage panic 后 runReadLoop
+	// 返回内部错误，readLoop 仍会继续走完 OnClose，故序列为 open→message→close。
+	if events := handler.eventSnapshot(); !equalStrings(events, []string{"open", "message", "close"}) {
+		t.Fatalf("事件序列=%v，期望 [open message close]", events)
+	}
+}
+
 func TestConnWaitContextAndRepeatedWait(t *testing.T) {
 	t.Parallel()
 

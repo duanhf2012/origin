@@ -84,6 +84,12 @@ type Handler interface {
 	//
 	// 实现必须在同步处理、转移给另一个明确所有者或任意失败路径中最终 Release；
 	// 返回非 nil error 会关闭当前连接。
+	//
+	// panic 路径下 tcpnet 不会兜底释放 packet。这是唯一所有权模型的必然结果：
+	// 实现可能在 panic 前已经把 packet 转交给业务队列，此时 tcpnet 再 Release 会
+	// 对另一个所有者持有的活对象二次释放并引发 use-after-free。因此实现必须自行
+	// 保证在 panic recover 边界内释放或转移 packet（参见
+	// TestOnMessagePanicWithoutReleaseLeaksBuffer 固化的契约）。
 	OnMessage(conn *Conn, packet *bufferpool.Buffer) error
 	// OnClose 在读写循环停止后恰好调用一次，cause 是首个有效关闭原因。
 	OnClose(conn *Conn, cause error)
