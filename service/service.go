@@ -33,6 +33,8 @@ type IService interface {
 	NotifyEventAsync(event Event) error
 	NotifyEventSync(ctx context.Context, event Event) error
 	EventStats() EventStats
+	Retire(ctx context.Context) error
+	Resume(ctx context.Context) error
 
 	baseService() *Service
 }
@@ -213,7 +215,7 @@ func (service *Service) Failure() error {
 // acceptanceError 把公开 Service 生命周期映射为稳定的调度准入错误。
 func (service *Service) acceptanceError() error {
 	switch service.State() {
-	case StateRunning:
+	case StateRunning, StateRetired:
 		return nil
 	case StateStopping:
 		return errs.ErrServiceStopping

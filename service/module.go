@@ -254,6 +254,24 @@ func (module *Module) EventStats() EventStats {
 	return owner.EventStats()
 }
 
+// Retire 委托所属 Service 进入 Retired 并等待发现发布确认。
+func (module *Module) Retire(ctx context.Context) error {
+	owner := module.ownerService()
+	if owner == nil {
+		return errs.ErrInvalidArgument
+	}
+	return owner.Retire(ctx)
+}
+
+// Resume 委托所属 Service 恢复 Running 并等待发现发布确认。
+func (module *Module) Resume(ctx context.Context) error {
+	owner := module.ownerService()
+	if owner == nil {
+		return errs.ErrInvalidArgument
+	}
+	return owner.Resume(ctx)
+}
+
 // Await 在所属 Service 的当前 Task 中协作式等待。
 func (module *Module) Await(ctx context.Context, fn func(context.Context) error) error {
 	owner := module.ownerService()

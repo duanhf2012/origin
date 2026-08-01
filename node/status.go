@@ -100,8 +100,9 @@ type DiscoveryStatus struct {
 
 // ServiceStatus 是本地管理代码查询单个 Service 时取得的冷路径快照。
 type ServiceStatus struct {
-	State   service.State
-	Failure error
+	State     service.State
+	EnteredAt time.Time
+	Failure   error
 }
 
 // transportStatusSnapshot 和 healthStatusSnapshot 让一次更新原子发布完整结构。
@@ -182,8 +183,9 @@ func (node *Node) ServiceStatus(name string) (ServiceStatus, bool) {
 		return ServiceStatus{}, false
 	}
 	return ServiceStatus{
-		State:   service.State(entry.state.Load()),
-		Failure: entry.failureCause(),
+		State:     service.State(entry.state.Load()),
+		EnteredAt: time.Unix(0, entry.stateEnteredAt.Load()),
+		Failure:   entry.failureCause(),
 	}, true
 }
 
@@ -392,7 +394,7 @@ func (node *Node) recordServiceFailure(entry *serviceEntry, cause error) {
 	if node == nil || entry == nil || cause == nil || !entry.recordFailure(cause) {
 		return
 	}
-	entry.state.Store(uint32(service.StateFailed))
+	entry.setState(service.StateFailed)
 
 	// Ready Node 用新的完整快照替换旧发现；若没有剩余公开 Service，publishDiscovery 会撤销。
 	if node.State() == StateReady {

@@ -17,7 +17,7 @@ func (service *Service) GoSafe(fn func()) error {
 		return errs.ErrInvalidArgument
 	}
 	switch service.State() {
-	case StateStarting, StateRunning:
+	case StateStarting, StateRunning, StateRetired:
 		// 继续创建业务 goroutine。
 	case StateStopping:
 		return errs.ErrServiceStopping

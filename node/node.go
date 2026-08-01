@@ -66,6 +66,7 @@ type Node struct {
 	discoverySubscription *internaldiscovery.Subscription
 	discoveryPublished    atomic.Bool
 	discoveryProvider     *providerRuntime
+	discoveryPublication  *discoveryPublication
 	discoveryServer       discoveryServer
 	// discoveryAvailable 和三个原子快照只在生命周期、恢复和故障冷路径更新。
 	discoveryAvailable atomic.Bool
@@ -96,6 +97,7 @@ type serviceEntry struct {
 	config              originconfig.View
 	logger              originlog.Logger
 	state               atomic.Uint32
+	stateEnteredAt      atomic.Int64
 	startError          bool
 	contractID          uint64
 	contractFingerprint [32]byte
@@ -271,7 +273,7 @@ func New(
 		entry.discoveryRun = func(ctx context.Context) {
 			instance.discovery.deliver(ctx, entry)
 		}
-		entry.state.Store(uint32(service.StateCreated))
+		entry.setState(service.StateCreated)
 		runtime := &serviceRuntime{node: instance, entry: entry}
 		if err := service.BindRuntime(binding.Service, runtime); err != nil {
 			return nil, fmt.Errorf(
@@ -333,7 +335,16 @@ func New(
 		instance.discoverySubscription = subscription
 	}
 	instance.initializeStatus(rpcRuntime.TransportKind())
+	if !instance.private &&
+		(instance.discoveryProvider != nil || instance.discoverySource != nil) {
+		instance.discoveryPublication = newDiscoveryPublication(instance)
+	}
 	return instance, nil
+}
+
+func (entry *serviceEntry) setState(state service.State) {
+	entry.state.Store(uint32(state))
+	entry.stateEnteredAt.Store(time.Now().UnixNano())
 }
 
 // selectServiceConfig 只按实际 ServiceName 选择一块完整业务配置。
@@ -520,9 +531,9 @@ func (node *Node) Start(ctx context.Context) error {
 				cause:       err,
 			})
 		}
-		entry.state.Store(uint32(service.StateInitializing))
+		entry.setState(service.StateInitializing)
 		if err := service.BeginModuleInitialization(entry.instance); err != nil {
-			entry.state.Store(uint32(service.StateFailed))
+			entry.setState(service.StateFailed)
 			entry.recordFailure(err)
 			initializationErrors = errors.Join(initializationErrors, &lifecycleContext{
 				nodeID:      node.id,
@@ -538,12 +549,12 @@ func (node *Node) Start(ctx context.Context) error {
 		moduleErr := service.CompleteModuleInitialization(entry.instance, err == nil)
 		err = errors.Join(err, moduleErr)
 		if err != nil {
-			entry.state.Store(uint32(service.StateFailed))
+			entry.setState(service.StateFailed)
 			entry.recordFailure(err)
 			initializationErrors = errors.Join(initializationErrors, err)
 			continue
 		}
-		entry.state.Store(uint32(service.StateInitialized))
+		entry.setState(service.StateInitialized)
 	}
 	if initializationErrors != nil {
 		node.state.Store(uint32(StateFailed))
@@ -613,13 +624,13 @@ func (node *Node) Start(ctx context.Context) error {
 				cause:       err,
 			}
 		}
-		entry.state.Store(uint32(service.StateStarting))
+		entry.setState(service.StateStarting)
 		if err := service.PrepareScheduler(
 			entry.instance,
 			node.schedulerConfig,
 			node.timerEngine,
 		); err != nil {
-			entry.state.Store(uint32(service.StateFailed))
+			entry.setState(service.StateFailed)
 			node.state.Store(uint32(StateFailed))
 			node.refreshHealth()
 			return &lifecycleContext{
@@ -641,7 +652,7 @@ func (node *Node) Start(ctx context.Context) error {
 		)
 		if err != nil {
 			entry.startError = true
-			entry.state.Store(uint32(service.StateFailed))
+			entry.setState(service.StateFailed)
 			node.state.Store(uint32(StateFailed))
 			node.refreshHealth()
 			return &lifecycleContext{
@@ -657,7 +668,7 @@ func (node *Node) Start(ctx context.Context) error {
 		finishStart()
 		if err != nil {
 			entry.startError = true
-			entry.state.Store(uint32(service.StateFailed))
+			entry.setState(service.StateFailed)
 			node.state.Store(uint32(StateFailed))
 			node.refreshHealth()
 			return err
@@ -678,10 +689,10 @@ func (node *Node) Start(ctx context.Context) error {
 	// 全部 OnStart 成功后统一发布 Running 并激活 Runner，任何业务任务都不能与后续
 	// Service 的 OnStart 并发。
 	for _, entry := range node.started {
-		entry.state.Store(uint32(service.StateRunning))
+		entry.setState(service.StateRunning)
 		if err := service.ActivateScheduler(entry.instance); err != nil {
 			entry.startError = true
-			entry.state.Store(uint32(service.StateFailed))
+			entry.setState(service.StateFailed)
 			node.state.Store(uint32(StateFailed))
 			node.refreshHealth()
 			return &lifecycleContext{
@@ -713,6 +724,9 @@ func (node *Node) Start(ctx context.Context) error {
 			cause:  err,
 		}
 	}
+	if node.discoveryPublication != nil {
+		node.discoveryPublication.startPublisher()
+	}
 	node.state.Store(uint32(StateReady))
 	node.refreshHealth()
 	node.logger.Info("node ready")
@@ -735,6 +749,7 @@ func (node *Node) Rollback(ctx context.Context) error {
 		return node.stopResult
 	}
 	// 失败实例仍先获得反序 OnStop，最后再关闭 Node 时间轮并等待其 goroutine 退出。
+	node.stopDiscoveryPublication()
 	result := node.withdrawDiscovery(ctx)
 	result = errors.Join(result, node.rpcRuntime.BeginStop(ctx))
 	result = errors.Join(result, node.stopStarted(ctx, true))
@@ -781,6 +796,7 @@ func (node *Node) Stop(ctx context.Context) error {
 	node.state.Store(uint32(StateStopping))
 	node.refreshHealth()
 	node.logger.Info("node stopping")
+	node.stopDiscoveryPublication()
 	result := node.withdrawDiscovery(ctx)
 	result = errors.Join(result, node.rpcRuntime.BeginStop(ctx))
 	// Service 清理阶段保留时间轮运行，全部 OnStop 返回后才回收 Node 最后的后台资源。
@@ -820,6 +836,12 @@ func (node *Node) Stop(ctx context.Context) error {
 
 // publishDiscovery 在全部 OnStart 和 Runner 激活成功后整体发布当前 Node 的公开 Service。
 func (node *Node) publishDiscovery() error {
+	operationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return node.publishDiscoveryContext(operationCtx)
+}
+
+func (node *Node) publishDiscoveryContext(ctx context.Context) error {
 	if node.private {
 		return nil
 	}
@@ -832,18 +854,20 @@ func (node *Node) publishDiscovery() error {
 			state == service.StateStopped {
 			continue
 		}
+		discoveryState := internaldiscovery.ServiceStateRunning
+		if state == service.StateRetired {
+			discoveryState = internaldiscovery.ServiceStateRetired
+		}
 		services = append(services, internaldiscovery.RawService{
 			ServiceName:         entry.name,
-			State:               internaldiscovery.ServiceStateRunning,
+			State:               discoveryState,
 			ContractID:          entry.contractID,
 			ContractFingerprint: entry.contractFingerprint,
 		})
 	}
 	// 全部 Service 均为私有时没有远端可见事实，不发布空 Node 记录。
 	if len(services) == 0 {
-		operationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return node.withdrawDiscovery(operationCtx)
+		return node.withdrawDiscovery(ctx)
 	}
 	transport := internaldiscovery.TransportNone
 	address := ""
@@ -866,9 +890,7 @@ func (node *Node) publishDiscovery() error {
 	}
 	if node.discoveryProvider != nil {
 		providerNode := publicProviderNode(raw)
-		operationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := node.discoveryProvider.publish(operationCtx, providerNode); err != nil {
+		if err := node.discoveryProvider.publish(ctx, providerNode); err != nil {
 			return err
 		}
 	} else if node.discoverySource != nil {
@@ -953,7 +975,7 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 			})
 		}
 		// started 只由 Start 追加一次；清理后置空可以让重复 Stop 保持幂等。
-		entry.state.Store(uint32(service.StateStopping))
+		entry.setState(service.StateStopping)
 
 		// Scheduler 排空后由最后一个 Service Runner 独占执行 OnStop。OnStop 的 Context
 		// 携带 finalizer 令牌，因此可以顺序 Await，但不能重新开放普通任务或 Timer。
@@ -972,9 +994,9 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 			})
 		}
 		if entry.failureCause() != nil || (rollback && entry.startError) {
-			entry.state.Store(uint32(service.StateFailed))
+			entry.setState(service.StateFailed)
 		} else {
-			entry.state.Store(uint32(service.StateStopped))
+			entry.setState(service.StateStopped)
 		}
 	}
 	node.started = node.started[:0]

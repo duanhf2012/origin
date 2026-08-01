@@ -129,7 +129,7 @@ func (service *Service) NewTicker(interval time.Duration, fn TimerFunc) TimerID 
 // Stopping 时立即关闭准入，不留下 Runtime 状态与 Scheduler 状态之间的竞争窗口。
 func (service *Service) timerCreationError() error {
 	switch service.State() {
-	case StateStarting, StateRunning:
+	case StateStarting, StateRunning, StateRetired:
 		return nil
 	case StateStopping:
 		return errs.ErrServiceStopping
