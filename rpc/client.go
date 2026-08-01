@@ -167,14 +167,11 @@ func (client Client) Await(
 		return err
 	}
 
-	payloadBytes := len(request.Bytes())
 	call := newAwaitCall()
 	started := false
-	accepted := false
-	transport := preparedInvalid
-	responseBytes := 0
-	err := client.owner.Await(ctx, func(waitCtx context.Context) error {
+	err := client.owner.Await(ctx, func(waitCtx context.Context) (waitErr error) {
 		started = true
+		payloadBytes := len(request.Bytes())
 		handle, err := client.submit(
 			waitCtx,
 			methodID,
@@ -187,9 +184,16 @@ func (client Client) Await(
 			request.Release()
 			return err
 		}
-		transport = handle.transport
-		client.runtime.recordOutboundAccepted(transport, payloadBytes)
-		accepted = true
+		client.runtime.recordOutboundAccepted(handle.transport)
+		responseBytes := 0
+		defer func() {
+			client.runtime.recordOutboundFinished(
+				handle.transport,
+				waitErr,
+				payloadBytes,
+				responseBytes,
+			)
+		}()
 
 		response, err := call.wait(waitCtx)
 		handle.cancel(err)
@@ -204,9 +208,6 @@ func (client Client) Await(
 	})
 	if !started {
 		request.Release()
-	}
-	if accepted {
-		client.runtime.recordOutboundFinished(transport, err, responseBytes)
 	}
 	return err
 }
@@ -293,6 +294,7 @@ func (client Client) Async(
 			defer client.runtime.recordOutboundFinished(
 				metricTransport,
 				resultErr,
+				payloadBytes,
 				len(payload),
 			)
 			decodeAndCallback(callbackCtx, payload, resultErr)
@@ -319,7 +321,7 @@ func (client Client) Async(
 	handle = submittedHandle
 	metricTransport = submittedHandle.transport
 	handleMu.Unlock()
-	client.runtime.recordOutboundAccepted(metricTransport, payloadBytes)
+	client.runtime.recordOutboundAccepted(metricTransport)
 	call.commit()
 	return nil
 }

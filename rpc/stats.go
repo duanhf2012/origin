@@ -60,8 +60,19 @@ func (runtime *Runtime) Stats() Stats {
 	if runtime == nil {
 		return Stats{}
 	}
+	local := runtime.rpcStats.local.snapshot()
+	// 同 Node 调用的两端属于同一个 Runtime。成功热路径只累计一次 accepted、pending、
+	// terminal 和总 payload，避免把同一事实重复做两套原子写；失败终态仍由目标侧单独
+	// 累计，因此响应解码失败不会被误报成目标执行失败。
+	local.InboundAccepted = local.OutboundAccepted
+	local.InboundRejected = local.OutboundRejected
+	finished := local.InboundFailed + local.InboundTimeout + local.Pending
+	if local.InboundAccepted >= finished {
+		local.InboundCompleted = local.InboundAccepted - finished
+	}
+	local.PayloadReceivedBytes = local.PayloadSentBytes
 	return Stats{
-		Local: runtime.rpcStats.local.snapshot(),
+		Local: local,
 		TCP:   runtime.rpcStats.tcp.snapshot(),
 		NATS:  runtime.rpcStats.nats.snapshot(),
 	}
@@ -109,7 +120,6 @@ func (runtime *Runtime) counters(transport preparedTransport) *transportCounters
 
 func (runtime *Runtime) recordOutboundAccepted(
 	transport preparedTransport,
-	payloadBytes int,
 ) {
 	counters := runtime.counters(transport)
 	if counters == nil {
@@ -118,23 +128,30 @@ func (runtime *Runtime) recordOutboundAccepted(
 	counters.outboundAccepted.Add(1)
 	pending := counters.pending.Add(1)
 	updateHighWater(&counters.pendingHighWater, pending)
-	if payloadBytes > 0 {
-		counters.payloadSentBytes.Add(uint64(payloadBytes))
-	}
 }
 
 func (runtime *Runtime) recordOutboundFinished(
 	transport preparedTransport,
 	result error,
-	payloadBytes int,
+	requestBytes int,
+	responseBytes int,
 ) {
 	counters := runtime.counters(transport)
 	if counters == nil {
 		return
 	}
 	counters.pending.Add(^uint64(0))
-	if payloadBytes > 0 {
-		counters.payloadReceivedBytes.Add(uint64(payloadBytes))
+	if transport == preparedLocal {
+		if payloadBytes := requestBytes + responseBytes; payloadBytes > 0 {
+			counters.payloadSentBytes.Add(uint64(payloadBytes))
+		}
+	} else {
+		if requestBytes > 0 {
+			counters.payloadSentBytes.Add(uint64(requestBytes))
+		}
+		if responseBytes > 0 {
+			counters.payloadReceivedBytes.Add(uint64(responseBytes))
+		}
 	}
 	recordResult(
 		result,
@@ -173,6 +190,9 @@ func (runtime *Runtime) recordInboundAccepted(
 	if counters == nil {
 		return
 	}
+	if transport == preparedLocal {
+		return
+	}
 	counters.inboundAccepted.Add(1)
 	if payloadBytes > 0 {
 		counters.payloadReceivedBytes.Add(uint64(payloadBytes))
@@ -188,6 +208,18 @@ func (runtime *Runtime) recordInboundFinished(
 	if counters == nil {
 		return
 	}
+	if transport == preparedLocal {
+		if result == nil {
+			return
+		}
+		recordResult(
+			result,
+			&counters.inboundCompleted,
+			&counters.inboundFailed,
+			&counters.inboundTimeout,
+		)
+		return
+	}
 	if payloadBytes > 0 {
 		counters.payloadSentBytes.Add(uint64(payloadBytes))
 	}
@@ -200,6 +232,9 @@ func (runtime *Runtime) recordInboundFinished(
 }
 
 func (runtime *Runtime) recordInboundRejected(transport preparedTransport) {
+	if transport == preparedLocal {
+		return
+	}
 	if counters := runtime.counters(transport); counters != nil {
 		counters.inboundRejected.Add(1)
 	}
@@ -211,6 +246,9 @@ func (runtime *Runtime) recordInboundNotify(
 ) {
 	counters := runtime.counters(transport)
 	if counters == nil {
+		return
+	}
+	if transport == preparedLocal {
 		return
 	}
 	counters.inboundAccepted.Add(1)
