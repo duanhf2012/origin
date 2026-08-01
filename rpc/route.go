@@ -101,6 +101,16 @@ func (client Client) OnNode(nodeID string) Client {
 	return client
 }
 
+// IncludeRetired 派生一个在自动选择范围中同时接受 Running 和 Retired 的值客户端。
+//
+// 该方法不改变基础客户端；精确 OnNode 原本就允许 Retired，因此重复调用和派生顺序都只保留
+// 同一个布尔标志，不增加第二套生命周期筛选语义。
+func (client Client) IncludeRetired() Client {
+	client.includeRetired = true
+	client.prepared = preparedTarget{}
+	return client
+}
+
 // RouteRoundRobin 派生显式使用 Runtime 级轮询策略的值客户端。
 func (client Client) RouteRoundRobin() Client {
 	client.route = routeSpec{mode: routeRoundRobin}

@@ -33,6 +33,15 @@ func BenchmarkClientOnNode(b *testing.B) {
 	}
 }
 
+// BenchmarkClientIncludeRetired 锁定轻量值派生不产生堆分配。
+func BenchmarkClientIncludeRetired(b *testing.B) {
+	client := Client{target: ToService("PlayerService")}
+	b.ReportAllocs()
+	for b.Loop() {
+		benchmarkClientSink = client.IncludeRetired()
+	}
+}
+
 func BenchmarkRouteRoundRobin(b *testing.B) {
 	client := Client{target: ToService("PlayerService")}
 	b.ReportAllocs()

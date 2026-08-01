@@ -50,6 +50,38 @@ func TestClientRouteModesAreExplicitValueDerivations(t *testing.T) {
 	}
 }
 
+// TestClientIncludeRetiredPreservesValueDerivations 锁定退休范围在全部客户端派生顺序中的值语义。
+func TestClientIncludeRetiredPreservesValueDerivations(t *testing.T) {
+	base := Client{target: ToService("PlayerService")}
+	included := base.IncludeRetired()
+	if base.includeRetired {
+		t.Fatal("IncludeRetired 修改了基础客户端")
+	}
+	if !included.includeRetired || !included.IncludeRetired().includeRetired {
+		t.Fatal("IncludeRetired 没有返回幂等的包含退休范围")
+	}
+
+	// 路由策略与精确 Node 只改变各自职责，不能清除已经显式选择的退休范围。
+	selector := prepareTestSelector{region: "east"}
+	derived := []Client{
+		included.OnNode("player-1"),
+		included.RouteRoundRobin(),
+		included.RouteRandom(),
+		included.Route(uint64(1)),
+		included.RouteBy(selector),
+		base.OnNode("player-1").IncludeRetired(),
+		base.RouteRoundRobin().IncludeRetired(),
+		base.RouteRandom().IncludeRetired(),
+		base.Route(uint64(1)).IncludeRetired(),
+		base.RouteBy(selector).IncludeRetired(),
+	}
+	for index, client := range derived {
+		if !client.includeRetired {
+			t.Fatalf("派生 %d 丢失 IncludeRetired 标志", index)
+		}
+	}
+}
+
 func TestRouteKeyNormalizationUsesStableLiterals(t *testing.T) {
 	tests := []struct {
 		name string
@@ -119,6 +151,7 @@ func TestRouteValueDerivationsDoNotAllocate(t *testing.T) {
 		_ = base.Route(uint64(42))
 		_ = base.Route("player")
 		_ = base.RouteBy(selector)
+		_ = base.IncludeRetired()
 	})
 	if allocations != 0 {
 		t.Fatalf("route derivation allocations = %v", allocations)

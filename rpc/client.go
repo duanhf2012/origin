@@ -14,13 +14,14 @@ import (
 // 构造时只解析一次 owner 所属 Runtime；每次调用不再查询 Service Runtime 或做 any
 // 断言。零值和构造失败值都可安全调用，并返回固定参数或未就绪错误。
 type Client struct {
-	owner       service.IService
-	runtime     *Runtime
-	target      Target
-	contractID  ContractID
-	fingerprint ContractFingerprint
-	route       routeSpec
-	prepared    preparedTarget
+	owner          service.IService
+	runtime        *Runtime
+	target         Target
+	contractID     ContractID
+	fingerprint    ContractFingerprint
+	route          routeSpec
+	includeRetired bool
+	prepared       preparedTarget
 }
 
 // NewGeneratedClient 创建供 origingen 生成代码保存的底层客户端。

@@ -71,12 +71,13 @@ type candidateSet struct {
 	tcpView     *remoteTargetTable
 	natsView    *natsConnectionView
 
-	local       serviceEndpoint
-	localView   routeCandidate
-	hasLocal    bool
-	localInsert int
-	remoteLen   int
-	exact       bool
+	local          serviceEndpoint
+	localView      routeCandidate
+	hasLocal       bool
+	localInsert    int
+	remoteLen      int
+	exact          bool
+	includeRetired bool
 
 	count int
 	scan  candidateScan
@@ -224,6 +225,7 @@ func (runtime *Runtime) prepareOnce(
 		client.target,
 		client.contractID,
 		client.fingerprint,
+		client.includeRetired,
 	)
 	set.scanEligible()
 	if set.count == 0 {
@@ -260,13 +262,15 @@ func (runtime *Runtime) buildCandidateSet(
 	target Target,
 	contractID ContractID,
 	fingerprint ContractFingerprint,
+	includeRetired bool,
 ) candidateSet {
 	result := candidateSet{
-		runtime:     runtime,
-		target:      target,
-		contractID:  contractID,
-		fingerprint: fingerprint,
-		exact:       target.mode == targetServiceOnNode,
+		runtime:        runtime,
+		target:         target,
+		contractID:     contractID,
+		fingerprint:    fingerprint,
+		exact:          target.mode == targetServiceOnNode,
+		includeRetired: includeRetired,
 	}
 	if resolver, ok := runtime.remoteResolver.(RemoteSnapshotResolver); ok {
 		result.snapshot = resolver.Snapshot()
@@ -464,7 +468,8 @@ func (set *candidateSet) lifecycleMatches(candidate routeCandidate) bool {
 	if candidate.state == publicdiscovery.StateRunning {
 		return true
 	}
-	return set.exact && candidate.state == publicdiscovery.StateRetired
+	return (set.exact || set.includeRetired) &&
+		candidate.state == publicdiscovery.StateRetired
 }
 
 func (set *candidateSet) transportCandidate(

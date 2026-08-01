@@ -385,6 +385,16 @@ func TestPrepareNotifyKeyAndExactRetiredBoundaries(t *testing.T) {
 	if auto.prepared.nodeID != "player-2" {
 		t.Fatalf("auto selected %q", auto.prepared.nodeID)
 	}
+	included, err := prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).IncludeRetired().Route(uint64(0)).PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("IncludeRetired PrepareNotify() error = %v", err)
+	}
+	if included.prepared.nodeID != "player-1" {
+		t.Fatalf("IncludeRetired selected %q", included.prepared.nodeID)
+	}
 
 	exact, err := prepareTestClient(
 		runtime,
