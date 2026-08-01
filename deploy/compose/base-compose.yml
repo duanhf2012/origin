@@ -112,13 +112,18 @@ services:
     image: nats:2.14.3
     container_name: origin-nats1
     command:
+      - "-c=/etc/nats/nats.conf"
       - "-cluster=nats://0.0.0.0:6222"
+      # 固定集群名，避免三个同时冷启动的节点各自生成名称后短暂拒绝路由。
+      - "-cluster_name=origin"
       - "-routes=nats://n1:6222,nats://n2:6222,nats://n3:6222"
       # 关闭重新连接时的自动抖动，使三节点集群在本地稳定快速成型。
       - "-no_advertise"
       # 开启 HTTP 监控端口（默认不启用）；三节点均开启，便于容器内互相观察，
       # 仅 n1 映射到宿主机供外部访问。
       - "-m=8222"
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf:ro
     ports:
       # 0.0.0.0 显式绑定到所有网卡，确保部署到测试服务器后可从本机远程访问。
       - "0.0.0.0:4222:4222"
@@ -130,11 +135,15 @@ services:
     image: nats:2.14.3
     container_name: origin-nats2
     command:
+      - "-c=/etc/nats/nats.conf"
       - "-cluster=nats://0.0.0.0:6222"
+      - "-cluster_name=origin"
       - "-routes=nats://n1:6222,nats://n2:6222,nats://n3:6222"
       - "-no_advertise"
       # 开启 HTTP 监控端口；n2 不映射到宿主机，仅在 origin-net 内可访问。
       - "-m=8222"
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf:ro
     networks:
       - origin-net
 
@@ -142,11 +151,15 @@ services:
     image: nats:2.14.3
     container_name: origin-nats3
     command:
+      - "-c=/etc/nats/nats.conf"
       - "-cluster=nats://0.0.0.0:6222"
+      - "-cluster_name=origin"
       - "-routes=nats://n1:6222,nats://n2:6222,nats://n3:6222"
       - "-no_advertise"
       # 开启 HTTP 监控端口；n3 不映射到宿主机，仅在 origin-net 内可访问。
       - "-m=8222"
+    volumes:
+      - ./nats.conf:/etc/nats/nats.conf:ro
     networks:
       - origin-net
 
