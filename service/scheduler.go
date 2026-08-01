@@ -79,6 +79,7 @@ const (
 	taskKindDispatch serviceTaskKind = iota
 	taskKindTimer
 	taskKindDiscovery
+	taskKindEvent
 )
 
 // taskContextKey 是不可从 service 包外构造的 Context 私有键。
@@ -107,11 +108,14 @@ func (taskContext *taskContext) Value(key any) any {
 // serviceTask 会在完整清零后进入 Scheduler 私有对象池；context 指向的 taskContext 不池化，
 // 因此被业务错误保留的旧 Context 永远不会因 Task 复用获得新任务执行权。
 type serviceTask struct {
-	scheduler *serviceScheduler
-	context   *taskContext
-	fn        func(context.Context)
-	kind      serviceTaskKind
-	timer     *businessTimer
+	scheduler  *serviceScheduler
+	context    *taskContext
+	fn         func(context.Context)
+	kind       serviceTaskKind
+	timer      *businessTimer
+	eventOwner *Service
+	eventSlot  *eventSlot
+	event      Event
 	// timerGeneration 固定 Timer Task 建立时的代次，使 Pause/Resume/Cancel 后留在
 	// Ready 队列中的旧任务变成可识别的无害墓碑。
 	timerGeneration uint64
@@ -129,6 +133,8 @@ type serviceTask struct {
 	awaitError      error
 	awaitPanic      any
 	awaitPanicStack []byte
+	// syncEventDepth 只在当前 Task 持有执行槽时大于零；Await 在同一锁内拒绝释放。
+	syncEventDepth uint8
 
 	// restoredPanicStack 只在 Await 重新抛出 panic 到根任务边界期间临时保存原始堆栈。
 	restoredPanicStack []byte
@@ -490,6 +496,54 @@ func (scheduler *serviceScheduler) dispatch(fn func(context.Context)) error {
 		scheduler.notifyRunner()
 	}
 	return err
+}
+
+// dispatchEvent 把完整事件通知作为一个 Ready item 提交，不为监听器建立闭包或任务。
+func (scheduler *serviceScheduler) dispatchEvent(
+	owner *Service,
+	slot *eventSlot,
+	event Event,
+) error {
+	scheduler.mu.Lock()
+	switch scheduler.state {
+	case schedulerRunning:
+		// 继续执行统一容量检查。
+	case schedulerDraining:
+		scheduler.mu.Unlock()
+		return errs.ErrServiceStopping
+	case schedulerStopped:
+		scheduler.mu.Unlock()
+		return errs.ErrServiceStopped
+	default:
+		scheduler.mu.Unlock()
+		return errs.ErrServiceNotReady
+	}
+	promotedTimer := scheduler.promoteDueTimersLocked()
+	if scheduler.accepted >= scheduler.config.MaxTasks {
+		scheduler.rejectedTotal++
+		scheduler.mu.Unlock()
+		if promotedTimer {
+			scheduler.notifyRunner()
+		}
+		return errs.ErrServiceQueueFull
+	}
+	task := scheduler.acquireTaskLocked(nil)
+	task.kind = taskKindEvent
+	task.eventOwner = owner
+	task.eventSlot = slot
+	task.event = event
+	if !scheduler.ready.Enqueue(task) {
+		scheduler.mu.Unlock()
+		panicInvariant("service: Event Ready 入队违反容量不变量")
+	}
+	scheduler.accepted++
+	scheduler.dispatchedTotal++
+	if scheduler.accepted > scheduler.acceptedHighWatermark {
+		scheduler.acceptedHighWatermark = scheduler.accepted
+	}
+	scheduler.mu.Unlock()
+	scheduler.notifyRunner()
+	return nil
 }
 
 // dispatchContinuation 为一个当前正在执行的已接受任务预留异步完成任务。
@@ -898,6 +952,8 @@ func callTask(task *serviceTask) (
 		task.fn(task.context)
 	case taskKindDiscovery:
 		task.fn(task.context)
+	case taskKindEvent:
+		task.eventOwner.executeAsyncEvent(task.context, task.eventSlot, task.event)
 	case taskKindTimer:
 		callTimerTask(task)
 	default:

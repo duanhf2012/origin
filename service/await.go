@@ -97,6 +97,11 @@ func (scheduler *serviceScheduler) awaitTask(
 		scheduler.mu.Unlock()
 		return errs.ErrInvalidArgument
 	}
+	if task.syncEventDepth != 0 {
+		// 同步事件复用当前调用栈；释放执行槽会让后续任务观察到尚未完成的事件状态。
+		scheduler.mu.Unlock()
+		return errs.ErrInvalidArgument
+	}
 	if scheduler.awaiting >= scheduler.config.MaxAwaitTasks {
 		scheduler.rejectedTotal++
 		scheduler.mu.Unlock()

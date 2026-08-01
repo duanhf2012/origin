@@ -29,6 +29,10 @@ type IService interface {
 	GoSafe(fn func()) error
 	RunSafe(fn func()) error
 	AddModule(module IModule) error
+	SubscribeEvent(eventID EventID, handler EventHandler) error
+	NotifyEventAsync(event Event) error
+	NotifyEventSync(ctx context.Context, event Event) error
+	EventStats() EventStats
 
 	baseService() *Service
 }
@@ -55,6 +59,13 @@ type Service struct {
 	moduleSealed        bool
 	moduleInitErr       error
 	serviceStartEntered bool
+
+	// events 在 OnInit 注册期惰性建立，封树后 Map 和监听器 Slice 均只读。
+	events             map[EventID]*eventSlot
+	eventListenerCount int
+	eventSyncTotal     atomic.Uint64
+	eventAsyncTotal    atomic.Uint64
+	eventFailureTotal  atomic.Uint64
 }
 
 // OnInit 是不需要初始化逻辑时使用的默认空实现。

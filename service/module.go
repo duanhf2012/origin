@@ -43,8 +43,9 @@ type Module struct {
 	entry  *moduleEntry
 
 	// scopeMu 仅保护可由并发 Timer 回调完成的 Module 长期资源登记。
-	scopeMu sync.Mutex
-	timers  map[TimerID]*moduleTimerRegistration
+	scopeMu        sync.Mutex
+	timers         map[TimerID]*moduleTimerRegistration
+	eventListeners []*eventListener
 }
 
 type moduleEntry struct {
@@ -217,6 +218,42 @@ func (module *Module) DispatchAsync(fn func(context.Context)) error {
 	return owner.DispatchAsync(fn)
 }
 
+// SubscribeEvent 在当前 Module.OnInit 中登记归属于该 Module 的监听器。
+func (module *Module) SubscribeEvent(eventID EventID, handler EventHandler) error {
+	owner := module.ownerService()
+	if owner == nil {
+		return errs.ErrInvalidArgument
+	}
+	return owner.subscribeEvent(eventID, handler, module)
+}
+
+// NotifyEventSync 委托所属 Service 同步通知本地事件。
+func (module *Module) NotifyEventSync(ctx context.Context, event Event) error {
+	owner := module.ownerService()
+	if owner == nil {
+		return errs.ErrInvalidArgument
+	}
+	return owner.NotifyEventSync(ctx, event)
+}
+
+// NotifyEventAsync 委托所属 Service 异步通知本地事件。
+func (module *Module) NotifyEventAsync(event Event) error {
+	owner := module.ownerService()
+	if owner == nil {
+		return errs.ErrInvalidArgument
+	}
+	return owner.NotifyEventAsync(event)
+}
+
+// EventStats 返回所属 Service 的事件统计。
+func (module *Module) EventStats() EventStats {
+	owner := module.ownerService()
+	if owner == nil {
+		return EventStats{}
+	}
+	return owner.EventStats()
+}
+
 // Await 在所属 Service 的当前 Task 中协作式等待。
 func (module *Module) Await(ctx context.Context, fn func(context.Context) error) error {
 	owner := module.ownerService()
@@ -375,7 +412,12 @@ func (module *Module) cleanupScope() {
 		identifiers = append(identifiers, timerID)
 	}
 	module.timers = nil
+	listeners := module.eventListeners
+	module.eventListeners = nil
 	module.scopeMu.Unlock()
+	for _, listener := range listeners {
+		listener.active.Store(false)
+	}
 	if owner == nil {
 		return
 	}

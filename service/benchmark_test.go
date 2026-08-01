@@ -217,6 +217,41 @@ func BenchmarkSchedulerStats(b *testing.B) {
 	}
 }
 
+func BenchmarkEventHandlerFanout(b *testing.B) {
+	owner := &Service{}
+	slot := &eventSlot{id: 1}
+	listener := &eventListener{handler: func(context.Context, Event) error { return nil }}
+	listener.active.Store(true)
+	slot.listeners = []*eventListener{listener}
+	event := &testEvent{id: 1}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if result, failures := owner.notifyEventHandlers(context.Background(), slot, event); result != nil || failures != 0 {
+			b.Fatal(result)
+		}
+	}
+}
+
+func BenchmarkNotifyEventAsync(b *testing.B) {
+	completed := make(chan struct{}, 1)
+	fixture := newEventFixture(b, DefaultSchedulerConfig(), func(target *testService) error {
+		return target.SubscribeEvent(1, func(context.Context, Event) error {
+			completed <- struct{}{}
+			return nil
+		})
+	})
+	event := &testEvent{id: 1}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if err := fixture.service.NotifyEventAsync(event); err != nil {
+			b.Fatal(err)
+		}
+		<-completed
+	}
+}
+
 func BenchmarkTaskPoolComparison(b *testing.B) {
 	fixture := newSchedulerFixture(b, DefaultSchedulerConfig())
 	scheduler := fixture.service.scheduler.Load()
