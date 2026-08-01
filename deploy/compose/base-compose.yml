@@ -107,6 +107,8 @@ services:
   # ---------------------------------------------------------------------------
   # 通过 --routes 互相发现并组成集群；--cluster 暴露集群路由端口 6222。
   # 不传 -js，因此不启用 JetStream 持久化（符合当前选择）。
+  # 不使用 --no_advertise：客户端必须能从首个 Seed 获得另外两个节点地址，才能在单节点
+  # 故障时自动转移；origin-net 的桥接地址可由同一台开发主机直接访问。
 
   n1:
     image: nats:2.14.3
@@ -117,8 +119,6 @@ services:
       # 固定集群名，避免三个同时冷启动的节点各自生成名称后短暂拒绝路由。
       - "-cluster_name=origin"
       - "-routes=nats://n1:6222,nats://n2:6222,nats://n3:6222"
-      # 关闭重新连接时的自动抖动，使三节点集群在本地稳定快速成型。
-      - "-no_advertise"
       # 开启 HTTP 监控端口（默认不启用）；三节点均开启，便于容器内互相观察，
       # 仅 n1 映射到宿主机供外部访问。
       - "-m=8222"
@@ -139,7 +139,6 @@ services:
       - "-cluster=nats://0.0.0.0:6222"
       - "-cluster_name=origin"
       - "-routes=nats://n1:6222,nats://n2:6222,nats://n3:6222"
-      - "-no_advertise"
       # 开启 HTTP 监控端口；n2 不映射到宿主机，仅在 origin-net 内可访问。
       - "-m=8222"
     volumes:
@@ -155,7 +154,6 @@ services:
       - "-cluster=nats://0.0.0.0:6222"
       - "-cluster_name=origin"
       - "-routes=nats://n1:6222,nats://n2:6222,nats://n3:6222"
-      - "-no_advertise"
       # 开启 HTTP 监控端口；n3 不映射到宿主机，仅在 origin-net 内可访问。
       - "-m=8222"
     volumes:
