@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -179,6 +180,142 @@ func TestDiagnosticsServerValidationAndBindFailure(t *testing.T) {
 		errs.ErrDiagnosticsUnavailable,
 	) {
 		t.Fatalf("occupied address error = %v", err)
+	}
+}
+
+// TestDiagnosticsServerConcurrentStartStop 固定同地址并发 Start 和重复 Stop 的线性化语义。
+// 所有调用共享一个 Listener；全部 Stop 返回后端口必须已经释放。
+func TestDiagnosticsServerConcurrentStartStop(t *testing.T) {
+	app := newHTTPTestApplication(t)
+	const callers = 16
+	startErrors := make(chan error, callers)
+	var startGroup sync.WaitGroup
+	for range callers {
+		startGroup.Add(1)
+		go func() {
+			defer startGroup.Done()
+			startErrors <- app.StartDiagnosticsServer("127.0.0.1:0")
+		}()
+	}
+	startGroup.Wait()
+	close(startErrors)
+	for err := range startErrors {
+		if err != nil {
+			t.Fatalf("concurrent StartDiagnosticsServer() error = %v", err)
+		}
+	}
+	address, ok := app.DiagnosticsAddress()
+	if !ok {
+		t.Fatal("concurrent Start did not publish an address")
+	}
+
+	stopErrors := make(chan error, callers)
+	var stopGroup sync.WaitGroup
+	for range callers {
+		stopGroup.Add(1)
+		go func() {
+			defer stopGroup.Done()
+			stopErrors <- app.StopDiagnosticsServer(context.Background())
+		}()
+	}
+	stopGroup.Wait()
+	close(stopErrors)
+	for err := range stopErrors {
+		if err != nil {
+			t.Fatalf("concurrent StopDiagnosticsServer() error = %v", err)
+		}
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("concurrent Stop did not release %q: %v", address, err)
+	}
+	_ = listener.Close()
+}
+
+// TestHTTPRuntimeCanceledStopForcesClose 使用一个真实阻塞请求验证 Shutdown 的 Context
+// 耗尽后仍会强制关闭连接、等待 Serve 退出并释放端口。
+func TestHTTPRuntimeCanceledStopForcesClose(t *testing.T) {
+	entered := make(chan struct{})
+	server := &http.Server{Handler: http.HandlerFunc(func(
+		_ http.ResponseWriter,
+		request *http.Request,
+	) {
+		close(entered)
+		<-request.Context().Done()
+	})}
+	var runtime httpRuntime
+	if err := runtime.start("127.0.0.1:0", server); err != nil {
+		t.Fatalf("httpRuntime.start() error = %v", err)
+	}
+	address, ok := runtime.addressSnapshot()
+	if !ok {
+		t.Fatal("httpRuntime address was not published")
+	}
+	requestDone := make(chan error, 1)
+	go func() {
+		response, err := http.Get("http://" + address)
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		requestDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("blocking HTTP request did not enter handler")
+	}
+
+	stopCtx, cancelStop := context.WithCancel(context.Background())
+	cancelStop()
+	if err := runtime.stop(stopCtx); !errors.Is(err, errs.ErrCanceled) {
+		t.Fatalf("canceled httpRuntime.stop() error = %v", err)
+	}
+	select {
+	case <-requestDone:
+	case <-time.After(time.Second):
+		t.Fatal("forced Close did not release blocking request")
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("forced Close did not release %q: %v", address, err)
+	}
+	_ = listener.Close()
+}
+
+// TestDiagnosticsServerUnexpectedServeExit 固定 Listener 异常退出只把诊断资源标为失败，
+// Application 仍可采集快照；随后 Stop 清理失败态并允许重新启动。
+func TestDiagnosticsServerUnexpectedServeExit(t *testing.T) {
+	app := newHTTPTestApplication(t)
+	if err := app.StartDiagnosticsServer("127.0.0.1:0"); err != nil {
+		t.Fatalf("StartDiagnosticsServer() error = %v", err)
+	}
+	address, _ := app.DiagnosticsAddress()
+	app.diagnosticsHTTP.mu.Lock()
+	listener := app.diagnosticsHTTP.listener
+	done := app.diagnosticsHTTP.done
+	app.diagnosticsHTTP.mu.Unlock()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close diagnostics Listener error = %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not exit after Listener failure")
+	}
+	snapshot := app.Diagnostics()
+	if snapshot.Application.DiagnosticsServer.State != "failed" ||
+		snapshot.Application.DiagnosticsServer.ErrorCode != errs.CodeDiagnosticsUnavailable ||
+		snapshot.Application.State != "running" {
+		t.Fatalf("unexpected Serve diagnostics = %+v", snapshot.Application)
+	}
+	if err := app.StopDiagnosticsServer(context.Background()); err != nil {
+		t.Fatalf("StopDiagnosticsServer(failed) error = %v", err)
+	}
+	if err := app.StartDiagnosticsServer("127.0.0.1:0"); err != nil {
+		t.Fatalf("restart after Serve failure error = %v", err)
+	}
+	if address == "" {
+		t.Fatal("failed Listener did not expose its original address")
 	}
 }
 

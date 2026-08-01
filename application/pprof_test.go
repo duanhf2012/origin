@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
 )
@@ -109,4 +111,40 @@ func TestPprofValidation(t *testing.T) {
 	) {
 		t.Fatalf("created StartPprof() error = %v", err)
 	}
+}
+
+// TestPprofStopInterruptsActiveProfile 验证运行中的长 CPU Profile 不会让运行时关闭失效。
+// Shutdown 期限耗尽后必须强制关闭连接，使 handler 观察请求取消并释放 Listener。
+func TestPprofStopInterruptsActiveProfile(t *testing.T) {
+	app := newHTTPTestApplication(t)
+	if err := app.StartPprof("127.0.0.1:0"); err != nil {
+		t.Fatalf("StartPprof() error = %v", err)
+	}
+	address, _ := app.PprofAddress()
+	connection, err := net.DialTimeout("tcp", address, time.Second)
+	if err != nil {
+		t.Fatalf("dial pprof error = %v", err)
+	}
+	defer connection.Close()
+	if _, err := io.WriteString(
+		connection,
+		"GET /debug/pprof/profile?seconds=30 HTTP/1.1\r\nHost: "+address+"\r\n\r\n",
+	); err != nil {
+		t.Fatalf("write pprof request error = %v", err)
+	}
+	// CPU Profile 启动不立即写响应体；给 handler 一个有界窗口进入采集，再触发关闭。
+	time.Sleep(100 * time.Millisecond)
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelStop()
+	if err := app.StopPprof(stopCtx); !errors.Is(err, errs.ErrDeadlineExceeded) {
+		t.Fatalf("StopPprof(active profile) error = %v", err)
+	}
+	if _, ok := app.PprofAddress(); ok {
+		t.Fatal("PprofAddress remains enabled after forced Stop")
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("forced pprof Stop did not release %q: %v", address, err)
+	}
+	_ = listener.Close()
 }
