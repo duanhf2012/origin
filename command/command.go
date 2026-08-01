@@ -35,6 +35,10 @@ type StartRequest struct {
 	PIDDir string
 	// NodeIDs 按命令行声明顺序保存要启动的 Node；空切片表示由 Application 使用配置顺序。
 	NodeIDs []string
+	// DiagnosticsAddress 非空时要求 Application 在 Node 启动前监听诊断 JSON 地址。
+	DiagnosticsAddress string
+	// PprofAddress 非空时要求 Application 在 Node 启动前监听 Go pprof 地址。
+	PprofAddress string
 }
 
 // StartHandler 同步运行上层 Application，直到其全部资源已经停止并可以释放 PID 锁。

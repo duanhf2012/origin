@@ -167,8 +167,12 @@ func (client Client) Await(
 		return err
 	}
 
+	payloadBytes := len(request.Bytes())
 	call := newAwaitCall()
 	started := false
+	accepted := false
+	transport := preparedInvalid
+	responseBytes := 0
 	err := client.owner.Await(ctx, func(waitCtx context.Context) error {
 		started = true
 		handle, err := client.submit(
@@ -179,9 +183,13 @@ func (client Client) Await(
 			call.complete,
 		)
 		if err != nil {
+			client.runtime.recordOutboundRejected(client.transportHint())
 			request.Release()
 			return err
 		}
+		transport = handle.transport
+		client.runtime.recordOutboundAccepted(transport, payloadBytes)
+		accepted = true
 
 		response, err := call.wait(waitCtx)
 		handle.cancel(err)
@@ -191,10 +199,14 @@ func (client Client) Await(
 		if err != nil {
 			return err
 		}
+		responseBytes = len(response.Bytes())
 		return decode(response.Bytes())
 	})
 	if !started {
 		request.Release()
+	}
+	if accepted {
+		client.runtime.recordOutboundFinished(transport, err, responseBytes)
 	}
 	return err
 }
@@ -222,9 +234,11 @@ func (client Client) Async(
 		return contextError(cause)
 	}
 
+	payloadBytes := len(request.Bytes())
 	call := newAsyncCall()
 	var handleMu sync.Mutex
 	var handle remoteRequestHandle
+	metricTransport := preparedInvalid
 	// completionStarted 只由同一个调用方完成任务按“wait 后 callback”的顺序访问。
 	// 它用于识别 Context 已取消或 Service 已停止导致 Await 根本没有进入等待函数的路径。
 	completionStarted := false
@@ -276,6 +290,11 @@ func (client Client) Async(
 			if response != nil {
 				payload = response.Bytes()
 			}
+			defer client.runtime.recordOutboundFinished(
+				metricTransport,
+				resultErr,
+				len(payload),
+			)
 			decodeAndCallback(callbackCtx, payload, resultErr)
 		},
 	); err != nil {
@@ -291,13 +310,16 @@ func (client Client) Async(
 		call.complete,
 	)
 	if err != nil {
+		client.runtime.recordOutboundRejected(client.transportHint())
 		request.Release()
 		call.abort()
 		return err
 	}
 	handleMu.Lock()
 	handle = submittedHandle
+	metricTransport = submittedHandle.transport
 	handleMu.Unlock()
+	client.runtime.recordOutboundAccepted(metricTransport, payloadBytes)
 	call.commit()
 	return nil
 }
@@ -320,17 +342,33 @@ func (client Client) Notify(
 		request.Release()
 		return contextError(cause)
 	}
-	if _, err := client.submit(
+	payloadBytes := len(request.Bytes())
+	handle, err := client.submit(
 		ctx,
 		methodID,
 		CallNotify,
 		request,
 		nil,
-	); err != nil {
+	)
+	if err != nil {
+		client.runtime.recordOutboundRejected(client.transportHint())
 		request.Release()
 		return err
 	}
+	client.runtime.recordOutboundNotify(handle.transport, payloadBytes)
 	return nil
+}
+
+// transportHint 返回编码前已经固定的 Transport；未 Prepare 的本地精确调用仍可确定类别。
+func (client Client) transportHint() preparedTransport {
+	if client.prepared.transport != preparedInvalid {
+		return client.prepared.transport
+	}
+	if client.target.mode != targetServiceOnNode ||
+		client.target.nodeID == client.runtime.nodeID {
+		return preparedLocal
+	}
+	return preparedInvalid
 }
 
 func (client Client) submit(

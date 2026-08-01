@@ -253,6 +253,8 @@ func TestStartBuildsRequestAndPIDRecord(t *testing.T) {
 		"--config", configDir,
 		"--pid-dir", pidDir,
 		"--node", " gateway-1,game-1 ",
+		"--diagnostics", "127.0.0.1:6061",
+		"--pprof", "127.0.0.1:6060",
 	})
 	if err != nil || code != ExitSuccess {
 		t.Fatalf("start = (%d, %v), want (%d, nil)", code, err, ExitSuccess)
@@ -265,6 +267,10 @@ func TestStartBuildsRequestAndPIDRecord(t *testing.T) {
 	}
 	if want := []string{"gateway-1", "game-1"}; !reflect.DeepEqual(received.NodeIDs, want) {
 		t.Fatalf("NodeIDs = %#v, want %#v", received.NodeIDs, want)
+	}
+	if received.DiagnosticsAddress != "127.0.0.1:6061" ||
+		received.PprofAddress != "127.0.0.1:6060" {
+		t.Fatalf("HTTP addresses = %#v", received)
 	}
 
 	// PID 文件在正常退出后保留，内容必须是严格可解析的当前进程记录。

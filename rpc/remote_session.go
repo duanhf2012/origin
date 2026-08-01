@@ -19,6 +19,7 @@ type remoteRequestHandle struct {
 	session   *outboundSession
 	nats      *natsRuntime
 	requestID uint64
+	transport preparedTransport
 }
 
 // cancel 从仍存活的会话中删除当前调用，并提交调用方已经确定的终态。
@@ -255,6 +256,7 @@ func (session *outboundSession) sendRequest(
 	return remoteRequestHandle{
 		session:   session,
 		requestID: requestID,
+		transport: preparedTCP,
 	}, nil
 }
 

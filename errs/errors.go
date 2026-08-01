@@ -88,6 +88,10 @@ var (
 	ErrLogClosed error = newCodeError(CodeLogClosed)
 	// ErrLogOutputFailed 表示日志输出创建、刷新或关闭失败。
 	ErrLogOutputFailed error = newCodeError(CodeLogOutputFailed)
+	// ErrDiagnosticsUnavailable 表示诊断 Listener、HTTP Serve 或受控关闭无法完成。
+	ErrDiagnosticsUnavailable error = newCodeError(CodeDiagnosticsUnavailable)
+	// ErrDiagnosticsStateConflict 表示当前 Application 或 Listener 状态不允许该诊断操作。
+	ErrDiagnosticsStateConflict error = newCodeError(CodeDiagnosticsStateConflict)
 )
 
 // codeError 是只有稳定错误码、没有动态消息和底层原因的轻量错误。
@@ -239,6 +243,10 @@ func New(code Code) error {
 		return ErrLogClosed
 	case CodeLogOutputFailed:
 		return ErrLogOutputFailed
+	case CodeDiagnosticsUnavailable:
+		return ErrDiagnosticsUnavailable
+	case CodeDiagnosticsStateConflict:
+		return ErrDiagnosticsStateConflict
 	default:
 		// 未登记错误码仍然需要保留原始数值，因此按需创建轻量对象。
 		return newCodeError(code)

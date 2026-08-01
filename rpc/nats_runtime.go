@@ -629,6 +629,7 @@ func (runtime *natsRuntime) sendRequestWithConn(
 	return remoteRequestHandle{
 		nats:      runtime,
 		requestID: requestID,
+		transport: preparedNATS,
 	}, nil
 }
 
@@ -735,13 +736,16 @@ func (runtime *natsRuntime) handleInbound(message natsnet.Message) {
 func (runtime *natsRuntime) handleRequest(data []byte) {
 	view, err := parseNATSRequest(data)
 	if err != nil {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		return
 	}
 	sourceNodeID := string(view.sourceNodeID)
 	if !validSubjectToken(sourceNodeID) {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		return
 	}
 	if len(data)-view.payloadOffset > runtime.config.MaxPayloadSize {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		runtime.sendError(
 			sourceNodeID,
 			view.sourceSessionID,
@@ -751,6 +755,7 @@ func (runtime *natsRuntime) handleRequest(data []byte) {
 		return
 	}
 	if view.targetSessionID != runtime.owner.sessionID {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		runtime.sendError(
 			sourceNodeID,
 			view.sourceSessionID,
@@ -764,6 +769,7 @@ func (runtime *natsRuntime) handleRequest(data []byte) {
 		view.methodID,
 	)
 	if err != nil {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		runtime.sendError(
 			sourceNodeID,
 			view.sourceSessionID,
@@ -782,6 +788,7 @@ func (runtime *natsRuntime) handleRequest(data []byte) {
 	deadlines := runtime.deadlines
 	runtime.mu.Unlock()
 	if deadlines == nil {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		cancel(errs.ErrServiceStopped)
 		runtime.sendError(
 			sourceNodeID,
@@ -793,6 +800,7 @@ func (runtime *natsRuntime) handleRequest(data []byte) {
 	}
 	deadlineID, err := deadlines.bind(view.remainingTimeout, cancel)
 	if err != nil {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		cancel(err)
 		runtime.sendError(
 			sourceNodeID,
@@ -803,10 +811,12 @@ func (runtime *natsRuntime) handleRequest(data []byte) {
 		return
 	}
 
+	payloadBytes := len(data) - view.payloadOffset
 	err = endpoint.target.DispatchAsync(func(targetCtx context.Context) {
 		defer cancel(nil)
 		defer deadlines.unbind(deadlineID)
 		if cause := context.Cause(deadlineContext); cause != nil {
+			runtime.owner.recordInboundFinished(preparedNATS, cause, 0)
 			runtime.sendError(
 				sourceNodeID,
 				view.sourceSessionID,
@@ -829,6 +839,7 @@ func (runtime *natsRuntime) handleRequest(data []byte) {
 		)
 		if cause := context.Cause(deadlineContext); cause != nil {
 			releaseBuffer(response)
+			runtime.owner.recordInboundFinished(preparedNATS, cause, 0)
 			runtime.sendError(
 				sourceNodeID,
 				view.sourceSessionID,
@@ -837,6 +848,15 @@ func (runtime *natsRuntime) handleRequest(data []byte) {
 			)
 			return
 		}
+		responseBytes := 0
+		if response != nil {
+			responseBytes = len(response.Bytes())
+		}
+		runtime.owner.recordInboundFinished(
+			preparedNATS,
+			dispatchErr,
+			responseBytes,
+		)
 		runtime.sendResponse(
 			sourceNodeID,
 			view.sourceSessionID,
@@ -846,6 +866,7 @@ func (runtime *natsRuntime) handleRequest(data []byte) {
 		)
 	})
 	if err != nil {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		deadlines.unbind(deadlineID)
 		cancel(err)
 		runtime.sendError(
@@ -854,7 +875,9 @@ func (runtime *natsRuntime) handleRequest(data []byte) {
 			view.requestID,
 			err,
 		)
+		return
 	}
+	runtime.owner.recordInboundAccepted(preparedNATS, payloadBytes)
 }
 
 // handleNotify 校验目标并把只读 Message.Data 转移给 Service 任务；准入失败只在目标侧丢弃。
@@ -863,6 +886,7 @@ func (runtime *natsRuntime) handleNotify(data []byte) {
 	if err != nil ||
 		view.targetSessionID != runtime.owner.sessionID ||
 		len(data)-view.payloadOffset > runtime.config.MaxPayloadSize {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		return
 	}
 	endpoint, err := runtime.resolveInbound(
@@ -870,16 +894,22 @@ func (runtime *natsRuntime) handleNotify(data []byte) {
 		view.methodID,
 	)
 	if err != nil {
+		runtime.owner.recordInboundRejected(preparedNATS)
 		return
 	}
-	_ = endpoint.target.DispatchAsync(func(targetCtx context.Context) {
+	payloadBytes := len(data) - view.payloadOffset
+	err = endpoint.target.DispatchAsync(func(targetCtx context.Context) {
 		runtime.owner.dispatchNotify(
 			targetCtx,
 			endpoint,
 			view.methodID,
 			data[view.payloadOffset:],
 		)
+		runtime.owner.recordInboundNotify(preparedNATS, payloadBytes)
 	})
+	if err != nil {
+		runtime.owner.recordInboundRejected(preparedNATS)
+	}
 }
 
 // resolveInbound 只允许仍接收入站、已 Ready 且公开的精确 Service。

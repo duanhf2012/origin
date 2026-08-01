@@ -74,7 +74,7 @@ func (runner *Runner) builtInHelp(name string) (string, bool) {
 	switch name {
 	case "start":
 		return fmt.Sprintf(
-			"Usage:\n  %s start --app-name <name> [--config ./config] [--pid-dir ./run] [--node id1,id2]\n",
+			"Usage:\n  %s start --app-name <name> [--config ./config] [--pid-dir ./run] [--node id1,id2] [--diagnostics 127.0.0.1:6061] [--pprof 127.0.0.1:6060]\n",
 			runner.programName,
 		), true
 	case "stop":

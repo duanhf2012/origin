@@ -56,6 +56,12 @@ type Runtime struct {
 	// transportObserver 把整体入站状态变化交给 Node。网络回调只发布常数大小快照，
 	// 不在这里执行发现发布、Service Stop 或 Application Stop。
 	transportObserver func(TransportEvent)
+	// rpcStats 是 Local/TCP/NATS 三个固定原子计数块；零值即可并发使用。
+	rpcStats struct {
+		local transportCounters
+		tcp   transportCounters
+		nats  transportCounters
+	}
 
 	// remote 在配置启用 TCP 时保存连接、监听和 Deadline 资源；未配置时保持 nil，
 	// 本地调用热路径只需一次 nil 判断。
@@ -229,6 +235,7 @@ func (runtime *Runtime) reportTransportEvent(event TransportEvent) {
 	if runtime == nil {
 		return
 	}
+	runtime.recordTransportEvent(event)
 	runtime.mu.Lock()
 	observer := runtime.transportObserver
 	runtime.mu.Unlock()
@@ -640,7 +647,10 @@ func (runtime *Runtime) submit(
 					methodID,
 					request,
 				)
-				return remoteRequestHandle{}, err
+				if err != nil {
+					return remoteRequestHandle{}, err
+				}
+				return remoteRequestHandle{transport: preparedTCP}, nil
 			}
 			timeout, err := service.AwaitTimeoutOf(owner)
 			if err != nil {
@@ -667,7 +677,10 @@ func (runtime *Runtime) submit(
 					methodID,
 					request,
 				)
-				return remoteRequestHandle{}, err
+				if err != nil {
+					return remoteRequestHandle{}, err
+				}
+				return remoteRequestHandle{transport: preparedNATS}, nil
 			}
 			timeout, err := service.AwaitTimeoutOf(owner)
 			if err != nil {
@@ -765,12 +778,16 @@ func (runtime *Runtime) submitPrepared(
 			return remoteRequestHandle{}, errs.ErrTransportUnavailable
 		}
 		if kind == CallNotify {
-			return remoteRequestHandle{}, current.sendNotify(
+			err := current.sendNotify(
 				prepared.serviceName,
 				fingerprint,
 				methodID,
 				request,
 			)
+			if err != nil {
+				return remoteRequestHandle{}, err
+			}
+			return remoteRequestHandle{transport: preparedTCP}, nil
 		}
 		timeout, err := service.AwaitTimeoutOf(owner)
 		if err != nil {
@@ -795,7 +812,7 @@ func (runtime *Runtime) submitPrepared(
 		return remoteRequestHandle{}, err
 	}
 	if kind == CallNotify {
-		return remoteRequestHandle{}, runtime.nats.sendNotifyWithConn(
+		err := runtime.nats.sendNotifyWithConn(
 			conn,
 			prepared.nodeID,
 			prepared.sessionID,
@@ -803,6 +820,10 @@ func (runtime *Runtime) submitPrepared(
 			methodID,
 			request,
 		)
+		if err != nil {
+			return remoteRequestHandle{}, err
+		}
+		return remoteRequestHandle{transport: preparedNATS}, nil
 	}
 	timeout, err := service.AwaitTimeoutOf(owner)
 	if err != nil {
@@ -869,6 +890,7 @@ func (runtime *Runtime) submitLocal(
 	request *Buffer,
 	complete func(*Buffer, error),
 ) (remoteRequestHandle, error) {
+	payloadBytes := len(request.Bytes())
 
 	// caller Context 只提供业务值；目标任务自身的生命周期和执行令牌由目标 Scheduler
 	// 创建。WithoutCancel 防止 Notify 在准入成功后又被调用方撤回。
@@ -893,6 +915,7 @@ func (runtime *Runtime) submitLocal(
 				methodID,
 				request.Bytes(),
 			)
+			runtime.recordInboundNotify(preparedLocal, payloadBytes)
 			return
 		}
 
@@ -903,9 +926,25 @@ func (runtime *Runtime) submitLocal(
 			request.Bytes(),
 			0,
 		)
+		responseBytes := 0
+		if response != nil {
+			responseBytes = len(response.Bytes())
+		}
+		runtime.recordInboundFinished(
+			preparedLocal,
+			dispatchErr,
+			responseBytes,
+		)
 		complete(response, dispatchErr)
 	})
-	return remoteRequestHandle{}, err
+	if err != nil {
+		runtime.recordInboundRejected(preparedLocal)
+		return remoteRequestHandle{}, err
+	}
+	if kind == CallRequest {
+		runtime.recordInboundAccepted(preparedLocal, payloadBytes)
+	}
+	return remoteRequestHandle{transport: preparedLocal}, nil
 }
 
 // dispatchRequest 执行请求—响应 Dispatcher，并取得其一次分配的最终响应。

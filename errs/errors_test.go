@@ -65,6 +65,8 @@ func TestStableCodes(t *testing.T) {
 		{name: "discovery snapshot invalid", code: errs.CodeDiscoverySnapshotInvalid, want: 5004},
 		{name: "log closed", code: errs.CodeLogClosed, want: 7001},
 		{name: "log output failed", code: errs.CodeLogOutputFailed, want: 7002},
+		{name: "diagnostics unavailable", code: errs.CodeDiagnosticsUnavailable, want: 8001},
+		{name: "diagnostics state conflict", code: errs.CodeDiagnosticsStateConflict, want: 8002},
 	}
 
 	// 所有数值在同一测试中集中验证。
@@ -219,6 +221,16 @@ func TestNew(t *testing.T) {
 		},
 		{code: errs.CodeLogClosed, want: errs.ErrLogClosed, text: "log runtime closed"},
 		{code: errs.CodeLogOutputFailed, want: errs.ErrLogOutputFailed, text: "log output failed"},
+		{
+			code: errs.CodeDiagnosticsUnavailable,
+			want: errs.ErrDiagnosticsUnavailable,
+			text: "diagnostics unavailable",
+		},
+		{
+			code: errs.CodeDiagnosticsStateConflict,
+			want: errs.ErrDiagnosticsStateConflict,
+			text: "diagnostics state conflict",
+		},
 	}
 
 	// 同时验证对象身份和外观文本。

@@ -194,11 +194,13 @@ func (handler *inboundHandler) handleRequest(
 ) error {
 	view, err := parseRequest(packet.Bytes())
 	if err != nil {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 		return err
 	}
 	if len(packet.Bytes())-view.payloadOffset >
 		handler.remote.config.MaxPayloadSize {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 		return errs.ErrTransportMessageTooLarge
 	}
@@ -207,6 +209,7 @@ func (handler *inboundHandler) handleRequest(
 		view.methodID,
 	)
 	if err != nil {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 		session.sendError(view.requestID, err)
 		return nil
@@ -214,11 +217,13 @@ func (handler *inboundHandler) handleRequest(
 
 	// 解析完成后丢弃协议头，Dispatcher 只借用原 Buffer 中的业务 payload。
 	if !packet.DiscardPrefix(view.payloadOffset) {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 		return errs.ErrTransportProtocol
 	}
 	delay := view.remainingTimeout
 	if delay <= 0 {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 		session.sendError(view.requestID, errs.ErrDeadlineExceeded)
 		return nil
@@ -233,6 +238,7 @@ func (handler *inboundHandler) handleRequest(
 	deadlines := handler.remote.deadlines
 	handler.remote.mu.Unlock()
 	if deadlines == nil {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		cancel(errs.ErrServiceStopped)
 		packet.Release()
 		session.sendError(view.requestID, errs.ErrServiceStopped)
@@ -240,12 +246,14 @@ func (handler *inboundHandler) handleRequest(
 	}
 	deadlineID, err := deadlines.bind(delay, cancel)
 	if err != nil {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		cancel(err)
 		packet.Release()
 		session.sendError(view.requestID, err)
 		return nil
 	}
 
+	payloadBytes := len(packet.Bytes())
 	err = endpoint.target.DispatchAsync(func(targetCtx context.Context) {
 		defer packet.Release()
 		defer cancel(nil)
@@ -253,6 +261,7 @@ func (handler *inboundHandler) handleRequest(
 
 		// 已在 FIFO 等待阶段超时的请求不再执行业务方法。
 		if cause := context.Cause(deadlineContext); cause != nil {
+			handler.remote.owner.recordInboundFinished(preparedTCP, cause, 0)
 			session.sendError(view.requestID, cause)
 			return
 		}
@@ -270,17 +279,30 @@ func (handler *inboundHandler) handleRequest(
 		)
 		if cause := context.Cause(deadlineContext); cause != nil {
 			releaseBuffer(response)
+			handler.remote.owner.recordInboundFinished(preparedTCP, cause, 0)
 			session.sendError(view.requestID, cause)
 			return
 		}
+		responseBytes := 0
+		if response != nil {
+			responseBytes = len(response.Bytes())
+		}
+		handler.remote.owner.recordInboundFinished(
+			preparedTCP,
+			dispatchErr,
+			responseBytes,
+		)
 		session.sendResponse(view.requestID, response, dispatchErr)
 	})
 	if err != nil {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		deadlines.unbind(deadlineID)
 		cancel(err)
 		packet.Release()
 		session.sendError(view.requestID, err)
+		return nil
 	}
+	handler.remote.owner.recordInboundAccepted(preparedTCP, payloadBytes)
 	return nil
 }
 
@@ -290,11 +312,13 @@ func (handler *inboundHandler) handleNotify(
 ) error {
 	view, err := parseNotify(packet.Bytes())
 	if err != nil {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 		return err
 	}
 	if len(packet.Bytes())-view.payloadOffset >
 		handler.remote.config.MaxPayloadSize {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 		return errs.ErrTransportMessageTooLarge
 	}
@@ -303,13 +327,16 @@ func (handler *inboundHandler) handleNotify(
 		view.methodID,
 	)
 	if err != nil {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 		return nil
 	}
 	if !packet.DiscardPrefix(view.payloadOffset) {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 		return errs.ErrTransportProtocol
 	}
+	payloadBytes := len(packet.Bytes())
 	err = endpoint.target.DispatchAsync(func(targetCtx context.Context) {
 		defer packet.Release()
 		handler.remote.owner.dispatchNotify(
@@ -318,8 +345,10 @@ func (handler *inboundHandler) handleNotify(
 			view.methodID,
 			packet.Bytes(),
 		)
+		handler.remote.owner.recordInboundNotify(preparedTCP, payloadBytes)
 	})
 	if err != nil {
+		handler.remote.owner.recordInboundRejected(preparedTCP)
 		packet.Release()
 	}
 	return nil

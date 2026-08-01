@@ -15,6 +15,10 @@ import (
 //
 // 它不属于 YAML/JSON 配置模型；默认值统一由 Application 处理。
 type Options struct {
+	// Application 是真实 Application 注入的最小进程级诊断外观。
+	//
+	// 独立 Node 测试可以省略；业务 Service 只通过 Service.Application 读取该接口。
+	Application service.ApplicationRuntime
 	// Config 是 Application 一次加载后冻结的完整配置快照。
 	//
 	// 省略时 Node 及其 Service 获得空业务配置，便于独立使用和单元测试。

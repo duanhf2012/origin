@@ -88,6 +88,11 @@ const (
 	CodeLogClosed Code = 7001
 	// CodeLogOutputFailed 表示日志输出创建、刷新或关闭失败。
 	CodeLogOutputFailed Code = 7002
+
+	// CodeDiagnosticsUnavailable 表示诊断 Listener、HTTP Serve 或受控关闭无法完成。
+	CodeDiagnosticsUnavailable Code = 8001
+	// CodeDiagnosticsStateConflict 表示当前 Application 或 Listener 状态不允许该诊断操作。
+	CodeDiagnosticsStateConflict Code = 8002
 )
 
 // codeText 返回已经登记的稳定英文错误文本。
@@ -172,6 +177,10 @@ func codeText(code Code) string {
 		return "log runtime closed"
 	case CodeLogOutputFailed:
 		return "log output failed"
+	case CodeDiagnosticsUnavailable:
+		return "diagnostics unavailable"
+	case CodeDiagnosticsStateConflict:
+		return "diagnostics state conflict"
 	default:
 		// 空字符串是“未登记”的内部标记，不作为最终错误文本对外返回。
 		return ""

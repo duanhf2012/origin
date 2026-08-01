@@ -42,6 +42,8 @@ type Node struct {
 	config originconfig.View
 	// schedulerConfig 是当前 Node 为每个 ServiceScheduler 提供的冻结默认策略。
 	schedulerConfig service.SchedulerConfig
+	// application 是 Application 注入的受限进程外观，装配后保持只读。
+	application service.ApplicationRuntime
 
 	// state 为查询提供无锁快照，生命周期写入由单一控制路径串行执行。
 	state atomic.Uint32
@@ -191,6 +193,7 @@ func New(
 		logger:          logger.With(originlog.String("node_id", config.ID)),
 		config:          options.Config.Root(),
 		schedulerConfig: config.Scheduler,
+		application:     options.Application,
 		services:        make([]*serviceEntry, 0, len(bindings)),
 		byName:          make(map[string]*serviceEntry, len(bindings)),
 		started:         make([]*serviceEntry, 0, len(bindings)),
@@ -1104,6 +1107,14 @@ func (runtime *serviceRuntime) ReportFailure(cause error) {
 // RPC 实现 service.Runtime，返回当前 Node 独占且启动后只读的 RPC Runtime。
 func (runtime *serviceRuntime) RPC() any {
 	return runtime.node.rpcRuntime
+}
+
+// Application 返回 Application 在 Node 装配期注入的受限进程外观。
+func (runtime *serviceRuntime) Application() service.ApplicationRuntime {
+	if runtime == nil || runtime.node == nil {
+		return nil
+	}
+	return runtime.node.application
 }
 
 // lifecycleContext 允许 Application 在不依赖具体错误类型时提取结构化失败位置。

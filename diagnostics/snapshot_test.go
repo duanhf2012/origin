@@ -1,0 +1,112 @@
+package diagnostics_test
+
+import (
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/duanhf2012/origin/v3/diagnostics"
+	"github.com/duanhf2012/origin/v3/errs"
+)
+
+// staticSource 只用于编译期证明业务监控适配器可以依赖最小 Source，而不需要 Application。
+type staticSource struct {
+	snapshot diagnostics.Snapshot
+}
+
+func (source staticSource) Diagnostics() diagnostics.Snapshot {
+	return source.snapshot
+}
+
+var _ diagnostics.Source = staticSource{}
+
+// TestSnapshotJSONSchema 检查 JSON 消费方依赖的字段名、时间格式和带单位 Duration。
+// 若 Duration 退回纳秒整数、字段改名或错误码丢失，本测试必须失败。
+func TestSnapshotJSONSchema(t *testing.T) {
+	collectedAt := time.Date(2026, 8, 1, 1, 2, 3, 456789000, time.FixedZone("CST", 8*60*60))
+	snapshot := diagnostics.Snapshot{
+		SchemaVersion: 1,
+		CollectedAt:   collectedAt,
+		StartedAt:     collectedAt.Add(-time.Minute),
+		CollectCost:   diagnostics.Duration(1500 * time.Microsecond),
+		Application: diagnostics.ApplicationSnapshot{
+			Name:  "player",
+			State: "running",
+			DiagnosticsServer: diagnostics.ServerSnapshot{
+				State:     "serving",
+				Address:   "127.0.0.1:6061",
+				ErrorCode: errs.CodeOK,
+			},
+		},
+		Runtime: diagnostics.RuntimeSnapshot{
+			Goroutines:   12,
+			GOMAXPROCS:   8,
+			GCPauseTotal: diagnostics.Duration(2 * time.Millisecond),
+		},
+		Nodes: []diagnostics.NodeSnapshot{{
+			NodeID: "player-1",
+			State:  "ready",
+			Services: []diagnostics.ServiceSnapshot{{
+				ServiceName: "PlayerService",
+				State:       "running",
+				ErrorCode:   errs.CodeOK,
+				Timer: diagnostics.TimerSnapshot{
+					LastReadyDelay: diagnostics.Duration(3 * time.Millisecond),
+				},
+			}},
+		}},
+	}
+
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("json.Marshal(snapshot) failed: %v", err)
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatalf("json.Unmarshal(snapshot) failed: %v", err)
+	}
+	if got := document["schema_version"]; got != float64(1) {
+		t.Fatalf("schema_version = %#v, want 1", got)
+	}
+	if got := document["collected_at"]; got != "2026-08-01T01:02:03.456789+08:00" {
+		t.Fatalf("collected_at = %#v", got)
+	}
+	if got := document["collect_cost"]; got != "1.5ms" {
+		t.Fatalf("collect_cost = %#v, want 1.5ms", got)
+	}
+
+	runtimeSnapshot := document["runtime"].(map[string]any)
+	if got := runtimeSnapshot["gc_pause_total"]; got != "2ms" {
+		t.Fatalf("gc_pause_total = %#v, want 2ms", got)
+	}
+	nodeSnapshot := document["nodes"].([]any)[0].(map[string]any)
+	serviceSnapshot := nodeSnapshot["services"].([]any)[0].(map[string]any)
+	timerSnapshot := serviceSnapshot["timer"].(map[string]any)
+	if got := timerSnapshot["last_ready_delay"]; got != "3ms" {
+		t.Fatalf("last_ready_delay = %#v, want 3ms", got)
+	}
+}
+
+// TestDurationJSONZeroAndNegative 固定零值和理论负值的 JSON 语义；诊断 DTO 不伪造单位。
+func TestDurationJSONZeroAndNegative(t *testing.T) {
+	tests := []struct {
+		name  string
+		value diagnostics.Duration
+		want  string
+	}{
+		{name: "zero", value: 0, want: `"0s"`},
+		{name: "negative", value: diagnostics.Duration(-time.Millisecond), want: `"-1ms"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, err := json.Marshal(test.value)
+			if err != nil {
+				t.Fatalf("json.Marshal(Duration) failed: %v", err)
+			}
+			if string(encoded) != test.want {
+				t.Fatalf("json = %s, want %s", encoded, test.want)
+			}
+		})
+	}
+}
