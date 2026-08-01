@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	originconfig "github.com/duanhf2012/origin/v3/config"
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
@@ -182,31 +181,31 @@ func isNilModule(target IModule) bool {
 	}
 }
 
-// Config 返回所属 Service 的有效业务配置。
-func (module *Module) Config() originconfig.View {
-	owner := module.ownerService()
-	if owner == nil {
-		return originconfig.View{}
-	}
-	return owner.Config()
-}
-
-// DecodeConfig 委托所属 Service 宽松解码有效业务配置。
-func (module *Module) DecodeConfig(destination any) error {
+// GetConfig 委托所属 Service 读取根配置的显式路径。
+func (module *Module) GetConfig(path string, destination any) error {
 	owner := module.ownerService()
 	if owner == nil {
 		return errs.ErrInvalidArgument
 	}
-	return owner.DecodeConfig(destination)
+	return owner.GetConfig(path, destination)
 }
 
-// DecodeConfigAt 委托所属 Service 解码显式相对配置路径。
-func (module *Module) DecodeConfigAt(path string, destination any) error {
+// GetServiceConfig 委托所属 Service 读取有效业务配置的显式相对路径。
+func (module *Module) GetServiceConfig(path string, destination any) error {
 	owner := module.ownerService()
 	if owner == nil {
 		return errs.ErrInvalidArgument
 	}
-	return owner.DecodeConfigAt(path, destination)
+	return owner.GetServiceConfig(path, destination)
+}
+
+// ParseServiceConfig 委托所属 Service 宽松解析完整有效业务配置。
+func (module *Module) ParseServiceConfig(destination any) error {
+	owner := module.ownerService()
+	if owner == nil {
+		return errs.ErrInvalidArgument
+	}
+	return owner.ParseServiceConfig(destination)
 }
 
 // DispatchAsync 把根任务投递到所属 Service。

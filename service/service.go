@@ -17,6 +17,7 @@ import (
 // 保证只有嵌入 Origin Service 的类型才能进入框架装配。
 type IService interface {
 	ITimer
+	IServiceConfig
 
 	OnInit() error
 	OnStart(ctx context.Context) error

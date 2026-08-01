@@ -136,7 +136,7 @@ func TestModuleDelegatesConfigAndSafeBoundary(t *testing.T) {
 		t.Fatal("Module.RunSafe() 未返回 panic 错误")
 	}
 	configured := struct{ Value int }{Value: 7}
-	if err := module.DecodeConfig(&configured); err != nil || configured.Value != 7 {
-		t.Fatalf("Module.DecodeConfig() = %+v, %v", configured, err)
+	if err := module.ParseServiceConfig(&configured); err != nil || configured.Value != 7 {
+		t.Fatalf("Module.ParseServiceConfig() = %+v, %v", configured, err)
 	}
 }

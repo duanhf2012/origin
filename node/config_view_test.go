@@ -51,8 +51,8 @@ node_services:
 	configured := struct {
 		Value string `config:"value"`
 	}{}
-	if err := target.DecodeConfig(&configured); err != nil {
-		t.Fatalf("DecodeConfig() error = %v", err)
+	if err := target.ParseServiceConfig(&configured); err != nil {
+		t.Fatalf("ParseServiceConfig() error = %v", err)
 	}
 	if configured.Value != "node" {
 		t.Fatalf("Value = %q, want node", configured.Value)

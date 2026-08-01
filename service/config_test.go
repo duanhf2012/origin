@@ -56,8 +56,8 @@ services:
 	configured := struct {
 		Timeout int `config:"timeout"`
 	}{Timeout: 3}
-	if err := target.DecodeConfig(&configured); err != nil {
-		t.Fatalf("DecodeConfig() error = %v", err)
+	if err := target.ParseServiceConfig(&configured); err != nil {
+		t.Fatalf("ParseServiceConfig() error = %v", err)
 	}
 	if configured.Timeout != 9 {
 		t.Fatalf("Timeout = %d", configured.Timeout)
@@ -65,14 +65,29 @@ services:
 	nested := struct {
 		Enabled bool `config:"enabled"`
 	}{}
-	if err := target.DecodeConfigAt("nested", &nested); err != nil {
-		t.Fatalf("DecodeConfigAt() error = %v", err)
+	if err := target.GetServiceConfig("nested", &nested); err != nil {
+		t.Fatalf("GetServiceConfig() error = %v", err)
 	}
 	if !nested.Enabled {
 		t.Fatal("nested.Enabled = false")
 	}
-	if err := target.DecodeConfigAt("missing", &nested); !errors.Is(err, errs.ErrConfigNotFound) {
-		t.Fatalf("missing DecodeConfigAt() error = %v", err)
+	if err := target.GetServiceConfig("missing", &nested); !errors.Is(err, errs.ErrConfigNotFound) {
+		t.Fatalf("missing GetServiceConfig() error = %v", err)
+	}
+	var rootTimeout int
+	if err := target.GetConfig("services.ActualPlayer.timeout", &rootTimeout); err != nil {
+		t.Fatalf("GetConfig() error = %v", err)
+	}
+	if rootTimeout != 9 {
+		t.Fatalf("rootTimeout = %d", rootTimeout)
+	}
+	if err := target.GetConfig("", &rootTimeout); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("empty GetConfig() error = %v", err)
+	}
+	for _, path := range []string{"services..timeout", "services.*", "services[0]", `services\timeout`} {
+		if err := target.GetConfig(path, &rootTimeout); !errors.Is(err, errs.ErrInvalidArgument) {
+			t.Fatalf("GetConfig(%q) error = %v", path, err)
+		}
 	}
 }
 
@@ -84,13 +99,31 @@ func TestServiceMissingBusinessConfigKeepsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	configured := struct{ Timeout int }{Timeout: 3}
-	if err := target.DecodeConfig(&configured); err != nil {
-		t.Fatalf("DecodeConfig() error = %v", err)
+	if err := target.ParseServiceConfig(&configured); err != nil {
+		t.Fatalf("ParseServiceConfig() error = %v", err)
 	}
 	if configured.Timeout != 3 {
 		t.Fatalf("Timeout = %d", configured.Timeout)
 	}
-	if err := target.DecodeConfigAt("nested", &configured); !errors.Is(err, errs.ErrConfigNotFound) {
-		t.Fatalf("DecodeConfigAt() error = %v", err)
+	if err := target.GetServiceConfig("nested", &configured); !errors.Is(err, errs.ErrConfigNotFound) {
+		t.Fatalf("GetServiceConfig() error = %v", err)
+	}
+}
+
+func TestServiceBusinessConfigRejectedAfterRelease(t *testing.T) {
+	runtime := &configTestRuntime{
+		testRuntime: &testRuntime{nodeID: "player-1", name: "ActualPlayer", state: StateStopped},
+	}
+	target := &Service{}
+	if err := BindRuntime(target, runtime); err != nil {
+		t.Fatal(err)
+	}
+	var configured struct{}
+	if err := target.ParseServiceConfig(&configured); !errors.Is(err, errs.ErrServiceStopped) {
+		t.Fatalf("ParseServiceConfig() error = %v", err)
+	}
+	runtime.state = StateFailed
+	if err := target.GetConfig("server.value", &configured); !errors.Is(err, errs.ErrServiceFailed) {
+		t.Fatalf("GetConfig() error = %v", err)
 	}
 }
