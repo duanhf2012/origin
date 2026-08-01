@@ -98,6 +98,7 @@ func (candidates RouteCandidates) candidate(
 func (client Client) OnNode(nodeID string) Client {
 	client.target = ToServiceOnNode(nodeID, client.target.serviceName)
 	client.prepared = preparedTarget{}
+	client.broadcast = nil
 	return client
 }
 
@@ -108,6 +109,7 @@ func (client Client) OnNode(nodeID string) Client {
 func (client Client) IncludeRetired() Client {
 	client.includeRetired = true
 	client.prepared = preparedTarget{}
+	client.broadcast = nil
 	return client
 }
 
@@ -115,6 +117,7 @@ func (client Client) IncludeRetired() Client {
 func (client Client) RouteRoundRobin() Client {
 	client.route = routeSpec{mode: routeRoundRobin}
 	client.prepared = preparedTarget{}
+	client.broadcast = nil
 	return client
 }
 
@@ -122,6 +125,7 @@ func (client Client) RouteRoundRobin() Client {
 func (client Client) RouteRandom() Client {
 	client.route = routeSpec{mode: routeRandom}
 	client.prepared = preparedTarget{}
+	client.broadcast = nil
 	return client
 }
 
@@ -134,6 +138,7 @@ func (client Client) Route(key any) Client {
 		err:  err,
 	}
 	client.prepared = preparedTarget{}
+	client.broadcast = nil
 	return client
 }
 
@@ -144,6 +149,7 @@ func (client Client) RouteBy(selector RouteSelector) Client {
 		selector: selector,
 	}
 	client.prepared = preparedTarget{}
+	client.broadcast = nil
 	return client
 }
 

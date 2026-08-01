@@ -22,6 +22,7 @@ type Client struct {
 	route          routeSpec
 	includeRetired bool
 	prepared       preparedTarget
+	broadcast      *broadcastPlan
 }
 
 // NewGeneratedClient 创建供 origingen 生成代码保存的底层客户端。
@@ -54,6 +55,9 @@ func NewGeneratedClient(
 func (client Client) AllocateRequest(size int, kind CallKind) (*Buffer, error) {
 	if err := client.validate(); err != nil {
 		return nil, err
+	}
+	if client.broadcast != nil {
+		return client.runtime.AllocateBroadcastRequest(client.broadcast, size, kind)
 	}
 	if client.prepared.transport != preparedInvalid {
 		return client.runtime.AllocatePreparedRequest(
@@ -119,6 +123,29 @@ func (client Client) PrepareNotify(
 		return Client{}, err
 	}
 	client.prepared = prepared
+	return client, nil
+}
+
+// PrepareBroadcast 在任何 Sizer、编码和 Buffer 申请前固定一次完整广播目标计划。
+//
+// 唯一可发送目标复用 M19 prepared target；多目标只保存一次不可变视图和常数个计数，
+// 提交阶段不会重新读取发现快照或改选连接。
+func (client Client) PrepareBroadcast(
+	ctx context.Context,
+	methodID MethodID,
+) (Client, error) {
+	if ctx == nil || methodID == 0 {
+		return Client{}, errs.ErrInvalidArgument
+	}
+	if err := client.validate(); err != nil {
+		return Client{}, err
+	}
+	prepared, plan, err := client.runtime.prepareBroadcast(ctx, client, methodID)
+	if err != nil {
+		return Client{}, err
+	}
+	client.prepared = prepared
+	client.broadcast = plan
 	return client, nil
 }
 
@@ -348,7 +375,29 @@ func (client Client) Broadcast(
 	methodID MethodID,
 	request *Buffer,
 ) error {
-	return client.Notify(ctx, methodID, request)
+	if client.broadcast == nil {
+		return client.Notify(ctx, methodID, request)
+	}
+	if ctx == nil || request == nil || methodID == 0 ||
+		client.broadcast.methodID != methodID {
+		releaseBuffer(request)
+		return errs.ErrInvalidArgument
+	}
+	if err := client.validate(); err != nil {
+		request.Release()
+		return err
+	}
+	// 编码完成后、首次目标提交前取消仍是整个调用错误，必须保证零目标投递。
+	if cause := context.Cause(ctx); cause != nil {
+		request.Release()
+		return contextError(cause)
+	}
+	return client.runtime.submitBroadcast(
+		ctx,
+		client,
+		client.broadcast,
+		request,
+	)
 }
 
 // validate 检查构造冷路径是否建立了完整、可调用的客户端。

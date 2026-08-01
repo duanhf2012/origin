@@ -434,6 +434,17 @@ func (runtime *Runtime) maxMessageSize() int {
 	return DefaultMaxPayloadSize
 }
 
+// maxBroadcastSize 返回当前 Node 冻结的一次广播放大字节上限。
+func (runtime *Runtime) maxBroadcastSize() int {
+	if runtime != nil && runtime.remote != nil {
+		return runtime.remote.config.MaxBroadcastSize
+	}
+	if runtime != nil && runtime.nats != nil {
+		return runtime.nats.config.MaxBroadcastSize
+	}
+	return DefaultMaxBroadcastSize
+}
+
 // AllocateRequest 为生成代码取得准确 payload，并只为远端目标保留对应调用头空间。
 func (runtime *Runtime) AllocateRequest(
 	target Target,
@@ -512,6 +523,37 @@ func (runtime *Runtime) AllocatePreparedRequest(
 		return nil, errs.ErrRPCEncodeFailed
 	}
 	return runtime.pool.AcquireWithHeadroom(size, headroom), nil
+}
+
+// AllocateBroadcastRequest 在编码前校验总放大容量，并按原始 Buffer 保留目标的精确
+// headroom 分配唯一规范 payload。
+func (runtime *Runtime) AllocateBroadcastRequest(
+	plan *broadcastPlan,
+	size int,
+	kind CallKind,
+) (*Buffer, error) {
+	if runtime == nil || runtime.pool == nil || plan == nil ||
+		plan.set.runtime != runtime || plan.methodID == 0 ||
+		plan.intentCount <= 1 || plan.sendableCount <= 0 ||
+		plan.lastSendableRaw < 0 || kind != CallNotify || size < 0 ||
+		size > runtime.maxMessageSize() {
+		return nil, errs.ErrRPCEncodeFailed
+	}
+
+	// 先用除法检查乘法上界，既避免 int64 溢出，也确保超限路径尚未申请任何 Buffer。
+	limit := int64(runtime.maxBroadcastSize())
+	if limit <= 0 || int64(size) > limit/int64(plan.intentCount) {
+		return nil, errs.ErrTransportOverloaded
+	}
+	candidate, exists := broadcastSendableAt(&plan.set, plan.lastSendableRaw)
+	if !exists {
+		return nil, errs.ErrTransportUnavailable
+	}
+	return runtime.AllocatePreparedRequest(
+		preparedTargetFromCandidate(candidate, plan.methodID, CallNotify),
+		size,
+		CallNotify,
+	)
 }
 
 // resolve 把逻辑 Target 解析为当前 Node 内唯一端点，并校验完整契约。
