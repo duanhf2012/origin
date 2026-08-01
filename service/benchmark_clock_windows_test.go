@@ -3,6 +3,7 @@
 package service
 
 import (
+	"sort"
 	"time"
 	_ "unsafe"
 )
@@ -32,7 +33,7 @@ var benchmarkCPUFrequency = calibrateBenchmarkCPUFrequency()
 type benchmarkLatencyTimestamp int64
 
 // benchmarkLatencyNow 读取 Go Runtime 的低开销 CPU Tick；amd64 使用已序列化的
-// RDTSCP/RDTSC。M22 只在受控构建机保存该基线，异常迁移由零值计数和时钟开销门禁拒绝。
+// RDTSCP/RDTSC。跨 CPU 不单调的极少数样本由 benchmarkLatencyElapsed 归零并显式统计。
 func benchmarkLatencyNow() benchmarkLatencyTimestamp {
 	return benchmarkLatencyTimestamp(benchmarkCPUTicks())
 }
@@ -53,25 +54,45 @@ func benchmarkLatencyFrequency() int64 {
 	return benchmarkCPUFrequency
 }
 
-// calibrateBenchmarkCPUFrequency 用一次 100ms 的 Windows 性能计数器区间校准硬件 Tick 频率。
-// 慢 syscall 只在测试进程初始化时执行两次，不进入任何事件样本。
+// calibrateBenchmarkCPUFrequency 用多个 20ms 区间校准硬件 Tick 频率。runtime.cputicks 不
+// 保证跨 CPU 单调，因此单个迁核样本只能被丢弃；五个有效样本的中位数还能隔离正向偏移。
+// QPC 只在测试进程初始化时使用，不进入事件基准的逐次采样热路径。
 func calibrateBenchmarkCPUFrequency() int64 {
 	performanceFrequency := benchmarkQueryPerformanceFrequency()
 	if performanceFrequency <= 0 {
 		panic("QueryPerformanceFrequency 返回无效频率")
 	}
-	performanceStarted := benchmarkQueryPerformanceCounter()
-	ticksStarted := benchmarkCPUTicks()
-	time.Sleep(100 * time.Millisecond)
-	ticksElapsed := benchmarkCPUTicks() - ticksStarted
-	performanceElapsed := benchmarkQueryPerformanceCounter() - performanceStarted
-	if ticksElapsed <= 0 || performanceElapsed <= 0 ||
-		ticksElapsed > (1<<63-1)/performanceFrequency {
+	const (
+		requiredSamples = 5
+		maximumAttempts = 15
+		sampleDuration  = 20 * time.Millisecond
+	)
+	frequencies := make([]int64, 0, requiredSamples)
+	for attempt := 0; attempt < maximumAttempts && len(frequencies) < requiredSamples; attempt++ {
+		performanceStarted := benchmarkQueryPerformanceCounter()
+		ticksStarted := benchmarkCPUTicks()
+		time.Sleep(sampleDuration)
+		ticksElapsed := benchmarkCPUTicks() - ticksStarted
+		performanceElapsed := benchmarkQueryPerformanceCounter() - performanceStarted
+		if ticksElapsed <= 0 || performanceElapsed <= 0 ||
+			ticksElapsed > (1<<63-1)/performanceFrequency {
+			continue
+		}
+		frequency := ticksElapsed * performanceFrequency / performanceElapsed
+		if frequency > 0 {
+			frequencies = append(frequencies, frequency)
+		}
+	}
+	return selectBenchmarkCPUFrequency(frequencies)
+}
+
+// selectBenchmarkCPUFrequency 要求至少三个有效区间，并以中位数隔离调度迁核导致的离群值。
+func selectBenchmarkCPUFrequency(frequencies []int64) int64 {
+	if len(frequencies) < 3 {
 		panic("CPU Tick 频率校准失败")
 	}
-	frequency := ticksElapsed * performanceFrequency / performanceElapsed
-	if frequency <= 0 {
-		panic("CPU Tick 频率校准结果无效")
-	}
-	return frequency
+	sort.Slice(frequencies, func(left, right int) bool {
+		return frequencies[left] < frequencies[right]
+	})
+	return frequencies[len(frequencies)/2]
 }
