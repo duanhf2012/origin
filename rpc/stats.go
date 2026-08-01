@@ -66,9 +66,16 @@ func (runtime *Runtime) Stats() Stats {
 	// 累计，因此响应解码失败不会被误报成目标执行失败。
 	local.InboundAccepted = local.OutboundAccepted
 	local.InboundRejected = local.OutboundRejected
-	finished := local.InboundFailed + local.InboundTimeout + local.Pending
-	if local.InboundAccepted >= finished {
-		local.InboundCompleted = local.InboundAccepted - finished
+	if local.OutboundAccepted != 0 && local.PendingHighWater == 0 {
+		local.PendingHighWater = 1
+	}
+	outboundUnfinished := local.OutboundFailed + local.OutboundTimeout + local.Pending
+	if local.OutboundAccepted >= outboundUnfinished {
+		local.OutboundCompleted = local.OutboundAccepted - outboundUnfinished
+	}
+	inboundUnfinished := local.InboundFailed + local.InboundTimeout + local.Pending
+	if local.InboundAccepted >= inboundUnfinished {
+		local.InboundCompleted = local.InboundAccepted - inboundUnfinished
 	}
 	local.PayloadReceivedBytes = local.PayloadSentBytes
 	return Stats{
@@ -127,7 +134,11 @@ func (runtime *Runtime) recordOutboundAccepted(
 	}
 	counters.outboundAccepted.Add(1)
 	pending := counters.pending.Add(1)
-	updateHighWater(&counters.pendingHighWater, pending)
+	// Local 的顺序 Await 是最敏感路径。pending=1 时快照可由 accepted 精确派生首个水位，
+	// 只有真实并发才需要触碰 high-water 原子；远端仍保持统一直接更新。
+	if transport != preparedLocal || pending > 1 {
+		updateHighWater(&counters.pendingHighWater, pending)
+	}
 }
 
 func (runtime *Runtime) recordOutboundFinished(
@@ -153,12 +164,23 @@ func (runtime *Runtime) recordOutboundFinished(
 			counters.payloadReceivedBytes.Add(uint64(responseBytes))
 		}
 	}
-	recordResult(
-		result,
-		&counters.outboundCompleted,
-		&counters.outboundFailed,
-		&counters.outboundTimeout,
-	)
+	if transport == preparedLocal {
+		if result != nil {
+			recordResult(
+				result,
+				&counters.outboundCompleted,
+				&counters.outboundFailed,
+				&counters.outboundTimeout,
+			)
+		}
+	} else {
+		recordResult(
+			result,
+			&counters.outboundCompleted,
+			&counters.outboundFailed,
+			&counters.outboundTimeout,
+		)
+	}
 }
 
 func (runtime *Runtime) recordOutboundRejected(transport preparedTransport) {
@@ -176,7 +198,9 @@ func (runtime *Runtime) recordOutboundNotify(
 		return
 	}
 	counters.outboundAccepted.Add(1)
-	counters.outboundCompleted.Add(1)
+	if transport != preparedLocal {
+		counters.outboundCompleted.Add(1)
+	}
 	if payloadBytes > 0 {
 		counters.payloadSentBytes.Add(uint64(payloadBytes))
 	}
