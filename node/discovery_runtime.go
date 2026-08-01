@@ -381,7 +381,7 @@ func (runtime *discoveryRuntime) addListener(
 	if runtime == nil || owner == nil || isNilListener(listener) {
 		return 0, errs.ErrInvalidArgument
 	}
-	state := service.State(owner.state.Load())
+	state := owner.loadState().State
 	switch state {
 	case service.StateInitializing, service.StateInitialized,
 		service.StateStarting, service.StateRunning:

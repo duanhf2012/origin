@@ -96,8 +96,7 @@ type serviceEntry struct {
 	instance            service.IService
 	config              originconfig.View
 	logger              originlog.Logger
-	state               atomic.Uint32
-	stateEnteredAt      atomic.Int64
+	state               atomic.Pointer[serviceStateSnapshot]
 	startError          bool
 	contractID          uint64
 	contractFingerprint [32]byte
@@ -105,6 +104,11 @@ type serviceEntry struct {
 	discoveryRun func(context.Context)
 	// failure 只保存第一个无法恢复根因，生命周期结束后仍保留供本地诊断。
 	failure atomic.Pointer[serviceFailureSnapshot]
+}
+
+type serviceStateSnapshot struct {
+	State     service.State
+	EnteredAt time.Time
 }
 
 // serviceRuntime 把 Service 的只读查询限制在所属 Node 和当前实例。
@@ -343,8 +347,21 @@ func New(
 }
 
 func (entry *serviceEntry) setState(state service.State) {
-	entry.state.Store(uint32(state))
-	entry.stateEnteredAt.Store(time.Now().UnixNano())
+	entry.state.Store(&serviceStateSnapshot{
+		State:     state,
+		EnteredAt: time.Now(),
+	})
+}
+
+func (entry *serviceEntry) loadState() serviceStateSnapshot {
+	if entry == nil {
+		return serviceStateSnapshot{}
+	}
+	snapshot := entry.state.Load()
+	if snapshot == nil {
+		return serviceStateSnapshot{State: service.StateCreated}
+	}
+	return *snapshot
 }
 
 // selectServiceConfig 只按实际 ServiceName 选择一块完整业务配置。
@@ -847,7 +864,7 @@ func (node *Node) publishDiscoveryContext(ctx context.Context) error {
 	}
 	services := make([]internaldiscovery.RawService, 0, len(node.services))
 	for _, entry := range node.services {
-		state := service.State(entry.state.Load())
+		state := entry.loadState().State
 		if entry.private ||
 			state == service.StateFailed ||
 			state == service.StateStopping ||
@@ -1015,7 +1032,7 @@ func (runtime *serviceRuntime) ServiceName() string {
 
 // State 实现 service.Runtime，并直接读取 Entry 原子状态。
 func (runtime *serviceRuntime) State() service.State {
-	return service.State(runtime.entry.state.Load())
+	return runtime.entry.loadState().State
 }
 
 // Logger 实现 service.Runtime。

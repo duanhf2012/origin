@@ -11,6 +11,7 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -134,6 +135,45 @@ func TestNodeRetireReverseResumeForwardAndPublishState(t *testing.T) {
 	}
 }
 
+func TestReadyDynamicPublicationUsesSingleCoordinator(t *testing.T) {
+	var changes []string
+	target := &retirementService{label: "Only", changes: &changes}
+	current := newRetirementNode(t, internaldiscovery.NewSource(), target)
+
+	current.discoveryPublication.mu.Lock()
+	before := current.discoveryPublication.desired
+	current.discoveryPublication.mu.Unlock()
+	current.handleTransportEvent(rpc.TransportEvent{
+		Kind:  rpc.TransportKindTCP,
+		State: rpc.TransportStateReady,
+	})
+
+	current.discoveryPublication.mu.Lock()
+	after := current.discoveryPublication.desired
+	current.discoveryPublication.mu.Unlock()
+	if after != before+1 {
+		t.Fatalf("dynamic generation = %d, want %d", after, before+1)
+	}
+}
+
+func TestServiceEntryPublishesStateAndEnteredAtAsOneSnapshot(t *testing.T) {
+	entry := &serviceEntry{}
+	entry.setState(service.StateRunning)
+	before := entry.loadState()
+	entry.setState(service.StateRetired)
+	after := entry.loadState()
+
+	if before.State != service.StateRunning || before.EnteredAt.IsZero() {
+		t.Fatalf("before = %+v", before)
+	}
+	if after.State != service.StateRetired || after.EnteredAt.IsZero() {
+		t.Fatalf("after = %+v", after)
+	}
+	if after.EnteredAt.Before(before.EnteredAt) {
+		t.Fatalf("entered time moved backwards: before=%v after=%v", before.EnteredAt, after.EnteredAt)
+	}
+}
+
 func TestServiceResumeInsideTaskDoesNotDeadlock(t *testing.T) {
 	var changes []string
 	target := &retirementService{label: "Only", changes: &changes, events: make(chan service.ServiceStateChanged, 4)}
@@ -169,6 +209,7 @@ type failingPublicationProvider struct {
 	context publicprovider.Context
 	mu      sync.Mutex
 	fail    bool
+	panic   bool
 }
 
 type blockingPublicationProvider struct {
@@ -177,6 +218,48 @@ type blockingPublicationProvider struct {
 	calls   int
 	started chan struct{}
 }
+
+type coalescingPublicationProvider struct {
+	context publicprovider.Context
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (provider *coalescingPublicationProvider) Start(context.Context) error {
+	if err := provider.context.Host.SetTTL(3 * time.Second); err != nil {
+		return err
+	}
+	if err := provider.context.Host.ReplaceSnapshot(publicprovider.Snapshot{}); err != nil {
+		return err
+	}
+	provider.context.Host.Report(publicprovider.Report{State: publicprovider.StateReady})
+	return nil
+}
+
+func (provider *coalescingPublicationProvider) Publish(
+	ctx context.Context,
+	_ publicprovider.Node,
+) error {
+	provider.mu.Lock()
+	provider.calls++
+	call := provider.calls
+	provider.mu.Unlock()
+	if call != 2 {
+		return nil
+	}
+	close(provider.started)
+	select {
+	case <-provider.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (*coalescingPublicationProvider) Withdraw(context.Context) error { return nil }
+func (*coalescingPublicationProvider) Close(context.Context) error    { return nil }
 
 func (provider *blockingPublicationProvider) Start(context.Context) error {
 	if err := provider.context.Host.SetTTL(3 * time.Second); err != nil {
@@ -225,11 +308,138 @@ func (provider *failingPublicationProvider) Start(context.Context) error {
 func (provider *failingPublicationProvider) Publish(context.Context, publicprovider.Node) error {
 	provider.mu.Lock()
 	fail := provider.fail
+	panicPublish := provider.panic
 	provider.mu.Unlock()
+	if panicPublish {
+		panic("publication panic")
+	}
 	if fail {
 		return errs.ErrDiscoveryUnavailable
 	}
 	return nil
+}
+
+func TestProviderPublishPanicIsIsolatedAndLockRemainsUsable(t *testing.T) {
+	var changes []string
+	target := &retirementService{label: "Only", changes: &changes}
+	var provider *failingPublicationProvider
+	current, err := New(
+		Config{ID: "publication-panic", Services: []string{"Only"}},
+		[]ServiceBinding{{Name: "Only", Template: "Only", Service: target}},
+		originlog.NewNop(),
+		Options{
+			MaxTimersPerNode: 64,
+			TimerLocation:    time.UTC,
+			DiscoveryKind:    "panic",
+			DiscoveryFactory: func(context publicprovider.Context) (publicprovider.Provider, error) {
+				provider = &failingPublicationProvider{context: context}
+				return provider, nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = current.Stop(context.Background()) })
+
+	provider.mu.Lock()
+	provider.panic = true
+	provider.mu.Unlock()
+	if err := target.Retire(t.Context()); !errors.Is(err, errs.ErrDiscoveryUnavailable) {
+		t.Fatalf("Retire() panic error = %v", err)
+	}
+	provider.mu.Lock()
+	provider.panic = false
+	provider.mu.Unlock()
+	resumeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := target.Resume(resumeCtx); err != nil {
+		t.Fatalf("Resume() after panic error = %v", err)
+	}
+}
+
+func TestDiscoveryPublicationCoalescesConcurrentGenerationsAndCanceledWaiter(t *testing.T) {
+	var changes []string
+	target := &retirementService{label: "Only", changes: &changes}
+	var provider *coalescingPublicationProvider
+	current, err := New(
+		Config{ID: "publication-coalescing", Services: []string{"Only"}},
+		[]ServiceBinding{{Name: "Only", Template: "Only", Service: target}},
+		originlog.NewNop(),
+		Options{
+			MaxTimersPerNode: 64,
+			TimerLocation:    time.UTC,
+			DiscoveryKind:    "coalescing",
+			DiscoveryFactory: func(context publicprovider.Context) (publicprovider.Provider, error) {
+				provider = &coalescingPublicationProvider{
+					context: context,
+					started: make(chan struct{}),
+					release: make(chan struct{}),
+				}
+				return provider, nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = current.Stop(context.Background()) })
+
+	retireResult := make(chan error, 1)
+	go func() { retireResult <- target.Retire(context.Background()) }()
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("first dynamic publication did not start")
+	}
+
+	const waiters = 32
+	results := make(chan error, waiters)
+	for range waiters {
+		go func() {
+			results <- current.requestDiscoveryPublication(context.Background())
+		}()
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := current.requestDiscoveryPublication(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled publication request error = %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		current.discoveryPublication.mu.Lock()
+		desired := current.discoveryPublication.desired
+		current.discoveryPublication.mu.Unlock()
+		if desired == waiters+2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("desired generation = %d, want %d", desired, waiters+2)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(provider.release)
+	if err := <-retireResult; err != nil {
+		t.Fatalf("Retire() error = %v", err)
+	}
+	for range waiters {
+		if err := <-results; err != nil {
+			t.Fatalf("coalesced request error = %v", err)
+		}
+	}
+	provider.mu.Lock()
+	calls := provider.calls
+	provider.mu.Unlock()
+	if calls != 3 {
+		t.Fatalf("Provider.Publish calls = %d, want startup + 2 coalesced publishes", calls)
+	}
 }
 
 func (*failingPublicationProvider) Withdraw(context.Context) error { return nil }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
+	originlog "github.com/duanhf2012/origin/v3/log"
 )
 
 // discoveryPublication 是每个 Node 唯一的完整发现快照发布者。
@@ -57,16 +58,10 @@ func (publication *discoveryPublication) request(ctx context.Context) error {
 	if ctx == nil {
 		return errs.ErrInvalidArgument
 	}
-	publication.startPublisher()
-	publication.mu.Lock()
-	if publication.closed {
-		publication.mu.Unlock()
-		return errs.ErrServiceStopping
+	target, err := publication.enqueue()
+	if err != nil {
+		return err
 	}
-	publication.desired++
-	target := publication.desired
-	publication.mu.Unlock()
-	publication.signal()
 
 	for {
 		publication.mu.Lock()
@@ -136,11 +131,42 @@ func (publication *discoveryPublication) run() {
 			publication.changed = make(chan struct{})
 			more := publication.desired > target
 			publication.mu.Unlock()
+			publication.node.updateDiscoveryAvailable(err == nil)
+			if err != nil {
+				publication.node.logger.Error(
+					"动态服务发现发布失败",
+					originlog.Err(err),
+				)
+			}
 			if !more {
 				break
 			}
 		}
 	}
+}
+
+func (publication *discoveryPublication) enqueue() (uint64, error) {
+	if publication == nil {
+		return 0, nil
+	}
+	publication.startPublisher()
+	publication.mu.Lock()
+	if publication.closed {
+		publication.mu.Unlock()
+		return 0, errs.ErrServiceStopping
+	}
+	publication.desired++
+	target := publication.desired
+	publication.mu.Unlock()
+	publication.signal()
+	return target, nil
+}
+
+func (node *Node) requestDiscoveryPublication(ctx context.Context) error {
+	if node == nil || node.discoveryPublication == nil {
+		return nil
+	}
+	return node.discoveryPublication.request(ctx)
 }
 
 func (publication *discoveryPublication) signal() {

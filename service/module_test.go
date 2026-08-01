@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 )
 
 type testModule struct {
@@ -10,6 +12,47 @@ type testModule struct {
 	init  func() error
 	start func(context.Context) error
 	stop  func(context.Context) error
+}
+
+type panicStopService struct{ Service }
+
+func (*panicStopService) OnStop(context.Context) error { panic("service stop") }
+
+func TestServiceStopPanicUsesServiceDiagnostic(t *testing.T) {
+	target := &panicStopService{}
+	if err := BindRuntime(target, &testRuntime{nodeID: "node-1", name: "Owner", state: StateStopping}); err != nil {
+		t.Fatal(err)
+	}
+	target.moduleSealed = true
+	target.serviceStartEntered = true
+	err := StopWithModules(t.Context(), target)
+	if err == nil || !strings.Contains(err.Error(), "Service") || strings.Contains(err.Error(), "Module <nil>") {
+		t.Fatalf("StopWithModules() error = %v", err)
+	}
+}
+
+func TestModuleScopeCancelsOwnedTimers(t *testing.T) {
+	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
+	module := &testModule{}
+	module.owner = &fixture.service.Service
+	id := module.NewTicker(time.Hour, func(context.Context, TimerID) {})
+	if id == InvalidTimerID {
+		t.Fatal("Module.NewTicker() returned InvalidTimerID")
+	}
+	if active := fixture.runtime.active.Load(); active != 1 {
+		t.Fatalf("active timers = %d, want 1", active)
+	}
+
+	module.cleanupScope()
+	if active := fixture.runtime.active.Load(); active != 0 {
+		t.Fatalf("active timers after cleanup = %d, want 0", active)
+	}
+	module.scopeMu.Lock()
+	remaining := len(module.timers)
+	module.scopeMu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("module timer registrations = %d", remaining)
+	}
 }
 
 func (module *testModule) OnInit() error {

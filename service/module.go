@@ -476,3 +476,25 @@ func callModuleLifecycle(
 	}()
 	return callback()
 }
+
+func callServiceLifecycle(
+	owner *Service,
+	target IService,
+	phase string,
+	callback func() error,
+) (result error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			stack := debug.Stack()
+			owner.Logger().ErrorStack(
+				"service lifecycle panic",
+				originlog.String("service_type", fmt.Sprintf("%T", target)),
+				originlog.String("phase", phase),
+				originlog.String("panic", fmt.Sprint(recovered)),
+				originlog.String("panic_stack", string(stack)),
+			)
+			result = fmt.Errorf("Service %T %s panic: %v", target, phase, recovered)
+		}
+	}()
+	return callback()
+}

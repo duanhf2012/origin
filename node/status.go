@@ -182,9 +182,10 @@ func (node *Node) ServiceStatus(name string) (ServiceStatus, bool) {
 	if !exists {
 		return ServiceStatus{}, false
 	}
+	state := entry.loadState()
 	return ServiceStatus{
-		State:     service.State(entry.state.Load()),
-		EnteredAt: time.Unix(0, entry.stateEnteredAt.Load()),
+		State:     state.State,
+		EnteredAt: state.EnteredAt,
 		Failure:   entry.failureCause(),
 	}, true
 }
@@ -239,14 +240,14 @@ func (node *Node) handleTransportEvent(event rpc.TransportEvent) {
 	case TransportReady:
 		// 初次启动尚未越过统一就绪屏障，因此只在已经 Ready 的 Node 上重新发布。
 		if node.State() == StateReady {
-			if err := node.publishDiscovery(); err != nil {
-				node.updateDiscoveryAvailable(false)
+			operationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := node.requestDiscoveryPublication(operationCtx)
+			cancel()
+			if err != nil {
 				node.logger.Error(
 					"Transport 恢复后重新发布服务发现失败",
 					originlog.Err(err),
 				)
-			} else {
-				node.updateDiscoveryAvailable(true)
 			}
 		}
 	}
@@ -295,7 +296,7 @@ func (node *Node) readyHealth() HealthStatus {
 		if entry.private || node.private {
 			continue
 		}
-		if service.State(entry.state.Load()) == service.StateFailed {
+		if entry.loadState().State == service.StateFailed {
 			publicFailed++
 		}
 	}
@@ -396,10 +397,12 @@ func (node *Node) recordServiceFailure(entry *serviceEntry, cause error) {
 	}
 	entry.setState(service.StateFailed)
 
-	// Ready Node 用新的完整快照替换旧发现；若没有剩余公开 Service，publishDiscovery 会撤销。
+	// Ready Node 只通过唯一发布协调器更新；它会在串行边界内重建最新完整快照。
 	if node.State() == StateReady {
-		if err := node.publishDiscovery(); err != nil {
-			node.updateDiscoveryAvailable(false)
+		operationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := node.requestDiscoveryPublication(operationCtx)
+		cancel()
+		if err != nil {
 			node.logger.Error(
 				"隔离 Service 后更新服务发现失败",
 				originlog.String("service_name", entry.name),

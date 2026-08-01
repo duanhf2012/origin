@@ -70,25 +70,46 @@ func (runtime *serviceRuntime) TransitionServiceState(
 		return time.Time{}, false, nodeStateControlError(runtime.node.State())
 	}
 	for {
-		current := service.State(runtime.entry.state.Load())
+		if state := runtime.node.State(); state != StateReady {
+			return time.Time{}, false, nodeStateControlError(state)
+		}
+		currentSnapshot := runtime.entry.state.Load()
+		if currentSnapshot == nil {
+			return time.Time{}, false, errs.ErrServiceNotReady
+		}
+		current := currentSnapshot.State
 		if current == to {
-			return time.Unix(0, runtime.entry.stateEnteredAt.Load()), false, nil
+			if state := runtime.node.State(); state != StateReady {
+				return time.Time{}, false, nodeStateControlError(state)
+			}
+			return currentSnapshot.EnteredAt, false, nil
 		}
 		if current != from {
+			switch current {
+			case service.StateStopping:
+				return time.Time{}, false, errs.ErrServiceStopping
+			case service.StateStopped:
+				return time.Time{}, false, errs.ErrServiceStopped
+			case service.StateFailed:
+				return time.Time{}, false, errs.ErrServiceFailed
+			}
 			return time.Time{}, false, errs.NewMessage(
 				errs.CodeInvalidArgument,
 				fmt.Sprintf("Service %q 不能从 %s 转换为 %s", runtime.entry.name, current, to),
 			)
 		}
 		changedAt := time.Now()
-		if !runtime.entry.state.CompareAndSwap(uint32(from), uint32(to)) {
+		next := &serviceStateSnapshot{State: to, EnteredAt: changedAt}
+		if !runtime.entry.state.CompareAndSwap(currentSnapshot, next) {
 			continue
 		}
-		runtime.entry.stateEnteredAt.Store(changedAt.UnixNano())
-		if runtime.node.State() != StateReady {
+		if state := runtime.node.State(); state != StateReady {
 			// Node Stop 已取得优先权；直接关闭本地准入，后续 Stop 路径会完成 Scheduler 清理。
-			runtime.entry.setState(service.StateStopping)
-			return time.Time{}, false, errs.ErrServiceStopping
+			runtime.entry.state.CompareAndSwap(next, &serviceStateSnapshot{
+				State:     service.StateStopping,
+				EnteredAt: time.Now(),
+			})
+			return time.Time{}, false, nodeStateControlError(state)
 		}
 		return changedAt, true, nil
 	}

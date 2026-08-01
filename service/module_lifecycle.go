@@ -106,7 +106,7 @@ func StopWithModules(ctx context.Context, target IService) error {
 
 	var result error
 	if serviceEntered {
-		result = errors.Join(result, callModuleLifecycle(base, nil, "service_on_stop", func() error {
+		result = errors.Join(result, callServiceLifecycle(base, target, "on_stop", func() error {
 			return target.OnStop(ctx)
 		}))
 	}

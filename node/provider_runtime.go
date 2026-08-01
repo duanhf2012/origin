@@ -3,6 +3,8 @@ package node
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -98,9 +100,9 @@ func (runtime *providerRuntime) startProvider(ctx context.Context) error {
 		return nil
 	}
 	runtime.start.Do(func() { go runtime.expiryLoop() })
-	runtime.callMu.Lock()
-	err := runtime.instance.Start(ctx)
-	runtime.callMu.Unlock()
+	err := runtime.callProvider("Start", func() error {
+		return runtime.instance.Start(ctx)
+	})
 	if err != nil {
 		return err
 	}
@@ -137,9 +139,9 @@ func (runtime *providerRuntime) publish(
 	runtime.publishStatusLocked()
 	runtime.mu.Unlock()
 
-	runtime.callMu.Lock()
-	err := runtime.instance.Publish(ctx, node)
-	runtime.callMu.Unlock()
+	err := runtime.callProvider("Publish", func() error {
+		return runtime.instance.Publish(ctx, node)
+	})
 
 	runtime.mu.Lock()
 	if err == nil {
@@ -159,9 +161,9 @@ func (runtime *providerRuntime) withdraw(ctx context.Context) error {
 	if runtime == nil {
 		return nil
 	}
-	runtime.callMu.Lock()
-	err := runtime.instance.Withdraw(ctx)
-	runtime.callMu.Unlock()
+	err := runtime.callProvider("Withdraw", func() error {
+		return runtime.instance.Withdraw(ctx)
+	})
 	runtime.mu.Lock()
 	if err == nil {
 		runtime.publication = PublicationNotRequired
@@ -180,9 +182,9 @@ func (runtime *providerRuntime) closeProvider(ctx context.Context) error {
 		return nil
 	}
 	runtime.start.Do(func() { go runtime.expiryLoop() })
-	runtime.callMu.Lock()
-	err := runtime.instance.Close(ctx)
-	runtime.callMu.Unlock()
+	err := runtime.callProvider("Close", func() error {
+		return runtime.instance.Close(ctx)
+	})
 	runtime.finish.Do(func() { close(runtime.stop) })
 	<-runtime.done
 	runtime.mu.Lock()
@@ -193,6 +195,28 @@ func (runtime *providerRuntime) closeProvider(ctx context.Context) error {
 	runtime.mu.Unlock()
 	runtime.node.updateDiscoveryAvailable(false)
 	return err
+}
+
+func (runtime *providerRuntime) callProvider(
+	operation string,
+	call func() error,
+) (result error) {
+	runtime.callMu.Lock()
+	defer runtime.callMu.Unlock()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = errs.NewMessage(
+				errs.CodeDiscoveryUnavailable,
+				fmt.Sprintf(
+					"Discovery Provider %s panic: %v\n%s",
+					operation,
+					recovered,
+					debug.Stack(),
+				),
+			)
+		}
+	}()
+	return call()
 }
 
 // setTTL 冻结 Provider TTL；它必须先于其他 Host 能力调用。
