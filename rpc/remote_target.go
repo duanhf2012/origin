@@ -119,10 +119,10 @@ func (target *remoteTarget) run() {
 		// 一次成功连接即重置退避；后续偶发断线可以快速恢复。
 		delay = reconnectInitialDelay
 		target.current.Store(session)
-		target.remote.owner.NotifyRoutesChanged()
+		target.remote.publishTargetSession(target, session)
 		target.runConnected(session)
 		if target.current.CompareAndSwap(session, nil) {
-			target.remote.owner.NotifyRoutesChanged()
+			target.remote.publishTargetSession(target, nil)
 		}
 		session.close()
 	}

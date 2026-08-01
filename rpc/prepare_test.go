@@ -3,6 +3,8 @@ package rpc
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -119,6 +121,37 @@ func (resolver *prepareTestResolver) Snapshot() RemoteSnapshot {
 	return resolver.snapshot
 }
 
+type atomicPrepareTestResolver struct {
+	snapshot atomic.Pointer[prepareTestSnapshot]
+}
+
+func (resolver *atomicPrepareTestResolver) Snapshot() RemoteSnapshot {
+	return resolver.snapshot.Load()
+}
+
+func (resolver *atomicPrepareTestResolver) ResolveRemote(
+	nodeID string,
+	serviceName string,
+	contractID ContractID,
+	fingerprint ContractFingerprint,
+) (RemoteRoute, error) {
+	snapshot := resolver.snapshot.Load()
+	candidate, exists := snapshot.Find(nodeID, serviceName)
+	if !exists {
+		return RemoteRoute{}, errs.ErrRPCNoRoute
+	}
+	if candidate.ContractID != contractID ||
+		candidate.Fingerprint != fingerprint {
+		return RemoteRoute{}, errs.ErrRPCContractMismatch
+	}
+	return RemoteRoute{
+		NodeID:    candidate.NodeID,
+		SessionID: candidate.SessionID,
+		Transport: candidate.Transport,
+		Address:   candidate.Address,
+	}, nil
+}
+
 func (resolver *prepareTestResolver) ResolveRemote(
 	nodeID string,
 	serviceName string,
@@ -142,7 +175,7 @@ func (resolver *prepareTestResolver) ResolveRemote(
 }
 
 func newPrepareTestRuntime(
-	t *testing.T,
+	t testing.TB,
 	nodeID string,
 	transport string,
 	snapshot *prepareTestSnapshot,
@@ -183,7 +216,7 @@ func newPrepareTestRuntime(
 }
 
 func addPrepareTestLocal(
-	t *testing.T,
+	t testing.TB,
 	runtime *Runtime,
 	serviceName string,
 	state service.State,
@@ -210,7 +243,7 @@ func addPrepareTestLocal(
 }
 
 func addPrepareTestTCPConnection(
-	t *testing.T,
+	t testing.TB,
 	runtime *Runtime,
 	nodeID string,
 	sessionID uint64,
@@ -363,6 +396,21 @@ func TestPrepareNotifyKeyAndExactRetiredBoundaries(t *testing.T) {
 	if exact.prepared.nodeID != "player-1" {
 		t.Fatalf("exact selected %q", exact.prepared.nodeID)
 	}
+
+	restored := append([]RemoteCandidate(nil), snapshot.candidates...)
+	restored[0].State = publicdiscovery.StateRunning
+	runtime.remoteResolver.(*prepareTestResolver).snapshot =
+		&prepareTestSnapshot{candidates: restored}
+	recovered, err := prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).Route(uint64(0)).PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("restored PrepareNotify() error = %v", err)
+	}
+	if recovered.prepared.nodeID != "player-1" {
+		t.Fatalf("restored selected %q", recovered.prepared.nodeID)
+	}
 }
 
 type prepareTestSelector struct {
@@ -383,6 +431,124 @@ type panicPrepareTestSelector struct{}
 
 func (panicPrepareTestSelector) Select(RouteCandidates) (int, bool) {
 	panic("selector panic")
+}
+
+type fixedPrepareTestSelector struct {
+	index int
+	ok    bool
+}
+
+func (selector fixedPrepareTestSelector) Select(RouteCandidates) (int, bool) {
+	return selector.index, selector.ok
+}
+
+type inspectingPrepareTestSelector struct {
+	length      int
+	nodeID      string
+	serviceName string
+	state       publicdiscovery.State
+	region      string
+	labelOK     bool
+}
+
+func (selector *inspectingPrepareTestSelector) Select(
+	candidates RouteCandidates,
+) (int, bool) {
+	selector.length = candidates.Len()
+	selector.nodeID = candidates.NodeID(1)
+	selector.serviceName = candidates.ServiceName(1)
+	selector.state = candidates.State(1)
+	selector.region, selector.labelOK = candidates.Label(1, "region")
+	return 1, true
+}
+
+type connectEarlierPrepareTestSelector struct {
+	t          *testing.T
+	target     *remoteTarget
+	session    *outboundSession
+	seenNodeID string
+}
+
+func (selector *connectEarlierPrepareTestSelector) Select(
+	candidates RouteCandidates,
+) (int, bool) {
+	selector.t.Helper()
+	if candidates.Len() != 1 {
+		selector.t.Fatalf("candidate count = %d", candidates.Len())
+	}
+	selector.seenNodeID = candidates.NodeID(0)
+	selector.target.current.Store(selector.session)
+	return 0, true
+}
+
+func TestPrepareNotifyKeepsCandidateIdentityWhenEarlierNodeConnects(t *testing.T) {
+	candidates := []RemoteCandidate{
+		{
+			NodeID:      "player-1",
+			SessionID:   69,
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportTCP,
+			Address:     "127.0.0.1:23999",
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		},
+		{
+			NodeID:      "player-2",
+			SessionID:   70,
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportTCP,
+			Address:     "127.0.0.1:24000",
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		},
+	}
+	runtime := newPrepareTestRuntime(
+		t,
+		"gateway-1",
+		TransportTCP,
+		&prepareTestSnapshot{candidates: candidates},
+	)
+	disconnected, recoveredSession := addPrepareTestDisconnectedTCP(
+		runtime,
+		"player-1",
+		69,
+		"127.0.0.1:23999",
+	)
+	addPrepareTestTCPConnection(
+		t,
+		runtime,
+		"player-2",
+		70,
+		"127.0.0.1:24000",
+	)
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	selector := &connectEarlierPrepareTestSelector{
+		t:       t,
+		target:  disconnected,
+		session: recoveredSession,
+	}
+
+	prepared, err := prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).RouteBy(selector).PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("PrepareNotify() error = %v", err)
+	}
+	if selector.seenNodeID != "player-2" {
+		t.Fatalf("selector saw %q", selector.seenNodeID)
+	}
+	if prepared.prepared.nodeID != selector.seenNodeID {
+		t.Fatalf(
+			"prepared node = %q, selector saw %q",
+			prepared.prepared.nodeID,
+			selector.seenNodeID,
+		)
+	}
 }
 
 func TestPrepareNotifyCustomSelectorReadsImmutableCandidateView(t *testing.T) {
@@ -429,6 +595,24 @@ func TestPrepareNotifyCustomSelectorReadsImmutableCandidateView(t *testing.T) {
 		t.Fatalf("selected %q", prepared.prepared.nodeID)
 	}
 
+	inspector := &inspectingPrepareTestSelector{}
+	prepared, err = prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).RouteBy(inspector).PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("inspecting selector error = %v", err)
+	}
+	if prepared.prepared.nodeID != "player-2" ||
+		inspector.length != 2 ||
+		inspector.nodeID != "player-2" ||
+		inspector.serviceName != "PlayerService" ||
+		inspector.state != publicdiscovery.StateRunning ||
+		!inspector.labelOK ||
+		inspector.region != "east" {
+		t.Fatalf("selector observation = %+v", inspector)
+	}
+
 	_, err = prepareTestClient(
 		runtime,
 		ToService("PlayerService"),
@@ -436,6 +620,104 @@ func TestPrepareNotifyCustomSelectorReadsImmutableCandidateView(t *testing.T) {
 		PrepareNotify(context.Background(), 1)
 	if !errors.Is(err, errs.ErrRPCRouteSelectorFailed) {
 		t.Fatalf("panic selector error = %v", err)
+	}
+
+	_, err = prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).RouteBy(fixedPrepareTestSelector{index: 999, ok: false}).
+		PrepareNotify(context.Background(), 1)
+	if !errors.Is(err, errs.ErrRPCNoRoute) {
+		t.Fatalf("reject selector error = %v", err)
+	}
+
+	_, err = prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).RouteBy(fixedPrepareTestSelector{index: 999, ok: true}).
+		PrepareNotify(context.Background(), 1)
+	if !errors.Is(err, errs.ErrRPCRouteSelectorFailed) {
+		t.Fatalf("invalid selector index error = %v", err)
+	}
+
+	_, err = prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).RouteBy(nil).PrepareNotify(context.Background(), 1)
+	if !errors.Is(err, errs.ErrRPCRouteSelectorFailed) {
+		t.Fatalf("nil selector error = %v", err)
+	}
+}
+
+func TestPrepareNotifyKeyIsStableAndUsesCurrentCandidateCount(t *testing.T) {
+	candidates := []RemoteCandidate{
+		{
+			NodeID:      "player-1",
+			SessionID:   91,
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportTCP,
+			Address:     "127.0.0.1:26001",
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		},
+		{
+			NodeID:      "player-2",
+			SessionID:   92,
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportTCP,
+			Address:     "127.0.0.1:26002",
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		},
+		{
+			NodeID:      "player-3",
+			SessionID:   93,
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportTCP,
+			Address:     "127.0.0.1:26003",
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		},
+	}
+	snapshot := &prepareTestSnapshot{candidates: candidates}
+	runtime := newPrepareTestRuntime(t, "gateway-1", TransportTCP, snapshot)
+	for _, candidate := range candidates {
+		addPrepareTestTCPConnection(
+			t,
+			runtime,
+			candidate.NodeID,
+			candidate.SessionID,
+			candidate.Address,
+		)
+	}
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	client := prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).Route(uint64(4))
+	for index := 0; index < 2; index++ {
+		prepared, err := client.PrepareNotify(context.Background(), 1)
+		if err != nil {
+			t.Fatalf("PrepareNotify() error = %v", err)
+		}
+		if prepared.prepared.nodeID != "player-2" {
+			t.Fatalf("stable key selected %q", prepared.prepared.nodeID)
+		}
+	}
+
+	runtime.remoteResolver.(*prepareTestResolver).snapshot =
+		&prepareTestSnapshot{candidates: candidates[:2]}
+	resized, err := client.PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("resized PrepareNotify() error = %v", err)
+	}
+	if resized.prepared.nodeID != "player-1" {
+		t.Fatalf("resized key selected %q", resized.prepared.nodeID)
 	}
 }
 
@@ -605,9 +887,80 @@ func TestPreparedNotifyRejectsSessionReplacementWithoutReselect(t *testing.T) {
 	}
 }
 
+func TestPreparedNotifyDoesNotReselectAfterDisconnect(t *testing.T) {
+	candidates := []RemoteCandidate{
+		{
+			NodeID:      "player-1",
+			SessionID:   103,
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportTCP,
+			Address:     "127.0.0.1:27003",
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		},
+		{
+			NodeID:      "player-2",
+			SessionID:   104,
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportTCP,
+			Address:     "127.0.0.1:27004",
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		},
+	}
+	runtime := newPrepareTestRuntime(
+		t,
+		"gateway-1",
+		TransportTCP,
+		&prepareTestSnapshot{candidates: candidates},
+	)
+	for _, candidate := range candidates {
+		addPrepareTestTCPConnection(
+			t,
+			runtime,
+			candidate.NodeID,
+			candidate.SessionID,
+			candidate.Address,
+		)
+	}
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	selector := &countingPrepareTestSelector{}
+	prepared, err := prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).RouteBy(selector).PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("PrepareNotify() error = %v", err)
+	}
+	if prepared.prepared.nodeID != "player-1" {
+		t.Fatalf("selected %q", prepared.prepared.nodeID)
+	}
+	request, err := prepared.AllocateRequest(0, CallNotify)
+	if err != nil {
+		t.Fatalf("AllocateRequest() error = %v", err)
+	}
+	runtime.remote.targets["player-1"].current.Store(nil)
+	runtime.remote.publishTargetSession(
+		runtime.remote.targets["player-1"],
+		nil,
+	)
+
+	err = prepared.Notify(context.Background(), 1, request)
+	if !errors.Is(err, errs.ErrTransportUnavailable) {
+		t.Fatalf("Notify() error = %v", err)
+	}
+	if selector.calls != 1 {
+		t.Fatalf("selector calls = %d", selector.calls)
+	}
+}
+
 type prepareAwaitTestOwner struct {
 	service.Service
-	awaitCalls int
+	awaitCalls atomic.Int64
 	entered    chan struct{}
 }
 
@@ -615,10 +968,9 @@ func (owner *prepareAwaitTestOwner) Await(
 	ctx context.Context,
 	fn func(context.Context) error,
 ) error {
-	owner.awaitCalls++
+	owner.awaitCalls.Add(1)
 	if owner.entered != nil {
 		close(owner.entered)
-		owner.entered = nil
 	}
 	return fn(ctx)
 }
@@ -683,7 +1035,7 @@ func TestPrepareAwaitWaitsForConnectedRouteEvent(t *testing.T) {
 		t.Fatal("PrepareAwait 没有进入连接等待")
 	}
 	target.current.Store(session)
-	runtime.NotifyRoutesChanged()
+	runtime.remote.publishTargetSession(target, session)
 
 	select {
 	case current := <-done:
@@ -696,8 +1048,8 @@ func TestPrepareAwaitWaitsForConnectedRouteEvent(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("连接事件没有唤醒 PrepareAwait")
 	}
-	if owner.awaitCalls != 1 {
-		t.Fatalf("Await calls = %d", owner.awaitCalls)
+	if calls := owner.awaitCalls.Load(); calls != 1 {
+		t.Fatalf("Await calls = %d", calls)
 	}
 }
 
@@ -735,7 +1087,131 @@ func TestPrepareAsyncDoesNotWaitForDisconnectedRoute(t *testing.T) {
 	if !errors.Is(err, errs.ErrTransportUnavailable) {
 		t.Fatalf("PrepareAsync() error = %v", err)
 	}
-	if owner.awaitCalls != 0 {
-		t.Fatalf("Await calls = %d", owner.awaitCalls)
+	if calls := owner.awaitCalls.Load(); calls != 0 {
+		t.Fatalf("Await calls = %d", calls)
+	}
+}
+
+func TestPrepareConcurrentSnapshotAndConnectionChanges(t *testing.T) {
+	runningCandidate := RemoteCandidate{
+		NodeID:      "player-1",
+		SessionID:   131,
+		ServiceName: "PlayerService",
+		State:       publicdiscovery.StateRunning,
+		Transport:   TransportTCP,
+		Address:     "127.0.0.1:29001",
+		ContractID:  1,
+		Fingerprint: runtimeTestFingerprint,
+	}
+	retiredCandidate := runningCandidate
+	retiredCandidate.State = publicdiscovery.StateRetired
+	runningSnapshot := &prepareTestSnapshot{
+		candidates: []RemoteCandidate{runningCandidate},
+	}
+	retiredSnapshot := &prepareTestSnapshot{
+		candidates: []RemoteCandidate{retiredCandidate},
+	}
+	resolver := &atomicPrepareTestResolver{}
+	resolver.snapshot.Store(runningSnapshot)
+	runtime := newPrepareTestRuntime(t, "gateway-1", TransportTCP, nil)
+	if err := runtime.BindRemoteResolver(resolver); err != nil {
+		t.Fatalf("BindRemoteResolver() error = %v", err)
+	}
+	session := addPrepareTestTCPConnection(
+		t,
+		runtime,
+		runningCandidate.NodeID,
+		runningCandidate.SessionID,
+		runningCandidate.Address,
+	)
+	target := runtime.remote.targets[runningCandidate.NodeID]
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	client := prepareTestClient(runtime, ToService("PlayerService"))
+
+	const iterations = 2000
+	var wait sync.WaitGroup
+	wait.Add(3)
+	go func() {
+		defer wait.Done()
+		for index := 0; index < iterations; index++ {
+			if index%2 == 0 {
+				target.current.Store(session)
+				runtime.remote.publishTargetSession(target, session)
+				resolver.snapshot.Store(runningSnapshot)
+			} else {
+				target.current.Store(nil)
+				runtime.remote.publishTargetSession(target, nil)
+				resolver.snapshot.Store(retiredSnapshot)
+			}
+		}
+	}()
+	for reader := 0; reader < 2; reader++ {
+		go func() {
+			defer wait.Done()
+			for index := 0; index < iterations; index++ {
+				_, err := client.PrepareNotify(context.Background(), 1)
+				if err != nil &&
+					!errors.Is(err, errs.ErrRPCNoRoute) &&
+					!errors.Is(err, errs.ErrTransportUnavailable) {
+					t.Errorf("PrepareNotify() error = %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wait.Wait()
+}
+
+func TestPrepareNotifyRunningLocalDoesNotAllocate(t *testing.T) {
+	runtime := newPrepareTestRuntime(t, "gateway-1", "", nil)
+	addPrepareTestLocal(
+		t,
+		runtime,
+		"PlayerService",
+		service.StateRunning,
+		&runtimeTestDispatcher{},
+	)
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	base := prepareTestClient(runtime, ToService("PlayerService"))
+	tests := []struct {
+		name   string
+		client Client
+	}{
+		{name: "default", client: base},
+		{name: "round-robin", client: base.RouteRoundRobin()},
+		{name: "random", client: base.RouteRandom()},
+		{name: "integer-key", client: base.Route(uint64(42))},
+		{name: "string-key", client: base.Route("player")},
+		{
+			name: "custom",
+			client: base.RouteBy(
+				fixedPrepareTestSelector{index: 0, ok: true},
+			),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := test.client.PrepareNotify(
+				context.Background(),
+				1,
+			); err != nil {
+				t.Fatalf("warm PrepareNotify() error = %v", err)
+			}
+			allocations := testing.AllocsPerRun(1000, func() {
+				if _, err := test.client.PrepareNotify(
+					context.Background(),
+					1,
+				); err != nil {
+					panic(err)
+				}
+			})
+			if allocations != 0 {
+				t.Fatalf("PrepareNotify allocations = %v", allocations)
+			}
+		})
 	}
 }

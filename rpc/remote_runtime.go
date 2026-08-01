@@ -17,6 +17,8 @@ import (
 const (
 	// maxRemoteTargets 给 M13 的显式 Node 地址表设置固定安全边界。
 	maxRemoteTargets = 8192
+	// remoteTargetShardCount 限制单次连接事件复制的不可变索引规模。
+	remoteTargetShardCount = 64
 	// reconnectInitialDelay 在远端尚未启动时保持快速恢复。
 	reconnectInitialDelay = 200 * time.Millisecond
 	// reconnectMaximumDelay 防止长期故障形成高频 Dial 风暴。
@@ -56,7 +58,34 @@ type remoteRuntime struct {
 }
 
 type remoteTargetTable struct {
-	byNode map[string]*remoteTarget
+	shards [remoteTargetShardCount]*remoteTargetShard
+}
+
+type remoteTargetShard struct {
+	byNode map[string]remoteTargetEntry
+}
+
+type remoteTargetEntry struct {
+	target  *remoteTarget
+	session *outboundSession
+}
+
+func (table *remoteTargetTable) lookup(
+	nodeID string,
+) (remoteTargetEntry, bool) {
+	if table == nil {
+		return remoteTargetEntry{}, false
+	}
+	shard := table.shards[remoteTargetShardIndex(nodeID)]
+	if shard == nil {
+		return remoteTargetEntry{}, false
+	}
+	entry, exists := shard.byNode[nodeID]
+	return entry, exists
+}
+
+func remoteTargetShardIndex(nodeID string) int {
+	return int(fnv1aString(nodeID) % remoteTargetShardCount)
 }
 
 // newRemoteRuntime 创建尚未启动、没有后台 goroutine 的远端资源容器。
@@ -67,19 +96,69 @@ func newRemoteRuntime(owner *Runtime, config Config) *remoteRuntime {
 		targets: make(map[string]*remoteTarget),
 		retired: make(map[*remoteTarget]struct{}),
 	}
-	result.targetView.Store(&remoteTargetTable{
-		byNode: make(map[string]*remoteTarget),
-	})
+	result.targetView.Store(&remoteTargetTable{})
 	return result
 }
 
 // publishTargetsLocked 在目标写侧变化后建立新的只读索引；调用方必须持有 remote.mu。
 func (remote *remoteRuntime) publishTargetsLocked() {
-	next := make(map[string]*remoteTarget, len(remote.targets))
+	next := &remoteTargetTable{}
 	for nodeID, target := range remote.targets {
-		next[nodeID] = target
+		index := remoteTargetShardIndex(nodeID)
+		shard := next.shards[index]
+		if shard == nil {
+			shard = &remoteTargetShard{
+				byNode: make(map[string]remoteTargetEntry),
+			}
+			next.shards[index] = shard
+		}
+		shard.byNode[nodeID] = remoteTargetEntry{
+			target:  target,
+			session: target.currentSession(),
+		}
 	}
-	remote.targetView.Store(&remoteTargetTable{byNode: next})
+	remote.targetView.Store(next)
+}
+
+// publishTargetSession 只复制一个分片并发布连接变化，避免 8192 个连接同时恢复时
+// 每个事件都复制完整目标表。返回 false 表示该目标已经被发现目录替换或删除。
+func (remote *remoteRuntime) publishTargetSession(
+	target *remoteTarget,
+	session *outboundSession,
+) bool {
+	remote.mu.Lock()
+	if remote.targets[target.nodeID] != target ||
+		target.currentSession() != session {
+		remote.mu.Unlock()
+		return false
+	}
+
+	current := remote.targetView.Load()
+	next := &remoteTargetTable{}
+	if current != nil {
+		*next = *current
+	}
+	index := remoteTargetShardIndex(target.nodeID)
+	entries := make(map[string]remoteTargetEntry)
+	if previous := next.shards[index]; previous != nil {
+		entries = make(
+			map[string]remoteTargetEntry,
+			len(previous.byNode),
+		)
+		for nodeID, entry := range previous.byNode {
+			entries[nodeID] = entry
+		}
+	}
+	entries[target.nodeID] = remoteTargetEntry{
+		target:  target,
+		session: session,
+	}
+	next.shards[index] = &remoteTargetShard{byNode: entries}
+	remote.targetView.Store(next)
+	remote.mu.Unlock()
+
+	remote.owner.NotifyRoutesChanged()
+	return true
 }
 
 // StartNetwork 在 Node 时间轮已经运行后启动整体入站 Transport。
@@ -645,14 +724,12 @@ func (remote *remoteRuntime) targetSession(
 	sessionID uint64,
 ) *outboundSession {
 	view := remote.targetView.Load()
-	if view == nil {
+	entry, exists := view.lookup(nodeID)
+	if !exists || entry.target == nil ||
+		entry.target.sessionID != sessionID {
 		return nil
 	}
-	target := view.byNode[nodeID]
-	if target == nil || target.sessionID != sessionID {
-		return nil
-	}
-	return target.currentSession()
+	return entry.session
 }
 
 // targetDone 删除已经退出的 retired 目标；当前活动目标不会自行退出并删除连接需求。

@@ -33,12 +33,13 @@ type RouteSelector interface {
 //
 // 候选字段和实际存储由 Runtime 管理，业务只能通过只读方法访问。
 type RouteCandidates struct {
-	set *candidateSet
+	set   candidateSet
+	valid bool
 }
 
 // Len 返回当前已过滤候选数量。
 func (candidates RouteCandidates) Len() int {
-	if candidates.set == nil {
+	if !candidates.valid {
 		return 0
 	}
 	return candidates.set.count
@@ -87,7 +88,7 @@ func (candidates RouteCandidates) Label(
 func (candidates RouteCandidates) candidate(
 	index int,
 ) (routeCandidate, bool) {
-	if candidates.set == nil {
+	if !candidates.valid {
 		return routeCandidate{}, false
 	}
 	return candidates.set.eligibleAt(index)

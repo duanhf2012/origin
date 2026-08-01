@@ -108,3 +108,19 @@ func TestRouteRejectsUnsupportedAndNamedKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestRouteValueDerivationsDoNotAllocate(t *testing.T) {
+	base := Client{target: ToService("PlayerService")}
+	selector := prepareTestSelector{region: "east"}
+	allocations := testing.AllocsPerRun(1000, func() {
+		_ = base.OnNode("player-1")
+		_ = base.RouteRoundRobin()
+		_ = base.RouteRandom()
+		_ = base.Route(uint64(42))
+		_ = base.Route("player")
+		_ = base.RouteBy(selector)
+	})
+	if allocations != 0 {
+		t.Fatalf("route derivation allocations = %v", allocations)
+	}
+}

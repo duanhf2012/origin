@@ -12,6 +12,19 @@ import (
 	"github.com/duanhf2012/origin/v3/service"
 )
 
+var benchmarkPlayerRPCClientSink PlayerRPCClient
+
+func BenchmarkBindGeneratedClient(b *testing.B) {
+	instance, caller := newBenchmarkNode(b)
+	defer stopBenchmarkNode(b, instance)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		benchmarkPlayerRPCClientSink = BindPlayerRPC(caller)
+	}
+}
+
 // BenchmarkFixedCustomCodecVsInt64 对比同为八字节业务值的内置整数和自定义 time.Time
 // 边界成本；样本、Pool 和 Codec 都在计时前构造。
 func BenchmarkFixedCustomCodecVsInt64(b *testing.B) {

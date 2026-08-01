@@ -50,7 +50,8 @@ type Runtime struct {
 	routeMu      sync.Mutex
 	routeChanged chan struct{}
 	// routeCounters 只为确实出现过合法候选的契约组惰性建立。
-	routeCounters sync.Map
+	// 强类型分片表避免 sync.Map 的接口键在每次路由时逃逸。
+	routeCounters [routeCounterShardCount]routeCounterShard
 	routeRandom   atomic.Uint64
 	// transportObserver 把整体入站状态变化交给 Node。网络回调只发布常数大小快照，
 	// 不在这里执行发现发布、Service Stop 或 Application Stop。

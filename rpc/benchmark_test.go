@@ -1,11 +1,19 @@
 package rpc
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 	"testing"
 
+	publicdiscovery "github.com/duanhf2012/origin/v3/discovery"
+	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/service"
 )
+
+var benchmarkClientSink Client
 
 func BenchmarkTargetConstruction(b *testing.B) {
 	b.ReportAllocs()
@@ -14,6 +22,239 @@ func BenchmarkTargetConstruction(b *testing.B) {
 		if !target.valid() {
 			b.Fatal("Target unexpectedly invalid")
 		}
+	}
+}
+
+func BenchmarkClientOnNode(b *testing.B) {
+	client := Client{target: ToService("PlayerService")}
+	b.ReportAllocs()
+	for b.Loop() {
+		benchmarkClientSink = client.OnNode("player-1")
+	}
+}
+
+func BenchmarkRouteRoundRobin(b *testing.B) {
+	client := Client{target: ToService("PlayerService")}
+	b.ReportAllocs()
+	for b.Loop() {
+		benchmarkClientSink = client.RouteRoundRobin()
+	}
+}
+
+func BenchmarkRouteRandom(b *testing.B) {
+	client := Client{target: ToService("PlayerService")}
+	b.ReportAllocs()
+	for b.Loop() {
+		benchmarkClientSink = client.RouteRandom()
+	}
+}
+
+func BenchmarkRouteKeyInt(b *testing.B) {
+	client := Client{target: ToService("PlayerService")}
+	b.ReportAllocs()
+	for b.Loop() {
+		benchmarkClientSink = client.Route(uint64(42))
+	}
+}
+
+func BenchmarkRouteKeyString(b *testing.B) {
+	client := Client{target: ToService("PlayerService")}
+	b.ReportAllocs()
+	for b.Loop() {
+		benchmarkClientSink = client.Route("player")
+	}
+}
+
+func BenchmarkPrepareStrategies(b *testing.B) {
+	runtime := newPrepareTestRuntime(b, "gateway-1", "", nil)
+	addPrepareTestLocal(
+		b,
+		runtime,
+		"PlayerService",
+		service.StateRunning,
+		&runtimeTestDispatcher{},
+	)
+	if err := runtime.Freeze(); err != nil {
+		b.Fatalf("Freeze() error = %v", err)
+	}
+	base := prepareTestClient(runtime, ToService("PlayerService"))
+	cases := []struct {
+		name   string
+		client Client
+	}{
+		{name: "round-robin", client: base.RouteRoundRobin()},
+		{name: "random", client: base.RouteRandom()},
+		{name: "integer-key", client: base.Route(uint64(42))},
+		{name: "string-key", client: base.Route("player")},
+		{
+			name: "custom",
+			client: base.RouteBy(
+				fixedPrepareTestSelector{index: 0, ok: true},
+			),
+		},
+	}
+	ctx := context.Background()
+	for _, current := range cases {
+		b.Run(current.name, func(b *testing.B) {
+			if _, err := current.client.PrepareNotify(ctx, 1); err != nil {
+				b.Fatalf("warm PrepareNotify() error = %v", err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				prepared, err := current.client.PrepareNotify(ctx, 1)
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkClientSink = prepared
+			}
+		})
+	}
+}
+
+type prepareBenchmarkSnapshot struct {
+	candidates []RemoteCandidate
+}
+
+func (snapshot *prepareBenchmarkSnapshot) Len(serviceName string) int {
+	if serviceName != "PlayerService" {
+		return 0
+	}
+	return len(snapshot.candidates)
+}
+
+func (snapshot *prepareBenchmarkSnapshot) Candidate(
+	serviceName string,
+	index int,
+) (RemoteCandidate, bool) {
+	if serviceName != "PlayerService" ||
+		index < 0 ||
+		index >= len(snapshot.candidates) {
+		return RemoteCandidate{}, false
+	}
+	return snapshot.candidates[index], true
+}
+
+func (snapshot *prepareBenchmarkSnapshot) Find(
+	nodeID string,
+	serviceName string,
+) (RemoteCandidate, bool) {
+	if serviceName != "PlayerService" {
+		return RemoteCandidate{}, false
+	}
+	for _, candidate := range snapshot.candidates {
+		if candidate.NodeID == nodeID {
+			return candidate, true
+		}
+	}
+	return RemoteCandidate{}, false
+}
+
+type prepareBenchmarkResolver struct {
+	snapshot *prepareBenchmarkSnapshot
+}
+
+func (resolver *prepareBenchmarkResolver) Snapshot() RemoteSnapshot {
+	return resolver.snapshot
+}
+
+func (resolver *prepareBenchmarkResolver) ResolveRemote(
+	nodeID string,
+	serviceName string,
+	contractID ContractID,
+	fingerprint ContractFingerprint,
+) (RemoteRoute, error) {
+	candidate, exists := resolver.snapshot.Find(nodeID, serviceName)
+	if !exists {
+		return RemoteRoute{}, errs.ErrRPCNoRoute
+	}
+	return RemoteRoute{
+		NodeID:    candidate.NodeID,
+		SessionID: candidate.SessionID,
+		Transport: candidate.Transport,
+		Address:   candidate.Address,
+	}, nil
+}
+
+func newRemotePrepareBenchmarkClient(
+	b *testing.B,
+	count int,
+) Client {
+	b.Helper()
+	runtime, err := NewRuntime(
+		"gateway-1",
+		bufferpool.NewPool(bufferpool.Options{}),
+		originlog.NewNop(),
+	)
+	if err != nil {
+		b.Fatalf("NewRuntime() error = %v", err)
+	}
+	config := DefaultConfig()
+	config.Transport = TransportTCP
+	config.TCP.Listen = "127.0.0.1:21001"
+	config.TCP.Advertise = "127.0.0.1:21001"
+	if err := runtime.Configure(&config); err != nil {
+		b.Fatalf("Configure() error = %v", err)
+	}
+
+	snapshot := &prepareBenchmarkSnapshot{
+		candidates: make([]RemoteCandidate, count),
+	}
+	for index := 0; index < count; index++ {
+		nodeID := "player-" + strconv.Itoa(index)
+		sessionID := uint64(index + 1)
+		snapshot.candidates[index] = RemoteCandidate{
+			NodeID:      nodeID,
+			SessionID:   sessionID,
+			ServiceName: "PlayerService",
+			State:       publicdiscovery.StateRunning,
+			Transport:   TransportTCP,
+			Address:     "127.0.0.1:24001",
+			ContractID:  1,
+			Fingerprint: runtimeTestFingerprint,
+		}
+		target := newRemoteTarget(
+			runtime.remote,
+			nodeID,
+			sessionID,
+			"127.0.0.1:24001",
+		)
+		target.current.Store(&outboundSession{})
+		runtime.remote.targets[nodeID] = target
+	}
+	runtime.remote.publishTargetsLocked()
+	if err := runtime.BindRemoteResolver(
+		&prepareBenchmarkResolver{snapshot: snapshot},
+	); err != nil {
+		b.Fatalf("BindRemoteResolver() error = %v", err)
+	}
+	if err := runtime.Freeze(); err != nil {
+		b.Fatalf("Freeze() error = %v", err)
+	}
+	return prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).Route(uint64(count / 2))
+}
+
+func BenchmarkPrepareCandidateScale(b *testing.B) {
+	for _, count := range []int{100, 1000, 8192} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			client := newRemotePrepareBenchmarkClient(b, count)
+			ctx := context.Background()
+			if _, err := client.PrepareNotify(ctx, 1); err != nil {
+				b.Fatalf("warm PrepareNotify() error = %v", err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				prepared, err := client.PrepareNotify(ctx, 1)
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkClientSink = prepared
+			}
+		})
 	}
 }
 

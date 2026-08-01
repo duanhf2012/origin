@@ -71,6 +71,7 @@ type PlayerRPC interface {
 type PlayerService struct {
 	service.Service
 
+	EchoSuffix  string
 	LastSaved   PlayerData
 	OnlineID    int64
 	GetCount    int
@@ -94,6 +95,9 @@ func (target *PlayerService) EchoName(
 	_ context.Context,
 	value string,
 ) string {
+	if target.EchoSuffix != "" {
+		return value + "-" + target.EchoSuffix
+	}
 	return value + "-echo"
 }
 

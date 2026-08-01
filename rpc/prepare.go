@@ -2,13 +2,21 @@ package rpc
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	publicdiscovery "github.com/duanhf2012/origin/v3/discovery"
 	"github.com/duanhf2012/origin/v3/errs"
-	"github.com/duanhf2012/origin/v3/internal/natsnet"
+	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/service"
 )
+
+const routeCounterShardCount = 64
+
+type routeCounterShard struct {
+	mu       sync.RWMutex
+	counters map[routeCounterKey]*atomic.Uint64
+}
 
 type preparedTransport uint8
 
@@ -64,6 +72,7 @@ type candidateSet struct {
 	natsView    *natsConnectionView
 
 	local       serviceEndpoint
+	localView   routeCandidate
 	hasLocal    bool
 	localInsert int
 	remoteLen   int
@@ -77,6 +86,42 @@ type routeCounterKey struct {
 	serviceName string
 	contractID  ContractID
 	fingerprint ContractFingerprint
+}
+
+func (runtime *Runtime) routeCounter(
+	key routeCounterKey,
+) *atomic.Uint64 {
+	shardIndex := routeCounterShardIndex(key) % routeCounterShardCount
+	shard := &runtime.routeCounters[shardIndex]
+	shard.mu.RLock()
+	counter := shard.counters[key]
+	shard.mu.RUnlock()
+	if counter != nil {
+		return counter
+	}
+
+	shard.mu.Lock()
+	counter = shard.counters[key]
+	if counter == nil {
+		if shard.counters == nil {
+			shard.counters = make(map[routeCounterKey]*atomic.Uint64)
+		}
+		counter = &atomic.Uint64{}
+		shard.counters[key] = counter
+	}
+	shard.mu.Unlock()
+	return counter
+}
+
+func routeCounterShardIndex(key routeCounterKey) uint64 {
+	hash := fnv1aString(key.serviceName)
+	hash ^= uint64(key.contractID) + 0x9e3779b97f4a7c15 +
+		(hash << 6) + (hash >> 2)
+	for _, value := range key.fingerprint {
+		hash ^= uint64(value)
+		hash *= 1099511628211
+	}
+	return hash
 }
 
 func (runtime *Runtime) prepareNotify(
@@ -194,7 +239,9 @@ func (runtime *Runtime) prepareOnce(
 	}
 	candidate, exists := set.eligibleAt(index)
 	if !exists {
-		return preparedTarget{}, errs.ErrRPCRouteSelectorFailed, false
+		// 候选快照、连接视图和本地生命周期都已固定；正常情况下同一下标必然
+		// 映射到同一实例。防御性失败也不归因于业务 Selector，更不能改选。
+		return preparedTarget{}, errs.ErrTransportUnavailable, false
 	}
 	return preparedTarget{
 		transport:   candidate.transport,
@@ -234,11 +281,17 @@ func (runtime *Runtime) buildCandidateSet(
 	if result.exact {
 		if target.nodeID == runtime.nodeID {
 			result.local, result.hasLocal = runtime.endpoints[target.serviceName]
+			if result.hasLocal {
+				result.localView = result.captureLocalCandidate()
+			}
 		}
 		return result
 	}
 
 	result.local, result.hasLocal = runtime.endpoints[target.serviceName]
+	if result.hasLocal {
+		result.localView = result.captureLocalCandidate()
+	}
 	if result.snapshot != nil {
 		result.remoteLen = result.snapshot.Len(target.serviceName)
 	}
@@ -325,7 +378,7 @@ func (set *candidateSet) rawAt(index int) (routeCandidate, bool) {
 			if !set.hasLocal {
 				return routeCandidate{}, false
 			}
-			return set.localCandidate(), true
+			return set.localView, true
 		}
 		if set.snapshot == nil {
 			return routeCandidate{}, false
@@ -339,7 +392,7 @@ func (set *candidateSet) rawAt(index int) (routeCandidate, bool) {
 
 	if set.hasLocal {
 		if index == set.localInsert {
-			return set.localCandidate(), true
+			return set.localView, true
 		}
 		if index > set.localInsert {
 			index--
@@ -355,7 +408,7 @@ func (set *candidateSet) rawAt(index int) (routeCandidate, bool) {
 	return remoteRouteCandidate(candidate), exists
 }
 
-func (set *candidateSet) localCandidate() routeCandidate {
+func (set *candidateSet) captureLocalCandidate() routeCandidate {
 	state := publicdiscovery.StateUnknown
 	if bound := service.RuntimeOf(set.local.target); bound != nil &&
 		bound.State() == service.StateRunning {
@@ -426,11 +479,12 @@ func (set *candidateSet) transportCandidate(
 			set.tcpView == nil {
 			return routeCandidate{}, false
 		}
-		target := set.tcpView.byNode[candidate.nodeID]
-		if target == nil || target.sessionID != candidate.sessionID {
+		entry, exists := set.tcpView.lookup(candidate.nodeID)
+		if !exists || entry.target == nil ||
+			entry.target.sessionID != candidate.sessionID {
 			return candidate, true
 		}
-		candidate.tcpSession = target.currentSession()
+		candidate.tcpSession = entry.session
 		return candidate, true
 	case preparedNATS:
 		if set.runtime.nats == nil {
@@ -452,8 +506,7 @@ func (set *candidateSet) connected(candidate routeCandidate) bool {
 	case preparedNATS:
 		return candidate.natsView != nil &&
 			candidate.natsView.conn != nil &&
-			candidate.natsView.generation != 0 &&
-			candidate.natsView.conn.Status() == natsnet.StatusConnected
+			candidate.natsView.generation != 0
 	default:
 		return false
 	}
@@ -507,9 +560,7 @@ func (runtime *Runtime) selectCandidateIndex(
 			contractID:  set.contractID,
 			fingerprint: set.fingerprint,
 		}
-		created := &atomic.Uint64{}
-		current, _ := runtime.routeCounters.LoadOrStore(key, created)
-		counter := current.(*atomic.Uint64)
+		counter := runtime.routeCounter(key)
 		return int((counter.Add(1) - 1) % uint64(set.count)), nil
 	case routeRandom:
 		value := runtime.routeRandom.Add(0x9e3779b97f4a7c15)
@@ -519,17 +570,47 @@ func (runtime *Runtime) selectCandidateIndex(
 		return int(route.hash % uint64(set.count)), nil
 	case routeCustom:
 		if route.selector == nil {
+			runtime.logger.Error(
+				"rpc route selector is nil",
+				originlog.String(
+					"service_name",
+					set.target.serviceName,
+				),
+			)
 			return 0, errs.ErrRPCRouteSelectorFailed
 		}
 		index, ok, panicked := callRouteSelector(
 			route.selector,
-			RouteCandidates{set: set},
+			RouteCandidates{
+				set:   *set,
+				valid: true,
+			},
 		)
-		if panicked || index < 0 || index >= set.count {
+		if panicked {
+			runtime.logger.ErrorStack(
+				"rpc route selector panic",
+				originlog.String(
+					"service_name",
+					set.target.serviceName,
+				),
+				originlog.Int("candidate_count", set.count),
+			)
 			return 0, errs.ErrRPCRouteSelectorFailed
 		}
 		if !ok {
 			return 0, errs.ErrRPCNoRoute
+		}
+		if index < 0 || index >= set.count {
+			runtime.logger.Error(
+				"rpc route selector returned invalid index",
+				originlog.String(
+					"service_name",
+					set.target.serviceName,
+				),
+				originlog.Int("candidate_count", set.count),
+				originlog.Int("selected_index", index),
+			)
+			return 0, errs.ErrRPCRouteSelectorFailed
 		}
 		return index, nil
 	default:

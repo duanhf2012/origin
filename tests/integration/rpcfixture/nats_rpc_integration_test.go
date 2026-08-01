@@ -73,10 +73,7 @@ func TestNATSRPCAwaitAsyncNotify(t *testing.T) {
 		err   error
 	}, 1)
 	if err := caller.DispatchAsync(func(ctx context.Context) {
-		client := NewPlayerRPCClient(
-			caller,
-			rpc.ToServiceOnNode("player-1", "PlayerService"),
-		)
+		client := BindPlayerRPC(caller)
 		await, callErr := client.AwaitEchoName(ctx, "await")
 		if callErr != nil {
 			result <- struct {
@@ -122,6 +119,145 @@ func TestNATSRPCAwaitAsyncNotify(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("NATS RPC 调用超时")
+	}
+}
+
+func TestM19NATSRoundRobinAcrossRunningInstances(t *testing.T) {
+	running := startRPCNATSServer(t)
+	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
+	discoverySource := internaldiscovery.NewSource()
+	firstPlayer := &PlayerService{EchoSuffix: "player-1"}
+	secondPlayer := &PlayerService{EchoSuffix: "player-2"}
+	caller := &CallerService{}
+	nodes := []*node.Node{
+		newRemoteFixtureNode(
+			t,
+			"player-1",
+			testNATSRPCConfig(running.ClientURL()),
+			pool,
+			discoverySource,
+			node.ServiceBinding{
+				Name: "PlayerService", Template: "PlayerService", Service: firstPlayer,
+			},
+		),
+		newRemoteFixtureNode(
+			t,
+			"player-2",
+			testNATSRPCConfig(running.ClientURL()),
+			pool,
+			discoverySource,
+			node.ServiceBinding{
+				Name: "PlayerService", Template: "PlayerService", Service: secondPlayer,
+			},
+		),
+		newRemoteFixtureNode(
+			t,
+			"gateway-1",
+			testNATSRPCConfig(running.ClientURL()),
+			pool,
+			discoverySource,
+			node.ServiceBinding{
+				Name: "CallerService", Template: "CallerService", Service: caller,
+			},
+		),
+	}
+	for _, current := range nodes {
+		if err := current.Start(context.Background()); err != nil {
+			t.Fatalf("Node %q Start() error = %v", current.ID(), err)
+		}
+	}
+	t.Cleanup(func() {
+		for index := len(nodes) - 1; index >= 0; index-- {
+			stopTestNode(t, nodes[index])
+		}
+		if stats := pool.Stats(); stats.InUseBuffers != 0 {
+			t.Errorf("M19 NATS Buffer 未全部归还: %+v", stats)
+		}
+	})
+
+	type callResult struct {
+		values []string
+		err    error
+	}
+	call := func(run func(context.Context, PlayerRPCClient) ([]string, error)) []string {
+		t.Helper()
+		done := make(chan callResult, 1)
+		if err := caller.DispatchAsync(func(ctx context.Context) {
+			values, callErr := run(ctx, BindPlayerRPC(caller))
+			done <- callResult{values: values, err: callErr}
+		}); err != nil {
+			t.Fatalf("DispatchAsync() error = %v", err)
+		}
+		select {
+		case result := <-done:
+			if result.err != nil {
+				t.Fatalf("M19 NATS route call error = %v", result.err)
+			}
+			return result.values
+		case <-time.After(5 * time.Second):
+			t.Fatal("M19 NATS route call timeout")
+			return nil
+		}
+	}
+
+	for _, nodeID := range []string{"player-1", "player-2"} {
+		values := call(func(
+			ctx context.Context,
+			client PlayerRPCClient,
+		) ([]string, error) {
+			value, err := client.OnNode(nodeID).AwaitEchoName(ctx, "warm")
+			return []string{value}, err
+		})
+		if len(values) != 1 || values[0] != "warm-"+nodeID {
+			t.Fatalf("NATS OnNode(%q) = %v", nodeID, values)
+		}
+	}
+
+	values := call(func(
+		ctx context.Context,
+		client PlayerRPCClient,
+	) ([]string, error) {
+		first, err := client.AwaitEchoName(ctx, "rr1")
+		if err != nil {
+			return nil, err
+		}
+		second, err := BindPlayerRPC(caller).AwaitEchoName(ctx, "rr2")
+		if err != nil {
+			return nil, err
+		}
+		third, err := client.AwaitEchoName(ctx, "rr3")
+		return []string{first, second, third}, err
+	})
+	want := []string{"rr1-player-1", "rr2-player-2", "rr3-player-1"}
+	if len(values) != len(want) {
+		t.Fatalf("NATS RoundRobin = %v", values)
+	}
+	for index := range want {
+		if values[index] != want[index] {
+			t.Fatalf("NATS RoundRobin = %v, want %v", values, want)
+		}
+	}
+
+	firstRecord := discoveryNodeRecord(t, discoverySource, "player-1")
+	firstRecord.Services[0].State = internaldiscovery.ServiceStateRetired
+	if err := discoverySource.Publish(firstRecord); err != nil {
+		t.Fatalf("Publish(retired) error = %v", err)
+	}
+	values = call(func(
+		ctx context.Context,
+		client PlayerRPCClient,
+	) ([]string, error) {
+		auto, err := client.AwaitEchoName(ctx, "retired-auto")
+		if err != nil {
+			return nil, err
+		}
+		exact, err := client.OnNode("player-1").
+			AwaitEchoName(ctx, "retired-exact")
+		return []string{auto, exact}, err
+	})
+	if values[0] != "retired-auto-player-2" ||
+		values[1] != "retired-exact-player-1" {
+		t.Fatalf("NATS Retired route boundary = %v", values)
 	}
 }
 
