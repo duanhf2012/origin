@@ -59,6 +59,8 @@ const (
 	CodeRPCExecutionPanic Code = 2009
 	// CodeRPCBroadcastPartialFailed 表示多目标广播只有部分目标完成本地提交。
 	CodeRPCBroadcastPartialFailed Code = 2010
+	// CodeRPCBroadcastFailed 表示多目标广播没有任何目标完成本地提交。
+	CodeRPCBroadcastFailed Code = 2011
 
 	// CodeTransportUnavailable 表示 Dial、Accept 或底层 I/O 导致传输不可用。
 	CodeTransportUnavailable Code = 3001
@@ -142,6 +144,8 @@ func codeText(code Code) string {
 		return "rpc execution panic"
 	case CodeRPCBroadcastPartialFailed:
 		return "rpc broadcast partially failed"
+	case CodeRPCBroadcastFailed:
+		return "rpc broadcast failed"
 	case CodeTransportUnavailable:
 		return "transport unavailable"
 	case CodeTransportClosed:

@@ -82,10 +82,11 @@ func (values *discoveryLabelValues) UnmarshalJSON(data []byte) error {
 
 // rpcConfigMirror 只负责把配置文本转换成 rpc.Config 的冻结值。
 type rpcConfigMirror struct {
-	Transport      string                 `json:"transport"`
-	MaxPayloadSize *originconfig.ByteSize `json:"max_payload_size"`
-	TCP            *rpcTCPConfigMirror    `json:"tcp"`
-	NATS           *rpcNATSConfigMirror   `json:"nats"`
+	Transport        string                 `json:"transport"`
+	MaxPayloadSize   *originconfig.ByteSize `json:"max_payload_size"`
+	MaxBroadcastSize *originconfig.ByteSize `json:"max_broadcast_size"`
+	TCP              *rpcTCPConfigMirror    `json:"tcp"`
+	NATS             *rpcNATSConfigMirror   `json:"nats"`
 }
 
 // rpcTCPConfigMirror 使用指针保留“省略字段沿用默认值”的明确语义。
@@ -529,10 +530,23 @@ func decodeNodeRPCConfig(
 		}
 		maxPayloadSize = int(size)
 	}
+	maxBroadcastSize := rpc.DefaultMaxBroadcastSize
+	if mirror.MaxBroadcastSize != nil {
+		size := mirror.MaxBroadcastSize.Bytes()
+		if size <= 0 || size > int64(rpc.MaxBroadcastSize) ||
+			uint64(size) > uint64(^uint(0)>>1) {
+			return nil, invalidConfigf(
+				"Node %q 的 rpc.max_broadcast_size 必须位于 1B～1G 且能由当前平台 int 表达",
+				nodeID,
+			)
+		}
+		maxBroadcastSize = int(size)
+	}
 
 	result := rpc.Config{
-		Transport:      transport,
-		MaxPayloadSize: maxPayloadSize,
+		Transport:        transport,
+		MaxPayloadSize:   maxPayloadSize,
+		MaxBroadcastSize: maxBroadcastSize,
 	}
 	switch transport {
 	case rpc.TransportTCP:

@@ -48,6 +48,11 @@ func TestStableCodes(t *testing.T) {
 			code: errs.CodeRPCBroadcastPartialFailed,
 			want: 2010,
 		},
+		{
+			name: "rpc broadcast failed",
+			code: errs.CodeRPCBroadcastFailed,
+			want: 2011,
+		},
 		{name: "transport unavailable", code: errs.CodeTransportUnavailable, want: 3001},
 		{name: "transport closed", code: errs.CodeTransportClosed, want: 3002},
 		{name: "transport overloaded", code: errs.CodeTransportOverloaded, want: 3003},
@@ -87,6 +92,7 @@ func TestRPCFixedErrors(t *testing.T) {
 		{errs.CodeRPCResponseDecodeFailed, errs.ErrRPCResponseDecodeFailed},
 		{errs.CodeRPCExecutionPanic, errs.ErrRPCExecutionPanic},
 		{errs.CodeRPCBroadcastPartialFailed, errs.ErrRPCBroadcastPartialFailed},
+		{errs.CodeRPCBroadcastFailed, errs.ErrRPCBroadcastFailed},
 	}
 
 	// 每个固定码必须返回同一个只读对象，并且 CodeOf 能恢复原始数值。
@@ -150,6 +156,16 @@ func TestNew(t *testing.T) {
 			text: "service not ready",
 		},
 		{code: errs.CodeServiceFailed, want: errs.ErrServiceFailed, text: "service failed"},
+		{
+			code: errs.CodeRPCBroadcastPartialFailed,
+			want: errs.ErrRPCBroadcastPartialFailed,
+			text: "rpc broadcast partially failed",
+		},
+		{
+			code: errs.CodeRPCBroadcastFailed,
+			want: errs.ErrRPCBroadcastFailed,
+			text: "rpc broadcast failed",
+		},
 		{
 			code: errs.CodeTransportUnavailable,
 			want: errs.ErrTransportUnavailable,

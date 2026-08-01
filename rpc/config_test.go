@@ -19,6 +19,7 @@ func TestTCPConfigDefaults(t *testing.T) {
 		t.Fatalf("默认 TCP 配置应有效: %v", err)
 	}
 	if config.MaxPayloadSize != DefaultMaxPayloadSize ||
+		config.MaxBroadcastSize != DefaultMaxBroadcastSize ||
 		config.TCP.SendQueueMessages != 16_384 ||
 		config.TCP.ReadIdleTimeout != 15*time.Second ||
 		config.TCP.WriteTimeout != 15*time.Second ||
@@ -30,9 +31,10 @@ func TestTCPConfigDefaults(t *testing.T) {
 // TestNATSConfigDefaults 锁定 NATS 最小公开配置和接收队列默认值。
 func TestNATSConfigDefaults(t *testing.T) {
 	config := Config{
-		Transport:      TransportNATS,
-		MaxPayloadSize: DefaultMaxPayloadSize,
-		NATS:           DefaultNATSConfig(),
+		Transport:        TransportNATS,
+		MaxPayloadSize:   DefaultMaxPayloadSize,
+		MaxBroadcastSize: DefaultMaxBroadcastSize,
+		NATS:             DefaultNATSConfig(),
 	}
 	config.NATS.Namespace = "game-prod"
 	config.NATS.URLs = []string{"nats://127.0.0.1:4222"}
@@ -53,9 +55,10 @@ func TestConfigRejectsInvalidValues(t *testing.T) {
 	tcpConfig.TCP.Advertise = "127.0.0.1:7101"
 
 	natsConfig := Config{
-		Transport:      TransportNATS,
-		MaxPayloadSize: DefaultMaxPayloadSize,
-		NATS:           DefaultNATSConfig(),
+		Transport:        TransportNATS,
+		MaxPayloadSize:   DefaultMaxPayloadSize,
+		MaxBroadcastSize: DefaultMaxBroadcastSize,
+		NATS:             DefaultNATSConfig(),
 	}
 	natsConfig.NATS.Namespace = "game-prod"
 	natsConfig.NATS.URLs = []string{"nats://127.0.0.1:4222"}
@@ -63,6 +66,12 @@ func TestConfigRejectsInvalidValues(t *testing.T) {
 	cases := []Config{
 		func() Config { value := tcpConfig; value.Transport = "udp"; return value }(),
 		func() Config { value := tcpConfig; value.MaxPayloadSize = 0; return value }(),
+		func() Config { value := tcpConfig; value.MaxBroadcastSize = 0; return value }(),
+		func() Config {
+			value := tcpConfig
+			value.MaxBroadcastSize = MaxBroadcastSize + 1
+			return value
+		}(),
 		func() Config { value := tcpConfig; value.TCP = nil; return value }(),
 		func() Config {
 			value := tcpConfig

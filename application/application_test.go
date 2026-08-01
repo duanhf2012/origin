@@ -597,6 +597,7 @@ nodes:
     rpc:
       transport: tcp
       max_payload_size: 2M
+      max_broadcast_size: 128M
       tcp:
         listen: 127.0.0.1:17001
         advertise: 127.0.0.1:17001
@@ -616,6 +617,7 @@ nodes:
 	if configured == nil ||
 		configured.Transport != rpc.TransportTCP ||
 		configured.MaxPayloadSize != 2*1024*1024 ||
+		configured.MaxBroadcastSize != 128*1024*1024 ||
 		configured.TCP.Listen != "127.0.0.1:17001" ||
 		configured.TCP.Advertise != "127.0.0.1:17001" ||
 		configured.TCP.SendQueueMessages != 2048 ||
@@ -633,6 +635,7 @@ nodes:
     rpc:
       transport: nats
       max_payload_size: 2M
+      max_broadcast_size: 128M
       nats:
         namespace: game-prod
         urls: [nats://127.0.0.1:4222]
@@ -652,6 +655,7 @@ nodes:
 	if configured == nil ||
 		configured.Transport != rpc.TransportNATS ||
 		configured.MaxPayloadSize != 2*1024*1024 ||
+		configured.MaxBroadcastSize != 128*1024*1024 ||
 		configured.TCP != nil ||
 		configured.NATS == nil ||
 		configured.NATS.Namespace != "game-prod" ||
@@ -697,6 +701,30 @@ func TestLoadConfigRejectsInvalidNodeRPC(t *testing.T) {
         listen: "127.0.0.1:17001"
         advertise: "127.0.0.1:17001"
         unknown: true
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    rpc:
+      transport: tcp
+      max_broadcast_size: 2G
+      tcp: {listen: "127.0.0.1:17001", advertise: "127.0.0.1:17001"}
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    rpc:
+      transport: tcp
+      max_broadcast_size: 0B
+      tcp: {listen: "127.0.0.1:17001", advertise: "127.0.0.1:17001"}
+    services: [lifecycleTestService]
+`,
+		`nodes:
+  - id: game-1
+    rpc:
+      transport: tcp
+      max_broadcast_size: 67108864
+      tcp: {listen: "127.0.0.1:17001", advertise: "127.0.0.1:17001"}
     services: [lifecycleTestService]
 `,
 		`nodes:

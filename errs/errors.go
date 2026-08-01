@@ -62,6 +62,8 @@ var (
 	ErrRPCExecutionPanic error = newCodeError(CodeRPCExecutionPanic)
 	// ErrRPCBroadcastPartialFailed 表示多目标广播只有部分目标完成提交。
 	ErrRPCBroadcastPartialFailed error = newCodeError(CodeRPCBroadcastPartialFailed)
+	// ErrRPCBroadcastFailed 表示多目标广播没有任何目标完成提交。
+	ErrRPCBroadcastFailed error = newCodeError(CodeRPCBroadcastFailed)
 	// ErrTransportUnavailable 表示底层连接或 I/O 当前不可用。
 	ErrTransportUnavailable error = newCodeError(CodeTransportUnavailable)
 	// ErrTransportClosed 表示 Transport 或连接已经关闭。
@@ -209,6 +211,8 @@ func New(code Code) error {
 		return ErrRPCExecutionPanic
 	case CodeRPCBroadcastPartialFailed:
 		return ErrRPCBroadcastPartialFailed
+	case CodeRPCBroadcastFailed:
+		return ErrRPCBroadcastFailed
 	case CodeTransportUnavailable:
 		return ErrTransportUnavailable
 	case CodeTransportClosed:

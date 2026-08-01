@@ -37,6 +37,10 @@ const (
 	DefaultPendingPerSession = 65_536
 	// DefaultPendingPerNode 是一个 NATS Node 的固定有界 Request 上限。
 	DefaultPendingPerNode = 65_536
+	// DefaultMaxBroadcastSize 限制一次广播按全部意图目标放大的业务 payload 总字节数。
+	DefaultMaxBroadcastSize = 64 * 1024 * 1024
+	// MaxBroadcastSize 是项目可以显式配置的一次广播放大硬上限。
+	MaxBroadcastSize = 1024 * 1024 * 1024
 )
 
 // Config 是一个 Node 创建后冻结的远程 RPC 配置。
@@ -48,6 +52,8 @@ type Config struct {
 	Transport string
 	// MaxPayloadSize 是不含 Origin 包络的单个业务 payload 上限。
 	MaxPayloadSize int
+	// MaxBroadcastSize 是一次广播的 payload 大小乘以意图目标数的上限。
+	MaxBroadcastSize int
 	// TCP 只在 TransportTCP 下存在。
 	TCP *TCPConfig
 	// NATS 只在 TransportNATS 下存在。
@@ -128,9 +134,10 @@ func DefaultNATSConfig() *NATSConfig {
 // 置 nil，并从 DefaultNATSConfig 开始构造 NATS 配置块。
 func DefaultConfig() Config {
 	return Config{
-		Transport:      TransportTCP,
-		MaxPayloadSize: DefaultMaxPayloadSize,
-		TCP:            DefaultTCPConfig(),
+		Transport:        TransportTCP,
+		MaxPayloadSize:   DefaultMaxPayloadSize,
+		MaxBroadcastSize: DefaultMaxBroadcastSize,
+		TCP:              DefaultTCPConfig(),
 	}
 }
 
@@ -141,6 +148,10 @@ func (config Config) Validate() error {
 		config.MaxPayloadSize > math.MaxInt-wireEnvelopeSize ||
 		uint64(config.MaxPayloadSize) > uint64(math.MaxUint32-wireEnvelopeSize) {
 		return invalidRPCConfig("rpc.max_payload_size 超出四字节帧可表达范围")
+	}
+	// 广播放大上限必须为正且不得超过已经确认的 1G 硬边界。
+	if config.MaxBroadcastSize <= 0 || config.MaxBroadcastSize > MaxBroadcastSize {
+		return invalidRPCConfig("rpc.max_broadcast_size 必须位于 1B～1G")
 	}
 
 	// 传输类型决定且只决定一个有效配置块，禁止静默忽略另一个配置块。
