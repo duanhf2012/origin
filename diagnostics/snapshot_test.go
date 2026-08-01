@@ -110,3 +110,41 @@ func TestDurationJSONZeroAndNegative(t *testing.T) {
 		})
 	}
 }
+
+// TestDurationJSONRoundTrip 固定管理工具读取诊断快照时的强类型解码语义。
+func TestDurationJSONRoundTrip(t *testing.T) {
+	var duration diagnostics.Duration
+	if err := json.Unmarshal([]byte(`"1.25s"`), &duration); err != nil {
+		t.Fatalf("json.Unmarshal(Duration) failed: %v", err)
+	}
+	if got, want := duration.Value(), 1250*time.Millisecond; got != want {
+		t.Fatalf("Duration.Value() = %v, want %v", got, want)
+	}
+	if got, want := duration.String(), "1.25s"; got != want {
+		t.Fatalf("Duration.String() = %q, want %q", got, want)
+	}
+}
+
+// TestDurationJSONRejectsInvalidInput 防止无单位整数、非法单位和空接收者被静默接受。
+func TestDurationJSONRejectsInvalidInput(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{name: "number", data: `1250`},
+		{name: "invalid unit", data: `"1fortnight"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var duration diagnostics.Duration
+			if err := json.Unmarshal([]byte(test.data), &duration); err == nil {
+				t.Fatalf("json.Unmarshal(%s) error = nil", test.data)
+			}
+		})
+	}
+
+	var duration *diagnostics.Duration
+	if err := duration.UnmarshalJSON([]byte(`"1s"`)); err == nil {
+		t.Fatalf("nil Duration.UnmarshalJSON() error = nil")
+	}
+}
