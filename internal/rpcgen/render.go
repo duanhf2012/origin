@@ -143,6 +143,16 @@ func renderContract(
 		rpcAlias,
 		clientName,
 	)
+	fmt.Fprintf(
+		body,
+		"// IncludeRetired 派生在自动范围中同时接受 Running 和 Retired 的客户端。\n"+
+			"func (client %s) IncludeRetired() %s {\n"+
+			"\tclient.client = client.client.IncludeRetired()\n"+
+			"\treturn client\n"+
+			"}\n\n",
+		clientName,
+		clientName,
+	)
 	for _, candidate := range item.methods {
 		renderCodecFunctions(
 			body,
@@ -529,16 +539,18 @@ func renderClientMethods(
 			contextAlias,
 			inputDecl,
 		)
-		clientExpression := "client.client"
-		if prefix == "Notify" {
-			fmt.Fprintf(
-				body,
-				"\tpreparedClient, err := client.client.PrepareNotify(ctx, %s)\n",
-				methodID,
-			)
-			body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
-			clientExpression = "preparedClient"
+		prepareMethod := "PrepareNotify"
+		if prefix == "Broadcast" {
+			prepareMethod = "PrepareBroadcast"
 		}
+		fmt.Fprintf(
+			body,
+			"\tpreparedClient, err := client.client.%s(ctx, %s)\n",
+			prepareMethod,
+			methodID,
+		)
+		body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
+		clientExpression := "preparedClient"
 		fmt.Fprintf(
 			body,
 			"\trequest, err := %s(%s, %s.CallNotify%s)\n",

@@ -947,9 +947,10 @@ func discoveryNodeRecord(
 // testNATSRPCConfig 返回共享同一 Broker 和 Namespace 的 Node 配置。
 func testNATSRPCConfig(url string) rpc.Config {
 	config := rpc.Config{
-		Transport:      rpc.TransportNATS,
-		MaxPayloadSize: rpc.DefaultMaxPayloadSize,
-		NATS:           rpc.DefaultNATSConfig(),
+		Transport:        rpc.TransportNATS,
+		MaxPayloadSize:   rpc.DefaultMaxPayloadSize,
+		MaxBroadcastSize: rpc.DefaultMaxBroadcastSize,
+		NATS:             rpc.DefaultNATSConfig(),
 	}
 	config.NATS.Namespace = "game-test"
 	config.NATS.URLs = []string{url}

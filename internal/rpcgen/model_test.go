@@ -408,12 +408,13 @@ func TestRenderContractIncludesM19BindingRoutingAndPrepare(t *testing.T) {
 	}
 	source := string(content)
 	required := []string{
-		"rpc.GeneratedABIVersion - 2",
-		"2 - rpc.GeneratedABIVersion",
+		"rpc.GeneratedABIVersion - 3",
+		"3 - rpc.GeneratedABIVersion",
 		"func BindPlayerRPC(owner service.IService) PlayerRPCClient",
 		`rpc.ToService("PlayerService")`,
 		"func BindPlayerRPCTo(owner service.IService, serviceName string) PlayerRPCClient",
 		"func (client PlayerRPCClient) OnNode(nodeID string) PlayerRPCClient",
+		"func (client PlayerRPCClient) IncludeRetired() PlayerRPCClient",
 		"func (client PlayerRPCClient) RouteRoundRobin() PlayerRPCClient",
 		"func (client PlayerRPCClient) RouteRandom() PlayerRPCClient",
 		"func (client PlayerRPCClient) Route(key any) PlayerRPCClient",
@@ -421,6 +422,7 @@ func TestRenderContractIncludesM19BindingRoutingAndPrepare(t *testing.T) {
 		"client.client.PrepareAwait(ctx, playerRPCEchoMethodID)",
 		"client.client.PrepareAsync(ctx, playerRPCEchoMethodID)",
 		"client.client.PrepareNotify(ctx, playerRPCEchoMethodID)",
+		"client.client.PrepareBroadcast(ctx, playerRPCEchoMethodID)",
 	}
 	for _, expected := range required {
 		if !strings.Contains(source, expected) {
@@ -432,6 +434,21 @@ func TestRenderContractIncludesM19BindingRoutingAndPrepare(t *testing.T) {
 		"client.client.PrepareNotify(ctx, playerRPCEchoMethodID)",
 	) != 1 {
 		t.Fatalf("Broadcast 被错误加入 PrepareNotify:\n%s", source)
+	}
+	if strings.Count(
+		source,
+		"client.client.PrepareBroadcast(ctx, playerRPCEchoMethodID)",
+	) != 1 {
+		t.Fatalf("Broadcast 没有恰好执行一次 PrepareBroadcast:\n%s", source)
+	}
+	broadcastBody := "preparedClient, err := client.client.PrepareBroadcast(ctx, playerRPCEchoMethodID)\n" +
+		"\tif err != nil {\n\t\treturn err\n\t}\n" +
+		"\trequest, err := encodePlayerRPCEchoRequest(preparedClient, rpc.CallNotify)"
+	if !strings.Contains(source, broadcastBody) || !strings.Contains(
+		source,
+		"return preparedClient.Broadcast(ctx, playerRPCEchoMethodID, request)",
+	) {
+		t.Fatalf("Broadcast 没有使用 Prepare 返回的客户端完成编码和提交:\n%s", source)
 	}
 }
 

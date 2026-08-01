@@ -305,13 +305,13 @@ func renderPackage(output packageOutput) ([]byte, error) {
 	rpcAlias := imports.add("github.com/duanhf2012/origin/v3/rpc", "rpc")
 	var body bytes.Buffer
 
-	// 两个无符号常量只在 Runtime ABI 恰好等于当前生成器版本 2 时都非负。单向减法
+	// 两个无符号常量只在 Runtime ABI 恰好等于当前生成器版本 3 时都非负。单向减法
 	// 只能发现降级，无法发现 Runtime 升级，因此必须同时检查两个方向。
 	fmt.Fprintf(
 		&body,
 		"const (\n"+
-			"\t_ uint = %s.GeneratedABIVersion - 2\n"+
-			"\t_ uint = 2 - %s.GeneratedABIVersion\n"+
+			"\t_ uint = %s.GeneratedABIVersion - 3\n"+
+			"\t_ uint = 3 - %s.GeneratedABIVersion\n"+
 			")\n\n",
 		rpcAlias,
 		rpcAlias,

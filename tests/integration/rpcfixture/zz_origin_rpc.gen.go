@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	_ uint = rpc.GeneratedABIVersion - 2
-	_ uint = 2 - rpc.GeneratedABIVersion
+	_ uint = rpc.GeneratedABIVersion - 3
+	_ uint = 3 - rpc.GeneratedABIVersion
 )
 
 const playerRPCContractID rpc.ContractID = 0xb3ca21d38db4b2fc
@@ -76,6 +76,12 @@ func (client PlayerRPCClient) Route(key any) PlayerRPCClient {
 // RouteBy 派生自定义 Selector 路由客户端。
 func (client PlayerRPCClient) RouteBy(selector rpc.RouteSelector) PlayerRPCClient {
 	client.client = client.client.RouteBy(selector)
+	return client
+}
+
+// IncludeRetired 派生在自动范围中同时接受 Running 和 Retired 的客户端。
+func (client PlayerRPCClient) IncludeRetired() PlayerRPCClient {
+	client.client = client.client.IncludeRetired()
 	return client
 }
 
@@ -207,11 +213,15 @@ func (client PlayerRPCClient) NotifyEchoName(ctx context.Context, arg1 string) e
 
 // BroadcastEchoName 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastEchoName(ctx context.Context, arg1 string) error {
-	request, err := encodePlayerRPCEchoNameRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareBroadcast(ctx, playerRPCEchoNameMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Broadcast(ctx, playerRPCEchoNameMethodID, request)
+	request, err := encodePlayerRPCEchoNameRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Broadcast(ctx, playerRPCEchoNameMethodID, request)
 }
 
 // encodePlayerRPCGetPlayerRequest 计算并一次写入当前方法请求载荷。
@@ -751,11 +761,15 @@ func (client PlayerRPCClient) NotifyGetPlayer(ctx context.Context, arg1 int64, a
 
 // BroadcastGetPlayer 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastGetPlayer(ctx context.Context, arg1 int64, arg2 PlayerData, arg3 *structpb.Struct) error {
-	request, err := encodePlayerRPCGetPlayerRequest(client.client, rpc.CallNotify, arg1, arg2, arg3)
+	preparedClient, err := client.client.PrepareBroadcast(ctx, playerRPCGetPlayerMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Broadcast(ctx, playerRPCGetPlayerMethodID, request)
+	request, err := encodePlayerRPCGetPlayerRequest(preparedClient, rpc.CallNotify, arg1, arg2, arg3)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Broadcast(ctx, playerRPCGetPlayerMethodID, request)
 }
 
 // encodePlayerRPCPlayerOnlineRequest 计算并一次写入当前方法请求载荷。
@@ -812,11 +826,15 @@ func (client PlayerRPCClient) NotifyPlayerOnline(ctx context.Context, arg1 int64
 
 // BroadcastPlayerOnline 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastPlayerOnline(ctx context.Context, arg1 int64) error {
-	request, err := encodePlayerRPCPlayerOnlineRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareBroadcast(ctx, playerRPCPlayerOnlineMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Broadcast(ctx, playerRPCPlayerOnlineMethodID, request)
+	request, err := encodePlayerRPCPlayerOnlineRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Broadcast(ctx, playerRPCPlayerOnlineMethodID, request)
 }
 
 // encodePlayerRPCRoundTripBlobRequest 计算并一次写入当前方法请求载荷。
@@ -983,11 +1001,15 @@ func (client PlayerRPCClient) NotifyRoundTripBlob(ctx context.Context, arg1 Owne
 
 // BroadcastRoundTripBlob 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastRoundTripBlob(ctx context.Context, arg1 OwnedBlob) error {
-	request, err := encodePlayerRPCRoundTripBlobRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareBroadcast(ctx, playerRPCRoundTripBlobMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Broadcast(ctx, playerRPCRoundTripBlobMethodID, request)
+	request, err := encodePlayerRPCRoundTripBlobRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Broadcast(ctx, playerRPCRoundTripBlobMethodID, request)
 }
 
 // encodePlayerRPCRoundTripPackedIDRequest 计算并一次写入当前方法请求载荷。
@@ -1154,11 +1176,15 @@ func (client PlayerRPCClient) NotifyRoundTripPackedID(ctx context.Context, arg1 
 
 // BroadcastRoundTripPackedID 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) error {
-	request, err := encodePlayerRPCRoundTripPackedIDRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareBroadcast(ctx, playerRPCRoundTripPackedIDMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Broadcast(ctx, playerRPCRoundTripPackedIDMethodID, request)
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Broadcast(ctx, playerRPCRoundTripPackedIDMethodID, request)
 }
 
 // encodePlayerRPCRoundTripTimeRequest 计算并一次写入当前方法请求载荷。
@@ -1727,11 +1753,15 @@ func (client PlayerRPCClient) NotifyRoundTripTime(ctx context.Context, arg1 Time
 
 // BroadcastRoundTripTime 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) error {
-	request, err := encodePlayerRPCRoundTripTimeRequest(client.client, rpc.CallNotify, arg1, arg2)
+	preparedClient, err := client.client.PrepareBroadcast(ctx, playerRPCRoundTripTimeMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Broadcast(ctx, playerRPCRoundTripTimeMethodID, request)
+	request, err := encodePlayerRPCRoundTripTimeRequest(preparedClient, rpc.CallNotify, arg1, arg2)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Broadcast(ctx, playerRPCRoundTripTimeMethodID, request)
 }
 
 // encodePlayerRPCSavePlayerRequest 计算并一次写入当前方法请求载荷。
@@ -2020,11 +2050,15 @@ func (client PlayerRPCClient) NotifySavePlayer(ctx context.Context, arg1 PlayerD
 
 // BroadcastSavePlayer 提交通知并主动放弃业务结果。
 func (client PlayerRPCClient) BroadcastSavePlayer(ctx context.Context, arg1 PlayerData) error {
-	request, err := encodePlayerRPCSavePlayerRequest(client.client, rpc.CallNotify, arg1)
+	preparedClient, err := client.client.PrepareBroadcast(ctx, playerRPCSavePlayerMethodID)
 	if err != nil {
 		return err
 	}
-	return client.client.Broadcast(ctx, playerRPCSavePlayerMethodID, request)
+	request, err := encodePlayerRPCSavePlayerRequest(preparedClient, rpc.CallNotify, arg1)
+	if err != nil {
+		return err
+	}
+	return preparedClient.Broadcast(ctx, playerRPCSavePlayerMethodID, request)
 }
 
 // playerRPCDispatcher 把 MethodID 静态分派到 PlayerRPC 实现。
