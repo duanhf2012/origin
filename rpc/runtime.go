@@ -56,19 +56,20 @@ type Runtime struct {
 	// transportObserver 把整体入站状态变化交给 Node。网络回调只发布常数大小快照，
 	// 不在这里执行发现发布、Service Stop 或 Application Stop。
 	transportObserver func(TransportEvent)
-	// rpcStats 是 Local/TCP/NATS 三个固定原子计数块；零值即可并发使用。
-	rpcStats struct {
-		local transportCounters
-		tcp   transportCounters
-		nats  transportCounters
-	}
-
 	// remote 在配置启用 TCP 时保存连接、监听和 Deadline 资源；未配置时保持 nil，
 	// 本地调用热路径只需一次 nil 判断。
 	remote *remoteRuntime
 	// nats 在配置启用 NATS 时保存 Node 共享 Connection、两个 Subscription 和 pending。
 	// TCP 与 NATS 直接使用不同字段，不在逐调用热路径引入接口分派。
 	nats *natsRuntime
+
+	// rpcStats 是 Local/TCP/NATS 三个固定原子计数块；放在结构体末尾，避免诊断冷字段
+	// 改变 M21 已建立基线的路由和 Transport 热字段布局。零值即可并发使用。
+	rpcStats struct {
+		local transportCounters
+		tcp   transportCounters
+		nats  transportCounters
+	}
 }
 
 // RemoteRoute 是发现目录为一次精确远端 RPC 解析出的传输与进程会话目标。
