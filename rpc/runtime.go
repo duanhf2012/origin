@@ -891,8 +891,6 @@ func (runtime *Runtime) submitLocal(
 	request *Buffer,
 	complete func(*Buffer, error),
 ) (remoteRequestHandle, error) {
-	payloadBytes := len(request.Bytes())
-
 	// caller Context 只提供业务值；目标任务自身的生命周期和执行令牌由目标 Scheduler
 	// 创建。WithoutCancel 防止 Notify 在准入成功后又被调用方撤回。
 	control := ctx
@@ -916,7 +914,6 @@ func (runtime *Runtime) submitLocal(
 				methodID,
 				request.Bytes(),
 			)
-			runtime.recordInboundNotify(preparedLocal, payloadBytes)
 			return
 		}
 
@@ -931,19 +928,17 @@ func (runtime *Runtime) submitLocal(
 		if response != nil {
 			responseBytes = len(response.Bytes())
 		}
-		runtime.recordInboundFinished(
-			preparedLocal,
-			dispatchErr,
-			responseBytes,
-		)
+		if dispatchErr != nil {
+			runtime.recordInboundFinished(
+				preparedLocal,
+				dispatchErr,
+				responseBytes,
+			)
+		}
 		complete(response, dispatchErr)
 	})
 	if err != nil {
-		runtime.recordInboundRejected(preparedLocal)
 		return remoteRequestHandle{}, err
-	}
-	if kind == CallRequest {
-		runtime.recordInboundAccepted(preparedLocal, payloadBytes)
 	}
 	return remoteRequestHandle{transport: preparedLocal}, nil
 }
