@@ -508,7 +508,9 @@ func (provider *Provider) newClient(ctx context.Context) (*clientv3.Client, erro
 		Token:                provider.config.Auth.Token,
 		Context:              ctx,
 		Logger:               zap.NewNop(),
-		PermitWithoutStream:  true,
+		// 保持 PermitWithoutStream 的默认 false：Watch 与 Lease 已为活动流提供保活，空闲
+		// endpoint 若继续无数据 ping，会触发 etcd 的 gRPC too_many_pings 连接驱逐。
+		PermitWithoutStream: false,
 	})
 }
 
