@@ -490,7 +490,8 @@ go test ./rpc ./tests/integration/rpcfixture -run '^$' -bench 'Broadcast' -bench
 
 - [x] **Step 5: 回写验收证据并形成 M20 完成提交**
 
-设计和实施计划状态改为已完成；路线图固定下一步只剩 M21 业务运行时扩展收口和 M22 稳定发布；
+设计和实施计划状态改为已完成；路线图固定下一步只剩 M21 业务运行时扩展收口和 M22
+发布前质量收口；
 记录命令、Benchmark、覆盖率、兼容性和剩余风险；确认工作树只含 M20 必要改动。
 
 Commit: `feat(M20): 完成多节点广播与部分失败`
