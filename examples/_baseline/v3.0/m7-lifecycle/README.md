@@ -10,11 +10,11 @@
 在仓库根目录运行：
 
 ```text
-go run ./examples/lifecycle start --app-name lifecycle-demo --config ./examples/lifecycle/config --node gateway-1,game-1
+go run ./examples/_baseline/v3.0/m7-lifecycle start --app-name lifecycle-demo --config ./examples/_baseline/v3.0/m7-lifecycle/config --node gateway-1,game-1
 ```
 
 另一个终端可以请求停止：
 
 ```text
-go run ./examples/lifecycle stop --app-name lifecycle-demo
+go run ./examples/_baseline/v3.0/m7-lifecycle stop --app-name lifecycle-demo
 ```

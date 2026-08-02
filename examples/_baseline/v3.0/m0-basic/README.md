@@ -9,21 +9,21 @@
 直接运行：
 
 ```text
-go run ./examples/basic
+go run ./examples/_baseline/v3.0/m0-basic
 ```
 
 通过构建脚本编译：
 
 ```text
-scripts\buildwin.bat ./examples/basic
-scripts\buildlinux.bat ./examples/basic
+scripts\buildwin.bat ./examples/_baseline/v3.0/m0-basic
+scripts\buildlinux.bat ./examples/_baseline/v3.0/m0-basic
 ```
 
-脚本生成的默认文件名分别为 `basic.exe` 和 `basic`。通过脚本编译时会自动注入构建信息；直接使用 `go run` 时构建信息允许为空。
+脚本生成的默认文件名分别为 `m0-basic.exe` 和 `m0-basic`。通过脚本编译时会自动注入构建信息；直接使用 `go run` 时构建信息允许为空。
 
 后续规则：
 
-1. `examples/basic` 始终保持最小、可编译和可运行；
+1. 本归档示例始终保持最小、可编译和可运行；
 2. RPC、NATS 等独立场景分别放入 `examples` 的独立子目录；
 3. 示例不建立独立 `go.mod`，始终跟随仓库根模块编译；
 4. 所有示例都必须通过 `go build ./...`。
