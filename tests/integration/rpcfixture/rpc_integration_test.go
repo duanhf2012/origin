@@ -96,6 +96,64 @@ func newRPCFixtureWithID(
 	return fixture
 }
 
+// TestGeneratedAwaitUsesActualNameAndTemplateContract 验证模板化改名后的完整本地 RPC：
+// Template 负责关联生成契约，actual 名负责查找和路由。
+func TestGeneratedAwaitUsesActualNameAndTemplateContract(t *testing.T) {
+	caller := &CallerService{}
+	player := &PlayerService{EchoSuffix: "renamed"}
+	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
+	instance, err := node.New(
+		node.Config{ID: "game-renamed"},
+		[]node.ServiceBinding{
+			{Name: "CallerService", Template: "CallerService", Service: caller},
+			{Name: "player-primary", Template: "PlayerService", Service: player},
+		},
+		originlog.NewNop(),
+		node.Options{
+			MaxTimersPerNode: 1024,
+			TimerLocation:    time.UTC,
+			BufferPool:       pool,
+		},
+	)
+	if err != nil {
+		t.Fatalf("node.New() error = %v", err)
+	}
+	if err := instance.Start(context.Background()); err != nil {
+		t.Fatalf("Node.Start() error = %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := instance.Stop(stopCtx); err != nil {
+			t.Errorf("Node.Stop() error = %v", err)
+		}
+		if stats := pool.Stats(); stats.InUseBuffers != 0 {
+			t.Errorf("RPC Buffer 未全部归还: %+v", stats)
+		}
+	})
+
+	type callResult struct {
+		value string
+		err   error
+	}
+	result := make(chan callResult, 1)
+	if err := caller.DispatchAsync(func(ctx context.Context) {
+		value, callErr := BindPlayerRPCTo(caller, "player-primary").
+			AwaitEchoName(ctx, "player")
+		result <- callResult{value: value, err: callErr}
+	}); err != nil {
+		t.Fatalf("DispatchAsync() error = %v", err)
+	}
+	select {
+	case received := <-result:
+		if received.err != nil || received.value != "player-renamed" {
+			t.Fatalf("renamed Await value=%q error=%v", received.value, received.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("renamed Await timed out")
+	}
+}
+
 func TestNodeRPCRuntimeRegistriesAreIsolated(t *testing.T) {
 	config := service.DefaultSchedulerConfig()
 	first := newRPCFixtureWithID(t, "game-1", config)

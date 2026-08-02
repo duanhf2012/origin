@@ -14,6 +14,10 @@ player, err := s.players.
 
 `OnNode` 适合已知目标 Node；未指定时，客户端从发现目录的 Running 实例中选择一个候选。
 
+契约、客户端和静态 Dispatcher 与传输无关。每个示例把普通 `PlayerService` 实现放在
+自己的业务目录，只复用 `_support/tutorialrpc` 中的契约和 `player_service.rpc.gen.go`；
+业务 Service 不需要生成文件。
+
 ## 我想改用 NATS
 
 先启动开发依赖，再运行：[examples/06-remote-rpc/02-nats-two-nodes](../../../../examples/06-remote-rpc/02-nats-two-nodes)。
@@ -24,6 +28,10 @@ examples\06-remote-rpc\02-nats-two-nodes\run.bat
 ```
 
 业务客户端外观不变，只替换 Node 的 `rpc.transport` 和 `rpc.nats` 配置。TCP 适合简单、直接的内网连接；NATS 适合已经运行 NATS 集群、希望由消息系统管理连接与恢复的部署。
+
+配置若使用 `player-primary:PlayerService`，右侧模板名仍负责关联契约，左侧实际名用于发现
+和路由。此时调用方使用 `BindPlayerServiceTo(s, "player-primary")`；不要尝试在业务代码中
+调用不存在的 `SetName`。
 
 ## 我想按业务键选择实例或广播
 

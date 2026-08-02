@@ -16,12 +16,12 @@ var app = application.New()
 // CallerService 保存默认只选择 Running 实例的基础客户端。
 type CallerService struct {
 	service.Service
-	players tutorialrpc.PlayerRPCClient
+	players tutorialrpc.PlayerServiceClient
 }
 
 // OnInit 绑定本 Node 中的 PlayerService。
 func (target *CallerService) OnInit() error {
-	target.players = tutorialrpc.BindPlayerRPC(target)
+	target.players = tutorialrpc.BindPlayerService(target)
 	return nil
 }
 
@@ -46,7 +46,7 @@ func (target *CallerService) OnStart(context.Context) error {
 }
 
 // init 登记目标实现和调用方。
-func init() { app.Setup(&tutorialrpc.PlayerService{}, &CallerService{}) }
+func init() { app.Setup(&PlayerService{}, &CallerService{}) }
 
 // main 启动 Application。
 func main() { app.Start() }

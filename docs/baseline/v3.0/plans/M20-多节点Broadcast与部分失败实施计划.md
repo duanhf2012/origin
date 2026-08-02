@@ -311,7 +311,7 @@ Commit: `feat(M20): 实现单次编码的顺序广播扇出`
 - Modify: `internal/rpcgen/render.go`
 - Modify: `internal/rpcgen/model_test.go`
 - Modify: `cmd/origingen/testdata/**`
-- Modify: `tests/integration/rpcfixture/zz_origin_rpc.gen.go`
+- Regenerate: `tests/integration/rpcfixture/fixture.rpc.gen.go`
 
 **Interfaces:**
 

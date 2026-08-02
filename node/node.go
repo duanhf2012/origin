@@ -119,11 +119,61 @@ type serviceRuntime struct {
 	entry *serviceEntry
 }
 
-// dispatcherProvider 是 origingen 为实现公开 RPC 契约的 Service 生成的装配适配接口。
-//
-// 接口留在 node 包内部，业务不需要手工注册 Dispatcher。
-type dispatcherProvider interface {
-	RPCDispatcher() rpc.Dispatcher
+// prepareRPCDispatchers 在创建 Node 资源和绑定 Service Runtime 前完成静态契约预检。
+// 成功返回的 Dispatcher 与 bindings 顺序一一对应，nil 表示普通非 RPC Service。
+func prepareRPCDispatchers(
+	nodeID string,
+	bindings []ServiceBinding,
+) ([]rpc.Dispatcher, error) {
+	dispatchers := make([]rpc.Dispatcher, len(bindings))
+	seenNames := make(map[string]struct{}, len(bindings))
+	for index, binding := range bindings {
+		if binding.Name == "" || binding.Template == "" || binding.Service == nil {
+			return nil, invalidConfig(fmt.Sprintf("Node %q 包含无效 Service 绑定", nodeID))
+		}
+		if _, exists := seenNames[binding.Name]; exists {
+			return nil, invalidConfig(fmt.Sprintf(
+				"Node %q 的 ServiceName %q 重复",
+				nodeID,
+				binding.Name,
+			))
+		}
+		seenNames[binding.Name] = struct{}{}
+
+		descriptor, found, err := rpc.FindGeneratedContract(binding.Template)
+		if err != nil {
+			return nil, invalidConfig(fmt.Sprintf(
+				"Node %q 装配 Service %q 的 RPC 契约失败: %v",
+				nodeID,
+				binding.Name,
+				err,
+			))
+		}
+		if !found {
+			continue
+		}
+		dispatcher, compatible := descriptor.NewDispatcher(binding.Service)
+		if !compatible {
+			return nil, invalidConfig(fmt.Sprintf(
+				"Node %q Service %q（模板 %q，类型 %T）未实现 RPC 契约 %q",
+				nodeID,
+				binding.Name,
+				binding.Template,
+				binding.Service,
+				descriptor.ContractName,
+			))
+		}
+		if dispatcher == nil {
+			return nil, invalidConfig(fmt.Sprintf(
+				"Node %q Service %q 的 RPC 契约 %q 返回空 Dispatcher",
+				nodeID,
+				binding.Name,
+				descriptor.ContractName,
+			))
+		}
+		dispatchers[index] = dispatcher
+	}
+	return dispatchers, nil
 }
 
 // New 校验绑定数据并创建尚未启动的 Node。
@@ -162,6 +212,10 @@ func New(
 			config.ID,
 			err,
 		))
+	}
+	dispatchers, err := prepareRPCDispatchers(config.ID, bindings)
+	if err != nil {
+		return nil, err
 	}
 	sessionID, err := newSessionID()
 	if err != nil {
@@ -244,18 +298,7 @@ func New(
 	instance.state.Store(uint32(StateCreated))
 
 	// 所有 Service 必须先完成创建、登记和 Runtime 绑定，之后才允许调用第一个 OnInit。
-	for _, binding := range bindings {
-		if binding.Name == "" || binding.Template == "" || binding.Service == nil {
-			return nil, invalidConfig(fmt.Sprintf("Node %q 包含无效 Service 绑定", config.ID))
-		}
-		if _, exists := instance.byName[binding.Name]; exists {
-			return nil, invalidConfig(fmt.Sprintf(
-				"Node %q 的 ServiceName %q 重复",
-				config.ID,
-				binding.Name,
-			))
-		}
-
+	for index, binding := range bindings {
 		// Entry 先建立完整稳定身份，再把只读 Runtime 交给业务基础对象。
 		entry := &serviceEntry{
 			nodeID:   config.ID,
@@ -290,16 +333,8 @@ func New(
 				err,
 			)
 		}
-		var dispatcher rpc.Dispatcher
-		if provider, ok := binding.Service.(dispatcherProvider); ok {
-			dispatcher = provider.RPCDispatcher()
-			if dispatcher == nil {
-				return nil, invalidConfig(fmt.Sprintf(
-					"Node %q Service %q 返回空 RPC Dispatcher",
-					config.ID,
-					binding.Name,
-				))
-			}
+		dispatcher := dispatchers[index]
+		if dispatcher != nil {
 			entry.contractID = uint64(dispatcher.ContractID())
 			entry.contractFingerprint = [32]byte(dispatcher.Fingerprint())
 		}

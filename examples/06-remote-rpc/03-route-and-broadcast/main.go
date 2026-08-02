@@ -23,15 +23,15 @@ func (firstCandidateSelector) Select(candidates rpc.RouteCandidates) (int, bool)
 	return 0, candidates.Len() > 0
 }
 
-// GatewayService 保存生成的轻量 PlayerRPC 客户端值。
+// GatewayService 保存生成的轻量 PlayerService 客户端值。
 type GatewayService struct {
 	service.Service
-	players tutorialrpc.PlayerRPCClient
+	players tutorialrpc.PlayerServiceClient
 }
 
 // OnInit 使用合约默认 ServiceName 绑定客户端；它不会立刻建立某个目标连接。
 func (target *GatewayService) OnInit() error {
-	target.players = tutorialrpc.BindPlayerRPC(target)
+	target.players = tutorialrpc.BindPlayerService(target)
 	return nil
 }
 
@@ -58,7 +58,7 @@ func (target *GatewayService) OnStart(context.Context) error {
 }
 
 // init 登记远端实现模板和网关调用方模板。
-func init() { app.Setup(&tutorialrpc.PlayerService{}, &GatewayService{}) }
+func init() { app.Setup(&PlayerService{}, &GatewayService{}) }
 
 // main 启动 Application。
 func main() { app.Start() }

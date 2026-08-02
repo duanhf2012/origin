@@ -41,16 +41,27 @@ func Run(options Options) error {
 			packages.NeedModule,
 		Dir: options.Dir,
 	}
-	overlay, err := generatedOverlay(options.Dir)
-	if err != nil {
-		return err
-	}
-	loadConfig.Overlay = overlay
 	loaded, err := packages.Load(loadConfig, options.Patterns...)
 	if err != nil {
 		return fmt.Errorf("加载 Go 包: %w", err)
 	}
-	if count := packages.PrintErrors(loaded); count > 0 {
+	count := packageErrorCount(loaded)
+	// 优先保留当前生成文件，使 ./... 中依赖生成客户端的业务包可以一起完成类型检查。
+	// 只有正式生成且旧代码已经无法编译时才启用 Overlay 重试；--check 从不修改类型视图。
+	if count > 0 && !options.Check {
+		overlay, overlayErr := generatedOverlay(options.Dir)
+		if overlayErr != nil {
+			return overlayErr
+		}
+		loadConfig.Overlay = overlay
+		loaded, err = packages.Load(loadConfig, options.Patterns...)
+		if err != nil {
+			return fmt.Errorf("使用生成文件 Overlay 加载 Go 包: %w", err)
+		}
+		count = packageErrorCount(loaded)
+	}
+	if count > 0 {
+		packages.PrintErrors(loaded)
 		return fmt.Errorf("加载 Go 包失败，共 %d 个错误", count)
 	}
 
@@ -64,25 +75,30 @@ func Run(options Options) error {
 	if err != nil {
 		return err
 	}
-	services, err := collectServiceBindings(scanned, contracts)
-	if err != nil {
-		return err
-	}
-	outputs := groupOutputs(scanned, contracts, services)
+	outputs := groupOutputs(contracts)
 
 	rendered := make(map[string][]byte, len(outputs))
 	for _, output := range outputs {
-		directory, err := packageDirectory(output.pkg)
-		if err != nil {
-			return err
-		}
 		content, err := renderPackage(output)
 		if err != nil {
 			return err
 		}
-		rendered[filepath.Join(directory, generatedFileName)] = content
+		path, err := generatedFilePath(output.sourceFile)
+		if err != nil {
+			return err
+		}
+		rendered[path] = content
 	}
 	return commitGenerated(scanned, rendered, options.Check)
+}
+
+// packageErrorCount 在决定是否启用 Overlay 前静默统计完整加载图中的错误。
+func packageErrorCount(roots []*packages.Package) int {
+	count := 0
+	packages.Visit(roots, nil, func(pkg *packages.Package) {
+		count += len(pkg.Errors)
+	})
+	return count
 }
 
 // generatedOverlay 在类型检查时把旧生成文件替换成仅含 package 子句的内存版本。
@@ -120,7 +136,7 @@ func generatedOverlay(directory string) (map[string][]byte, error) {
 			}
 			return nil
 		}
-		if entry.Name() != generatedFileName {
+		if !strings.HasSuffix(entry.Name(), ".gen.go") {
 			return nil
 		}
 		content, err := os.ReadFile(path)
@@ -179,43 +195,49 @@ func rootAndModulePackages(roots []*packages.Package) []*packages.Package {
 	return result
 }
 
-// groupOutputs 按 Go 包聚合契约与 Service 适配器，并冻结文件生成顺序。
-func groupOutputs(
-	scanned []*packages.Package,
-	contracts []*contract,
-	services []serviceBinding,
-) []packageOutput {
-	// 同一个包的契约和实现适配器必须写入唯一生成文件，避免多个生成步骤互相覆盖。
+// groupOutputs 按声明源文件聚合契约，并冻结文件生成顺序。
+func groupOutputs(contracts []*contract) []packageOutput {
+	// 同一源文件中的多个声明共享一个 <source>.rpc.gen.go；不同源文件互不影响。
 	byPath := make(map[string]*packageOutput)
-	find := func(pkg *packages.Package) *packageOutput {
-		output := byPath[pkg.PkgPath]
+	find := func(pkg *packages.Package, sourceFile string) *packageOutput {
+		key := pkg.PkgPath + "\x00" + filepath.Clean(sourceFile)
+		output := byPath[key]
 		if output == nil {
-			output = &packageOutput{pkg: pkg}
-			byPath[pkg.PkgPath] = output
+			output = &packageOutput{pkg: pkg, sourceFile: sourceFile}
+			byPath[key] = output
 		}
 		return output
 	}
 	for _, item := range contracts {
-		find(item.pkg).contracts = append(find(item.pkg).contracts, item)
-	}
-	for _, binding := range services {
-		find(binding.pkg).services = append(find(binding.pkg).services, binding)
+		output := find(item.pkg, item.sourceFile)
+		output.contracts = append(output.contracts, item)
 	}
 	result := make([]packageOutput, 0, len(byPath))
 	for _, output := range byPath {
 		sort.Slice(output.contracts, func(i, j int) bool {
 			return output.contracts[i].name < output.contracts[j].name
 		})
-		sort.Slice(output.services, func(i, j int) bool {
-			return output.services[i].typeName < output.services[j].typeName
-		})
 		result = append(result, *output)
 	}
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].pkg.PkgPath < result[j].pkg.PkgPath
+		if result[i].pkg.PkgPath != result[j].pkg.PkgPath {
+			return result[i].pkg.PkgPath < result[j].pkg.PkgPath
+		}
+		return result[i].sourceFile < result[j].sourceFile
 	})
-	_ = scanned
 	return result
+}
+
+// generatedFilePath 让生成结果与声明源文件一一对应，例如 player_service.go 对应
+// player_service.rpc.gen.go。这样新增或删除一个契约不会重写同包内无关契约的生成文件。
+func generatedFilePath(sourceFile string) (string, error) {
+	if sourceFile == "" || filepath.Ext(sourceFile) != ".go" {
+		return "", fmt.Errorf("RPC 声明源文件无效: %q", sourceFile)
+	}
+	if strings.HasSuffix(sourceFile, ".gen.go") {
+		return "", fmt.Errorf("RPC 声明不能位于生成文件: %s", sourceFile)
+	}
+	return strings.TrimSuffix(sourceFile, ".go") + ".rpc.gen.go", nil
 }
 
 // importSet 为单个生成文件分配稳定且无冲突的导入别名。
@@ -293,15 +315,10 @@ func (imports *importSet) block() string {
 	return builder.String()
 }
 
-// renderPackage 把一个包的全部契约与 Service 适配器渲染为单个 gofmt 结果。
+// renderPackage 把一个源文件中的全部 RPC 契约渲染为单个 gofmt 结果。
 func renderPackage(output packageOutput) ([]byte, error) {
 	imports := newImportSet(output.pkg.PkgPath)
-	// 只有声明契约的包会生成带 Context 的客户端和 Dispatcher。纯 Service 实现包只
-	// 生成跨包适配器，提前导入 context 会让常见的契约/实现分包布局无法编译。
-	contextAlias := ""
-	if len(output.contracts) > 0 {
-		contextAlias = imports.add("context", "context")
-	}
+	contextAlias := imports.add("context", "context")
 	rpcAlias := imports.add("github.com/duanhf2012/origin/v3/rpc", "rpc")
 	var body bytes.Buffer
 
@@ -327,25 +344,6 @@ func renderPackage(output packageOutput) ([]byte, error) {
 			return nil, err
 		}
 	}
-	for _, binding := range output.services {
-		contractAlias := imports.qualifier(binding.contract.pkg.Types)
-		constructor := "New" + binding.contract.name + "Dispatcher"
-		if contractAlias != "" {
-			constructor = contractAlias + "." + constructor
-		}
-		fmt.Fprintf(
-			&body,
-			"// RPCDispatcher 由 origingen 生成，使 Node 无需业务注册样板即可发现 %s。\n"+
-				"func (service *%s) RPCDispatcher() %s.Dispatcher {\n"+
-				"\treturn %s(service)\n"+
-				"}\n\n",
-			binding.contract.fullName,
-			binding.typeName,
-			rpcAlias,
-			constructor,
-		)
-	}
-
 	var source bytes.Buffer
 	source.WriteString(generatedMarker)
 	source.WriteString("\n\npackage ")
@@ -384,17 +382,34 @@ func commitGenerated(
 	}
 
 	// 收集当前扫描范围内由 origingen 拥有的旧文件，供过期比较和安全删除使用。
+	// 这里也会识别旧版 zz_origin_rpc.gen.go，因此升级生成器后可自动迁移文件名。
 	existing := make(map[string][]byte)
+	visitedDirectories := make(map[string]bool)
 	for _, pkg := range scanned {
 		if len(pkg.GoFiles) == 0 {
 			continue
 		}
-		path := filepath.Join(filepath.Dir(pkg.GoFiles[0]), generatedFileName)
-		content, err := os.ReadFile(path)
-		if err == nil && bytes.HasPrefix(content, []byte(generatedMarker)) {
-			existing[path] = content
-		} else if err != nil && !os.IsNotExist(err) {
+		directory := filepath.Dir(pkg.GoFiles[0])
+		if visitedDirectories[directory] {
+			continue
+		}
+		visitedDirectories[directory] = true
+		entries, err := os.ReadDir(directory)
+		if err != nil {
 			return err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".gen.go") {
+				continue
+			}
+			path := filepath.Join(directory, entry.Name())
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if bytes.HasPrefix(content, []byte(generatedMarker)) {
+				existing[path] = content
+			}
 		}
 	}
 

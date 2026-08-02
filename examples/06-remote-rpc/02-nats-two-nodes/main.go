@@ -18,12 +18,12 @@ var app = application.New()
 // GatewayService 与 TCP 示例使用完全相同的生成客户端类型。
 type GatewayService struct {
 	service.Service
-	players tutorialrpc.PlayerRPCClient
+	players tutorialrpc.PlayerServiceClient
 }
 
 // OnInit 绑定合约默认的 PlayerService 名称。
 func (target *GatewayService) OnInit() error {
-	target.players = tutorialrpc.BindPlayerRPC(target)
+	target.players = tutorialrpc.BindPlayerService(target)
 	return nil
 }
 
@@ -61,7 +61,7 @@ func (target *GatewayService) OnStart(context.Context) error {
 }
 
 // init 登记实现与调用方模板。
-func init() { app.Setup(&tutorialrpc.PlayerService{}, &GatewayService{}) }
+func init() { app.Setup(&PlayerService{}, &GatewayService{}) }
 
 // main 启动 Application。
 func main() { app.Start() }

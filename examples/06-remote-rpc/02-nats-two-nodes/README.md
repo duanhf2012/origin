@@ -1,6 +1,6 @@
 # NATS 跨 Node RPC
 
-此示例与 TCP 示例使用相同的 `PlayerRPC` 客户端外观，只将 Node 的传输配置换为 NATS。适合已经拥有 NATS 集群、希望由消息系统处理连接和重连的部署。
+此示例与 TCP 示例使用相同的 `PlayerServiceClient` 外观，只将 Node 的传输配置换为 NATS。适合已经拥有 NATS 集群、希望由消息系统处理连接和重连的部署。
 
 ## 前置条件
 
@@ -9,6 +9,16 @@
 ## 配置重点
 
 `rpc.transport: nats` 与 `rpc.nats.urls` 选择 NATS 传输；`namespace` 用于隔离同一 NATS 中不同 Origin 环境。生产部署应在 NATS 配置 TLS 和最小权限凭据，而不是复制本地无认证地址。
+
+## 契约与业务实现
+
+- [`../../_support/tutorialrpc/player_service.go`](../../_support/tutorialrpc/player_service.go)：与 TCP 示例共用的契约。
+- [`../../_support/tutorialrpc/player_service.rpc.gen.go`](../../_support/tutorialrpc/player_service.rpc.gen.go)：与传输无关的生成客户端和 Dispatcher。
+- [`player_service.go`](player_service.go)：本示例业务实现；只通过编译期断言校验契约，不生成适配文件。
+- [`main.go`](main.go)：保持与 TCP 示例相同的 RPC 调用代码。
+
+Node 仍在冷启动时按模板名 `PlayerService` 自动装配，NATS Subject 和连接不会进入业务
+Service 的生成或识别逻辑。
 
 ## 运行与观察
 

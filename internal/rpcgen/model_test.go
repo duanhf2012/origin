@@ -1,6 +1,8 @@
 package rpcgen
 
 import (
+	"bytes"
+	"fmt"
 	"go/token"
 	"go/types"
 	"os"
@@ -232,6 +234,121 @@ type PlayerRPC[T any] interface {
 	}
 }
 
+// TestRunWritesOneGeneratedFilePerSource 锁定“声明文件与生成文件一一对应”的公开约定。
+func TestRunWritesOneGeneratedFilePerSource(t *testing.T) {
+	directory := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/rpcgentest\n\ngo 1.26.5\n",
+		"player_service.go": `package contract
+import "context"
+//origin:rpc
+type PlayerService interface { Get(context.Context, int64) string }
+`,
+		"chat_service.go": `package contract
+import "context"
+//origin:rpc
+type ChatService interface { Send(context.Context, string) }
+`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Run(Options{Patterns: []string{"./..."}, Dir: directory}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for _, name := range []string{"player_service.rpc.gen.go", "chat_service.rpc.gen.go"} {
+		content, err := os.ReadFile(filepath.Join(directory, name))
+		if err != nil || !bytes.HasPrefix(content, []byte(generatedMarker)) {
+			t.Fatalf("generated file %s content=%q error=%v", name, content, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(directory, "zz_origin_rpc.gen.go")); !os.IsNotExist(err) {
+		t.Fatalf("legacy aggregate file exists: %v", err)
+	}
+}
+
+// TestRunGeneratesOnlyContractPackage 锁定契约与实现分包时的文件所有权：生成器只写
+// 契约包，不扫描或改写实现该接口的业务 Service 包。
+func TestRunGeneratesOnlyContractPackage(t *testing.T) {
+	directory := t.TempDir()
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	goSum, err := os.ReadFile(filepath.Join(repositoryRoot, "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootGoMod, err := os.ReadFile(filepath.Join(repositoryRoot, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testGoMod := strings.Replace(
+		string(rootGoMod),
+		"module github.com/duanhf2012/origin/v3",
+		"module example.com/game",
+		1,
+	)
+	testGoMod += fmt.Sprintf(
+		"\nrequire github.com/duanhf2012/origin/v3 v3.0.0\n"+
+			"replace github.com/duanhf2012/origin/v3 => %s\n",
+		filepath.ToSlash(repositoryRoot),
+	)
+	files := map[string]string{
+		"go.mod": testGoMod,
+		"go.sum": string(goSum),
+		filepath.Join("playerapi", "player_service.go"): `package playerapi
+import "context"
+//origin:rpc
+type PlayerService interface { GetPlayer(context.Context, int64) (string, error) }
+`,
+		filepath.Join("player", "player_service.go"): `package player
+import (
+	"context"
+	"github.com/duanhf2012/origin/v3/service"
+	"example.com/game/playerapi"
+)
+type PlayerService struct { service.Service }
+var _ playerapi.PlayerService = (*PlayerService)(nil)
+func (*PlayerService) GetPlayer(context.Context, int64) (string, error) { return "player", nil }
+`,
+	}
+	for name, content := range files {
+		path := filepath.Join(directory, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Run(Options{Patterns: []string{"./..."}, Dir: directory}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	contractGenerated := filepath.Join(
+		directory,
+		"playerapi",
+		"player_service.rpc.gen.go",
+	)
+	content, err := os.ReadFile(contractGenerated)
+	if err != nil {
+		t.Fatalf("read contract generated file: %v", err)
+	}
+	if !bytes.Contains(content, []byte("RegisterGeneratedContract")) {
+		t.Fatalf("contract descriptor missing:\n%s", content)
+	}
+	for _, name := range []string{
+		filepath.Join("player", "player_service.rpc.gen.go"),
+		filepath.Join("player", "player_service.gen.go"),
+	} {
+		if _, err := os.Stat(filepath.Join(directory, name)); !os.IsNotExist(err) {
+			t.Fatalf("business Service unexpectedly generated %s: %v", name, err)
+		}
+	}
+}
+
 // TestCommitGeneratedCheckReplaceAndDelete 覆盖 --check 不改磁盘、Windows 目标替换以及只删除
 // 带完整生成标记的多余文件。它直接验证最终文件提交层，避免依赖完整包加载掩盖分支。
 func TestCommitGeneratedCheckReplaceAndDelete(t *testing.T) {
@@ -251,10 +368,11 @@ func TestCommitGeneratedCheckReplaceAndDelete(t *testing.T) {
 		}
 	}
 	currentGenerated := filepath.Join(currentDirectory, generatedFileName)
-	staleGenerated := filepath.Join(staleDirectory, generatedFileName)
+	currentLegacy := filepath.Join(currentDirectory, "zz_origin_rpc.gen.go")
+	staleGenerated := filepath.Join(staleDirectory, "zz_origin_rpc.gen.go")
 	oldContent := []byte(generatedMarker + "\n\npackage contract\n\nconst Old = 1\n")
 	newContent := []byte(generatedMarker + "\n\npackage contract\n\nconst New = 2\n")
-	for _, path := range []string{currentGenerated, staleGenerated} {
+	for _, path := range []string{currentLegacy, staleGenerated} {
 		if err := os.WriteFile(path, oldContent, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -269,7 +387,7 @@ func TestCommitGeneratedCheckReplaceAndDelete(t *testing.T) {
 	if err := commitGenerated(scanned, rendered, true); err == nil {
 		t.Fatal("commitGenerated(Check) unexpectedly succeeded")
 	}
-	for _, path := range []string{currentGenerated, staleGenerated} {
+	for _, path := range []string{currentLegacy, staleGenerated} {
 		content, err := os.ReadFile(path)
 		if err != nil || string(content) != string(oldContent) {
 			t.Fatalf("check 修改了 %s: content=%q error=%v", path, content, err)
@@ -286,6 +404,23 @@ func TestCommitGeneratedCheckReplaceAndDelete(t *testing.T) {
 	}
 	if _, err := os.Stat(staleGenerated); !os.IsNotExist(err) {
 		t.Fatalf("stale generated still exists: %v", err)
+	}
+	if _, err := os.Stat(currentLegacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy generated still exists: %v", err)
+	}
+}
+
+func TestGeneratedFilePathFollowsSourceFile(t *testing.T) {
+	path, err := generatedFilePath(filepath.Join("playerapi", "player_service.go"))
+	if err != nil {
+		t.Fatalf("generatedFilePath() error = %v", err)
+	}
+	want := filepath.Join("playerapi", "player_service.rpc.gen.go")
+	if path != want {
+		t.Fatalf("generatedFilePath() = %q, want %q", path, want)
+	}
+	if _, err := generatedFilePath("playerapi/player_service.gen.go"); err == nil {
+		t.Fatal("generated source unexpectedly accepted")
 	}
 }
 
@@ -316,56 +451,14 @@ func TestCommitGeneratedRefusesUnmarkedTarget(t *testing.T) {
 	}
 }
 
-// TestRenderServiceOnlyPackageHasNoUnusedContextImport 覆盖契约与 Service 分包的常见布局。
-// 纯实现包只有 RPCDispatcher 适配器，不得生成未使用的 context 导入。
-func TestRenderServiceOnlyPackageHasNoUnusedContextImport(t *testing.T) {
-	contractTypes := types.NewPackage("example.com/game/contract", "contract")
-	serviceTypes := types.NewPackage("example.com/game/player", "player")
-	contractPackage := &packages.Package{
-		PkgPath: "example.com/game/contract",
-		Name:    "contract",
-		Types:   contractTypes,
-	}
-	servicePackage := &packages.Package{
-		PkgPath: "example.com/game/player",
-		Name:    "player",
-		Types:   serviceTypes,
-	}
-	item := &contract{
-		pkg:      contractPackage,
-		name:     "PlayerRPC",
-		fullName: "example.com/game/contract.PlayerRPC",
-	}
-	content, err := renderPackage(packageOutput{
-		pkg: servicePackage,
-		services: []serviceBinding{
-			{
-				pkg:      servicePackage,
-				typeName: "PlayerService",
-				contract: item,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("renderPackage() error = %v", err)
-	}
-	if strings.Contains(string(content), "context \"context\"") {
-		t.Fatalf("纯 Service 包包含未使用 context 导入:\n%s", content)
-	}
-	if !strings.Contains(
-		string(content),
-		"contract.NewPlayerRPCDispatcher(service)",
-	) {
-		t.Fatalf("跨包 Dispatcher 适配器缺失:\n%s", content)
-	}
-}
-
 func TestDefaultServiceNameUsesDeterministicContractRule(t *testing.T) {
 	tests := []struct {
 		contract string
 		want     string
 	}{
 		{contract: "PlayerRPC", want: "PlayerService"},
+		{contract: "PlayerService", want: "PlayerService"},
+		{contract: "PlayerServiceRPC", want: "PlayerService"},
 		{contract: "DBRPC", want: "DBService"},
 		{contract: "Scene", want: "SceneService"},
 		{contract: "RPC", want: "RPCService"},
@@ -423,6 +516,11 @@ func TestRenderContractIncludesM19BindingRoutingAndPrepare(t *testing.T) {
 		"client.client.PrepareAsync(ctx, playerRPCEchoMethodID)",
 		"client.client.PrepareNotify(ctx, playerRPCEchoMethodID)",
 		"client.client.PrepareBroadcast(ctx, playerRPCEchoMethodID)",
+		"rpc.RegisterGeneratedContract(rpc.GeneratedContractDescriptor{",
+		`ServiceName:  "PlayerService"`,
+		`ContractName: "example.com/game/playerapi.PlayerRPC"`,
+		"target, ok := implementation.(PlayerRPC)",
+		"return NewPlayerRPCDispatcher(target), true",
 	}
 	for _, expected := range required {
 		if !strings.Contains(source, expected) {

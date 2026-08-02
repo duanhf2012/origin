@@ -17,13 +17,13 @@ var app = application.New()
 // CallerService 保存可重复使用的轻量强类型客户端。
 type CallerService struct {
 	service.Service
-	players tutorialrpc.PlayerRPCClient
+	players tutorialrpc.PlayerServiceClient
 }
 
 // OnInit 完成客户端绑定，不在每次业务请求中重复创建绑定代码。
 func (target *CallerService) OnInit() error {
-	// 默认绑定名来自 PlayerRPC 的约定，对应 PlayerService。
-	target.players = tutorialrpc.BindPlayerRPC(target)
+	// 契约名就是 PlayerService，因此默认绑定同名业务 Service。
+	target.players = tutorialrpc.BindPlayerService(target)
 	return nil
 }
 
@@ -31,7 +31,7 @@ func (target *CallerService) OnInit() error {
 func (target *CallerService) OnStart(context.Context) error {
 	// Timer 回调提供当前 Service 任务 Context，RPC 完成后仍回到同一执行语义。
 	target.AfterFunc(100*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
-		// AwaitGetPlayer 由 origingen 根据 PlayerRPC 合约生成并保留强类型参数/返回值。
+		// AwaitGetPlayer 由 origingen 根据 PlayerService 合约生成并保留强类型参数/返回值。
 		message, err := target.players.AwaitGetPlayer(ctx, 1001)
 		if err != nil {
 			target.Logger().Error("rpc failed")
@@ -43,7 +43,7 @@ func (target *CallerService) OnStart(context.Context) error {
 }
 
 // init 同时登记 RPC 实现 Service 和调用方 Service。
-func init() { app.Setup(&tutorialrpc.PlayerService{}, &CallerService{}) }
+func init() { app.Setup(&PlayerService{}, &CallerService{}) }
 
 // main 启动 Application。
 func main() { app.Start() }

@@ -15,15 +15,15 @@ import (
 // app 同时管理发现 Node、Player Node 和 Gateway Node。
 var app = application.New()
 
-// GatewayService 保存按 PlayerRPC 合约生成的客户端。
+// GatewayService 保存按 PlayerService RPC 合约生成的客户端。
 type GatewayService struct {
 	service.Service
-	players tutorialrpc.PlayerRPCClient
+	players tutorialrpc.PlayerServiceClient
 }
 
 // OnInit 只绑定默认 ServiceName，不锁定具体远端 Node。
 func (target *GatewayService) OnInit() error {
-	target.players = tutorialrpc.BindPlayerRPC(target)
+	target.players = tutorialrpc.BindPlayerService(target)
 	return nil
 }
 
@@ -64,7 +64,7 @@ func (target *GatewayService) OnStart(context.Context) error {
 }
 
 // init 登记远端实现和网关调用方两个 Service 类型。
-func init() { app.Setup(&tutorialrpc.PlayerService{}, &GatewayService{}) }
+func init() { app.Setup(&PlayerService{}, &GatewayService{}) }
 
 // main 启动 Application。
 func main() { app.Start() }

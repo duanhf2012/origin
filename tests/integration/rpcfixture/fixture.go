@@ -90,6 +90,9 @@ type PlayerService struct {
 	LastBlob          OwnedBlob
 }
 
+// 编译期锁定业务实现与 RPC 契约；业务 Service 不需要任何生成适配方法。
+var _ PlayerRPC = (*PlayerService)(nil)
+
 // EchoName 覆盖普通类型业务输出不声明 error 的契约分类。
 func (target *PlayerService) EchoName(
 	_ context.Context,

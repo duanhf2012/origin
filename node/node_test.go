@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -126,6 +127,105 @@ type lifecycleService struct {
 	onStartContext func(context.Context) error
 	onStop         func()
 	onStopContext  func(context.Context) error
+}
+
+type generatedBindingDispatcher struct{}
+
+func (*generatedBindingDispatcher) ContractID() rpc.ContractID { return 0x2211 }
+func (*generatedBindingDispatcher) Fingerprint() rpc.ContractFingerprint {
+	return rpc.ContractFingerprint{0x33}
+}
+func (*generatedBindingDispatcher) Dispatch(
+	context.Context,
+	rpc.MethodID,
+	rpc.CallKind,
+	[]byte,
+	rpc.ResponseWriter,
+) (rpc.ResponseWriter, error) {
+	return rpc.ResponseWriter{}, nil
+}
+
+type incompatibleGeneratedBindingService struct{ service.Service }
+
+func registerGeneratedBindingContract() {
+	rpc.RegisterGeneratedContract(rpc.GeneratedContractDescriptor{
+		ServiceName:  "GeneratedBindingPlayerService",
+		ContractName: "example.com/playerapi.PlayerService",
+		ContractID:   0x2211,
+		Fingerprint:  rpc.ContractFingerprint{0x33},
+		NewDispatcher: func(implementation any) (rpc.Dispatcher, bool) {
+			if _, ok := implementation.(*lifecycleService); !ok {
+				return nil, false
+			}
+			return &generatedBindingDispatcher{}, true
+		},
+	})
+}
+
+func TestNewAssociatesGeneratedContractByTemplateName(t *testing.T) {
+	registerGeneratedBindingContract()
+	events := make([]string, 0, 1)
+	target := &lifecycleService{label: "player-1", events: &events}
+	current, err := New(
+		Config{ID: "game-1", Services: []string{"unused"}},
+		[]ServiceBinding{{
+			Name:     "player-1",
+			Template: "GeneratedBindingPlayerService",
+			Service:  target,
+		}},
+		originlog.NewNop(),
+		Options{MaxTimersPerNode: 64, TimerLocation: time.UTC},
+	)
+	if err != nil {
+		t.Fatalf("New() error=%v", err)
+	}
+	t.Cleanup(func() { _ = current.Rollback(context.Background()) })
+
+	entry := current.byName["player-1"]
+	if entry == nil || entry.template != "GeneratedBindingPlayerService" {
+		t.Fatalf("service entry=%+v", entry)
+	}
+	if entry.contractID != 0x2211 || entry.contractFingerprint[0] != 0x33 {
+		t.Fatalf(
+			"contract id=%x fingerprint[0]=%x",
+			entry.contractID,
+			entry.contractFingerprint[0],
+		)
+	}
+}
+
+func TestNewRejectsTemplateContractImplementationMismatch(t *testing.T) {
+	registerGeneratedBindingContract()
+	target := &incompatibleGeneratedBindingService{}
+	_, err := New(
+		Config{ID: "game-1", Services: []string{"unused"}},
+		[]ServiceBinding{{
+			Name:     "player-2",
+			Template: "GeneratedBindingPlayerService",
+			Service:  target,
+		}},
+		originlog.NewNop(),
+		Options{MaxTimersPerNode: 64, TimerLocation: time.UTC},
+	)
+	if err == nil || !strings.Contains(err.Error(), "未实现 RPC 契约") {
+		t.Fatalf("New() error=%v", err)
+	}
+
+	// 失败发生在 BindRuntime 前，同一个业务对象仍可用于修正后的配置。
+	current, err := New(
+		Config{ID: "game-2", Services: []string{"unused"}},
+		[]ServiceBinding{{
+			Name:     "plain-player",
+			Template: "PlainPlayerService",
+			Service:  target,
+		}},
+		originlog.NewNop(),
+		Options{MaxTimersPerNode: 64, TimerLocation: time.UTC},
+	)
+	if err != nil {
+		t.Fatalf("New(corrected config) error=%v", err)
+	}
+	t.Cleanup(func() { _ = current.Rollback(context.Background()) })
 }
 
 func (target *lifecycleService) OnInit() error {

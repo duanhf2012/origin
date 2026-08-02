@@ -27,6 +27,10 @@ app.Retire(ctx)  // Node 倒序
 
 运行：[examples/08-retire-and-resume/03-include-retired](../../../../examples/08-retire-and-resume/03-include-retired)。默认路由排除 Retired；精确 `OnNode` 目标原本就可以命中，自动选择时可显式使用 `IncludeRetired()`。
 
+该示例的 `PlayerService` 是业务目录中的普通结构体，只通过模板名与共享 RPC 契约自动
+关联。Retire/Resume 不重新生成或重新匹配契约，也不改变实际 ServiceName；它们只更新
+准入状态和发现状态。
+
 ## 深入一点
 
 退休是发现状态和本地准入状态的组合，而非延迟删除。Retire/Resume 不会回滚已经提交的本地状态：通知或发布失败会作为结果返回，由业务决定重试、告警或继续维护流程。

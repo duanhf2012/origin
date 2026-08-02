@@ -2218,7 +2218,18 @@ func (dispatcher *playerRPCDispatcher) Dispatch(ctx context.Context, methodID rp
 	}
 }
 
-// RPCDispatcher 由 origingen 生成，使 Node 无需业务注册样板即可发现 github.com/duanhf2012/origin/v3/tests/integration/rpcfixture.PlayerRPC。
-func (service *PlayerService) RPCDispatcher() rpc.Dispatcher {
-	return NewPlayerRPCDispatcher(service)
+func init() {
+	rpc.RegisterGeneratedContract(rpc.GeneratedContractDescriptor{
+		ServiceName:  "PlayerService",
+		ContractName: "github.com/duanhf2012/origin/v3/tests/integration/rpcfixture.PlayerRPC",
+		ContractID:   playerRPCContractID,
+		Fingerprint:  playerRPCFingerprint,
+		NewDispatcher: func(implementation any) (rpc.Dispatcher, bool) {
+			target, ok := implementation.(PlayerRPC)
+			if !ok {
+				return nil, false
+			}
+			return NewPlayerRPCDispatcher(target), true
+		},
+	})
 }

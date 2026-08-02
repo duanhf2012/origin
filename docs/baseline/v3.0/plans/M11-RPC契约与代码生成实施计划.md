@@ -17,7 +17,7 @@ M11 最终交付：
 1. `//origin:rpc` Go 接口契约和 `origingen rpc`；
 2. ContractID、MethodID 和完整契约指纹；
 3. 强类型 Async、Await、Notify、Broadcast 客户端；
-4. Service 实现自动识别和 Dispatcher 适配；
+4. 契约侧静态 Dispatcher 与冷启动描述符，Node 按 Service 模板名自动关联实现；
 5. 每 Node 独立 RPC Runtime 和本地注册目录；
 6. 基础类型、普通结构体、容器、顶层 Protobuf 和嵌套 Protobuf 的静态编解码；
 7. 使用 Service Ready FIFO、唯一执行槽和统一 Deadline 的真实本地调用；
@@ -124,8 +124,8 @@ M11 最终交付：
 - [x] 为带返回值方法生成 Async/Await/Notify/Broadcast；无返回值生成 Notify/Broadcast。
 - [x] 所有生成请求—响应方法保留最终 error，非法 error 位置在生成期失败。
 - [x] Dispatcher 使用 MethodID switch、CallKind 和 ResponseWriter，不进行运行时反射。
-- [x] 为每个 Service 实现包生成 `RPCDispatcher()` 薄适配和编译期断言。
-- [x] 生成代码不引用 Origin `internal` 包，不通过 `init()` 注册任何全局状态。
+- [x] 契约包生成静态 Dispatcher 和最小冷启动描述符；Service 实现包不生成文件。
+- [x] 生成代码不引用 Origin `internal` 包；描述符通过 `init()` 登记，只供 Node 冷启动按模板名装配。
 
 ### Task 8：完成同 Node RPC 闭环
 

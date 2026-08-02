@@ -173,13 +173,41 @@ func renderContract(
 		)
 	}
 	renderDispatcher(body, imports, contextAlias, rpcAlias, item, contractPrefix)
+	fmt.Fprintf(
+		body,
+		"func init() {\n"+
+			"\t%s.RegisterGeneratedContract(%s.GeneratedContractDescriptor{\n"+
+			"\t\tServiceName: %q,\n"+
+			"\t\tContractName: %q,\n"+
+			"\t\tContractID: %sContractID,\n"+
+			"\t\tFingerprint: %sFingerprint,\n"+
+			"\t\tNewDispatcher: func(implementation any) (%s.Dispatcher, bool) {\n"+
+			"\t\t\ttarget, ok := implementation.(%s)\n"+
+			"\t\t\tif !ok { return nil, false }\n"+
+			"\t\t\treturn New%sDispatcher(target), true\n"+
+			"\t\t},\n"+
+			"\t})\n"+
+			"}\n\n",
+		rpcAlias,
+		rpcAlias,
+		defaultServiceName(item.name),
+		item.fullName,
+		contractPrefix,
+		contractPrefix,
+		rpcAlias,
+		item.name,
+		item.name,
+	)
 	return nil
 }
 
 func defaultServiceName(contractName string) string {
 	if strings.HasSuffix(contractName, "RPC") &&
 		len(contractName) > len("RPC") {
-		return strings.TrimSuffix(contractName, "RPC") + "Service"
+		contractName = strings.TrimSuffix(contractName, "RPC")
+	}
+	if strings.HasSuffix(contractName, "Service") {
+		return contractName
 	}
 	return contractName + "Service"
 }

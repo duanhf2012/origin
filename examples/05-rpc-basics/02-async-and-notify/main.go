@@ -13,15 +13,15 @@ import (
 // app 是当前示例唯一的 Application。
 var app = application.New()
 
-// CallerService 复用共享 PlayerRPC 合约生成的客户端。
+// CallerService 复用共享 PlayerService RPC 合约生成的客户端。
 type CallerService struct {
 	service.Service
-	players tutorialrpc.PlayerRPCClient
+	players tutorialrpc.PlayerServiceClient
 }
 
 // OnInit 使用约定的默认 PlayerService 名完成绑定。
 func (target *CallerService) OnInit() error {
-	target.players = tutorialrpc.BindPlayerRPC(target)
+	target.players = tutorialrpc.BindPlayerService(target)
 	return nil
 }
 
@@ -47,7 +47,7 @@ func (target *CallerService) OnStart(context.Context) error {
 }
 
 // init 登记实现与调用方两个 Service 模板。
-func init() { app.Setup(&tutorialrpc.PlayerService{}, &CallerService{}) }
+func init() { app.Setup(&PlayerService{}, &CallerService{}) }
 
 // main 启动 Application。
 func main() { app.Start() }
