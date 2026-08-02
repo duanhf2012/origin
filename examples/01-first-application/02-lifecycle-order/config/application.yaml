@@ -1,0 +1,5 @@
+log:
+  console: {enabled: true, level: info, format: text}
+nodes:
+  - id: lifecycle-1
+    services: [FirstService, SecondService]

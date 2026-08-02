@@ -1,0 +1,16 @@
+log:
+  console: {enabled: true, level: info, format: text}
+discovery:
+  type: etcd
+  etcd:
+    endpoints: [http://127.0.0.1:2379]
+    local_network: cn-east
+    ttl: 5s
+    request_timeout: 3s
+nodes:
+  - id: game-1
+    labels: {region: cn-east}
+    services: [Service]
+  - id: game-2
+    labels: {region: cn-east}
+    services: [Service]

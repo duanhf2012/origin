@@ -1,0 +1,15 @@
+log:
+  console: {enabled: true, level: info, format: text}
+discovery:
+  type: origin
+  origin:
+    ttl: 5s
+    server:
+      node: discovery-1
+      listen: 127.0.0.1:18090
+      address: 127.0.0.1:18090
+nodes:
+  - id: discovery-1
+    services: [DiscoveryService, Service]
+  - id: game-1
+    services: [Service]

@@ -1,0 +1,8 @@
+log:
+  console: {enabled: true, level: info, format: text}
+nodes:
+  - id: game-1
+    services: [ConfigService]
+services:
+  ConfigService:
+    region: cn-east

@@ -1,0 +1,7 @@
+log:
+  console: {enabled: true, level: info, format: text}
+nodes:
+  - id: upstream-1
+    services: [WorkerService]
+  - id: downstream-1
+    services: [ControlService]

@@ -1,0 +1,13 @@
+log:
+  console:
+    enabled: true
+    level: info
+    format: text
+
+nodes:
+  - id: gateway-1
+    services:
+      - GatewayService
+  - id: game-1
+    services:
+      - PlayerService

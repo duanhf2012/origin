@@ -1,0 +1,9 @@
+log:
+  console: {enabled: true, level: info, format: text}
+discovery:
+  type: consul
+  consul:
+    address: 127.0.0.1:8500
+nodes:
+  - id: game-1
+    services: [AppService]

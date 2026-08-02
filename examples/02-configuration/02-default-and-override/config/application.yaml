@@ -1,0 +1,15 @@
+log:
+  console: {enabled: true, level: info, format: text}
+nodes:
+  - id: game-1
+    services: [ConfigService]
+
+services:
+  ConfigService:
+    welcome: hello-from-common
+    max_players: 100
+
+node_services:
+  game-1:
+    ConfigService:
+      welcome: hello-from-game-1

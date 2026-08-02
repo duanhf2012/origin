@@ -1,0 +1,8 @@
+log:
+  console: {enabled: true, level: info, format: text}
+discovery:
+  type: await-demo
+  await-demo: {}
+nodes:
+  - id: gateway-1
+    services: [GatewayService]

@@ -1,0 +1,3 @@
+nodes:
+  - id: Game-1
+    services: [HelloService]
