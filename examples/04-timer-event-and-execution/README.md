@@ -2,8 +2,8 @@
 
 这些示例都运行在单个 Service 的执行语义中。建议按顺序阅读：先掌握 Timer，再理解本地事件，最后再使用 Await 和安全执行包装。
 
-- [01-delay-and-cron](./01-delay-and-cron/README.md)：一次性 Timer 与 Cron，适合短小的周期任务。
-- [02-local-event](./02-local-event/README.md)：同步本地事件，不跨 Node。
-- [03-await-and-safe](./03-await-and-safe/README.md)：外部等待、panic 边界与后台工作。
+- [01-delay-and-cron](./01-delay-and-cron/README.md)：一次性 Timer、Ticker、Cron，以及暂停、恢复、取消和统计。
+- [02-local-event](./02-local-event/README.md)：同步与异步本地事件，不跨 Node。
+- [03-await-and-safe](./03-await-and-safe/README.md)：Await、异步派发、panic 边界、默认超时和执行统计。
 
 对应教程：[Timer、Event 与执行](../../docs/baseline/v3.0/guides/04-timer-event-and-execution.md)。

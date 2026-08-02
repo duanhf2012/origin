@@ -44,13 +44,17 @@ discovery:
 运行：[examples/07-discovery/05-await-service](../../../../examples/07-discovery/05-await-service)。在启动依赖另一个 Node 时，先等待发现目录出现目标，再读取其快照：
 
 ```go
+if err := s.AwaitService(ctx, "PlayerService"); err != nil {
+    return err
+}
 if err := s.AwaitNodeService(ctx, "player-1", "PlayerService"); err != nil {
     return err
 }
 instance, ok := s.FindDiscoveredService("player-1", "PlayerService")
+instances := s.ListDiscoveredServices("PlayerService")
 ```
 
-`AwaitService` 等待任意 Node 上的指定 Service；`AwaitNodeService` 等待明确 Node。两者都复用 `Service.Await`，应传入生命周期或当前业务任务的 `Context`，并处理超时和取消。
+`AwaitService` 等待任意 Node 上的指定 Service；`AwaitNodeService` 等待明确 Node；`FindDiscoveredService` 和 `ListDiscoveredServices` 读取当前快照。两种等待都复用 `Service.Await`，应传入生命周期或当前业务任务的 `Context`，并处理超时和取消。监听器通过 `AddDiscoveryListener` 注册，并在停止时用 `RemoveDiscoveryListener` 显式移除。
 
 ## 我想替换为 Consul 或其他发现系统
 

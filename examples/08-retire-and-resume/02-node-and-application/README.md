@@ -1,10 +1,10 @@
 # Node 与 Application 批量状态切换
 
-当一次维护需要影响多个 Node 时，可由 `Application` 统一退休和恢复。批量 Retire 按 Node 启动顺序倒序执行，Resume 按正序执行，和资源依赖的停止/启动方向保持一致。
+当一次维护需要影响多个 Node 时，可由 `Application` 统一退休和恢复。批量 Retire 按 Node 启动顺序倒序执行，Resume 按正序执行，和资源依赖的停止/启动方向保持一致。也可通过 `Application.Node(id)` 精确取得一个 Node，再调用 Node 自己的 `Retire`/`Resume`。
 
 ## 示例流程
 
-YAML 配置两个 Node；示例从业务 Service 调用 Application 的公开退休/恢复入口并记录每个 Node 的状态变化。它只演示顺序和状态，不替代生产中的发布流程。
+YAML 配置两个 Node；示例先调用 Application 的批量入口，再单独退休和恢复 `upstream-1`。它只演示顺序和状态，不替代生产中的发布流程。
 
 ## 运行与练习
 

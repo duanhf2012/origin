@@ -10,7 +10,7 @@
 curl http://127.0.0.1:6061/debug/origin/diagnostics
 ```
 
-响应是 JSON 快照；按 `Ctrl+C` 后 Application 会停止该 Listener。
+响应是 JSON 快照。Service 在 `OnStart` 调用 `StartDiagnosticsServer` 并通过 `DiagnosticsAddress` 查询实际地址，在 `OnStop` 显式调用 `StopDiagnosticsServer`；Application 仍提供异常路径兜底关闭。
 
 ## 生产提示
 

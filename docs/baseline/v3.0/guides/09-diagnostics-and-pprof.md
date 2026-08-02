@@ -7,6 +7,9 @@
 ```go
 snapshot := app.Diagnostics()
 // snapshot 包含 Application、Go Runtime、Node、Service、RPC、发现和 Timer 状态。
+nodes := app.Nodes()
+node, ok := app.Node("game-1")
+nodeSnapshot := node.Diagnostics()
 ```
 
 诊断快照是某一时刻的只读聚合，用于排错、运维采集和业务侧监控适配，不是持续监控系统本身。
@@ -17,6 +20,8 @@ snapshot := app.Diagnostics()
 
 ```go
 app.StartDiagnosticsServer("127.0.0.1:6061")
+address, running := app.DiagnosticsAddress()
+defer app.StopDiagnosticsServer(ctx)
 ```
 
 访问 `http://127.0.0.1:6061/debug/origin/diagnostics` 获取 JSON。生产环境不要直接暴露到公网；框架会对非回环监听发出无内建 TLS/认证警告。

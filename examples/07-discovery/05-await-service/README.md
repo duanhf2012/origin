@@ -1,17 +1,21 @@
 # 等待发现服务
 
-此示例通过无外部依赖的演示 Provider 发布 `player-1:PlayerService`。`GatewayService.OnStart` 先等待目标出现，再读取目录快照，适合启动依赖远端服务的业务。
+此示例通过无外部依赖的演示 Provider 发布 `player-1:PlayerService`。`GatewayService.OnStart` 先等待目标出现，再执行精确查询和列表查询，适合启动依赖远端服务的业务。
 
 ## 关键代码
 
 ```go
+if err := s.AwaitService(ctx, "PlayerService"); err != nil {
+    return err
+}
 if err := s.AwaitNodeService(ctx, "player-1", "PlayerService"); err != nil {
     return err
 }
 instance, ok := s.FindDiscoveredService("player-1", "PlayerService")
+instances := s.ListDiscoveredServices("PlayerService")
 ```
 
-`AwaitService` 等待任意 Node 的指定 Service；`AwaitNodeService` 等待明确 Node。两者都应传入生命周期或当前业务任务的 Context，使超时、取消和停止可以正确传递。
+`AwaitService` 等待任意 Node 的指定 Service；`AwaitNodeService` 等待明确 Node；`FindDiscoveredService` 精确查询；`ListDiscoveredServices` 返回同名候选快照。发现监听共享代码还演示了 `AddDiscoveryListener` 与 `RemoveDiscoveryListener`。
 
 ## 运行与练习
 

@@ -32,10 +32,12 @@ examples\06-remote-rpc\02-nats-two-nodes\run.bat
 ```go
 client.Route(playerID).AwaitGetPlayer(ctx, playerID)
 client.RouteRoundRobin()
+client.RouteRandom()
+client.RouteBy(selector)
 client.BroadcastRefresh(ctx, version)
 ```
 
-广播的部分失败不会被静默吞掉；检查返回的 `*rpc.BroadcastError`，读取成功数量和每个失败目标。
+自定义 Selector 必须同步、快速、可安全并发调用，并尽量使用无状态值类型以避免不必要分配。广播的部分失败不会被静默吞掉；检查返回的 `*rpc.BroadcastError`，读取成功数量和每个失败目标。
 
 ## 深入一点
 

@@ -1,10 +1,10 @@
 # 路由与广播
 
-当一个 Service 有多个实例时，客户端可按业务键稳定路由、显式轮询或随机选择；当必须通知全部实例时，可使用生成的 `Broadcast...` 方法。
+当一个 Service 有多个实例时，客户端可按业务键稳定路由、显式轮询、随机或自定义 Selector 选择；当必须通知全部实例时，可使用生成的 `Broadcast...` 方法。
 
 ## 关键代码
 
-`Route(playerID)` 把同一业务键稳定映射到一个候选实例，适合玩家/房间归属；`RouteRoundRobin` 用于均衡的无状态请求；`BroadcastRefresh` 向所有候选提交通知，并返回聚合错误。
+`Route(playerID)` 把同一业务键稳定映射到一个候选实例；`RouteRoundRobin` 用于轮询；`RouteRandom` 使用低竞争随机选择；`RouteBy(firstCandidateSelector{})` 展示同步、快速、无状态的自定义选择器；`BroadcastRefresh` 向全部候选提交通知。
 
 ## 运行与观察
 

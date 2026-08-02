@@ -26,17 +26,25 @@ go run ./examples/00-quickstart/01-hello-service
 
 预期会看到 `OnInit`、`OnStart` 和业务任务输出。按 `Ctrl+C` 可观察 `OnStop`。
 
-## 推荐学习路径
+## 完整学习路径
 
-| 目标 | 从这里开始 |
-| --- | --- |
-| 运行第一个应用 | [快速入口](./docs/baseline/v3.0/guides/00-quickstart.md) |
-| 创建自己的 Service | [创建第一个应用](./docs/baseline/v3.0/guides/01-first-application.md) |
-| 配置 Application、Node 和 Service | [配置应用](./docs/baseline/v3.0/guides/02-configuration.md) |
-| 调用其他 Service | [RPC 基础](./docs/baseline/v3.0/guides/05-rpc-basics.md) |
-| 调用其他 Node | [跨节点 RPC](./docs/baseline/v3.0/guides/06-remote-rpc.md) |
-| 使用 Origin 或 etcd 服务发现 | [服务发现](./docs/baseline/v3.0/guides/07-discovery.md) |
-| 查看运行状态、启停 pprof | [Diagnostics 与 pprof](./docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md) |
+教程章节与 `examples/` 编号目录一一对应；每章先运行对应示例，再阅读使用说明和深入内容。
+
+| 顺序 | 学习目标 | 教程 | 示例目录 |
+| --- | --- | --- | --- |
+| 00 | 运行第一个 Application | [快速入口](./docs/baseline/v3.0/guides/00-quickstart.md) | [00-quickstart](./examples/00-quickstart/) |
+| 01 | 创建 Application、Node 与 Service | [创建第一个应用](./docs/baseline/v3.0/guides/01-first-application.md) | [01-first-application](./examples/01-first-application/) |
+| 02 | 加载 YAML 与业务配置 | [配置应用](./docs/baseline/v3.0/guides/02-configuration.md) | [02-configuration](./examples/02-configuration/) |
+| 03 | 用 Service、Module 组织业务 | [Service 与 Module](./docs/baseline/v3.0/guides/03-service-and-module.md) | [03-service-and-module](./examples/03-service-and-module/) |
+| 04 | 使用 Timer、Event、Await 与安全执行 | [Timer、Event 与执行](./docs/baseline/v3.0/guides/04-timer-event-and-execution.md) | [04-timer-event-and-execution](./examples/04-timer-event-and-execution/) |
+| 05 | 定义合约并调用同 Node RPC | [RPC 基础](./docs/baseline/v3.0/guides/05-rpc-basics.md) | [05-rpc-basics](./examples/05-rpc-basics/) |
+| 06 | 使用 TCP、NATS 与多实例远程 RPC | [跨节点 RPC](./docs/baseline/v3.0/guides/06-remote-rpc.md) | [06-remote-rpc](./examples/06-remote-rpc/) |
+| 07 | 使用 Origin、etcd 或自定义服务发现 | [服务发现](./docs/baseline/v3.0/guides/07-discovery.md) | [07-discovery](./examples/07-discovery/) |
+| 08 | Retire、Resume 与优雅下线 | [Retire、Resume 与优雅停止](./docs/baseline/v3.0/guides/08-retire-and-resume.md) | [08-retire-and-resume](./examples/08-retire-and-resume/) |
+| 09 | 读取诊断、启停 pprof、适配监控 | [Diagnostics 与 pprof](./docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md) | [09-diagnostics-and-pprof](./examples/09-diagnostics-and-pprof/) |
+| 10 | 构建、依赖编排与 Ubuntu 运行 | [部署与运维](./docs/baseline/v3.0/guides/10-deployment-and-operations.md) | [10-deployment-and-operations](./examples/10-deployment-and-operations/) |
+| 11 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/11-performance.md) | [11-performance](./examples/11-performance/) |
+| 12 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/12-troubleshooting.md) | [12-troubleshooting](./examples/12-troubleshooting/) |
 
 完整教程见 [v3.0 使用指南](./docs/baseline/v3.0/guides/README.md)，全部可运行示例见 [examples](./examples/README.md)。
 
@@ -51,7 +59,7 @@ go run ./examples/00-quickstart/01-hello-service
 - `run.sh`：Linux 入口；
 - 完整源码和必要配置。
 
-依赖 NATS 或 etcd 的示例会明确提供依赖检查及启动、停止脚本；systemd、部署清单等非程序示例则提供对应的 Unit 或运维脚本。前六章不要求任何外部中间件。
+依赖 NATS 或 etcd 的示例会明确提供依赖检查及启动、停止脚本；systemd、部署清单等非程序示例则提供对应的 Unit 或运维脚本。`00`–`05` 以及 `06` 的 TCP 示例不要求任何外部中间件。
 
 ## 文档边界
 
