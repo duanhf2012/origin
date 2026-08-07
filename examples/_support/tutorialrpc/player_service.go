@@ -3,6 +3,9 @@ package tutorialrpc
 
 import "context"
 
+// 进入本目录后执行 go generate，即可更新本合约的 player_service.rpc.gen.go。
+//go:generate go run github.com/duanhf2012/origin/v3/cmd/origingen rpc .
+
 // PlayerService 描述业务 PlayerService 对其他 Service 公开的 RPC 能力。
 //
 // 契约与实现使用相同的领域名称，但位于不同包：本接口属于共享 RPC 合约包，具体实现

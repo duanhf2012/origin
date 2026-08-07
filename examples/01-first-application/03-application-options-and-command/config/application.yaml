@@ -1,0 +1,10 @@
+# 仅 run-start 脚本使用本配置；print-options 是离线命令，不会读取它。
+log:
+  console:
+    enabled: true
+    level: info
+    format: text
+
+nodes:
+  - id: option-demo-1
+    services: [OptionService]

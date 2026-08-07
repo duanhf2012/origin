@@ -7,14 +7,14 @@
 - [`../../_support/tutorialrpc/player_service.go`](../../_support/tutorialrpc/player_service.go)：只声明 `PlayerService` RPC 合约。
 - [`../../_support/tutorialrpc/player_service.rpc.gen.go`](../../_support/tutorialrpc/player_service.rpc.gen.go)：由同名契约文件生成的客户端、静态 Dispatcher 和冷启动描述符，不要手改。
 - [`player_service.go`](player_service.go)：当前业务目录中的普通 `PlayerService` 实现；业务侧没有生成文件。
-- `generate.bat` / `generate.sh`：调用 `origingen` 更新共享合约的生成代码。
+- `generate.bat` / `generate.sh`：调用 `go generate`，再由契约文件中的 `//go:generate` 指令运行 `origingen` 更新共享代码。
 - `main.go`：`CallerService` 使用 `BindPlayerService` 得到客户端，在
   `OnStart(ctx context.Context)` 中用 `AwaitGetPlayer`，并在普通 goroutine 中用
   `CallGetPlayer`。
 
 ## 运行
 
-生成代码已提交，可直接执行 `run.bat` 或 `./run.sh`。修改 RPC 接口后，先运行 `generate.bat`，再执行 `go test ./...` 或本示例。
+生成代码已提交，可直接执行 `run.bat` 或 `./run.sh`。修改 RPC 接口后，先运行 `generate.bat`，再执行 `go test ./...` 或本示例。提交前可在仓库根目录运行 `go run ./cmd/origingen rpc --check ./...`，它只检查生成结果是否缺失、过期或多余，不会改写文件。
 
 ## 观察与练习
 
@@ -31,5 +31,5 @@ Background、TODO 或显式 Deadline，但普通 goroutine 必须使用 `CallXxx
 
 若配置写成 `player-1:PlayerService`，`player-1` 是发现、路由和配置使用的实际名，`PlayerService` 仍是自动关联契约的模板名。Service 没有 `SetName`：实际名由配置决定，避免业务代码和配置产生两个名称来源；调用改名实例时使用 `BindPlayerServiceTo(target, "player-1")`。
 
-完整规则：[RPC 基础](../README.md)；v3.1 变更索引见
+完整的安装、目录、`go generate` 与 CI 工作流见 [RPC 基础](../../../docs/baseline/v3.0/guides/05-rpc-basics.md)；v3.1 变更索引见
 [RPC 调用与 Context](../../../docs/maintenance/v3.1/guides/README.md)。

@@ -18,9 +18,62 @@ snapshot := runtime.Diagnostics()
 report(snapshot)
 ```
 
-`Application.Diagnostics()` 汇总同一份快照模型；`Node.Diagnostics()`、`ExecutionStats()`、
+`Application.Diagnostics()` 汇总同一份快照模型；`Application.Logger()` 适合记录进程级管理、
+启动和观测事件（日志 Runtime 尚未建立时安全退化为 Nop Logger）；`Node.Diagnostics()`、`ExecutionStats()`、
 `TimerStats()` 和 `EventStats()` 适合只关心局部对象的低成本查询。快照不包含配置原文、密码、
 Token、RPC Payload、玩家数据、完整远端地址表或 goroutine 栈。
+
+## 我想读取一个 Node 的实时状态
+
+同一进程的管理/观测代码可通过 `app.Node(id)` 或 `app.Nodes()` 得到 Node。它们适合冷路径状态
+读取；`Nodes()` 返回独立 Slice 快照，因此可以遍历或排序这个 Slice，但不能借此修改 Application
+内部顺序。完整可运行代码见：[诊断快照示例](../../../../examples/09-diagnostics-and-pprof/01-diagnostics-snapshot)。
+
+```go
+current, ok := app.Node("game-1")
+if !ok {
+    return fmt.Errorf("node is not running")
+}
+
+// 身份与静态公开性来自最终 Node 配置。
+id, private := current.ID(), current.Private()
+// 当前 Node 的本地 Service 查询；不会跨 Node，也不会发起 RPC。
+local, found := current.Service("PlayerService")
+allLocal := current.Services() // 按 YAML services 声明顺序的独立 Slice。
+
+// 以下都是无锁值快照，适合健康检查、日志、诊断 HTTP 或监控适配层。
+health := current.HealthStatus()
+transport := current.TransportStatus()
+directory := current.DiscoveryStatus()
+serviceStatus, known := current.ServiceStatus("PlayerService")
+fmt.Printf("node=%s private=%t local=%t services=%d ready=%t transport=%v discovery=%v service=%v known=%t\\n",
+    id, private, found && local != nil, len(allLocal), health.Readiness,
+    transport.State, directory.State, serviceStatus.State, known,
+)
+```
+
+`Private()` 表示该 Node 配置为不向服务发现发布；它不妨碍本进程内的 `Service` 查询或自身的
+生命周期。`Node.Logger()` 是已带 `node_id` 的结构化 Logger，适合 Node 级管理日志。
+
+状态快照的含义如下：
+
+| 方法 | 关键含义 | 常见用法 |
+| --- | --- | --- |
+| `State()` | `created → starting → ready → stopping → stopped`，失败时为 `failed` | 判断 Application 启停阶段；不是远端可达性探针。 |
+| `HealthStatus()` | `Liveness` 表示进程内 Node 尚存活；`Readiness` 表示可承接默认服务流量；`Degraded` 表示局部 Service、Transport 或发现异常 | 由业务监控转换为 liveness/readiness/degraded 指标。 |
+| `TransportStatus()` | TCP/NATS 入站 Transport 的类型、启动/就绪/恢复/失败状态和重连计数 | 排查远端 RPC 不能接收或不断重连；纯本地 RPC Node 为 `disabled`。 |
+| `DiscoveryStatus()` | Provider 类型、首次同步、恢复、发布确认及错误码 | 排查实例没有发布、目录失联或重连。 |
+| `ServiceStatus(name)` | 指定实际 ServiceName 的状态、进入该状态时间和首个运行期失败根因 | 精确定位某个被隔离或退休的本地 Service。 |
+| `Diagnostics()` | 汇总 Node、全部本地 Service、RPC、发现、Timer 与调度统计的不可变快照 | 需要完整 JSON、支持快照或监控适配时使用。 |
+
+`HealthStatus` 不是 Origin 自动开启的 HTTP 健康端点，而是一份数据模型；业务可通过
+`Application.Diagnostics()`、诊断 HTTP 或自己的 HTTP/Prometheus/OpenTelemetry 适配层暴露它。
+`ErrorCode` 使用 `errs.Code` 稳定分类，监控应按 code 聚合，不要依赖错误文本。
+
+`Node.New`、`Start`、`Stop` 与 `Rollback` 虽然因独立测试/嵌入场景而公开，但它们属于框架装配
+和唯一生命周期路径。普通 Service、RPC Handler 和业务 goroutine 不应直接调用；正常项目始终
+通过 `Application.Setup`、配置和 `app.Start()` 创建 Node，通过 Application 的停止路径结束它。
+业务需要改变流量准入时使用 `Node.Retire/Resume` 或 `Service.Retire/Resume`，而不是 `Node.Stop`。
 
 ## Application 公开函数可以从哪里调用
 

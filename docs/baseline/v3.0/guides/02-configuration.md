@@ -52,6 +52,42 @@ if err := module.ParseServiceConfig(&module.config); err != nil {
 }
 ```
 
+## 我该使用哪一种 Service 配置读取方法
+
+`Service` 与 `Module` 都提供相同的三种只读配置方法。它们读取的是启动时已经合并并冻结的快照，不会触发磁盘 I/O，也不支持运行期热更新：
+
+| 方法 | 读取范围 | 常见用途 |
+| --- | --- | --- |
+| `ParseServiceConfig(&dst)` | 当前 Node 与当前实际 ServiceName 最终选中的**完整**业务配置 | 在 `OnInit` 一次性解码本 Service 的 settings 结构体，最常用。 |
+| `GetServiceConfig("path", &dst)` | 同一份有效业务配置中的相对路径 | 只读取一个小字段或嵌套子块，例如 `limits.max_players`。 |
+| `GetConfig("path", &dst)` | Application 的完整根配置中的绝对路径 | 少量需要读取共享框架配置或其他已知配置块的场景。 |
+
+已有完整可运行代码：[Service 与 Module 配置](../../../../examples/02-configuration/03-service-module-config)。它同时演示这三种调用：
+
+```go
+func (s *ConfigService) OnInit() error {
+    // 1. 最常用：一次解析当前 Service 的完整有效配置。
+    if err := s.ParseServiceConfig(&s.settings); err != nil {
+        return err
+    }
+
+    // 2. 相对当前 Service 配置读取一个字段。
+    if err := s.GetServiceConfig("limits.max_players", &s.maxPlayers); err != nil {
+        return err
+    }
+
+    // 3. 根路径只用于明确需要的跨配置读取，不要把它当作业务 Service 间通信。
+    var nodes []struct {
+        ID string `json:"id"`
+    }
+    return s.GetConfig("nodes", &nodes)
+}
+```
+
+路径使用点号分隔，例如 `limits.max_players`；空路径、空分段、通配符和数组下标不属于这套
+稳定 API。没有业务配置时，`ParseServiceConfig` 保留目标结构体预填的默认值；读取不存在路径
+则返回错误。推荐只在 `OnInit` 解析并保存强类型结果，避免在 RPC、Timer 和事件热路径重复解码。
+
 ## 我想配置控制台和滚动文件日志
 
 运行：[examples/02-configuration/04-log-output-and-rolling](../../../../examples/02-configuration/04-log-output-and-rolling)。常用完整配置为：

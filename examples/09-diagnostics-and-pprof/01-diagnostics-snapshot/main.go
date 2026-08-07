@@ -30,14 +30,30 @@ func (target *DiagnosticsService) OnStart(context.Context) error {
 	if !found {
 		return fmt.Errorf("current node %q not found", target.NodeID())
 	}
+	// Node.Service 与 Services 只查询本 Node 的本地实例，不经过远端发现或 RPC 路由。
+	localService, localFound := currentNode.Service(target.Name())
+	serviceStatus, statusFound := currentNode.ServiceStatus(target.Name())
+	transport := currentNode.TransportStatus()
+	discovery := currentNode.DiscoveryStatus()
+	health := currentNode.HealthStatus()
 	nodeSnapshot := currentNode.Diagnostics()
+	// Application.Logger 适合记录进程级管理与观测事件；初始化前它安全地退化为 Nop Logger。
+	app.Logger().Info("application diagnostics snapshot collected")
 	target.Logger().Info(fmt.Sprintf(
-		"diagnostics: app_state=%v snapshot_state=%s nodes=%d node=%s services=%d goroutines=%d",
+		"diagnostics: app_state=%v snapshot_state=%s nodes=%d node=%s private=%t services=%d local_found=%t status_found=%t service_state=%s ready=%t degraded=%t transport=%v discovery=%v goroutines=%d",
 		app.State(),
 		snapshot.Application.State,
 		len(nodes),
-		nodeSnapshot.NodeID,
+		currentNode.ID(),
+		currentNode.Private(),
 		len(nodeSnapshot.Services),
+		localFound && localService != nil,
+		statusFound,
+		serviceStatus.State,
+		health.Readiness,
+		health.Degraded,
+		transport.State,
+		discovery.State,
 		snapshot.Runtime.Goroutines,
 	))
 	return nil

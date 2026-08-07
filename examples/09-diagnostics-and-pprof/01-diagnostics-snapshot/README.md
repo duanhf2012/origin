@@ -1,6 +1,6 @@
 # 读取 Diagnostics 快照
 
-`Application.Diagnostics()` 返回统一的不可变诊断快照，适合业务代码、诊断 HTTP 和监控适配层共同读取。示例同时展示 `Application.State`、`Nodes`、`Node(id)` 和 `Node.Diagnostics()`。
+`Application.Diagnostics()` 返回统一的不可变诊断快照，适合业务代码、诊断 HTTP 和监控适配层共同读取。示例同时展示 `Application.State`、`Nodes`、`Node(id)`、`Node.ID`、`Node.Private`、`Node.Service`、`Node.ServiceStatus`、`HealthStatus`、`TransportStatus`、`DiscoveryStatus`、`Node.Diagnostics()` 与进程级 `Application.Logger()`。
 
 ## 示例流程
 

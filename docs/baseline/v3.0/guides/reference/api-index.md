@@ -2,12 +2,13 @@
 
 | 包 | 首选入口 |
 | --- | --- |
-| `application` | `application.New`、`Setup`、`Start`、`State`、`Node`、`Nodes`、`Logger`、`Diagnostics`、`Start/StopDiagnosticsServer`、`Start/StopPprof`、`Retire`、`Resume` |
+| `application` | `application.New`、`Setup`、`RegisterCommand`、`RegisterDiscoveryProvider`、`Start`、`Stop`、`State`、`Node`、`Nodes`、`Logger`、`Diagnostics`、`Start/StopDiagnosticsServer`、`Start/StopPprof`、`Retire`、`Resume`；使用位置与 Options 见[第 01 章](../01-first-application.md) |
 | `command` | `start`、`stop`、`help`、`version` 的 `Runner`、`Command` 和 `StartRequest`；`start --retired`、`--diagnostics`、`--pprof` |
+| `buildinfo` | `Version`、`Commit`、`BuildTime`；编译期注入方式见[第 01 章](../01-first-application.md) |
 | `config` | `LoadDir`、`LoadSnapshot`、`View`、`Duration`、`ByteSize` |
 | `log` | `Logger`、`Field`、`Runtime`、`Flush`、`Stats`；默认 Zap Handler 位于 `log/zaplog` |
-| `node` | `Node`、`State`、`Service`、`Services`、`Diagnostics`、`Retire`、`Resume` |
-| `service` | `Service`、`Module`、`Application`、`AfterFunc`、`NewTicker`、`CronFunc`、`NotifyEventSync`、`NotifyEventAsync`、`DispatchAsync`、`Await`、`GoSafe`、`RunSafe`、`Retire`、`Resume` |
+| `node` | `ID`、`Private`、`State`、`Logger`、`Service`、`Services`、`ServiceStatus`、`HealthStatus`、`TransportStatus`、`DiscoveryStatus`、`Diagnostics`、`Retire`、`Resume`；状态读取与生命周期边界见[第 09 章](../09-diagnostics-and-pprof.md) |
+| `service` | `Name`、`NodeID`、`State`、`Logger`、`LookupService`、`Failure`、三种配置读取、`Module.Service` 见[第 02/03 章](../02-configuration.md)；Timer、事件、执行、统计见[第 04 章](../04-timer-event-and-execution.md)；发现见[第 07 章](../07-discovery.md)；Retire/Resume 见[第 08 章](../08-retire-and-resume.md) |
 | `rpc` | 生成客户端、`OnNode`、`Route`、`RouteRoundRobin`、`RouteRandom`、`RouteBy`、`IncludeRetired`、广播调用与 `BroadcastError` |
 | `discovery` | 服务目录的事件和值类型；通过 `Service` 使用 `AwaitService`、`AwaitNodeService`、精确查询、列表查询和监听 |
 | `discovery/provider` | 自定义 Provider SPI |

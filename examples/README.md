@@ -5,7 +5,7 @@
 | 目录 | 用途 |
 | --- | --- |
 | `00-quickstart` | 第一个可运行 Application |
-| `01-first-application` | Application、Node、Service 与生命周期 |
+| `01-first-application` | Application、Options、自定义命令、Node、Service 与生命周期 |
 | `02-configuration` | YAML、默认值与 Service 配置 |
 | `03-service-and-module` | Service、Module 与配置归属 |
 | `04-timer-event-and-execution` | Timer、事件、Await 与安全执行 |

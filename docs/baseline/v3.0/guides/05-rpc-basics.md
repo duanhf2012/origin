@@ -53,6 +53,107 @@ Node 按配置中的模板名自动关联契约。例如 `player-1:PlayerService
 s.players = tutorialrpc.BindPlayerServiceTo(s, "player-1")
 ```
 
+## 我想从零使用 origingen
+
+`origingen` 是 RPC 契约的代码生成器。它从带 `//origin:rpc` 的 Go 接口生成强类型 Client、
+静态编解码、Dispatcher 和冷启动描述符；业务 Service 本身不参与生成。第一次使用不必先安装
+全局工具，最可靠的方式是让 `go run` 使用 `go.mod` 已锁定的 Origin 版本：
+
+```bash
+# 在业务项目的 go.mod 所在目录执行；扫描当前 Module 的所有包。
+go run github.com/duanhf2012/origin/v3/cmd/origingen rpc ./...
+```
+
+如果团队希望直接输入 `origingen`，可安装与项目 `go.mod` 中 Origin **相同版本**的工具：
+
+```bash
+# <origin-v3-version> 替换为 go.mod 中 github.com/duanhf2012/origin/v3 的版本。
+go install github.com/duanhf2012/origin/v3/cmd/origingen@<origin-v3-version>
+origingen rpc ./...
+```
+
+在 Origin 源码仓库内开发时，也可以安装当前工作树版本：
+
+```bash
+go install ./cmd/origingen
+```
+
+不要用不受项目依赖约束的“最新”生成器去更新旧项目：生成器与运行时必须来自同一 Origin
+版本线。`go run` 或 `go generate` 不依赖 `PATH`，是新项目和 CI 的推荐默认方式。
+
+### 推荐目录和命名
+
+将可被其他 Service 调用的接口放进稳定、可被双方导入的契约包；将拥有生命周期、配置和
+业务状态的实现放进业务包。一个实用的起点如下：
+
+```text
+your-project/
+  cmd/game/                    # main：创建并启动 Application
+  rpc/playerapi/
+    player_service.go          # 手写契约，包含 //origin:rpc
+    player_service.rpc.gen.go  # origingen 生成，提交到 Git，不手改
+  internal/player/
+    player_service.go          # 手写业务 Service，实现 playerapi.PlayerService
+```
+
+约定“契约名等于模板 Service 名”：`playerapi.PlayerService` 是远程能力契约，
+`player.PlayerService` 是业务实现。接口不使用 `IPlayerService` 前缀。这样 Node 可通过配置
+中的模板名 `PlayerService` 自动关联生成描述符；若实际实例名改为 `player-1`，只在配置和
+`BindPlayerServiceTo(owner, "player-1")` 中使用该实际名。
+
+契约文件的最小外观如下。标记必须紧邻具名接口声明；不要标记业务 `struct`，也不要把声明
+放进 `*.gen.go`：
+
+```go
+package playerapi
+
+import "context"
+
+//go:generate go run github.com/duanhf2012/origin/v3/cmd/origingen rpc .
+
+//origin:rpc
+// PlayerService 是其他 Service 可调用的公开 RPC 能力。
+type PlayerService interface {
+    GetPlayer(context.Context, int64) (Player, error)
+    Refresh(context.Context, int64)
+}
+
+// Player 是公开传输数据；字段必须可由静态编码表达。
+type Player struct {
+    ID   int64
+    Name string
+}
+```
+
+一个源文件对应一个生成文件：`player_service.go` 会生成 `player_service.rpc.gen.go`；同一源文件
+的多个 RPC 接口写入同一个生成文件，不同源文件互不改写。生成器会在写入前完成整批类型校验；
+契约签名、接口嵌入、泛型、不可静态编码类型或循环对象图不符合规则时会直接报错，而不会留下
+部分生成结果。把 `*.rpc.gen.go` 提交到 Git，评审时只审查手写契约和生成差异，不手动编辑生成文件。
+
+### 日常工作流与 CI 校验
+
+修改契约、请求/响应类型或自定义 Codec 后，按以下顺序执行：
+
+```bash
+# 1. 运行当前包声明的生成命令；也可用 go generate ./... 更新全部契约包。
+go generate ./rpc/playerapi
+
+# 2. 编译和测试业务；生成 Client 的变更会让漏实现、错误方法名尽早暴露。
+go test ./...
+
+# 3. CI 中只检查，不修改工作树；缺失、过期或多余生成文件都会失败。
+go run github.com/duanhf2012/origin/v3/cmd/origingen rpc --check ./...
+```
+
+也可把最后一条替换为已安装工具的 `origingen rpc --check ./...`。`--check` 绝不改写文件，
+适合提交前检查和 CI；普通 `rpc` 命令会原子地新增、更新或删除带完整 origingen 头部的陈旧
+生成文件，不会覆盖同名手写文件。
+
+本章的 [生成脚本](../../../../examples/05-rpc-basics/01-contract-generate-bind/generate.bat) 已改为
+`go generate` 工作流；对应契约位于
+[examples/_support/tutorialrpc/player_service.go](../../../../examples/_support/tutorialrpc/player_service.go)。先运行
+`generate.bat`/`generate.sh`，再运行示例，最容易观察完整流程。
+
 ## 我要异步调用或只发送通知
 
 ```go
