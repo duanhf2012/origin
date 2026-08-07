@@ -4,7 +4,7 @@ Origin 使用 `errs.Code` 提供稳定错误分类：
 
 ```go
 if errs.CodeOf(err) == errs.CodeDeadlineExceeded {
-    // 超时降级或重试
+    // 根据稳定超时码执行降级或有限重试，而不匹配错误字符串。
 }
 ```
 
@@ -17,4 +17,4 @@ if errs.CodeOf(err) == errs.CodeDeadlineExceeded {
 | 无候选实例 | ServiceName、`allow_discovery`、Retired 状态、Provider 快照 |
 | Provider 不可用 | etcd/NATS 网络、TLS、认证、TTL 和日志 |
 
-详细可复现路径见[故障排查](../12-troubleshooting.md)。
+详细可复现路径见[故障排查](../11-troubleshooting.md)。

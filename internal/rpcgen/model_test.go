@@ -513,6 +513,7 @@ func TestRenderContractIncludesM19BindingRoutingAndPrepare(t *testing.T) {
 		"func (client PlayerRPCClient) Route(key any) PlayerRPCClient",
 		"func (client PlayerRPCClient) RouteBy(selector rpc.RouteSelector) PlayerRPCClient",
 		"client.client.PrepareAwait(ctx, playerRPCEchoMethodID)",
+		"client.client.PrepareCall(ctx, playerRPCEchoMethodID)",
 		"client.client.PrepareAsync(ctx, playerRPCEchoMethodID)",
 		"client.client.PrepareNotify(ctx, playerRPCEchoMethodID)",
 		"client.client.PrepareBroadcast(ctx, playerRPCEchoMethodID)",
@@ -521,6 +522,8 @@ func TestRenderContractIncludesM19BindingRoutingAndPrepare(t *testing.T) {
 		`ContractName: "example.com/game/playerapi.PlayerRPC"`,
 		"target, ok := implementation.(PlayerRPC)",
 		"return NewPlayerRPCDispatcher(target), true",
+		"defer preparedClient.FinishInvocation()",
+		"handedOff = true",
 	}
 	for _, expected := range required {
 		if !strings.Contains(source, expected) {

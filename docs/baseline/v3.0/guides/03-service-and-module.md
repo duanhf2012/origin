@@ -7,9 +7,13 @@
 一个业务 Service 只需要嵌入 `service.Service` 并在 `app.Setup` 中登记：
 
 ```go
-type InventoryService struct { service.Service }
+type InventoryService struct {
+    // 嵌入后该类型成为可由 Application 托管的 Service。
+    service.Service
+}
 
 func init() {
+    // 登记零值模板；配置决定在哪些 Node 创建实例。
     app.Setup(&InventoryService{})
 }
 ```
@@ -22,6 +26,7 @@ func init() {
 
 ```go
 func (s *GameService) OnInit() error {
+    // Module 只能在所属 Service 的 OnInit 中加入。
     return s.AddModule(&RootModule{})
 }
 ```

@@ -156,11 +156,30 @@ func (client PlayerServiceClient) AwaitGetPlayer(ctx context.Context, arg1 int64
 	if err != nil {
 		return
 	}
+	defer preparedClient.FinishInvocation()
 	request, err := encodePlayerServiceGetPlayerRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return
 	}
 	err = preparedClient.Await(ctx, playerServiceGetPlayerMethodID, request, func(data []byte) error {
+		result1, err = decodePlayerServiceGetPlayerResponse(data)
+		return err
+	})
+	return
+}
+
+// CallGetPlayer 在当前普通 goroutine 中阻塞并返回 RPC 结果。
+func (client PlayerServiceClient) CallGetPlayer(ctx context.Context, arg1 int64) (result1 string, err error) {
+	preparedClient, err := client.client.PrepareCall(ctx, playerServiceGetPlayerMethodID)
+	if err != nil {
+		return
+	}
+	defer preparedClient.FinishInvocation()
+	request, err := encodePlayerServiceGetPlayerRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Call(ctx, playerServiceGetPlayerMethodID, request, func(data []byte) error {
 		result1, err = decodePlayerServiceGetPlayerResponse(data)
 		return err
 	})
@@ -176,10 +195,17 @@ func (client PlayerServiceClient) AsyncGetPlayer(ctx context.Context, arg1 int64
 	if err != nil {
 		return err
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			preparedClient.FinishInvocation()
+		}
+	}()
 	request, err := encodePlayerServiceGetPlayerRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return err
 	}
+	handedOff = true
 	return preparedClient.Async(ctx, playerServiceGetPlayerMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(string), callErr)

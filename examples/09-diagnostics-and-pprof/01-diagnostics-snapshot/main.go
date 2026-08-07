@@ -15,10 +15,15 @@ var app = application.New()
 // DiagnosticsService 在启动后读取只读快照，不接触内部运行时对象。
 type DiagnosticsService struct{ service.Service }
 
-// OnStart 同时演示 App.State、Nodes、Node 和 Diagnostics。
+// OnStart 同时演示 Service.Application 与进程级 Diagnostics。
 func (target *DiagnosticsService) OnStart(context.Context) error {
+	// Service.Application 返回受限且并发安全的进程外观，不开放 Stop、Setup 等高风险能力。
+	runtime := target.Application()
+	if runtime == nil {
+		return fmt.Errorf("application runtime is unavailable")
+	}
 	// Diagnostics 每次都返回当前时间点的新快照，不要长期缓存当作实时状态。
-	snapshot := app.Diagnostics()
+	snapshot := runtime.Diagnostics()
 	// Nodes 返回只读用途的 Node 列表副本，Node 可按 ID 再精确查询。
 	nodes := app.Nodes()
 	currentNode, found := app.Node(target.NodeID())

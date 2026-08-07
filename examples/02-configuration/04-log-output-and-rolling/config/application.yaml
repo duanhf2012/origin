@@ -1,0 +1,32 @@
+log:
+  # async 使用容量固定的异步队列，避免普通日志阻塞业务；sync 适合本地调试。
+  mode: async
+  console:
+    # 控制台只显示 info 及以上，并使用便于人工阅读的单行文本。
+    enabled: true
+    level: info
+    format: text
+  file:
+    # 文件保留 debug 及以上，并输出便于采集系统解析的 JSON Lines。
+    enabled: true
+    level: debug
+    format: json
+    # 相对路径以程序启动时的当前工作目录为基准。
+    path: examples/02-configuration/04-log-output-and-rolling/logs/tutorial.log
+    rotation:
+      # 活动文件在下一条完整日志会使其超过 1 MiB 前滚动；0B 关闭大小滚动。
+      max_size: 1M
+      # 跨本地自然日时也滚动；timezone 还可以设置为 UTC。
+      by_date: true
+      timezone: Local
+    retention:
+      # 删除超过七天的归档；0s 表示不按时间删除。
+      max_age: 7d
+      # 只保留最新十个归档；0 表示不限制数量。
+      max_files: 10
+      # 滚动后的普通归档由唯一维护协程压缩为 gzip。
+      compress: true
+
+nodes:
+  - id: log-1
+    services: [LogService]

@@ -10,3 +10,11 @@
 - `guides/`：面向使用者的使用、部署、配置和排障文档。
 
 每篇文档必须注明：状态、目标版本、兼容性和基线（通常为 `v3.0`）。
+
+## 已确认设计
+
+- [RPC 可选 Context 与 goroutine 调用设计](./design/RPC可选Context与goroutine调用设计.md)
+
+## 使用者变更
+
+- [v3.1 RPC 调用、Context 与 Deadline 规则](./guides/README.md)

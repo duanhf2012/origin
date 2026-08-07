@@ -135,6 +135,68 @@ func TestNodeRetireReverseResumeForwardAndPublishState(t *testing.T) {
 	}
 }
 
+// TestNodeInitialRetiredPublishesNoRunningWindow 验证启动参数不会先发布一个短暂 Running
+// 快照。Service 仍完成正常 OnInit/OnStart 和 Scheduler 激活，只改变首次对外准入状态。
+func TestNodeInitialRetiredPublishesNoRunningWindow(t *testing.T) {
+	source := internaldiscovery.NewSource()
+	var snapshotMu sync.Mutex
+	var snapshots []internaldiscovery.RawSnapshot
+	subscription, err := source.Subscribe(func(snapshot internaldiscovery.RawSnapshot) error {
+		snapshotMu.Lock()
+		snapshots = append(snapshots, snapshot)
+		snapshotMu.Unlock()
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+
+	var changes []string
+	target := &retirementService{label: "PlayerService", changes: &changes}
+	current, err := New(
+		Config{ID: "retired-node", Services: []string{"PlayerService"}},
+		[]ServiceBinding{{
+			Name: "PlayerService", Template: "retirementService", Service: target,
+		}},
+		originlog.NewNop(),
+		Options{
+			InitialRetired:   true,
+			MaxTimersPerNode: 64,
+			TimerLocation:    time.UTC,
+			DiscoverySource:  source,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = current.Stop(context.Background()) })
+
+	if target.State() != service.StateRetired {
+		t.Fatalf("initial Service state = %v, want Retired", target.State())
+	}
+	if len(changes) != 0 {
+		t.Fatalf("initial state unexpectedly emitted transition events: %v", changes)
+	}
+	snapshotMu.Lock()
+	defer snapshotMu.Unlock()
+	for _, snapshot := range snapshots {
+		for _, publishedNode := range snapshot.Nodes {
+			if publishedNode.NodeID != "retired-node" {
+				continue
+			}
+			for _, publishedService := range publishedNode.Services {
+				if publishedService.State != internaldiscovery.ServiceStateRetired {
+					t.Fatalf("published initial state = %v, want Retired", publishedService.State)
+				}
+			}
+		}
+	}
+}
+
 func TestReadyDynamicPublicationUsesSingleCoordinator(t *testing.T) {
 	var changes []string
 	target := &retirementService{label: "Only", changes: &changes}

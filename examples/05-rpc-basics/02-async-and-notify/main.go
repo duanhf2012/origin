@@ -38,8 +38,8 @@ func (target *CallerService) OnStart(context.Context) error {
 		}); err != nil {
 			target.Logger().Error("submit async rpc failed")
 		}
-		// Notify 只报告提交/传输层错误，适合不需要业务返回值的单向语义。
-		if err := target.players.NotifyRefresh(ctx, 7); err != nil {
+		// Notify 只报告提交/传输层错误；nil 合法，且无响应通知不会建立 15 秒 Pending。
+		if err := target.players.NotifyRefresh(nil, 7); err != nil {
 			target.Logger().Error("notify failed")
 		}
 	})

@@ -1,4 +1,4 @@
-// 本示例展示单个 Service 在不停止进程的情况下 Retire 和 Resume。
+// 本示例展示 --retired 初始状态，以及单个 Service 在不停止进程时的 Retire 和 Resume。
 package main
 
 import (
@@ -15,9 +15,10 @@ var app = application.New()
 // MaintenanceService 在两个 Timer 回调中切换自己的可路由状态。
 type MaintenanceService struct{ service.Service }
 
-// OnStart 登记状态切换任务；Retire 不会调用 OnStop。
+// OnStart 登记状态切换任务；run 脚本使用 --retired，因此首个 Retire 是幂等调用。
 func (target *MaintenanceService) OnStart(context.Context) error {
-	// Retire 使默认自动路由排除当前 Service，但已接受任务仍可收敛。
+	// --retired 会在 OnStart 全部完成后、首次发现发布前提交 Retired；Timer 到期时
+	// 再调用 Retire 会幂等成功，证明初始状态仍使用同一套运行期状态机。
 	target.AfterFunc(200*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		if err := target.Retire(ctx); err != nil {
 			target.Logger().Error("retire failed")

@@ -148,6 +148,23 @@ func BenchmarkGeneratedLocalAwait(b *testing.B) {
 	}
 }
 
+// BenchmarkGeneratedLocalCall 记录普通 goroutine 阻塞外观的同 Node 完整闭环；与 Await
+// 基线分开，避免把 Service 执行槽释放和 FIFO 恢复成本错误归因给 RPC 传输内核。
+func BenchmarkGeneratedLocalCall(b *testing.B) {
+	instance, caller := newBenchmarkNode(b)
+	defer stopBenchmarkNode(b, instance)
+
+	client := NewPlayerRPCClient(caller, rpc.ToService("PlayerService"))
+	seed := PlayerData{Name: "benchmark", Tags: []string{"a", "b"}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, _, err := client.CallGetPlayer(nil, 1001, seed, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkGeneratedCustomTimeAwait 测量固定八字节 time.Time Codec 参与的完整同 Node
 // Await，包含结构体字段生成、两阶段编码、目标调度和响应解码。
 func BenchmarkGeneratedCustomTimeAwait(b *testing.B) {

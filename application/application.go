@@ -386,7 +386,7 @@ func (app *Application) run(
 	if err := validateSelectedDiscoveryOrder(configured.discovery, selected); err != nil {
 		return app.report(err)
 	}
-	nodes, err := app.buildNodes(selected, configured.discovery)
+	nodes, err := app.buildNodes(selected, configured.discovery, request.InitialRetired)
 	if err != nil {
 		return app.report(err)
 	}
@@ -567,6 +567,7 @@ func (app *Application) initializeResources(
 func (app *Application) buildNodes(
 	configs []node.Config,
 	discovery *discoverySelection,
+	initialRetired bool,
 ) ([]*node.Node, error) {
 	var factory publicprovider.Factory
 	var originConfig origindiscovery.Config
@@ -659,6 +660,7 @@ func (app *Application) buildNodes(
 			app.logger,
 			node.Options{
 				Application:      app,
+				InitialRetired:   initialRetired,
 				Config:           app.config,
 				MaxTimersPerNode: app.options.Timer.MaxTimersPerNode,
 				TimerLocation:    app.options.Timer.Location,

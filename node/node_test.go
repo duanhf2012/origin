@@ -418,6 +418,38 @@ func TestNodeDiscoveryQueryWaitAndListener(t *testing.T) {
 	}
 }
 
+// TestNodeStopRemovesDiscoveryListenersBeforeOnStop 锁定监听器归属 Service 的自动清理顺序。
+func TestNodeStopRemovesDiscoveryListenersBeforeOnStop(t *testing.T) {
+	events := make([]string, 0, 2)
+	target := &lifecycleService{label: "GatewayService", events: &events}
+	current := newTestNode(t, target)
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	listener := &nodeDiscoveryListener{
+		owner:  target,
+		events: make(chan string, 1),
+	}
+	if _, err := target.AddDiscoveryListener(listener); err != nil {
+		t.Fatalf("AddDiscoveryListener() error = %v", err)
+	}
+
+	entry := current.services[0]
+	target.onStop = func() {
+		current.discovery.mu.Lock()
+		remaining := len(current.discovery.listeners[entry])
+		current.discovery.mu.Unlock()
+		if remaining != 0 {
+			t.Errorf("OnStop 开始时仍有 %d 个发现监听器", remaining)
+		}
+	}
+
+	if err := current.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
 // TestNodeWithoutSourceClosesDiscoveryRuntime 验证独立构造的 Node 停止后也会关闭发现外观。
 func TestNodeWithoutSourceClosesDiscoveryRuntime(t *testing.T) {
 	events := make([]string, 0, 2)

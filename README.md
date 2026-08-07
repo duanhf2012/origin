@@ -42,11 +42,17 @@ go run ./examples/00-quickstart/01-hello-service
 | 07 | 使用 Origin、etcd 或自定义服务发现 | [服务发现](./docs/baseline/v3.0/guides/07-discovery.md) | [07-discovery](./examples/07-discovery/) |
 | 08 | Retire、Resume 与优雅下线 | [Retire、Resume 与优雅停止](./docs/baseline/v3.0/guides/08-retire-and-resume.md) | [08-retire-and-resume](./examples/08-retire-and-resume/) |
 | 09 | 读取诊断、启停 pprof、适配监控 | [Diagnostics 与 pprof](./docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md) | [09-diagnostics-and-pprof](./examples/09-diagnostics-and-pprof/) |
-| 10 | 构建、依赖编排与 Ubuntu 运行 | [部署与运维](./docs/baseline/v3.0/guides/10-deployment-and-operations.md) | [10-deployment-and-operations](./examples/10-deployment-and-operations/) |
-| 11 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/11-performance.md) | [11-performance](./examples/11-performance/) |
-| 12 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/12-troubleshooting.md) | [12-troubleshooting](./examples/12-troubleshooting/) |
+| 10 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/10-performance.md) | [10-performance](./examples/10-performance/) |
+| 11 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/11-troubleshooting.md) | [11-troubleshooting](./examples/11-troubleshooting/) |
 
 完整教程见 [v3.0 使用指南](./docs/baseline/v3.0/guides/README.md)，全部可运行示例见 [examples](./examples/README.md)。
+
+### v3.1 RPC 调用更新
+
+v3.1 为有响应 RPC 新增普通 goroutine 使用的 `CallXxx`，并允许 Await、Call、Async、
+Notify 和 Broadcast 接受 nil、Background、TODO 或自定义 Context。完整的调用位置、
+15 秒默认预算、显式长 Deadline 和 Async 回调规则见
+[v3.1 RPC 使用变更](./docs/maintenance/v3.1/guides/README.md)。
 
 ## 学习方式
 
@@ -59,7 +65,7 @@ go run ./examples/00-quickstart/01-hello-service
 - `run.sh`：Linux 入口；
 - 完整源码和必要配置。
 
-依赖 NATS 或 etcd 的示例会明确提供依赖检查及启动、停止脚本；systemd、部署清单等非程序示例则提供对应的 Unit 或运维脚本。`00`–`05` 以及 `06` 的 TCP 示例不要求任何外部中间件。
+依赖 NATS 或 etcd 的示例会明确提供依赖检查及启动、停止脚本。`00`–`05` 以及 `06` 的 TCP 示例不要求任何外部中间件。
 
 ## 文档边界
 

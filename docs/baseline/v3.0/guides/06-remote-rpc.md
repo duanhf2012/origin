@@ -7,8 +7,10 @@
 该示例在同一个 Application 中启动发现服务、`gateway-1` 与 `player-1`，并由网关执行：
 
 ```go
+// 派生一个只指向 player-1 的客户端值，不修改 s.players。
 player, err := s.players.
     OnNode("player-1").
+    // Await 仍在调用方 Service 的当前 Context 中完成。
     AwaitGetPlayer(ctx, playerID)
 ```
 
@@ -23,7 +25,9 @@ player, err := s.players.
 先启动开发依赖，再运行：[examples/06-remote-rpc/02-nats-two-nodes](../../../../examples/06-remote-rpc/02-nats-two-nodes)。
 
 ```text
+REM 启动示例所需的本地 NATS 依赖。
 examples\06-remote-rpc\02-nats-two-nodes\deps-up.bat
+REM 启动三个 Node 并执行 NATS RPC。
 examples\06-remote-rpc\02-nats-two-nodes\run.bat
 ```
 
@@ -38,10 +42,13 @@ examples\06-remote-rpc\02-nats-two-nodes\run.bat
 运行：[examples/06-remote-rpc/03-route-and-broadcast](../../../../examples/06-remote-rpc/03-route-and-broadcast)。
 
 ```go
+// 用稳定业务键在当前候选集中选择一个实例。
 client.Route(playerID).AwaitGetPlayer(ctx, playerID)
+// 依次演示轮询、随机和业务自定义候选选择。
 client.RouteRoundRobin()
 client.RouteRandom()
 client.RouteBy(selector)
+// 向所有合格候选提交无响应的 Refresh 通知。
 client.BroadcastRefresh(ctx, version)
 ```
 

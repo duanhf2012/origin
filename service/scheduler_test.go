@@ -214,6 +214,15 @@ func TestSchedulerInvariantFailureIsolatesOnlyService(t *testing.T) {
 	if scheduler == nil {
 		t.Fatal("Scheduler 未装配")
 	}
+	// 模拟 Failed 时仍存在一个普通 goroutine 的 RPC 调用预算。故障清理必须取消并摘除
+	// 它；调用方晚到的幂等 finish 不能让已经归零的 operations 下溢。
+	_, finishOperation, err := PrepareOperationContext(
+		fixture.service,
+		context.Background(),
+	)
+	if err != nil {
+		t.Fatalf("PrepareOperationContext() error = %v", err)
+	}
 
 	// 直接注入只能由框架内部产生的不变量错误，验证它不会逃逸为进程 panic。
 	scheduler.failInvariant(
@@ -243,6 +252,7 @@ func TestSchedulerInvariantFailureIsolatesOnlyService(t *testing.T) {
 	) {
 		t.Fatalf("StopScheduler() error = %v", err)
 	}
+	finishOperation()
 }
 
 // TestSchedulerInvariantFailureWithUnavailableLockDoesNotBlockStop 模拟内部 panic 遗留
@@ -307,9 +317,15 @@ func TestDrainingAcceptsOnlyContinuationFromAcceptedTask(t *testing.T) {
 	if err := fixture.service.DispatchAsync(func(ctx context.Context) {
 		close(rootStarted)
 		<-continueRoot
+		operationCtx, finish, err := PrepareOperationContext(fixture.service, ctx)
+		if err != nil {
+			dispatchResult <- err
+			return
+		}
+		defer finish()
 		dispatchResult <- DispatchAsyncCompletion(
 			fixture.service,
-			ctx,
+			operationCtx,
 			func(context.Context) error { return nil },
 			func(context.Context, error) { close(continuationDone) },
 		)
@@ -319,6 +335,12 @@ func TestDrainingAcceptsOnlyContinuationFromAcceptedTask(t *testing.T) {
 	<-rootStarted
 	if err := BeginStopScheduler(fixture.service); err != nil {
 		t.Fatalf("BeginStopScheduler() error = %v", err)
+	}
+	if _, _, err := PrepareOperationContext(
+		fixture.service,
+		context.Background(),
+	); !errors.Is(err, errs.ErrServiceStopping) {
+		t.Fatalf("Draining 外部 PrepareOperationContext() error = %v", err)
 	}
 	close(continueRoot)
 	if err := <-dispatchResult; err != nil {
@@ -437,8 +459,9 @@ func TestStartContextAwaitUsesDefaultDeadline(t *testing.T) {
 	}
 }
 
-// TestStartContextRejectsBackgroundAndCrossService 验证生命周期执行权不能跨 Service 复用。
-func TestStartContextRejectsBackgroundAndCrossService(t *testing.T) {
+// TestStartContextAcceptsOptionalControlContext 验证生命周期执行帧来自 Service 本身，而
+// nil、Background 和 TODO 都只表示为本次 Await 建立新的默认控制预算。
+func TestStartContextAcceptsOptionalControlContext(t *testing.T) {
 	first := newPreparedSchedulerFixture(t, DefaultSchedulerConfig())
 	second := newPreparedSchedulerFixture(t, DefaultSchedulerConfig())
 	startContext, finish, err := PrepareStartContext(
@@ -450,12 +473,19 @@ func TestStartContextRejectsBackgroundAndCrossService(t *testing.T) {
 	}
 	defer finish()
 
-	if err := first.service.Await(
-		context.Background(),
-		func(context.Context) error { return nil },
-	); !errors.Is(err, errs.ErrInvalidArgument) {
-		t.Fatalf("Background Await() error = %v", err)
+	for name, control := range map[string]context.Context{
+		"nil":        nil,
+		"background": context.Background(),
+		"todo":       context.TODO(),
+	} {
+		if err := first.service.Await(
+			control,
+			func(context.Context) error { return nil },
+		); err != nil {
+			t.Fatalf("%s Await() error = %v", name, err)
+		}
 	}
+	// Context 不再证明执行身份；second 没有活动生命周期帧，因此仍不能 Await。
 	if err := second.service.Await(
 		startContext,
 		func(context.Context) error { return nil },
@@ -1115,6 +1145,108 @@ func TestAwaitRejectsInvalidAndCrossServiceContexts(t *testing.T) {
 	second.stop(t)
 }
 
+// TestAwaitAcceptsOptionalControlContextInTask 验证普通 Service Task 中的可选 Context
+// 外观；每次调用都保持同一串行任务调用栈，不要求调用方传递框架私有令牌。
+func TestAwaitAcceptsOptionalControlContextInTask(t *testing.T) {
+	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
+	done := make(chan struct{})
+	if err := fixture.service.DispatchAsync(func(context.Context) {
+		for name, control := range map[string]context.Context{
+			"nil":        nil,
+			"background": context.Background(),
+			"todo":       context.TODO(),
+		} {
+			called := false
+			err := fixture.service.Await(control, func(waitCtx context.Context) error {
+				called = true
+				if _, exists := waitCtx.Deadline(); !exists {
+					t.Errorf("%s Await Context 没有默认 Deadline", name)
+				}
+				return nil
+			})
+			if err != nil || !called {
+				t.Errorf("%s Await() = %v, called=%v", name, err, called)
+			}
+		}
+		close(done)
+	}); err != nil {
+		t.Fatalf("DispatchAsync() error = %v", err)
+	}
+	waitSignal(t, done)
+	fixture.stop(t)
+}
+
+// TestAwaitNilGetsFreshDefaultBudgetPerPublicCall 验证两个独立 Await(nil) 不共享已经消耗的
+// 默认 Deadline；每次公开调用都在进入点重新冻结一份完整预算。
+func TestAwaitNilGetsFreshDefaultBudgetPerPublicCall(t *testing.T) {
+	config := DefaultSchedulerConfig()
+	config.DefaultAwaitTimeout = 25 * time.Millisecond
+	fixture := newSchedulerFixture(t, config)
+	result := make(chan []time.Duration, 1)
+	if err := fixture.service.DispatchAsync(func(context.Context) {
+		elapsed := make([]time.Duration, 0, 2)
+		for range 2 {
+			started := time.Now()
+			err := fixture.service.Await(nil, func(waitCtx context.Context) error {
+				<-waitCtx.Done()
+				return context.Cause(waitCtx)
+			})
+			if !errors.Is(err, errs.ErrDeadlineExceeded) {
+				t.Errorf("Await(nil) error = %v", err)
+			}
+			elapsed = append(elapsed, time.Since(started))
+		}
+		result <- elapsed
+	}); err != nil {
+		t.Fatalf("DispatchAsync() error = %v", err)
+	}
+	for index, elapsed := range receive(t, result) {
+		if elapsed < 15*time.Millisecond || elapsed > 250*time.Millisecond {
+			t.Fatalf("Await(nil) #%d elapsed = %s", index+1, elapsed)
+		}
+	}
+	fixture.stop(t)
+}
+
+// TestPreparedAwaitContextFreezesOneDeadlineAcrossPhases 验证 RPC Prepare 和响应等待等内部
+// 阶段复用同一 operationContext，后续阶段不会重新得到一份默认超时。
+func TestPreparedAwaitContextFreezesOneDeadlineAcrossPhases(t *testing.T) {
+	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
+	done := make(chan struct{})
+	if err := fixture.service.DispatchAsync(func(context.Context) {
+		operationCtx, finish, err := PrepareAwaitContext(fixture.service, nil)
+		if err != nil {
+			t.Errorf("PrepareAwaitContext() error = %v", err)
+			close(done)
+			return
+		}
+		defer finish()
+		frozen, exists := operationCtx.Deadline()
+		if !exists {
+			t.Error("prepared operation 没有 Deadline")
+			close(done)
+			return
+		}
+		for phase := 0; phase < 2; phase++ {
+			err = fixture.service.Await(operationCtx, func(waitCtx context.Context) error {
+				current, currentExists := waitCtx.Deadline()
+				if !currentExists || !current.Equal(frozen) {
+					t.Errorf("phase %d Deadline = %v, want %v", phase, current, frozen)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Errorf("phase %d Await() error = %v", phase, err)
+			}
+		}
+		close(done)
+	}); err != nil {
+		t.Fatalf("DispatchAsync() error = %v", err)
+	}
+	waitSignal(t, done)
+	fixture.stop(t)
+}
+
 func TestAwaitPanicRestoresSlotAndNextTaskContinues(t *testing.T) {
 	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
 
@@ -1526,7 +1658,7 @@ func TestNestedAwaitIsRejectedWithoutReleasingSecondSlot(t *testing.T) {
 	fixture.stop(t)
 }
 
-func TestPooledTaskDoesNotGiveOldContextNewExecutionRights(t *testing.T) {
+func TestCompletedContextDoesNotCreateExecutionFrame(t *testing.T) {
 	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
 
 	oldContext := make(chan context.Context, 1)
@@ -1543,25 +1675,9 @@ func TestPooledTaskDoesNotGiveOldContextNewExecutionRights(t *testing.T) {
 		return stats.CompletedTotal == 1
 	})
 
-	// 连续执行任务使 sync.Pool 有机会复用原 serviceTask；同时从多个 goroutine 反复使用
-	// 已完成旧 Context，验证原子令牌失效与新 Task 初始化之间没有数据竞争或 ABA。
-	var staleChecks sync.WaitGroup
-	staleChecks.Add(8)
-	for worker := 0; worker < 8; worker++ {
-		go func() {
-			defer staleChecks.Done()
-			for attempt := 0; attempt < 1000; attempt++ {
-				err := fixture.service.Await(retained, func(context.Context) error {
-					return nil
-				})
-				if !errors.Is(err, errs.ErrInvalidArgument) {
-					t.Errorf("并发旧 Context Await() error = %v", err)
-					return
-				}
-			}
-		}()
-	}
-
+	// Context 只携带控制语义，不再是执行权令牌。先让任务池经历充分复用，再在没有活动
+	// 执行帧时验证旧 Context 不能凭空创建 Await 环境。普通 goroutine 与活动 Task 并发
+	// 调用 Await 属于 API 误用，应使用生成的 CallXxx，框架不依赖 goid 猜测该情况。
 	var completed sync.WaitGroup
 	completed.Add(1000)
 	for index := 0; index < 1000; index++ {
@@ -1572,15 +1688,16 @@ func TestPooledTaskDoesNotGiveOldContextNewExecutionRights(t *testing.T) {
 		}
 	}
 	waitGroup(t, &completed)
-	staleChecks.Wait()
 
-	called := false
-	err := fixture.service.Await(retained, func(context.Context) error {
-		called = true
-		return nil
-	})
-	if !errors.Is(err, errs.ErrInvalidArgument) || called {
-		t.Fatalf("旧 Context Await() = %v, called=%v", err, called)
+	for attempt := 0; attempt < 1000; attempt++ {
+		called := false
+		err := fixture.service.Await(retained, func(context.Context) error {
+			called = true
+			return nil
+		})
+		if !errors.Is(err, errs.ErrInvalidArgument) || called {
+			t.Fatalf("旧 Context Await() = %v, called=%v", err, called)
+		}
 	}
 	fixture.stop(t)
 }

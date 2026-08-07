@@ -164,11 +164,30 @@ func (client PlayerRPCClient) AwaitEchoName(ctx context.Context, arg1 string) (r
 	if err != nil {
 		return
 	}
+	defer preparedClient.FinishInvocation()
 	request, err := encodePlayerRPCEchoNameRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return
 	}
 	err = preparedClient.Await(ctx, playerRPCEchoNameMethodID, request, func(data []byte) error {
+		result1, err = decodePlayerRPCEchoNameResponse(data)
+		return err
+	})
+	return
+}
+
+// CallEchoName 在当前普通 goroutine 中阻塞并返回 RPC 结果。
+func (client PlayerRPCClient) CallEchoName(ctx context.Context, arg1 string) (result1 string, err error) {
+	preparedClient, err := client.client.PrepareCall(ctx, playerRPCEchoNameMethodID)
+	if err != nil {
+		return
+	}
+	defer preparedClient.FinishInvocation()
+	request, err := encodePlayerRPCEchoNameRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Call(ctx, playerRPCEchoNameMethodID, request, func(data []byte) error {
 		result1, err = decodePlayerRPCEchoNameResponse(data)
 		return err
 	})
@@ -184,10 +203,17 @@ func (client PlayerRPCClient) AsyncEchoName(ctx context.Context, arg1 string, ca
 	if err != nil {
 		return err
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			preparedClient.FinishInvocation()
+		}
+	}()
 	request, err := encodePlayerRPCEchoNameRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return err
 	}
+	handedOff = true
 	return preparedClient.Async(ctx, playerRPCEchoNameMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(string), callErr)
@@ -712,11 +738,30 @@ func (client PlayerRPCClient) AwaitGetPlayer(ctx context.Context, arg1 int64, ar
 	if err != nil {
 		return
 	}
+	defer preparedClient.FinishInvocation()
 	request, err := encodePlayerRPCGetPlayerRequest(preparedClient, rpc.CallRequest, arg1, arg2, arg3)
 	if err != nil {
 		return
 	}
 	err = preparedClient.Await(ctx, playerRPCGetPlayerMethodID, request, func(data []byte) error {
+		result1, result2, err = decodePlayerRPCGetPlayerResponse(data)
+		return err
+	})
+	return
+}
+
+// CallGetPlayer 在当前普通 goroutine 中阻塞并返回 RPC 结果。
+func (client PlayerRPCClient) CallGetPlayer(ctx context.Context, arg1 int64, arg2 PlayerData, arg3 *structpb.Struct) (result1 PlayerData, result2 *structpb.Struct, err error) {
+	preparedClient, err := client.client.PrepareCall(ctx, playerRPCGetPlayerMethodID)
+	if err != nil {
+		return
+	}
+	defer preparedClient.FinishInvocation()
+	request, err := encodePlayerRPCGetPlayerRequest(preparedClient, rpc.CallRequest, arg1, arg2, arg3)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Call(ctx, playerRPCGetPlayerMethodID, request, func(data []byte) error {
 		result1, result2, err = decodePlayerRPCGetPlayerResponse(data)
 		return err
 	})
@@ -732,10 +777,17 @@ func (client PlayerRPCClient) AsyncGetPlayer(ctx context.Context, arg1 int64, ar
 	if err != nil {
 		return err
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			preparedClient.FinishInvocation()
+		}
+	}()
 	request, err := encodePlayerRPCGetPlayerRequest(preparedClient, rpc.CallRequest, arg1, arg2, arg3)
 	if err != nil {
 		return err
 	}
+	handedOff = true
 	return preparedClient.Async(ctx, playerRPCGetPlayerMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(PlayerData), *new(*structpb.Struct), callErr)
@@ -952,11 +1004,30 @@ func (client PlayerRPCClient) AwaitRoundTripBlob(ctx context.Context, arg1 Owned
 	if err != nil {
 		return
 	}
+	defer preparedClient.FinishInvocation()
 	request, err := encodePlayerRPCRoundTripBlobRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return
 	}
 	err = preparedClient.Await(ctx, playerRPCRoundTripBlobMethodID, request, func(data []byte) error {
+		result1, err = decodePlayerRPCRoundTripBlobResponse(data)
+		return err
+	})
+	return
+}
+
+// CallRoundTripBlob 在当前普通 goroutine 中阻塞并返回 RPC 结果。
+func (client PlayerRPCClient) CallRoundTripBlob(ctx context.Context, arg1 OwnedBlob) (result1 OwnedBlob, err error) {
+	preparedClient, err := client.client.PrepareCall(ctx, playerRPCRoundTripBlobMethodID)
+	if err != nil {
+		return
+	}
+	defer preparedClient.FinishInvocation()
+	request, err := encodePlayerRPCRoundTripBlobRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Call(ctx, playerRPCRoundTripBlobMethodID, request, func(data []byte) error {
 		result1, err = decodePlayerRPCRoundTripBlobResponse(data)
 		return err
 	})
@@ -972,10 +1043,17 @@ func (client PlayerRPCClient) AsyncRoundTripBlob(ctx context.Context, arg1 Owned
 	if err != nil {
 		return err
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			preparedClient.FinishInvocation()
+		}
+	}()
 	request, err := encodePlayerRPCRoundTripBlobRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return err
 	}
+	handedOff = true
 	return preparedClient.Async(ctx, playerRPCRoundTripBlobMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(OwnedBlob), callErr)
@@ -1127,11 +1205,30 @@ func (client PlayerRPCClient) AwaitRoundTripPackedID(ctx context.Context, arg1 P
 	if err != nil {
 		return
 	}
+	defer preparedClient.FinishInvocation()
 	request, err := encodePlayerRPCRoundTripPackedIDRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return
 	}
 	err = preparedClient.Await(ctx, playerRPCRoundTripPackedIDMethodID, request, func(data []byte) error {
+		result1, err = decodePlayerRPCRoundTripPackedIDResponse(data)
+		return err
+	})
+	return
+}
+
+// CallRoundTripPackedID 在当前普通 goroutine 中阻塞并返回 RPC 结果。
+func (client PlayerRPCClient) CallRoundTripPackedID(ctx context.Context, arg1 PackedPlayerID) (result1 PackedPlayerID, err error) {
+	preparedClient, err := client.client.PrepareCall(ctx, playerRPCRoundTripPackedIDMethodID)
+	if err != nil {
+		return
+	}
+	defer preparedClient.FinishInvocation()
+	request, err := encodePlayerRPCRoundTripPackedIDRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Call(ctx, playerRPCRoundTripPackedIDMethodID, request, func(data []byte) error {
 		result1, err = decodePlayerRPCRoundTripPackedIDResponse(data)
 		return err
 	})
@@ -1147,10 +1244,17 @@ func (client PlayerRPCClient) AsyncRoundTripPackedID(ctx context.Context, arg1 P
 	if err != nil {
 		return err
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			preparedClient.FinishInvocation()
+		}
+	}()
 	request, err := encodePlayerRPCRoundTripPackedIDRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return err
 	}
+	handedOff = true
 	return preparedClient.Async(ctx, playerRPCRoundTripPackedIDMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(PackedPlayerID), callErr)
@@ -1704,11 +1808,30 @@ func (client PlayerRPCClient) AwaitRoundTripTime(ctx context.Context, arg1 TimeE
 	if err != nil {
 		return
 	}
+	defer preparedClient.FinishInvocation()
 	request, err := encodePlayerRPCRoundTripTimeRequest(preparedClient, rpc.CallRequest, arg1, arg2)
 	if err != nil {
 		return
 	}
 	err = preparedClient.Await(ctx, playerRPCRoundTripTimeMethodID, request, func(data []byte) error {
+		result1, err = decodePlayerRPCRoundTripTimeResponse(data)
+		return err
+	})
+	return
+}
+
+// CallRoundTripTime 在当前普通 goroutine 中阻塞并返回 RPC 结果。
+func (client PlayerRPCClient) CallRoundTripTime(ctx context.Context, arg1 TimeEnvelope, arg2 int) (result1 TimeEnvelope, err error) {
+	preparedClient, err := client.client.PrepareCall(ctx, playerRPCRoundTripTimeMethodID)
+	if err != nil {
+		return
+	}
+	defer preparedClient.FinishInvocation()
+	request, err := encodePlayerRPCRoundTripTimeRequest(preparedClient, rpc.CallRequest, arg1, arg2)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Call(ctx, playerRPCRoundTripTimeMethodID, request, func(data []byte) error {
 		result1, err = decodePlayerRPCRoundTripTimeResponse(data)
 		return err
 	})
@@ -1724,10 +1847,17 @@ func (client PlayerRPCClient) AsyncRoundTripTime(ctx context.Context, arg1 TimeE
 	if err != nil {
 		return err
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			preparedClient.FinishInvocation()
+		}
+	}()
 	request, err := encodePlayerRPCRoundTripTimeRequest(preparedClient, rpc.CallRequest, arg1, arg2)
 	if err != nil {
 		return err
 	}
+	handedOff = true
 	return preparedClient.Async(ctx, playerRPCRoundTripTimeMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, *new(TimeEnvelope), callErr)
@@ -2002,11 +2132,29 @@ func (client PlayerRPCClient) AwaitSavePlayer(ctx context.Context, arg1 PlayerDa
 	if err != nil {
 		return
 	}
+	defer preparedClient.FinishInvocation()
 	request, err := encodePlayerRPCSavePlayerRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return
 	}
 	err = preparedClient.Await(ctx, playerRPCSavePlayerMethodID, request, func(data []byte) error {
+		return decodePlayerRPCSavePlayerResponse(data)
+	})
+	return
+}
+
+// CallSavePlayer 在当前普通 goroutine 中阻塞并返回 RPC 结果。
+func (client PlayerRPCClient) CallSavePlayer(ctx context.Context, arg1 PlayerData) (err error) {
+	preparedClient, err := client.client.PrepareCall(ctx, playerRPCSavePlayerMethodID)
+	if err != nil {
+		return
+	}
+	defer preparedClient.FinishInvocation()
+	request, err := encodePlayerRPCSavePlayerRequest(preparedClient, rpc.CallRequest, arg1)
+	if err != nil {
+		return
+	}
+	err = preparedClient.Call(ctx, playerRPCSavePlayerMethodID, request, func(data []byte) error {
 		return decodePlayerRPCSavePlayerResponse(data)
 	})
 	return
@@ -2021,10 +2169,17 @@ func (client PlayerRPCClient) AsyncSavePlayer(ctx context.Context, arg1 PlayerDa
 	if err != nil {
 		return err
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			preparedClient.FinishInvocation()
+		}
+	}()
 	request, err := encodePlayerRPCSavePlayerRequest(preparedClient, rpc.CallRequest, arg1)
 	if err != nil {
 		return err
 	}
+	handedOff = true
 	return preparedClient.Async(ctx, playerRPCSavePlayerMethodID, request, func(callbackCtx context.Context, data []byte, callErr error) {
 		if callErr != nil {
 			callback(callbackCtx, callErr)

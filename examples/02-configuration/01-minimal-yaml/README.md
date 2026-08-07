@@ -8,7 +8,9 @@
 
 ```yaml
 nodes:
+  # 当前示例唯一的 Node。
   - id: game-1
+    # 必须对应 main.go 中 app.Setup 已登记的 Service 模板。
     services: [ConfigService]
 ```
 

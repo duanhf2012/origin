@@ -6,7 +6,9 @@ Module 没有独立配置树：它属于某个 Service，因此读取该 Service
 
 ```yaml
 services:
+  # ConfigService 与其内部 Module 共享的有效业务配置。
   ConfigService:
+    # Module 可通过所属 Service 按路径读取此字段。
     region: cn-east
 ```
 

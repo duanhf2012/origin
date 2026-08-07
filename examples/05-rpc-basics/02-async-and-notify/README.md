@@ -20,6 +20,13 @@ Async 和 Notify 热路径不查描述符。
 
 ## 何时使用
 
-需要返回值且后续工作可以继续时选 Async；只需告知目标、允许不等待结果时选 Notify。若当前步骤必须使用返回值，改用上一示例的 Await 方法，而不是在回调中拼接同步流程。
+需要返回值且后续工作可以继续时选 Async；只需告知目标、允许不等待结果时选 Notify。若
+Service 当前步骤必须使用返回值，改用 Await；普通 goroutine 需要原地得到结果时用 Call，
+不要阻塞 Channel 等 Async 回调。
 
-对应教程：[RPC 基础](../../../docs/baseline/v3.0/guides/05-rpc-basics.md)。
+Async、Notify 都允许 nil、Background、TODO 和自定义 Context。Async 没有显式 Deadline
+时使用 Service/Node/内置 15 秒预算；Notify 没有响应 Pending，不额外建立 15 秒 Timer。
+无论 Async 从哪个 goroutine 提交，回调都进入绑定 owner Service 的后续串行 FIFO。
+
+完整规则：[RPC 基础](../README.md)；v3.1 变更索引见
+[RPC 调用与 Context](../../../docs/maintenance/v3.1/guides/README.md)。

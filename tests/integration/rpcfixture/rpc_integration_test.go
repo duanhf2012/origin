@@ -756,6 +756,37 @@ func TestGeneratedAsyncRejectsNilCallback(t *testing.T) {
 	}
 }
 
+// TestGeneratedAwaitRejectsInvalidContexts 锁定 nil 和裸 Context 不能绕过 Service 执行权校验。
+func TestGeneratedAwaitRejectsInvalidContexts(t *testing.T) {
+	fixture := newRPCFixture(t)
+	client := NewPlayerRPCClient(
+		fixture.caller,
+		rpc.ToService("PlayerService"),
+	)
+
+	for name, ctx := range map[string]context.Context{
+		"nil":        nil,
+		"background": context.Background(),
+		"todo":       context.TODO(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := client.AwaitGetPlayer(
+				ctx,
+				1,
+				PlayerData{Name: name},
+				nil,
+			)
+			if !errors.Is(err, errs.ErrInvalidArgument) {
+				t.Fatalf("AwaitGetPlayer() error = %v, want ErrInvalidArgument", err)
+			}
+		})
+	}
+
+	if fixture.player.GetCount != 0 {
+		t.Fatalf("无效 Context 仍调用了目标 Service: %d", fixture.player.GetCount)
+	}
+}
+
 func TestGeneratedErrorsPanicAndSelfCall(t *testing.T) {
 	fixture := newRPCFixture(t)
 	done := make(chan struct{})

@@ -7,6 +7,7 @@
 示例先退休同 Node 的 `PlayerService`，再由调用方执行：
 
 ```go
+// 派生一个允许 Retired 候选的客户端，基础 s.players 的默认规则不变。
 value, err := s.players.IncludeRetired().AwaitGetPlayer(ctx, playerID)
 ```
 

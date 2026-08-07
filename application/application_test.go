@@ -206,6 +206,44 @@ nodes:
 	}
 }
 
+// TestApplicationInitialRetiredPropagatesStartFlag 验证 Application 把命令请求传到每个 Node，
+// 而不是只在 command 包解析后丢失该状态。
+func TestApplicationInitialRetiredPropagatesStartFlag(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: retired-1
+    services: [lifecycleTestService]
+`)
+	app := newSilentApplication()
+	app.Setup(&lifecycleTestService{})
+	runCtx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- app.run(runCtx, command.StartRequest{
+			AppName:        "initial-retired-test",
+			ConfigDir:      directory,
+			NodeIDs:        []string{"retired-1"},
+			InitialRetired: true,
+		})
+	}()
+	waitForState(t, app, StateRunning)
+	current, ok := app.Node("retired-1")
+	if !ok {
+		t.Fatal("未找到 retired-1")
+	}
+	instance, ok := current.Service("lifecycleTestService")
+	if !ok {
+		t.Fatal("未找到初始退休 Service")
+	}
+	if got := instance.(*lifecycleTestService).State(); got != service.StateRetired {
+		t.Fatalf("initial Service state = %v, want Retired", got)
+	}
+	cancel()
+	if err := <-result; err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+}
+
 func TestApplicationOriginDiscoveryLifecycle(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

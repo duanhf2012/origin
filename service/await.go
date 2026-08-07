@@ -7,17 +7,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
-	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 )
-
-// managedDeadlineContext 为 M8 管理的默认超时补充标准 Context Deadline 语义。
-//
-// 内嵌 Context 只负责取消、Done、Err 和 Value；deadline 由 Service 在进入 Await 时一次
-// 计算并冻结。该类型不会创建 Go Runtime Timer，真正到期仍由唯一 M8 DeadlineQueue 驱动。
-type managedDeadlineContext struct {
-	context.Context
-	deadline time.Time
-}
 
 // AwaitTimeoutOf 返回 target 当前已经冻结的默认 Await 超时。
 //
@@ -38,31 +28,38 @@ func AwaitTimeoutOf(target IService) (time.Duration, error) {
 	return scheduler.config.DefaultAwaitTimeout, nil
 }
 
-// Deadline 返回 M8 当前唯一管理的绝对截止时间。
-func (managed *managedDeadlineContext) Deadline() (time.Time, bool) {
-	if managed == nil || managed.deadline.IsZero() {
-		return time.Time{}, false
-	}
-	return managed.deadline, true
-}
-
 // await 释放当前 Task 的执行权、执行等待函数，并在恢复原 goroutine 后返回结果。
 func (scheduler *serviceScheduler) await(
 	ctx context.Context,
 	fn func(context.Context) error,
 ) error {
-	// 普通业务 Task 和 OnStart 生命周期使用不同的私有令牌与调度语义。
-	if token, ok := ctx.Value(taskContextKey{}).(*taskContext); ok &&
-		token != nil &&
-		token.scheduler == scheduler {
-		return scheduler.awaitTask(ctx, fn, token)
+	// 执行身份从 owner 当前执行帧捕获；业务 Context 不再承担 Task 令牌传递职责。
+	if ctx == nil || fn == nil || preparedOperationContext(ctx, scheduler) == nil {
+		return errs.ErrInvalidArgument
 	}
-	if token, ok := ctx.Value(lifecycleContextKey{}).(*lifecycleContext); ok &&
-		token != nil &&
-		token.scheduler == scheduler {
-		return scheduler.awaitLifecycle(ctx, fn, token)
+	scheduler.mu.Lock()
+	var taskToken *taskContext
+	var lifecycleToken *lifecycleContext
+	if scheduler.runningTask != nil &&
+		scheduler.running == 1 &&
+		scheduler.runningTask.state == taskRunning {
+		taskToken = scheduler.runningTask.context
+	} else if scheduler.activeLifecycle != nil &&
+		scheduler.activeLifecycle.active.Load() {
+		lifecycleToken = scheduler.activeLifecycle
 	}
-	return errs.ErrInvalidArgument
+	scheduler.mu.Unlock()
+
+	if taskToken != nil {
+		return scheduler.awaitTask(ctx, fn, taskToken)
+	}
+	if lifecycleToken != nil {
+		return scheduler.awaitLifecycle(ctx, fn, lifecycleToken)
+	}
+	return errs.NewMessage(
+		errs.CodeInvalidArgument,
+		"Await 需要活动的 Origin Service 执行环境；普通 goroutine 请使用 CallXxx",
+	)
 }
 
 // awaitTask 释放普通根 Task 的执行权，并在 FIFO 恢复后继续原调用栈。
@@ -71,8 +68,7 @@ func (scheduler *serviceScheduler) awaitTask(
 	fn func(context.Context) error,
 	token *taskContext,
 ) error {
-	// 私有令牌必须来自当前 Scheduler 正在执行的根任务。Background Context、另一个
-	// Service 的 Context 或已经完成的旧 Context 都不能释放当前执行槽。
+	// 执行令牌已经从 owner 当前帧捕获；调用方 Context 只携带取消、Deadline 与 Value。
 	task := token.task.Load()
 	if task == nil {
 		return errs.ErrInvalidArgument
@@ -108,60 +104,24 @@ func (scheduler *serviceScheduler) awaitTask(
 		return errs.ErrServiceQueueFull
 	}
 
-	// 调用方显式 Deadline 已由父 Context 的 Go Runtime Timer 管理，不能再登记 M8。
-	// 没有显式值时才使用冻结的 Service/Node 默认值，并建立唯一一条 M8 Deadline。
-	now := time.Now()
-	deadlineAt, explicitDeadline := ctx.Deadline()
-	if !explicitDeadline {
-		deadlineAt = now.Add(scheduler.config.DefaultAwaitTimeout)
-	}
-	delay := time.Until(deadlineAt)
-	if delay <= 0 {
+	// operationContext 已在公开调用入口冻结唯一 Deadline；本阶段不得重新应用默认值。
+	deadlineAt, exists := ctx.Deadline()
+	if !exists || time.Until(deadlineAt) <= 0 {
 		scheduler.mu.Unlock()
 		return errs.ErrDeadlineExceeded
-	}
-
-	// 先创建不带新 Timer 的可取消子 Context。默认超时路径再用轻量包装公开 Deadline，
-	// 使 Redis、数据库和后续 RPC 等下游仍能读取标准截止时间。
-	cancelContext, cancelWait := context.WithCancelCause(ctx)
-	var waitContext context.Context = cancelContext
-	deadlineID := timerwheel.InvalidDeadlineID
-	if !explicitDeadline {
-		waitContext = &managedDeadlineContext{
-			Context:  cancelContext,
-			deadline: deadlineAt,
-		}
-		var err error
-		deadlineID, err = scheduler.deadlineQueue.ScheduleAfter(delay)
-		if err != nil {
-			scheduler.mu.Unlock()
-			cancelWait(err)
-			return errs.Wrap(errs.CodeInternal, err)
-		}
 	}
 
 	// 每次 Await 增加代次并建立全新交接 Channel；同一 Task 连续 Await 时，旧 Deadline 和
 	// 旧信号不能命中新一轮等待。
 	task.awaitGeneration++
 	generation := task.awaitGeneration
-	task.awaitContext = waitContext
-	task.awaitInput = ctx
-	task.awaitCancel = cancelWait
-	task.awaitDeadlineID = deadlineID
+	task.awaitContext = ctx
 	task.awaitDeadlineAt = deadlineAt
 	task.awaitHandoff = make(chan struct{}, 1)
 	task.awaitError = nil
+	task.awaitExpired = false
 	task.awaitPanic = nil
 	task.awaitPanicStack = nil
-	if deadlineID != timerwheel.InvalidDeadlineID {
-		// 只有默认超时需要 watcher 绑定；显式 Deadline 直接由父 Context 取消 waitContext。
-		scheduler.deadlineBindings[deadlineID] = deadlineBinding{
-			kind:       deadlineBindingAwait,
-			task:       task,
-			token:      token,
-			generation: generation,
-		}
-	}
 
 	task.state = taskWaiting
 	scheduler.runningTask = nil
@@ -173,7 +133,7 @@ func (scheduler *serviceScheduler) awaitTask(
 	// 当前 goroutine 从此不再持有 Service 执行权。替补 Runner 负责处理 Ready 任务；
 	// 等待函数则直接在原 goroutine 执行，不额外创建“执行 fn”的辅助 goroutine。
 	scheduler.startRunner()
-	waitError, panicValue, panicStack, panicked := callAwaitFunction(fn, waitContext)
+	waitError, panicValue, panicStack, panicked := callAwaitFunction(fn, ctx)
 
 	// 外部等待完成只把同一个根任务转为恢复项，不增加 Accepted，也不经过容量拒绝。
 	scheduler.mu.Lock()
@@ -195,17 +155,14 @@ func (scheduler *serviceScheduler) awaitTask(
 	// 只有活动替补 Runner 从 FIFO 取到本恢复项、归还执行槽并退出后，原 goroutine 才继续。
 	<-task.awaitHandoff
 
-	// Deadline 覆盖恢复排队阶段。先观察等待 Context 和原输入 Context 的最终原因，再调用
-	// CancelFunc 释放资源；否则 cancel(nil) 会把成功结果误标为 context.Canceled。
+	// Deadline 覆盖恢复排队阶段；operationContext 由最外层公开调用统一清理。
 	cause := context.Cause(task.awaitContext)
-	if cause == nil {
-		cause = context.Cause(task.awaitInput)
-	}
 	finalError := task.awaitError
-	if cause != nil {
+	if task.awaitExpired || errors.Is(cause, context.DeadlineExceeded) {
+		finalError = errs.ErrDeadlineExceeded
+	} else if cause != nil {
 		finalError = awaitContextError(cause)
 	}
-	task.awaitCancel(nil)
 
 	// 恢复后当前 goroutine 已重新持有唯一执行槽，可以在短锁内完成统计和临时引用清理。
 	scheduler.mu.Lock()
@@ -230,12 +187,10 @@ func (scheduler *serviceScheduler) awaitTask(
 	}
 
 	task.awaitContext = nil
-	task.awaitInput = nil
-	task.awaitCancel = nil
-	task.awaitDeadlineID = timerwheel.InvalidDeadlineID
 	task.awaitDeadlineAt = time.Time{}
 	task.awaitHandoff = nil
 	task.awaitError = nil
+	task.awaitExpired = false
 	task.awaitPanic = nil
 	task.awaitPanicStack = nil
 	scheduler.mu.Unlock()
@@ -282,43 +237,14 @@ func (scheduler *serviceScheduler) awaitLifecycle(
 		return errs.ErrServiceQueueFull
 	}
 
-	// 显式 Deadline 由父 Context 的 Go Timer 管理；没有显式值时只登记一条 M8 Deadline。
-	now := time.Now()
-	deadlineAt, explicitDeadline := ctx.Deadline()
-	if !explicitDeadline {
-		deadlineAt = now.Add(scheduler.config.DefaultAwaitTimeout)
-	}
-	delay := time.Until(deadlineAt)
-	if delay <= 0 {
+	// operationContext 已统一冻结 Deadline，生命周期阶段不能重新得到一份默认预算。
+	deadlineAt, exists := ctx.Deadline()
+	if !exists || time.Until(deadlineAt) <= 0 {
 		scheduler.mu.Unlock()
 		return errs.ErrDeadlineExceeded
 	}
-	cancelContext, cancelWait := context.WithCancelCause(ctx)
-	var waitContext context.Context = cancelContext
 	binding := &lifecycleAwait{
-		token:      token,
-		cancel:     cancelWait,
-		deadlineID: timerwheel.InvalidDeadlineID,
-	}
-	if !explicitDeadline {
-		waitContext = &managedDeadlineContext{
-			Context:  cancelContext,
-			deadline: deadlineAt,
-		}
-		deadlineID, err := scheduler.deadlineQueue.ScheduleAfter(delay)
-		if err != nil {
-			scheduler.mu.Unlock()
-			cancelWait(err)
-			return errs.Wrap(errs.CodeInternal, err)
-		}
-		scheduler.lifecycleAwaitGeneration++
-		binding.generation = scheduler.lifecycleAwaitGeneration
-		binding.deadlineID = deadlineID
-		scheduler.deadlineBindings[deadlineID] = deadlineBinding{
-			kind:       deadlineBindingLifecycleAwait,
-			lifecycle:  binding,
-			generation: binding.generation,
-		}
+		token: token,
 	}
 	scheduler.activeLifecycleAwait = binding
 	scheduler.awaiting++
@@ -326,32 +252,22 @@ func (scheduler *serviceScheduler) awaitLifecycle(
 	scheduler.mu.Unlock()
 
 	// 等待函数就在原生命周期 goroutine 执行；Finalizer 不创建替补 Runner。
-	waitError, panicValue, _, panicked := callAwaitFunction(fn, waitContext)
+	waitError, panicValue, _, panicked := callAwaitFunction(fn, ctx)
 
-	// 解除仍未到期的 M8 绑定，并在锁内冻结最终到期标记和统计。
+	// 清理当前生命周期 Await 占用；调用级 Deadline 由 operationContext 的唯一 owner 清理。
 	scheduler.mu.Lock()
 	if scheduler.activeLifecycleAwait != binding {
 		scheduler.mu.Unlock()
 		panicInvariant("service: 生命周期 Await 活动绑定不一致")
 	}
-	if binding.deadlineID != timerwheel.InvalidDeadlineID {
-		scheduler.deadlineQueue.Cancel(binding.deadlineID)
-		delete(scheduler.deadlineBindings, binding.deadlineID)
-		binding.deadlineID = timerwheel.InvalidDeadlineID
-	}
 	scheduler.activeLifecycleAwait = nil
 	scheduler.awaiting--
-	expired := binding.expired
 	scheduler.mu.Unlock()
 
-	// 必须在 cancel(nil) 前读取父/等待 Context 原因，否则成功路径会被主动清理标为取消。
-	cause := context.Cause(waitContext)
-	if cause == nil {
-		cause = context.Cause(ctx)
-	}
-	cancelWait(nil)
+	// Deadline 还覆盖等待函数返回前的完整阶段；到期 watcher 尚未调度时也按绝对时间判定。
+	cause := context.Cause(ctx)
 	finalError := waitError
-	if expired || errors.Is(cause, context.DeadlineExceeded) {
+	if !time.Now().Before(deadlineAt) || errors.Is(cause, context.DeadlineExceeded) {
 		finalError = errs.ErrDeadlineExceeded
 		scheduler.mu.Lock()
 		scheduler.awaitTimeoutTotal++

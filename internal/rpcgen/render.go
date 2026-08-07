@@ -455,6 +455,7 @@ func renderClientMethods(
 			methodID,
 		)
 		body.WriteString("\tif err != nil {\n\t\treturn\n\t}\n")
+		body.WriteString("\tdefer preparedClient.FinishInvocation()\n")
 		fmt.Fprintf(
 			body,
 			"\trequest, err := %s(preparedClient, %s.CallRequest%s)\n",
@@ -466,6 +467,58 @@ func renderClientMethods(
 		fmt.Fprintf(
 			body,
 			"\terr = preparedClient.Await(ctx, %s, request, func(data []byte) error {\n",
+			methodID,
+		)
+		if len(candidate.outputs) == 0 {
+			fmt.Fprintf(body, "\t\treturn %s(data)\n", decodeName)
+		} else {
+			body.WriteString("\t\t")
+			for index, output := range candidate.outputs {
+				if index > 0 {
+					body.WriteString(", ")
+				}
+				body.WriteString(output.name)
+			}
+			fmt.Fprintf(body, ", err = %s(data)\n\t\treturn err\n", decodeName)
+		}
+		body.WriteString("\t})\n\treturn\n}\n\n")
+
+		// Call 外观。
+		fmt.Fprintf(
+			body,
+			"// Call%s 在当前普通 goroutine 中阻塞并返回 RPC 结果。\n",
+			candidate.name,
+		)
+		fmt.Fprintf(
+			body,
+			"func (client %s) Call%s(ctx %s.Context%s) (",
+			clientName,
+			candidate.name,
+			contextAlias,
+			inputDecl,
+		)
+		for _, output := range candidate.outputs {
+			fmt.Fprintf(body, "%s %s, ", output.name, imports.typeName(output.typ))
+		}
+		body.WriteString("err error) {\n")
+		fmt.Fprintf(
+			body,
+			"\tpreparedClient, err := client.client.PrepareCall(ctx, %s)\n",
+			methodID,
+		)
+		body.WriteString("\tif err != nil {\n\t\treturn\n\t}\n")
+		body.WriteString("\tdefer preparedClient.FinishInvocation()\n")
+		fmt.Fprintf(
+			body,
+			"\trequest, err := %s(preparedClient, %s.CallRequest%s)\n",
+			encodeName,
+			rpcAlias,
+			inputNames,
+		)
+		body.WriteString("\tif err != nil {\n\t\treturn\n\t}\n")
+		fmt.Fprintf(
+			body,
+			"\terr = preparedClient.Call(ctx, %s, request, func(data []byte) error {\n",
 			methodID,
 		)
 		if len(candidate.outputs) == 0 {
@@ -510,6 +563,12 @@ func renderClientMethods(
 			methodID,
 		)
 		body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
+		// 编码失败由当前生成方法清理；进入底层 Async 后，调用预算一律移交给完成任务，
+		// 包括提交失败但已经预留内部完成任务的路径。
+		body.WriteString("\thandedOff := false\n")
+		body.WriteString("\tdefer func() {\n")
+		body.WriteString("\t\tif !handedOff {\n\t\t\tpreparedClient.FinishInvocation()\n\t\t}\n")
+		body.WriteString("\t}()\n")
 		fmt.Fprintf(
 			body,
 			"\trequest, err := %s(preparedClient, %s.CallRequest%s)\n",
@@ -518,6 +577,7 @@ func renderClientMethods(
 			inputNames,
 		)
 		body.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n")
+		body.WriteString("\thandedOff = true\n")
 		fmt.Fprintf(
 			body,
 			"\treturn preparedClient.Async(ctx, %s, request, func(callbackCtx %s.Context, data []byte, callErr error) {\n",

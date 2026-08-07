@@ -1,0 +1,3 @@
+log:
+  # 文件名只用于组织与稳定排序；字段语义和单文件配置完全相同。
+  console: {enabled: true, level: info, format: text}

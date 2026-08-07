@@ -5,12 +5,14 @@
 无需配置 NATS、etcd 或 Docker。在仓库根目录执行：
 
 ```text
+REM 从仓库根目录启动最小示例。
 examples\00-quickstart\01-hello-service\run.bat
 ```
 
 Linux：
 
 ```bash
+# Linux/macOS：执行同一示例的启动脚本。
 ./examples/00-quickstart/01-hello-service/run.sh
 ```
 
@@ -22,10 +24,12 @@ Linux：
 
 ```go
 type HelloService struct {
+    // 嵌入框架 Service，获得日志与生命周期能力。
     service.Service
 }
 
 func (s *HelloService) OnStart(context.Context) error {
+    // Service 已进入 Running 前的启动阶段，记录一条业务日志。
     s.Logger().Info("hello, Origin v3")
     return nil
 }

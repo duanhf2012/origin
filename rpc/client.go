@@ -23,6 +23,24 @@ type Client struct {
 	includeRetired bool
 	prepared       preparedTarget
 	broadcast      *broadcastPlan
+	// invocation 只存在于一次生成方法调用的 Prepared Client 副本中，使 Prepare、编码、
+	// 提交和等待共享同一 Context、Deadline 与清理责任。
+	invocation *clientInvocation
+}
+
+// clientInvocation 保存一次生成方法调用唯一的控制 Context 和幂等清理函数。
+type clientInvocation struct {
+	ctx        context.Context
+	finish     func()
+	finishOnce sync.Once
+}
+
+// close 只执行一次 Service 调用预算清理，允许生成方法 defer 与底层错误路径重复调用。
+func (invocation *clientInvocation) close() {
+	if invocation == nil {
+		return
+	}
+	invocation.finishOnce.Do(invocation.finish)
 }
 
 // NewGeneratedClient 创建供 origingen 生成代码保存的底层客户端。
@@ -74,18 +92,55 @@ func (client Client) PrepareAwait(
 	ctx context.Context,
 	methodID MethodID,
 ) (Client, error) {
-	if ctx == nil || methodID == 0 {
+	if methodID == 0 {
 		return Client{}, errs.ErrInvalidArgument
 	}
 	if err := client.validate(); err != nil {
 		return Client{}, err
 	}
-	prepared, err := client.runtime.prepareAwait(ctx, client, methodID)
+	preparedClient, err := client.beginInvocation(ctx, true)
 	if err != nil {
 		return Client{}, err
 	}
-	client.prepared = prepared
-	return client, nil
+	prepared, err := client.runtime.prepareAwait(
+		preparedClient.invocation.ctx,
+		preparedClient,
+		methodID,
+	)
+	if err != nil {
+		preparedClient.FinishInvocation()
+		return Client{}, err
+	}
+	preparedClient.prepared = prepared
+	return preparedClient, nil
+}
+
+// PrepareCall 在编码前选择一次有响应目标；只有合法候选仅缺连接时阻塞当前 goroutine等待。
+func (client Client) PrepareCall(
+	ctx context.Context,
+	methodID MethodID,
+) (Client, error) {
+	if methodID == 0 {
+		return Client{}, errs.ErrInvalidArgument
+	}
+	if err := client.validate(); err != nil {
+		return Client{}, err
+	}
+	preparedClient, err := client.beginInvocation(ctx, false)
+	if err != nil {
+		return Client{}, err
+	}
+	prepared, err := client.runtime.prepareCall(
+		preparedClient.invocation.ctx,
+		preparedClient,
+		methodID,
+	)
+	if err != nil {
+		preparedClient.FinishInvocation()
+		return Client{}, err
+	}
+	preparedClient.prepared = prepared
+	return preparedClient, nil
 }
 
 // PrepareAsync 在编码前选择一次有响应目标，当前没有可发送候选时立即失败。
@@ -93,18 +148,27 @@ func (client Client) PrepareAsync(
 	ctx context.Context,
 	methodID MethodID,
 ) (Client, error) {
-	if ctx == nil || methodID == 0 {
+	if methodID == 0 {
 		return Client{}, errs.ErrInvalidArgument
 	}
 	if err := client.validate(); err != nil {
 		return Client{}, err
 	}
-	prepared, err := client.runtime.prepareAsync(ctx, client, methodID)
+	preparedClient, err := client.beginInvocation(ctx, false)
 	if err != nil {
 		return Client{}, err
 	}
-	client.prepared = prepared
-	return client, nil
+	prepared, err := client.runtime.prepareAsync(
+		preparedClient.invocation.ctx,
+		preparedClient,
+		methodID,
+	)
+	if err != nil {
+		preparedClient.FinishInvocation()
+		return Client{}, err
+	}
+	preparedClient.prepared = prepared
+	return preparedClient, nil
 }
 
 // PrepareNotify 在编码前选择并固定一次无响应调用目标。
@@ -112,13 +176,21 @@ func (client Client) PrepareNotify(
 	ctx context.Context,
 	methodID MethodID,
 ) (Client, error) {
-	if ctx == nil || methodID == 0 {
+	if methodID == 0 {
 		return Client{}, errs.ErrInvalidArgument
 	}
 	if err := client.validate(); err != nil {
 		return Client{}, err
 	}
-	prepared, err := client.runtime.prepareNotify(ctx, client, methodID)
+	ctx = normalizeContext(ctx)
+	if cause := context.Cause(ctx); cause != nil {
+		return Client{}, contextError(cause)
+	}
+	prepared, err := client.runtime.prepareNotify(
+		ctx,
+		client,
+		methodID,
+	)
 	if err != nil {
 		return Client{}, err
 	}
@@ -134,19 +206,97 @@ func (client Client) PrepareBroadcast(
 	ctx context.Context,
 	methodID MethodID,
 ) (Client, error) {
-	if ctx == nil || methodID == 0 {
+	if methodID == 0 {
 		return Client{}, errs.ErrInvalidArgument
 	}
 	if err := client.validate(); err != nil {
 		return Client{}, err
 	}
-	prepared, plan, err := client.runtime.prepareBroadcast(ctx, client, methodID)
+	ctx = normalizeContext(ctx)
+	if cause := context.Cause(ctx); cause != nil {
+		return Client{}, contextError(cause)
+	}
+	prepared, plan, err := client.runtime.prepareBroadcast(
+		ctx,
+		client,
+		methodID,
+	)
 	if err != nil {
 		return Client{}, err
 	}
 	client.prepared = prepared
 	client.broadcast = plan
 	return client, nil
+}
+
+// FinishInvocation 释放生成方法已经建立但尚未交给底层调用完成路径的调用预算。
+//
+// 生成代码在编码失败、panic 清理和同步调用返回时使用该幂等方法；普通业务不需要调用。
+func (client Client) FinishInvocation() {
+	if client.invocation != nil {
+		client.invocation.close()
+	}
+}
+
+// beginInvocation 根据调用类型建立一次唯一 Service 调用预算。
+func (client Client) beginInvocation(
+	ctx context.Context,
+	await bool,
+) (Client, error) {
+	var operationCtx context.Context
+	var finish func()
+	var err error
+	if await {
+		operationCtx, finish, err = service.PrepareAwaitContext(client.owner, ctx)
+	} else {
+		operationCtx, finish, err = service.PrepareOperationContext(client.owner, ctx)
+	}
+	// rpc 包的白盒单元测试会构造无法从业务侧创建的未绑定 Client，以独立验证路由和
+	// Buffer 所有权。真实生成客户端必有绑定 Runtime；仅对白盒对象保留标准 Context
+	// 兼容层，避免测试底座伪造整个 Node/Service 生命周期。
+	if errors.Is(err, errs.ErrServiceNotReady) && service.RuntimeOf(client.owner) == nil {
+		operationCtx, finish = unmanagedInvocationContext(ctx)
+		err = nil
+	}
+	if err != nil {
+		return Client{}, err
+	}
+	client.invocation = &clientInvocation{ctx: operationCtx, finish: finish}
+	return client, nil
+}
+
+// unmanagedInvocationContext 仅服务 rpc 包内部白盒测试；产品路径统一使用 Service M8。
+func unmanagedInvocationContext(ctx context.Context) (context.Context, func()) {
+	ctx = normalizeContext(ctx)
+	if _, exists := ctx.Deadline(); exists {
+		derived, cancel := context.WithCancel(ctx)
+		return derived, cancel
+	}
+	return context.WithTimeout(ctx, service.DefaultAwaitTimeout)
+}
+
+// normalizeContext 让所有生成 RPC 都接受 nil，并在不需要响应预算的同步提交路径中保持
+// 零分配；Await、Call 和 Async 会在其上继续建立完整 operationContext。
+func normalizeContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+// invocationContext 复用 Prepared 调用预算；低层直接调用时补建一次兼容预算。
+func (client Client) invocationContext(
+	ctx context.Context,
+	await bool,
+) (context.Context, func(), error) {
+	if client.invocation != nil {
+		return client.invocation.ctx, client.invocation.close, nil
+	}
+	prepared, err := client.beginInvocation(ctx, await)
+	if err != nil {
+		return nil, nil, err
+	}
+	return prepared.invocation.ctx, prepared.invocation.close, nil
 }
 
 // Await 执行一次有响应本地调用，并在 owner 的原任务调用栈恢复后解码结果。
@@ -158,18 +308,26 @@ func (client Client) Await(
 	request *Buffer,
 	decode func([]byte) error,
 ) error {
-	if ctx == nil || request == nil || decode == nil {
+	if request == nil || decode == nil {
 		releaseBuffer(request)
+		client.FinishInvocation()
 		return errs.ErrInvalidArgument
 	}
 	if err := client.validate(); err != nil {
 		request.Release()
+		client.FinishInvocation()
 		return err
 	}
+	waitCtx, finish, err := client.invocationContext(ctx, true)
+	if err != nil {
+		request.Release()
+		return err
+	}
+	defer finish()
 
 	call := newAwaitCall()
 	started := false
-	err := client.owner.Await(ctx, func(waitCtx context.Context) (waitErr error) {
+	err = client.owner.Await(waitCtx, func(waitCtx context.Context) (waitErr error) {
 		started = true
 		payloadBytes := len(request.Bytes())
 		handle, err := client.submit(
@@ -212,6 +370,70 @@ func (client Client) Await(
 	return err
 }
 
+// Call 在当前 goroutine 中阻塞等待一次有响应调用，不读取或释放 owner Service 执行槽。
+//
+// Service Task 必须使用 Await；在 Service Task 中调用 Call 会占住唯一执行槽，并可能使
+// 同 Service或环形 RPC 只能依赖 Deadline 退出。
+func (client Client) Call(
+	ctx context.Context,
+	methodID MethodID,
+	request *Buffer,
+	decode func([]byte) error,
+) (callErr error) {
+	if request == nil || decode == nil {
+		releaseBuffer(request)
+		client.FinishInvocation()
+		return errs.ErrInvalidArgument
+	}
+	if err := client.validate(); err != nil {
+		request.Release()
+		client.FinishInvocation()
+		return err
+	}
+	callCtx, finish, err := client.invocationContext(ctx, false)
+	if err != nil {
+		request.Release()
+		return err
+	}
+	defer finish()
+
+	call := newAwaitCall()
+	payloadBytes := len(request.Bytes())
+	handle, err := client.submit(
+		callCtx,
+		methodID,
+		CallRequest,
+		request,
+		call.complete,
+	)
+	if err != nil {
+		client.runtime.recordOutboundRejected(client.transportHint())
+		request.Release()
+		return err
+	}
+	client.runtime.recordOutboundAccepted(handle.transport)
+	responseBytes := 0
+	defer func() {
+		client.runtime.recordOutboundFinished(
+			handle.transport,
+			callErr,
+			payloadBytes,
+			responseBytes,
+		)
+	}()
+
+	response, err := call.wait(callCtx)
+	handle.cancel(err)
+	if response != nil {
+		defer response.Release()
+	}
+	if err != nil {
+		return err
+	}
+	responseBytes = len(response.Bytes())
+	return decode(response.Bytes())
+}
+
 // Async 预留调用方回调任务后提交有响应调用。
 //
 // 返回非 nil 时 callback 绝不执行；返回 nil 后 callback 必须在 owner 的串行执行上下文中
@@ -222,16 +444,24 @@ func (client Client) Async(
 	request *Buffer,
 	decodeAndCallback func(context.Context, []byte, error),
 ) error {
-	if ctx == nil || request == nil || decodeAndCallback == nil {
+	if request == nil || decodeAndCallback == nil {
 		releaseBuffer(request)
+		client.FinishInvocation()
 		return errs.ErrInvalidArgument
 	}
 	if err := client.validate(); err != nil {
 		request.Release()
+		client.FinishInvocation()
 		return err
 	}
-	if cause := context.Cause(ctx); cause != nil {
+	callCtx, finish, err := client.invocationContext(ctx, false)
+	if err != nil {
 		request.Release()
+		return err
+	}
+	if cause := context.Cause(callCtx); cause != nil {
+		request.Release()
+		finish()
 		return contextError(cause)
 	}
 
@@ -245,7 +475,7 @@ func (client Client) Async(
 	completionStarted := false
 	if err := service.DispatchAsyncCompletion(
 		client.owner,
-		ctx,
+		callCtx,
 		func(waitCtx context.Context) error {
 			completionStarted = true
 			// 提交方先发布 committed 再允许当前任务读取结果。通常当前调用仍占有唯一
@@ -268,6 +498,9 @@ func (client Client) Async(
 			return err
 		},
 		func(callbackCtx context.Context, waitErr error) {
+			// 已接受的异步调用把唯一调用预算交给完成任务；业务回调返回或内部中止后
+			// 才能释放，确保 Deadline 和 Service Stop 覆盖完整的异步生命周期。
+			defer finish()
 			// Await 可能因调用方已经取消或 Service 正在停止而不调用 wait。此时必须先
 			// 放弃 localCall，确保已经到达或之后到达的响应都由 localCall 归还。
 			if !completionStarted {
@@ -301,11 +534,12 @@ func (client Client) Async(
 		},
 	); err != nil {
 		request.Release()
+		finish()
 		return err
 	}
 
 	submittedHandle, err := client.submit(
-		ctx,
+		callCtx,
 		methodID,
 		CallRequest,
 		request,
@@ -332,21 +566,24 @@ func (client Client) Notify(
 	methodID MethodID,
 	request *Buffer,
 ) error {
-	if ctx == nil || request == nil {
+	if request == nil {
 		releaseBuffer(request)
+		client.FinishInvocation()
 		return errs.ErrInvalidArgument
 	}
 	if err := client.validate(); err != nil {
 		request.Release()
+		client.FinishInvocation()
 		return err
 	}
-	if cause := context.Cause(ctx); cause != nil {
+	callCtx := normalizeContext(ctx)
+	if cause := context.Cause(callCtx); cause != nil {
 		request.Release()
 		return contextError(cause)
 	}
 	payloadBytes := len(request.Bytes())
 	handle, err := client.submit(
-		ctx,
+		callCtx,
 		methodID,
 		CallNotify,
 		request,
@@ -418,22 +655,25 @@ func (client Client) Broadcast(
 	if client.broadcast == nil {
 		return client.Notify(ctx, methodID, request)
 	}
-	if ctx == nil || request == nil || methodID == 0 ||
+	if request == nil || methodID == 0 ||
 		client.broadcast.methodID != methodID {
 		releaseBuffer(request)
+		client.FinishInvocation()
 		return errs.ErrInvalidArgument
 	}
 	if err := client.validate(); err != nil {
 		request.Release()
+		client.FinishInvocation()
 		return err
 	}
+	callCtx := normalizeContext(ctx)
 	// 编码完成后、首次目标提交前取消仍是整个调用错误，必须保证零目标投递。
-	if cause := context.Cause(ctx); cause != nil {
+	if cause := context.Cause(callCtx); cause != nil {
 		request.Release()
 		return contextError(cause)
 	}
 	return client.runtime.submitBroadcast(
-		ctx,
+		callCtx,
 		client,
 		client.broadcast,
 		request,

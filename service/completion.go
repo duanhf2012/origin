@@ -7,10 +7,10 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 )
 
-// completionContext 把异步调用方的取消语义与回调任务的 Service 执行令牌组合起来。
+// completionContext 把异步调用方的取消语义与回调任务的执行 Value 组合起来。
 //
 // Deadline、Done 和 Err 来自调用方 Context，保证显式 Go Timer 不被重复创建；Value
-// 优先读取当前根任务，使 Await 能验证执行权，其余业务值再委托原调用方 Context。
+// 保留当前根任务的框架私有值，其余业务值和调用预算继续委托原调用方 Context。
 type completionContext struct {
 	execution context.Context
 	caller    context.Context
@@ -31,7 +31,7 @@ func (ctx *completionContext) Err() error {
 	return ctx.caller.Err()
 }
 
-// Value 仅用执行 Context 提供 Origin 私有令牌，其他值保持调用方语义。
+// Value 仅用执行 Context 提供 Origin 私有任务值，其他值保持调用方语义。
 func (ctx *completionContext) Value(key any) any {
 	if value := ctx.execution.Value(key); value != nil {
 		if _, private := key.(taskContextKey); private {
@@ -66,7 +66,7 @@ func DispatchAsyncCompletion(
 	if scheduler == nil {
 		return errs.ErrServiceNotReady
 	}
-	return scheduler.dispatchContinuation(ctx, func(taskCtx context.Context) {
+	continuation := func(taskCtx context.Context) {
 		// 组合 Context 只活到本回调任务结束，不交给其他根任务或长期保存。
 		merged := &completionContext{
 			execution: taskCtx,
@@ -74,5 +74,11 @@ func DispatchAsyncCompletion(
 		}
 		err := owner.Await(merged, wait)
 		callback(taskCtx, err)
-	})
+	}
+	// 在 owner 当前 Task 中提交时保留原有严格校验；普通 goroutine 没有任务令牌，直接
+	// 使用同一有界 FIFO 预留完成任务。两条路径都在返回成功前完成容量占用。
+	if scheduler.ownsRunningTask(ctx) {
+		return scheduler.dispatchContinuation(ctx, continuation)
+	}
+	return scheduler.dispatch(continuation)
 }

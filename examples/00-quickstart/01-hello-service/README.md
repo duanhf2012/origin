@@ -12,6 +12,7 @@
 Windows 执行 `run.bat`；Linux/macOS 执行 `./run.sh`。等价命令：
 
 ```bash
+# 从仓库根目录启动 hello-1，并读取示例配置目录。
 go run ./examples/00-quickstart/01-hello-service start \
   --app-name hello-service \
   --config ./examples/00-quickstart/01-hello-service/config --node hello-1

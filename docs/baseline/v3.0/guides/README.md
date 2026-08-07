@@ -16,9 +16,8 @@
 | 07 | [服务发现](./07-discovery.md) | 怎样发现服务、使用 etcd 或替换 Provider？ |
 | 08 | [Retire 与 Resume](./08-retire-and-resume.md) | 怎样优雅地下线和恢复业务？ |
 | 09 | [Diagnostics 与 pprof](./09-diagnostics-and-pprof.md) | 怎样观察运行状态和按需诊断？ |
-| 10 | [部署与运维](./10-deployment-and-operations.md) | 怎样在 Windows、Ubuntu 和外部依赖环境中运行？ |
-| 11 | [性能](./11-performance.md) | 怎样运行和理解 RPC 基准测试？ |
-| 12 | [故障排查](./12-troubleshooting.md) | 怎样定位常见配置、RPC 和发现故障？ |
+| 10 | [性能](./10-performance.md) | 怎样运行和理解 RPC 基准测试？ |
+| 11 | [故障排查](./11-troubleshooting.md) | 怎样定位常见配置、RPC 和发现故障？ |
 
 ## 参考资料
 
@@ -39,4 +38,4 @@ main.go 或 cmd/     # 完整源码
 config/             # 需要时提供 YAML
 ```
 
-部署编排和 systemd 小节会改为提供 `deps-*` 脚本或 Unit 文件。文档中的代码片段用于阅读；示例目录中的代码才是可直接编译和调试的完整版本。
+依赖 NATS 或 etcd 的示例会提供 `deps-*` 检查、启动或停止脚本。文档中的代码片段用于阅读；示例目录中的代码才是可直接编译和调试的完整版本。

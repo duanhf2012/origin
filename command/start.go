@@ -22,6 +22,7 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 	configDir := flags.String("config", "./config", "配置目录")
 	pidDir := flags.String("pid-dir", "./run", "PID 目录")
 	nodeOption := registerStringOption(flags, "node", "", "逗号分隔的 NodeID")
+	initialRetired := flags.Bool("retired", false, "以 Retired 状态发布全部选中 Service")
 	diagnosticsAddress := flags.String("diagnostics", "", "Diagnostics JSON 监听地址")
 	pprofAddress := flags.String("pprof", "", "Go pprof 监听地址")
 	if err := flags.Parse(args); err != nil {
@@ -76,6 +77,7 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 		ConfigDir:          absoluteConfigDir,
 		PIDDir:             absolutePIDDir,
 		NodeIDs:            append([]string(nil), nodeIDs...),
+		InitialRetired:     *initialRetired,
 		DiagnosticsAddress: strings.TrimSpace(*diagnosticsAddress),
 		PprofAddress:       strings.TrimSpace(*pprofAddress),
 	}

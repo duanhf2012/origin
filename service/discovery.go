@@ -93,6 +93,9 @@ func (service *Service) AwaitNodeService(
 }
 
 // AddDiscoveryListener 注册一个同时接收发现、状态变化和失去发现的监听器。
+//
+// 监听器归属于当前 Service，并在进入 OnStop 前自动移除；返回 ID 只在业务需要提前
+// 取消这一次注册时交给 RemoveDiscoveryListener。
 func (service *Service) AddDiscoveryListener(
 	listener discovery.IListener,
 ) (discovery.ListenerID, error) {

@@ -6,13 +6,16 @@
 
 ```yaml
 services:
+  # 当 Node 没有专属块时使用的公共业务配置。
   ConfigService:
     welcome: hello-from-common
     max_players: 100
 
 node_services:
+  # game-1 的完整专属配置，会整体替换公共 ConfigService 块。
   game-1:
     ConfigService:
+      # 未写 max_players，保留 Go 结构体默认值 10。
       welcome: hello-from-game-1
 ```
 

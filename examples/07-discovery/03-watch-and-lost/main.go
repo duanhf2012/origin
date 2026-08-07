@@ -1,17 +1,52 @@
-// 本示例用可控内存 Provider 展示 discovered 后立即产生 Lost 的状态顺序。
+// 本示例重点展示如何在业务 Service 中注册并处理服务发现监听器。
 package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/application"
+	"github.com/duanhf2012/origin/v3/discovery"
 	"github.com/duanhf2012/origin/v3/discovery/provider"
-	"github.com/duanhf2012/origin/v3/examples/_support/tutorialwatcher"
+	"github.com/duanhf2012/origin/v3/service"
 )
 
 // app 是当前示例唯一的 Application。
 var app = application.New()
+
+// DiscoveryWatcherService 是教程中真正注册监听器的业务 Service。
+//
+// 监听器放在示例自身，而不是隐藏在公共辅助包中，便于直接复制到业务项目。
+type DiscoveryWatcherService struct{ service.Service }
+
+// OnInit 在 Service 初始化阶段把 Service 自身注册为发现事件监听器。
+func (target *DiscoveryWatcherService) OnInit() error {
+	// 监听器归属于当前 Service；框架会在进入 OnStop 前自动移除它。
+	_, err := target.AddDiscoveryListener(target)
+	return err
+}
+
+// OnDiscovered 处理远端 Service 首次出现或新会话重新出现。
+func (target *DiscoveryWatcherService) OnDiscovered(_ context.Context, event discovery.Event) {
+	target.Logger().Info(fmt.Sprintf(
+		"discovered node=%s services=%v", event.NodeID, event.Services,
+	))
+}
+
+// OnStateChanged 处理远端 Service 的 Running/Retired 状态变化。
+func (target *DiscoveryWatcherService) OnStateChanged(_ context.Context, event discovery.Event) {
+	target.Logger().Info(fmt.Sprintf(
+		"state changed node=%s services=%v", event.NodeID, event.Services,
+	))
+}
+
+// OnLost 处理已经发现的远端 Service 从权威快照中消失。
+func (target *DiscoveryWatcherService) OnLost(_ context.Context, event discovery.Event) {
+	target.Logger().Info(fmt.Sprintf(
+		"lost node=%s services=%v", event.NodeID, event.Services,
+	))
+}
 
 // disappearingProvider 先发布一个权威远端快照，再提交空快照，演示 Lost 是立即状态事实。
 type disappearingProvider struct{ host provider.Host }
@@ -29,7 +64,7 @@ func (target *disappearingProvider) Start(context.Context) error {
 		return err
 	}
 	target.host.Report(provider.Report{State: provider.StateReady})
-	// Provider 自己管理网络/重连 goroutine；空快照会立即产生 Lost。
+	// Provider 自己管理异步恢复 goroutine；空快照会立即产生 Lost。
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		_ = target.host.ReplaceSnapshot(provider.Snapshot{})
@@ -45,7 +80,7 @@ func (*disappearingProvider) Close(context.Context) error                  { ret
 
 // init 登记监听 Service 和名为 demo 的 Provider Factory。
 func init() {
-	app.Setup(&tutorialwatcher.Service{})
+	app.Setup(&DiscoveryWatcherService{})
 	if err := app.RegisterDiscoveryProvider("demo", func(ctx provider.Context) (provider.Provider, error) {
 		return &disappearingProvider{host: ctx.Host}, nil
 	}); err != nil {

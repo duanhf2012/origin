@@ -6,15 +6,15 @@
 
 ```go
 s.AfterFunc(300*time.Millisecond, func(ctx context.Context, id service.TimerID) {
-    // 只执行一次
+    // 到期后在当前 Service 的串行执行上下文中只执行一次。
 })
 
 s.NewTicker(250*time.Millisecond, func(ctx context.Context, id service.TimerID) {
-    // 固定节拍重复执行；可用 PauseTimer、ResumeTimer、CancelTimer 控制
+    // 固定节拍重复执行；可用 id 暂停、恢复或取消该 Timer。
 })
 
 s.CronFunc("*/1 * * * * *", func(ctx context.Context, id service.TimerID) {
-    // 每秒一次；支持 5 或 6 段数字 Cron
+    // 每秒一次；支持 5 或 6 段数字 Cron 表达式。
 })
 ```
 
@@ -25,9 +25,13 @@ s.CronFunc("*/1 * * * * *", func(ctx context.Context, id service.TimerID) {
 运行：[examples/04-timer-event-and-execution/02-local-event](../../../../examples/04-timer-event-and-execution/02-local-event)。先在 `OnInit` 注册监听器，再从业务任务中通知：
 
 ```go
-err := s.SubscribeEvent(playerJoinedEvent, handler) // OnInit
+// 在 OnInit 注册本 Service 内的事件处理器。
+err := s.SubscribeEvent(playerJoinedEvent, handler)
+// 同步通知：处理器完成后才返回。
 err = s.NotifyEventSync(ctx, PlayerJoined{PlayerID: 1001})
+// 异步通知：仅保证事件已进入当前 Service 队列。
 err = s.NotifyEventAsync(PlayerJoined{PlayerID: 1002})
+// 读取本地事件计数与队列统计。
 stats := s.EventStats()
 ```
 

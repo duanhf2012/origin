@@ -1,0 +1,6 @@
+nodes:
+  # 每个文件只声明一个 Node；Sequence 会按文件相对路径顺序追加。
+  - id: game-1
+    # 环境变量只替换字符串值；缺失变量会带文件位置启动失败。
+    labels: {region: "${ORIGIN_TUTORIAL_REGION}"}
+    services: [SplitConfigService]

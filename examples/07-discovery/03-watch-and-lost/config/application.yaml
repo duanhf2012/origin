@@ -5,4 +5,4 @@ discovery:
   demo: {}
 nodes:
   - id: watcher-1
-    services: [Service]
+    services: [DiscoveryWatcherService]

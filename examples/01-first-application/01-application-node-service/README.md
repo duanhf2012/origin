@@ -12,6 +12,7 @@
 执行 `run.bat` 或 `./run.sh`，也可使用：
 
 ```bash
+# 同时启动 YAML 中声明的 gateway-1 和 game-1。
 go run ./examples/01-first-application/01-application-node-service start \
   --app-name first-application \
   --config ./examples/01-first-application/01-application-node-service/config \

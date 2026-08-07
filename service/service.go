@@ -157,15 +157,26 @@ func (service *Service) Await(
 	ctx context.Context,
 	fn func(context.Context) error,
 ) error {
-	// Await 必须同时拥有 receiver、Origin Task Context 和真实等待函数。
-	if service == nil || ctx == nil || fn == nil {
+	// Context 只控制取消、Deadline 和 Value；nil 表示为本次 Await 建立新的默认预算。
+	if service == nil || fn == nil {
 		return errs.ErrInvalidArgument
 	}
 	scheduler := service.scheduler.Load()
 	if scheduler == nil {
 		return errs.ErrServiceNotReady
 	}
-	return scheduler.await(ctx, fn)
+
+	// RPC 的 Prepare 与最终响应等待会共享一个已经冻结的 operationContext；通用 Await
+	// 则在本方法内创建并清理一次性预算，保证每次公开调用只有一个 Deadline。
+	if preparedOperationContext(ctx, scheduler) != nil {
+		return scheduler.await(ctx, fn)
+	}
+	operationCtx, finish, err := PrepareAwaitContext(service, ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	return scheduler.await(operationCtx, fn)
 }
 
 // SetDefaultAwaitTimeout 设置当前 Service 覆盖 Node 默认值的 Await 超时。

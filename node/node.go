@@ -44,6 +44,8 @@ type Node struct {
 	schedulerConfig service.SchedulerConfig
 	// application 是 Application 注入的受限进程外观，装配后保持只读。
 	application service.ApplicationRuntime
+	// initialRetired 只影响首次激活状态；运行期状态切换继续由 Retire/Resume 控制。
+	initialRetired bool
 
 	// state 为查询提供无锁快照，生命周期写入由单一控制路径串行执行。
 	state atomic.Uint32
@@ -248,6 +250,7 @@ func New(
 		config:          options.Config.Root(),
 		schedulerConfig: config.Scheduler,
 		application:     options.Application,
+		initialRetired:  options.InitialRetired,
 		services:        make([]*serviceEntry, 0, len(bindings)),
 		byName:          make(map[string]*serviceEntry, len(bindings)),
 		started:         make([]*serviceEntry, 0, len(bindings)),
@@ -747,10 +750,15 @@ func (node *Node) Start(ctx context.Context) error {
 		}
 	}
 
-	// 全部 OnStart 成功后统一发布 Running 并激活 Runner，任何业务任务都不能与后续
-	// Service 的 OnStart 并发。
+	// 全部 OnStart 成功后统一提交初始状态并激活 Runner，任何业务任务都不能与后续
+	// Service 的 OnStart 并发。--retired 直接提交 Retired，确保首次发现发布不会短暂
+	// 暴露 Running；Retired 仍然允许 Timer、Task 和精确 RPC 正常工作。
 	for _, entry := range node.started {
-		entry.setState(service.StateRunning)
+		initialState := service.StateRunning
+		if node.initialRetired {
+			initialState = service.StateRetired
+		}
+		entry.setState(initialState)
 		if err := service.ActivateScheduler(entry.instance); err != nil {
 			entry.startError = true
 			entry.setState(service.StateFailed)

@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/duanhf2012/origin/v3/application"
 	"github.com/duanhf2012/origin/v3/examples/_support/tutorialrpc"
@@ -27,18 +26,30 @@ func (target *CallerService) OnInit() error {
 	return nil
 }
 
-// OnStart 延迟到 Service Running 后发起一次顺序化 Await RPC。
-func (target *CallerService) OnStart(context.Context) error {
-	// Timer 回调提供当前 Service 任务 Context，RPC 完成后仍回到同一执行语义。
-	target.AfterFunc(100*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
-		// AwaitGetPlayer 由 origingen 根据 PlayerService 合约生成并保留强类型参数/返回值。
-		message, err := target.players.AwaitGetPlayer(ctx, 1001)
-		if err != nil {
-			target.Logger().Error("rpc failed")
+// OnStart 接收框架创建的 Lifecycle Context，可以直接执行顺序化 Await RPC。
+func (target *CallerService) OnStart(ctx context.Context) error {
+	// AwaitGetPlayer 由 origingen 根据 PlayerService 合约生成；没有显式 Deadline 时使用
+	// Service/Node 默认 Await 超时，最终回退到内置 15 秒。
+	message, err := target.players.AwaitGetPlayer(ctx, 1001)
+	if err != nil {
+		// 返回错误会让当前 Service 启动失败，并由 Node 执行既定回滚流程。
+		return fmt.Errorf("load player during startup: %w", err)
+	}
+	target.Logger().Info(fmt.Sprintf("rpc result: %s", message))
+
+	// GoSafe 创建的是普通 goroutine，没有 Service 执行槽；请求—响应调用应使用 Call，
+	// 结果会返回到这个 goroutine 的同一调用栈。nil 会取得本次独立的默认 15 秒预算链。
+	if err := target.GoSafe(func() {
+		callMessage, callErr := target.players.CallGetPlayer(nil, 2002)
+		if callErr != nil {
+			target.Logger().Error("call rpc failed")
 			return
 		}
-		target.Logger().Info(fmt.Sprintf("rpc result: %s", message))
-	})
+		// Logger 可并发使用；若要修改 target 的业务状态，应再 DispatchAsync 回串行队列。
+		target.Logger().Info(fmt.Sprintf("call result: %s", callMessage))
+	}); err != nil {
+		return fmt.Errorf("start ordinary rpc caller: %w", err)
+	}
 	return nil
 }
 

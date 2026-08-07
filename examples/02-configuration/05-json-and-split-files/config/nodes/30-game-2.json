@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    {
+      "id": "game-2",
+      "labels": {"region": "cn-west"},
+      "services": ["SplitConfigService"]
+    }
+  ]
+}

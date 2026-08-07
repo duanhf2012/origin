@@ -5,6 +5,7 @@
 运行两个 Node、两个 Service：
 
 ```text
+REM 启动包含两个 Node 的示例。
 examples\01-first-application\01-application-node-service\run.bat
 ```
 
@@ -14,8 +15,10 @@ examples\01-first-application\01-application-node-service\run.bat
 
 ```yaml
 nodes:
+  # gateway-1 只创建网关 Service 实例。
   - id: gateway-1
     services: [GatewayService]
+  # game-1 只创建玩家 Service 实例。
   - id: game-1
     services: [PlayerService]
 ```
@@ -28,8 +31,11 @@ nodes:
 
 ```text
 Application
+  # Application 持有进程级资源与全部 Node。
   └── Node
+        # Node 按配置拥有多个 Service。
         └── Service
+              # Module 是 Service 内部的生命周期单元。
               └── Module
 ```
 

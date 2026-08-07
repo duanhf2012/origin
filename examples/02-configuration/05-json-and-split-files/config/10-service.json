@@ -1,0 +1,7 @@
+{
+  "services": {
+    "SplitConfigService": {
+      "welcome": "hello from strict JSON"
+    }
+  }
+}

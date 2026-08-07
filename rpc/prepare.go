@@ -199,6 +199,46 @@ func (runtime *Runtime) prepareAwait(
 	return result, nil
 }
 
+// prepareCall 为普通 goroutine 固定一次有响应目标；候选仅缺连接时阻塞当前 goroutine，
+// 不进入 Service.Await，也不读取或释放 owner 的串行执行槽。
+func (runtime *Runtime) prepareCall(
+	ctx context.Context,
+	client Client,
+	methodID MethodID,
+) (preparedTarget, error) {
+	signal := runtime.routeChangeSignal()
+	prepared, err, waitable := runtime.prepareOnce(
+		ctx,
+		client,
+		methodID,
+		CallRequest,
+	)
+	if err == nil || !waitable {
+		return prepared, err
+	}
+
+	for {
+		select {
+		case <-signal:
+		case <-ctx.Done():
+			return preparedTarget{}, contextError(context.Cause(ctx))
+		}
+		signal = runtime.routeChangeSignal()
+		current, currentErr, currentWaitable := runtime.prepareOnce(
+			ctx,
+			client,
+			methodID,
+			CallRequest,
+		)
+		if currentErr == nil {
+			return current, nil
+		}
+		if !currentWaitable {
+			return preparedTarget{}, currentErr
+		}
+	}
+}
+
 func (runtime *Runtime) prepareOnce(
 	ctx context.Context,
 	client Client,

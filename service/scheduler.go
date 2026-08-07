@@ -125,12 +125,10 @@ type serviceTask struct {
 
 	awaitGeneration uint64
 	awaitContext    context.Context
-	awaitInput      context.Context
-	awaitCancel     context.CancelCauseFunc
-	awaitDeadlineID timerwheel.DeadlineID
 	awaitDeadlineAt time.Time
 	awaitHandoff    chan struct{}
 	awaitError      error
+	awaitExpired    bool
 	awaitPanic      any
 	awaitPanicStack []byte
 	// syncEventDepth 只在当前 Task 持有执行槽时大于零；Await 在同一锁内拒绝释放。
@@ -140,30 +138,23 @@ type serviceTask struct {
 	restoredPanicStack []byte
 }
 
-// deadlineBindingKind 区分 Service 共用 DeadlineQueue 中的 Await 和业务 Timer。
+// deadlineBindingKind 区分 Service 共用 DeadlineQueue 中的公开调用预算和业务 Timer。
 type deadlineBindingKind uint8
 
 const (
-	deadlineBindingAwait deadlineBindingKind = iota
-	deadlineBindingLifecycleAwait
+	deadlineBindingOperation deadlineBindingKind = iota
 	deadlineBindingTimer
 )
 
-// lifecycleAwait 保存 OnStart/OnStop 顺序等待在 M8 DeadlineQueue 中的一次活动绑定。
+// lifecycleAwait 保存 OnStart/OnStop 当前唯一的顺序等待。
 type lifecycleAwait struct {
-	token      *lifecycleContext
-	generation uint64
-	deadlineID timerwheel.DeadlineID
-	cancel     context.CancelCauseFunc
-	expired    bool
+	token *lifecycleContext
 }
 
 // deadlineBinding 防止旧 DeadlineID 误作用到复用后的 Await Task 或业务 Timer。
 type deadlineBinding struct {
 	kind       deadlineBindingKind
-	task       *serviceTask
-	token      *taskContext
-	lifecycle  *lifecycleAwait
+	operation  *operationContext
 	timer      *businessTimer
 	generation uint64
 }
@@ -180,14 +171,12 @@ type serviceScheduler struct {
 	// 状态进入 Draining 后仅凭 state 无法恢复这一事实，因此单独冻结该生命周期标记。
 	activated bool
 	// lifecycleGeneration 和 activeLifecycle 验证当前唯一 OnStart/OnStop 生命周期令牌。
-	lifecycleGeneration uint64
-	activeLifecycle     *lifecycleContext
-	// lifecycleAwaitGeneration 和 activeLifecycleAwait 防止旧 Deadline 命中新一轮等待。
-	lifecycleAwaitGeneration uint64
-	activeLifecycleAwait     *lifecycleAwait
-	config                   SchedulerConfig
-	logger                   originlog.Logger
-	runtime                  Runtime
+	lifecycleGeneration  uint64
+	activeLifecycle      *lifecycleContext
+	activeLifecycleAwait *lifecycleAwait
+	config               SchedulerConfig
+	logger               originlog.Logger
+	runtime              Runtime
 
 	ready       *ringqueue.Queue[*serviceTask]
 	runningTask *serviceTask
@@ -197,6 +186,10 @@ type serviceScheduler struct {
 	accepted int
 	running  int
 	awaiting int
+	// operations 统计尚未关闭的公开 Await/RPC 调用预算，使 Stop 不会先于外部 Call 或
+	// 已接受 Async 关闭共用 DeadlineQueue。
+	operations    int
+	operationHead *operationContext
 
 	// 发现更新只占用常数大小状态，并在统一 Ready FIFO 中最多存在一个同步 Task。
 	discoveryRun     func(context.Context)
@@ -343,7 +336,7 @@ func PrepareScheduler(
 	return nil
 }
 
-// ActivateScheduler 在 Service 已发布 Running 后启动唯一普通业务 Runner。
+// ActivateScheduler 在 Service 已提交 Running 或初始 Retired 后启动唯一普通业务 Runner。
 func ActivateScheduler(target IService) error {
 	// 激活只接受已经由 PrepareScheduler 完整发布的真实 Service。
 	if target == nil || isNilService(target) {
@@ -353,8 +346,9 @@ func ActivateScheduler(target IService) error {
 	if base == nil || base.runtime == nil {
 		return invalidArgument("Service 尚未绑定 Runtime")
 	}
-	if base.runtime.State() != StateRunning {
-		return invalidArgument("ServiceScheduler 只能在 Service Running 阶段激活")
+	state := base.runtime.State()
+	if state != StateRunning && state != StateRetired {
+		return invalidArgument("ServiceScheduler 只能在 Service Running 或 Retired 阶段激活")
 	}
 	scheduler := base.scheduler.Load()
 	if scheduler == nil {
@@ -796,7 +790,7 @@ func (scheduler *serviceScheduler) nextTask() (
 	}
 
 	// 只有进入 Draining 且已接受任务归零，最后一个活动 Runner 才能退出。
-	if scheduler.state == schedulerDraining && scheduler.accepted == 0 {
+	if scheduler.state == schedulerDraining && scheduler.accepted == 0 && scheduler.operations == 0 {
 		if scheduler.running != 0 || scheduler.runningTask != nil || scheduler.awaiting != 0 {
 			panicInvariant("service: Scheduler 排空计数不一致")
 		}
@@ -821,17 +815,12 @@ func (scheduler *serviceScheduler) restoreTaskLocked(task *serviceTask) *service
 		panicInvariant("service: Await 恢复时执行槽或计数不一致")
 	}
 
-	// Deadline 覆盖整个外部等待和恢复排队阶段。若时间已经越过有效 Deadline，但 M8
-	// 控制协程尚未来得及消费到期 ID，本交接点直接提交同一超时结果。
-	if task.awaitDeadlineID != timerwheel.InvalidDeadlineID {
-		scheduler.deadlineQueue.Cancel(task.awaitDeadlineID)
-		delete(scheduler.deadlineBindings, task.awaitDeadlineID)
-		task.awaitDeadlineID = timerwheel.InvalidDeadlineID
-	}
+	// Deadline 覆盖整个外部等待和恢复排队阶段。M8 watcher 尚未来得及发布取消时，
+	// 交接点仍按已经冻结的绝对时间提交同一超时结果。
 	if !task.awaitDeadlineAt.IsZero() &&
 		!time.Now().Before(task.awaitDeadlineAt) &&
 		context.Cause(task.awaitContext) == nil {
-		task.awaitCancel(context.DeadlineExceeded)
+		task.awaitExpired = true
 	}
 
 	task.state = taskRunning
@@ -1181,7 +1170,8 @@ func (scheduler *serviceScheduler) stop(
 	}
 	scheduler.cancelAllTimersLocked()
 	if scheduler.ready.Len() != 0 || scheduler.accepted != 0 ||
-		scheduler.running != 0 || scheduler.awaiting != 0 ||
+		scheduler.running != 0 || scheduler.awaiting != 0 || scheduler.operations != 0 ||
+		scheduler.operationHead != nil ||
 		scheduler.activeLifecycle != nil ||
 		scheduler.activeLifecycleAwait != nil ||
 		len(scheduler.deadlineBindings) != 0 ||
@@ -1225,6 +1215,19 @@ func (scheduler *serviceScheduler) releaseFailedStorageLocked() {
 	}
 	clear(scheduler.timers)
 	clear(scheduler.deadlineBindings)
+	// Failed 可以丢弃尚未执行的 Async 完成任务，因此它们未必还有机会调用 finish。
+	// lifetime 已先取消；这里把全部侵入式操作节点标记为已释放，晚到 close 只做幂等
+	// Context 清理，不再触碰已经归零的 Scheduler 计数。
+	for operation := scheduler.operationHead; operation != nil; {
+		next := operation.next
+		operation.closed = true
+		operation.released = true
+		operation.deadlineID = timerwheel.InvalidDeadlineID
+		operation.previous = nil
+		operation.next = nil
+		operation = next
+	}
+	scheduler.operationHead = nil
 	if scheduler.activeLifecycle != nil {
 		scheduler.activeLifecycle.active.Store(false)
 	}
@@ -1234,6 +1237,7 @@ func (scheduler *serviceScheduler) releaseFailedStorageLocked() {
 	scheduler.accepted = 0
 	scheduler.running = 0
 	scheduler.awaiting = 0
+	scheduler.operations = 0
 	scheduler.timerStats.Active = 0
 	scheduler.timerStats.Scheduled = 0
 	scheduler.timerStats.DuePending = 0
@@ -1267,6 +1271,7 @@ func (scheduler *serviceScheduler) releaseStoppedStorageLocked() {
 	scheduler.finalizerFinish = nil
 	scheduler.deadlineQueue = nil
 	scheduler.deadlineBindings = nil
+	scheduler.operationHead = nil
 	scheduler.timerEngine = nil
 	scheduler.timers = nil
 	scheduler.duePending = nil
@@ -1377,41 +1382,17 @@ func (scheduler *serviceScheduler) watchDeadlines() {
 					continue
 				}
 				switch binding.kind {
-				case deadlineBindingAwait:
-					task := binding.task
-					if task == nil ||
-						binding.token == nil ||
-						binding.token.task.Load() != task ||
-						task.context != binding.token ||
-						task.awaitGeneration != binding.generation ||
-						task.awaitDeadlineID != id ||
-						(task.state != taskWaiting && task.state != taskRecoveryReady) {
+				case deadlineBindingOperation:
+					operation := binding.operation
+					if operation == nil || operation.scheduler != scheduler ||
+						operation.closed || operation.deadlineID != id {
 						delete(scheduler.deadlineBindings, id)
 						continue
 					}
 
 					delete(scheduler.deadlineBindings, id)
-					task.awaitDeadlineID = timerwheel.InvalidDeadlineID
-					cancels[cancelCount] = task.awaitCancel
-					cancelCount++
-				case deadlineBindingLifecycleAwait:
-					lifecycle := binding.lifecycle
-					if lifecycle == nil ||
-						lifecycle.token == nil ||
-						!lifecycle.token.active.Load() ||
-						scheduler.activeLifecycleAwait != lifecycle ||
-						lifecycle.generation != binding.generation ||
-						lifecycle.deadlineID != id {
-						delete(scheduler.deadlineBindings, id)
-						continue
-					}
-
-					// 先在线性化锁内记录到期，再于锁外取消 Context。即使等待函数恰好
-					// 自行返回，清理路径也能稳定把本次结果判定为 DeadlineExceeded。
-					delete(scheduler.deadlineBindings, id)
-					lifecycle.deadlineID = timerwheel.InvalidDeadlineID
-					lifecycle.expired = true
-					cancels[cancelCount] = lifecycle.cancel
+					operation.deadlineID = timerwheel.InvalidDeadlineID
+					cancels[cancelCount] = operation.cancel
 					cancelCount++
 				case deadlineBindingTimer:
 					timer := binding.timer

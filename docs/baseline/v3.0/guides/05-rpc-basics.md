@@ -6,8 +6,11 @@
 
 ```go
 //origin:rpc
+// PlayerService 声明其他 Service 可以调用的公开能力。
 type PlayerService interface {
+    // 请求—响应方法：调用方获得玩家信息和业务错误。
     GetPlayer(context.Context, int64) (string, error)
+    // 单向方法：适合 Notify 或 Broadcast 的缓存刷新通知。
     Refresh(context.Context, int64)
 }
 ```
@@ -15,14 +18,18 @@ type PlayerService interface {
 执行生成器后，业务 Service 使用默认绑定即可：
 
 ```go
+// 绑定默认实际名 PlayerService 的轻量客户端；通常在 OnInit 执行一次。
 s.players = tutorialrpc.BindPlayerService(s)
+// Await 等待结果、超时或错误后才继续当前 Service。
 player, err := s.players.AwaitGetPlayer(ctx, playerID)
 ```
 
 直接运行示例：[合约、生成与 Bind](../../../../examples/05-rpc-basics/01-contract-generate-bind)。
 
 ```text
+REM 修改契约后重新生成契约包代码。
 examples\05-rpc-basics\01-contract-generate-bind\generate.bat
+REM 运行同 Node Await 示例。
 examples\05-rpc-basics\01-contract-generate-bind\run.bat
 ```
 
@@ -33,6 +40,7 @@ RPC 合约与业务实现放在不同包中，并使用相同领域名称：合�
 ```go
 type PlayerService struct{ service.Service }
 
+// 编译期确认业务实现满足共享 RPC 契约；不会产生运行时成本。
 var _ tutorialrpc.PlayerService = (*PlayerService)(nil)
 ```
 
@@ -41,16 +49,24 @@ var _ tutorialrpc.PlayerService = (*PlayerService)(nil)
 Node 按配置中的模板名自动关联契约。例如 `player-1:PlayerService` 中，`PlayerService` 用于冷启动关联，`player-1` 才是配置、发现和 RPC 路由使用的实际名。框架不提供 `SetName`；实际名只有配置这一个来源。需要调用改名实例时：
 
 ```go
+// player-1 是配置中的实际 Service 名；PlayerService 仍是模板名。
 s.players = tutorialrpc.BindPlayerServiceTo(s, "player-1")
 ```
 
 ## 我要异步调用或只发送通知
 
 ```go
-client.AsyncGetPlayer(ctx, playerID, func(ctx context.Context, value string, err error) {
+if err := client.AsyncGetPlayer(ctx, playerID, func(ctx context.Context, value string, err error) {
     // 回调回到调用方 Service 的后续串行任务中执行。
-})
-client.NotifyRefresh(ctx, version)
+    // err 表示本次 RPC 最终失败；value 仅在 err == nil 时可用。
+}); err != nil {
+    // 这里只表示请求没有成功提交；不会执行回调。
+}
+
+if err := client.NotifyRefresh(ctx, version); err != nil {
+    // Notify 没有业务响应：这里只报告本地提交、路由或传输错误。
+    // 目标 Refresh 内部发生的业务错误不会回传给调用方。
+}
 ```
 
 直接运行示例：[Async 与 Notify](../../../../examples/05-rpc-basics/02-async-and-notify)。

@@ -1158,6 +1158,12 @@ RPC 默认超时，也不公开 `AwaitManaged` 等重复入口。Deadline 从进
 Async pending 使用与 Await 相同的有效 Deadline。调用方需要主动取消时使用
 `context.WithCancel` 派生 Context 并调用 `cancel()`；生成方法不再返回另一种取消句柄。
 
+`AsyncXxx` 还要求外层 Context 携带当前普通 Service Task 的 Origin 执行权，用于预约并
+把完成回调投递回调用方 FIFO；`context.Background()`、`context.TODO()`、`nil` 和当前
+生命周期 Context 都不能替代该 Task Context，必须在提交前返回参数错误。需要自定义超时
+时应从有效 Task Context 派生 `context.WithTimeout`，不能从裸 Background 派生后再调用
+`AsyncXxx`。
+
 M11 只处理 Running 期间的基本回调。Draining、停止期间的新调用和回调排空由 M16 完整
 实现。
 
@@ -1176,6 +1182,10 @@ M11 只处理 Running 期间的基本回调。Draining、停止期间的新调�
 M11 Notify 的“发送成功”表示目标本地队列已经接受，不表示业务成功。Context 只约束
 接受前的编码、路由和投递过程；目标队列接受后不能撤回，不创建 pending 或超时项，目标
 业务执行也不再受调用方 Deadline 约束。
+
+因此 `NotifyXxx`/`BroadcastXxx` 只要求非 nil 且尚未取消的 Context，不要求 Origin Task
+执行权；普通 goroutine 可以传入 `context.Background()` 或 `context.TODO()`。它们不创建
+远端响应等待或 15 秒 pending 超时；`nil` 仍是参数错误。
 
 ### 13.6 Broadcast
 
