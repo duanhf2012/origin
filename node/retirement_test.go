@@ -17,13 +17,15 @@ import (
 
 type retirementService struct {
 	service.Service
-	label   string
-	changes *[]string
-	events  chan service.ServiceStateChanged
+	label               string
+	changes             *[]string
+	events              chan service.ServiceStateChanged
+	synchronousEventID  service.EventID
+	synchronousRetireTo chan error
 }
 
 func (target *retirementService) OnInit() error {
-	return target.SubscribeEvent(
+	if err := target.SubscribeEvent(
 		service.ServiceStateChangedEventID,
 		func(_ context.Context, raw service.Event) error {
 			event := raw.(service.ServiceStateChanged)
@@ -32,6 +34,19 @@ func (target *retirementService) OnInit() error {
 				target.events <- event
 			}
 			return nil
+		},
+	); err != nil {
+		return err
+	}
+	if target.synchronousEventID == 0 {
+		return nil
+	}
+	return target.SubscribeEvent(
+		target.synchronousEventID,
+		func(ctx context.Context, _ service.Event) error {
+			err := target.Retire(ctx)
+			target.synchronousRetireTo <- err
+			return err
 		},
 	)
 }
@@ -281,6 +296,50 @@ func TestServiceResumeInsideTaskDoesNotDeadlock(t *testing.T) {
 	}
 	status, ok := current.ServiceStatus("Only")
 	if !ok || status.State != service.StateRunning || status.EnteredAt.IsZero() {
+		t.Fatalf("ServiceStatus = %+v, %v", status, ok)
+	}
+}
+
+type retirementRequestEvent struct{ id service.EventID }
+
+func (event retirementRequestEvent) EventID() service.EventID { return event.id }
+
+// TestServiceRetireFromSynchronousEventListener 防止遗留预检查因 Retire
+// 内部需要等待发现发布，而拒绝同步事件监听器中的调用。
+func TestServiceRetireFromSynchronousEventListener(t *testing.T) {
+	const eventID service.EventID = 77
+	var changes []string
+	target := &retirementService{
+		label:               "Only",
+		changes:             &changes,
+		synchronousEventID:  eventID,
+		synchronousRetireTo: make(chan error, 1),
+	}
+	current := newRetirementNode(t, internaldiscovery.NewSource(), target)
+	notifyResult := make(chan error, 1)
+	if err := target.DispatchAsync(func(ctx context.Context) {
+		notifyResult <- target.NotifyEventSync(ctx, retirementRequestEvent{id: eventID})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-target.synchronousRetireTo:
+		if err != nil {
+			t.Fatalf("listener Retire() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("synchronous listener did not finish Retire")
+	}
+	select {
+	case err := <-notifyResult:
+		if err != nil {
+			t.Fatalf("NotifyEventSync() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("NotifyEventSync did not return")
+	}
+	status, ok := current.ServiceStatus("Only")
+	if !ok || status.State != service.StateRetired {
 		t.Fatalf("ServiceStatus = %+v, %v", status, ok)
 	}
 }

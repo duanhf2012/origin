@@ -4,7 +4,7 @@
 
 ## 流程
 
-Timer 先进入 Service 任务上下文，再同步通知玩家 `1001`；监听器在当前任务中立即完成，并同步通知一个嵌套的审计事件。嵌套事件的监听器执行完成后，外层监听器才返回。随后异步通知玩家 `1002`，它作为普通后续 Service 任务排队执行。异步提交只保存 Event 接口值，提交成功后生产者不能再修改 payload。
+Timer 先进入 Service 任务上下文，再同步通知玩家 `1001`；监听器又同步通知一个嵌套的审计事件。审计监听器用 `Await` 模拟读取存储：等待期间会释放 Service 执行权，恢复后才完成嵌套事件和外层监听器。随后异步通知玩家 `1002`，它作为普通后续 Service 任务排队执行。异步提交只保存 Event 接口值，提交成功后生产者不能再修改 payload。
 
 同步监听器需要先通过 `SubscribeEvent` 注册，框架才会在通知时调用它。可以这样注册并嵌套另一个同步事件：
 
@@ -19,33 +19,58 @@ func (target *EventService) onPlayerJoined(ctx context.Context, event service.Ev
 }
 ```
 
-但不要在同步监听器中调用 `Await`。`Await` 会释放 Service 执行权，可能让其他任务插入；如果监听器需要等待数据库或 RPC，应改用异步事件，或在通知事件前先完成等待。
+同步监听器可以直接调用通用 `Await` 或生成的 `AwaitXxx` RPC。“同步”表示调用方会等到监听器按注册顺序全部完成，不表示 Await 期间独占 Service；Await 释放执行权后，同 Service 的其他已就绪任务可以插入。
 
-例如，需要在监听器中等待数据库时，改成异步通知：
+例如，在同步监听器中等待数据库：
 
 ```go
-// 将 OnInit 中原来的同步监听器注册替换为这个异步监听器。
 func (target *EventService) OnInit() error {
-    return target.SubscribeEvent(playerJoinedEvent, target.onPlayerJoinedAsync)
+	return target.SubscribeEvent(playerJoinedEvent, target.onPlayerJoined)
 }
 
-// 异步事件监听器作为后续 Service 任务执行，因此可以 Await。
-func (target *EventService) onPlayerJoinedAsync(ctx context.Context, event service.Event) error {
-    joined := event.(PlayerJoined)
-    return target.Await(ctx, func(waitCtx context.Context) error {
-        return loadPlayerExtraData(waitCtx, joined.PlayerID)
-    })
+func (target *EventService) onPlayerJoined(ctx context.Context, event service.Event) error {
+	joined := event.(PlayerJoined)
+	var extra PlayerExtra
+	if err := target.Await(ctx, func(waitCtx context.Context) error {
+		var loadErr error
+		extra, loadErr = loadPlayerExtraData(waitCtx, joined.PlayerID)
+		return loadErr
+	}); err != nil {
+		return err
+	}
+	// Await 返回后已恢复 Service 执行权，再更新成员状态。
+	target.playerExtra[joined.PlayerID] = extra
+	return nil
 }
+```
 
-// 调用方只保证事件已入队，不等待监听器完成。
+生成的 Await RPC 使用同一规则：
+
+```go
+func (target *EventService) onPlayerJoined(ctx context.Context, event service.Event) error {
+	joined := event.(PlayerJoined)
+	player, err := target.players.AwaitGetPlayer(ctx, joined.PlayerID)
+	if err != nil {
+		return err
+	}
+	// RPC 等待已结束，现在可在 Service 串行上下文中更新状态。
+	target.currentPlayer = player
+	return nil
+}
+```
+
+上面两个片段中，等待函数只操作局部变量，不在已释放执行权时读写 Service 成员。如果业务不需要调用方等到监听器完成，才使用 `NotifyEventAsync`：
+
+```go
+// 只保证事件已入队，不等待监听器完成。
 if err := target.NotifyEventAsync(PlayerJoined{PlayerID: 1002, Mode: "async"}); err != nil {
-    target.Logger().Error("async event submission failed")
+	target.Logger().Error("async event submission failed")
 }
 ```
 
 ## 运行与练习
 
 执行 `run.bat` 或 `./run.sh`，预期依次看到 sync 玩家日志、audit 日志和 async 玩家日志，随后看到
-`sync=2 async=1 failures=0` 的统计（外层和嵌套事件各计一次同步通知）。可增加第二个监听器观察订阅顺序；同步监听器不能在嵌套调用中执行 `Await`。
+`sync=2 async=1 failures=0` 的统计（外层和嵌套事件各计一次同步通知）。可增加第二个监听器观察：第一个监听器 Await 恢复并返回后，框架才会继续调用第二个监听器。
 
 对应教程：[Timer、Event 与执行](../../../docs/baseline/v3.0/guides/05.timer-event-and-execution.md)。

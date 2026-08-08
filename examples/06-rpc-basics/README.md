@@ -205,7 +205,7 @@ func (s *CallerService) OnStart(ctx context.Context) error {
 
 Await 是明确的业务让出点。等待期间其他任务可能修改 Service 状态，因此调用前不要留下
 “半完成”状态；跨 Await 的输入应复制为局部值，恢复后按需重新检查版本和前置条件。同步
-事件监听器复用当前调用栈，不能 Await；需要等待时改用异步事件或后续任务。
+同步事件监听器可以调用 `AwaitXxx`；Await 期间会释放所属 Service 执行权，恢复后才继续当前监听器和后续监听器。
 
 ## 4. Call：普通 goroutine 阻塞等待
 

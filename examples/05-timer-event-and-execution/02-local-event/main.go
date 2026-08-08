@@ -60,10 +60,28 @@ func (target *EventService) onPlayerJoined(ctx context.Context, event service.Ev
 	return target.NotifyEventSync(ctx, PlayerAudit{PlayerID: joined.PlayerID})
 }
 
-// onPlayerAudit 是嵌套同步事件的监听器。
-func (target *EventService) onPlayerAudit(_ context.Context, event service.Event) error {
+// onPlayerAudit 是嵌套同步事件的监听器，并演示其中可以 Await。
+func (target *EventService) onPlayerAudit(ctx context.Context, event service.Event) error {
 	audit := event.(PlayerAudit)
-	target.Logger().Info(fmt.Sprintf("player %d audit completed", audit.PlayerID))
+	var auditSource string
+	if err := target.Await(ctx, func(waitCtx context.Context) error {
+		// 等待函数运行时已释放 Service 执行权；只写本次调用的局部结果。
+		select {
+		case <-time.After(20 * time.Millisecond):
+			auditSource = "simulated storage"
+			return nil
+		case <-waitCtx.Done():
+			return waitCtx.Err()
+		}
+	}); err != nil {
+		return err
+	}
+	// Await 返回后已重新获得 Service 执行权，可安全使用局部结果。
+	target.Logger().Info(fmt.Sprintf(
+		"player %d audit completed from %s",
+		audit.PlayerID,
+		auditSource,
+	))
 	return nil
 }
 

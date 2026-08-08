@@ -54,10 +54,6 @@ func (service *Service) changeRunningState(
 	if scheduler == nil {
 		return errs.ErrServiceNotReady
 	}
-	if scheduler.synchronousEventActive(ctx) {
-		// Retire/Resume 内部必须 Await 发布确认；同步事件禁止在状态已提交后才发现无法 Await。
-		return errs.ErrInvalidArgument
-	}
 	return scheduler.executeControl(ctx, func(taskCtx context.Context) error {
 		if err := taskCtx.Err(); err != nil {
 			return errs.Wrap(errs.CodeOf(err), err)

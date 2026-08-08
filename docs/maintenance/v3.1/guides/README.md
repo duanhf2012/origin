@@ -77,6 +77,17 @@ goroutine 身份。
 - 普通 goroutine 若需要结果回到自己的同一调用栈，使用 Call；
 - Context 取消表示调用方不再等待，不承诺远端业务回滚。
 
+## 同步本地事件中的 Await
+
+`NotifyEventSync` 监听器可以直接调用通用 `Await` 和生成的 `AwaitXxx` RPC。
+调用方仍等到所有监听器按注册顺序完成后才返回；但 Await 期间会释放
+所属 Service 执行权，同 Service 的其他已就绪任务可以插入。恢复后应重新校验
+Await 前观察的可变状态，不要在等待函数中读写 Service 普通成员。
+
+完整代码、Await RPC 片段和可运行示例见
+[Timer、Event 与执行](../../../baseline/v3.0/guides/05.timer-event-and-execution.md)。内部语义见
+[同步本地事件 Await 语义设计](../design/同步本地事件Await语义设计.md)。
+
 ## 完整教程和示例
 
 完整讲解、代码片段和可运行路径见

@@ -54,20 +54,3 @@ func (scheduler *serviceScheduler) ownsRunningTask(ctx context.Context) bool {
 	scheduler.mu.Unlock()
 	return owned
 }
-
-func (scheduler *serviceScheduler) synchronousEventActive(ctx context.Context) bool {
-	token, _ := ctx.Value(taskContextKey{}).(*taskContext)
-	if token == nil || token.scheduler != scheduler {
-		return false
-	}
-	task := token.task.Load()
-	if task == nil {
-		return false
-	}
-	scheduler.mu.Lock()
-	active := token.task.Load() == task && task.context == token &&
-		task.scheduler == scheduler && scheduler.runningTask == task &&
-		scheduler.running == 1 && task.state == taskRunning && task.syncEventDepth != 0
-	scheduler.mu.Unlock()
-	return active
-}

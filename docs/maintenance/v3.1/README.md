@@ -16,6 +16,7 @@
 - [RPC 可选 Context 与 goroutine 调用设计](./design/RPC可选Context与goroutine调用设计.md)
 - [Node 游戏逻辑时间设计](./design/Node游戏逻辑时间设计.md)
 - [日志易用性、输出格式与运行时控制设计](./design/日志易用性、输出格式与运行时控制设计.md)
+- [同步本地事件 Await 语义设计](./design/同步本地事件Await语义设计.md)
 
 ## 使用者变更
 
@@ -29,3 +30,4 @@
 - [Node 游戏逻辑时间验收报告](./reports/Node游戏逻辑时间验收报告.md)
 - [日志易用性、输出格式与运行时控制变更摘要](./changes/日志易用性、输出格式与运行时控制变更摘要.md)
 - [日志易用性、输出格式与运行时控制验收报告](./reports/日志易用性、输出格式与运行时控制验收报告.md)
+- [同步本地事件 Await 语义变更摘要](./changes/同步本地事件Await语义变更摘要.md)

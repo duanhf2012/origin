@@ -131,7 +131,8 @@ type serviceTask struct {
 	awaitExpired    bool
 	awaitPanic      any
 	awaitPanicStack []byte
-	// syncEventDepth 只在当前 Task 持有执行槽时大于零；Await 在同一锁内拒绝释放。
+	// syncEventDepth 跟随原 Task 的同步事件调用栈；Await 期间保留，
+	// FIFO 恢复后由 NotifyEventSync 的 defer 对称减少。
 	syncEventDepth uint8
 
 	// restoredPanicStack 只在 Await 重新抛出 panic 到根任务边界期间临时保存原始堆栈。

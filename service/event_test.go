@@ -98,9 +98,8 @@ func TestNotifyEventSyncRejectsDepthSixtyFive(t *testing.T) {
 	}
 }
 
-func TestNotifyEventSyncIsolatesHandlersAndForbidsAwait(t *testing.T) {
+func TestNotifyEventSyncIsolatesHandlersAndAggregatesFailures(t *testing.T) {
 	var order []int
-	var listenerAwait error
 	fixture := newEventFixture(t, DefaultSchedulerConfig(), func(target *testService) error {
 		if err := target.SubscribeEvent(7, func(context.Context, Event) error {
 			order = append(order, 1)
@@ -114,9 +113,8 @@ func TestNotifyEventSyncIsolatesHandlersAndForbidsAwait(t *testing.T) {
 		}); err != nil {
 			return err
 		}
-		return target.SubscribeEvent(7, func(ctx context.Context, _ Event) error {
+		return target.SubscribeEvent(7, func(context.Context, Event) error {
 			order = append(order, 3)
-			listenerAwait = target.Await(ctx, func(context.Context) error { return nil })
 			return nil
 		})
 	})
@@ -133,14 +131,78 @@ func TestNotifyEventSyncIsolatesHandlersAndForbidsAwait(t *testing.T) {
 	if err := <-result; err == nil {
 		t.Fatal("监听器错误和 panic 未聚合")
 	}
-	if !errors.Is(listenerAwait, errs.ErrInvalidArgument) {
-		t.Fatalf("listener Await() error = %v", listenerAwait)
-	}
 	if !reflect.DeepEqual(order, []int{1, 2, 3}) {
 		t.Fatalf("handler order = %v", order)
 	}
 	if err := fixture.service.NotifyEventAsync(&alternateTestEvent{id: 7}); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("payload mismatch error = %v", err)
+	}
+}
+
+// TestNotifyEventSyncAllowsAwaitAndPreservesListenerOrder 防止 awaitTask 因当前 Task
+// 处于同步事件调用栈而拒绝 Await。嵌套监听器等待期间必须允许另一个
+// Service Task 执行，同时外层的下一监听器必须等待原监听器恢复。
+func TestNotifyEventSyncAllowsAwaitAndPreservesListenerOrder(t *testing.T) {
+	var order []int
+	awaitStarted := make(chan struct{})
+	releaseAwait := make(chan struct{})
+	fixture := newEventFixture(t, DefaultSchedulerConfig(), func(target *testService) error {
+		if err := target.SubscribeEvent(31, func(ctx context.Context, _ Event) error {
+			order = append(order, 1)
+			return target.NotifyEventSync(ctx, &testEvent{id: 32})
+		}); err != nil {
+			return err
+		}
+		if err := target.SubscribeEvent(32, func(ctx context.Context, _ Event) error {
+			order = append(order, 2)
+			if err := target.Await(ctx, func(context.Context) error {
+				close(awaitStarted)
+				<-releaseAwait
+				return nil
+			}); err != nil {
+				return err
+			}
+			order = append(order, 4)
+			return nil
+		}); err != nil {
+			return err
+		}
+		return target.SubscribeEvent(31, func(context.Context, Event) error {
+			order = append(order, 5)
+			return nil
+		})
+	})
+
+	result := make(chan error, 1)
+	if err := fixture.service.DispatchAsync(func(ctx context.Context) {
+		result <- fixture.service.NotifyEventSync(ctx, &testEvent{id: 31})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-awaitStarted:
+	case err := <-result:
+		t.Fatalf("NotifyEventSync() returned before Await started: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("synchronous listener did not enter Await")
+	}
+
+	if err := fixture.service.DispatchAsync(func(context.Context) {
+		order = append(order, 3)
+		close(releaseAwait)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("NotifyEventSync() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("synchronous listener did not resume after Await")
+	}
+	if !reflect.DeepEqual(order, []int{1, 2, 3, 4, 5}) {
+		t.Fatalf("execution order = %v", order)
 	}
 }
 

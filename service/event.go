@@ -105,7 +105,8 @@ func (service *Service) subscribeEvent(
 
 // NotifyEventSync 在当前所属 Service Task 中同步通知全部监听器。
 //
-// 监听器可以嵌套同步通知，但不能调用 Await；错误和 panic 会聚合后返回且不跳过后续监听器。
+// 监听器可以嵌套同步通知或调用 Await；Await 期间允许其他 Service Task
+// 执行，恢复后仍按注册顺序继续。错误和 panic 会聚合后返回且不跳过后续监听器。
 func (service *Service) NotifyEventSync(ctx context.Context, event Event) error {
 	if service == nil || ctx == nil {
 		return errs.ErrInvalidArgument
