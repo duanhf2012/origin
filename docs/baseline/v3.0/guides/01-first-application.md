@@ -81,6 +81,8 @@ var app = application.New(application.Options{
 
 Go 无法强行终止一个忽略 Context 的 goroutine。因此 `OnStart(ctx)`、`OnStop(ctx)` 和其中调用的外部 I/O 仍应传递并响应 Context；否则即使超时已到，框架也不能把该业务函数强行停掉。
 
+### 我想替换日志 Handler
+
 只有项目确实需要接入自己的日志 Handler 时才设置 `LogHandlerFactory`。Factory 接收已经合并完成的 `log.Config`，并返回 `log.Handler`；Origin 仍负责异步队列、调用方定位、Flush 与 Close：
 
 ```go
@@ -92,6 +94,10 @@ var app = application.New(application.Options{
     },
 })
 ```
+
+`LogHandlerFactory` 是日志后端扩展点，与 `StartTimeout`、`StopTimeout` 没有关系。常规的日志级别、格式、文件输出和滚动不需要编写 Factory，直接使用 YAML/JSON 配置即可。
+
+### 其他 Options 到哪里继续学习
 
 `Timer` 的日常使用、Ticker 和 Cron 示例见 [04：Timer、Event 与执行](./04-timer-event-and-execution.md)；日志 YAML/JSON、文件输出和滚动见 [02：配置应用](./02-configuration.md)。
 
@@ -325,11 +331,19 @@ Node 内部有几个容易误解的顺序点：
 停止：Module.OnStop（严格逆序、子到父）→ Service.OnStop
 ```
 
-如果 `Service.OnStart` 失败，框架不会启动 Module，只调用一次 `Service.OnStop` 回滚。如果某个
-`Module.OnStart` 失败，失败 Module 自身和此前已经进入 `OnStart` 的 Module 会严格逆序执行
-`OnStop`，最后调用 `Service.OnStop`。Application 随后按倒序回滚此前已经 Ready 的 Node；不会
-把未成功启动的 Node 当作可运行对象留下。一次启动失败后的 Node/Application 不能原地重新启动，
-应修复配置或进程依赖后重新创建 Application。
+框架按“是否已经进入 `OnStart`”判断清理责任，而不是按“`OnStart` 是否返回成功”判断：
+
+| 失败位置 | 回滚行为 |
+| --- | --- |
+| `Service.OnInit` | Service 和 Module 都没有进入 `OnStart`，因此不调用它们的 `OnStop`。 |
+| `Service.OnStart` | 不启动任何 Module，也不调用 `Module.OnStop`；但 Service 已经进入过 `OnStart`，因此调用一次 `Service.OnStop`。 |
+| `Module.OnStart` | 失败 Module 自身和此前进入过 `OnStart` 的 Module 严格逆序执行 `OnStop`，最后调用 `Service.OnStop`。 |
+
+这样即使 `Service.OnStart` 在创建部分资源后返回错误，`Service.OnStop` 仍有机会关闭已经交给
+Service 持有的资源；尚未转交给 Service 的局部临时资源，应由 `OnStart` 自己使用 `defer` 或
+错误分支清理。Application 随后按倒序回滚此前已经 Ready 的 Node，不会把未成功启动的 Node
+当作可运行对象留下。一次启动失败后的 Node/Application 不能原地重新启动，应修复配置或进程
+依赖后重新创建 Application。
 
 Service 的 `OnInit`、`OnStart`、`OnStop` 分别适合读取配置/登记资源、创建 Service 级共享资源、
 最后关闭共享资源。不要在 `OnInit` 发起依赖其他 Service 的 RPC；应在 `OnStart` 或后续任务中进行。

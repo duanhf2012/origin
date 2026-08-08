@@ -132,10 +132,20 @@ GameService
 - `Module.OnStop` 执行时 Service 仍未停止，可以完成 Await、RPC、存档和 Worker 回收；最后的
   `Service.OnStop` 汇总 Module 已提交的结果并关闭共享资源，不应再次要求已停止 Module 工作。
 
-失败回滚也遵守同一个生命周期栈：`Service.OnStart` 失败时不启动任何 Module；Module 启动
-失败时，失败 Module 自身和此前进入过 `OnStart` 的 Module 都会严格逆序停止，然后再调用
-`Service.OnStop`。某个 Module 的 `OnStop` 返回错误或 panic 不会跳过其余 Module，也不会跳过
-最后的 `Service.OnStop`。
+失败回滚也遵守同一个生命周期栈。判断标准是“对象是否已经进入 `OnStart`”，不是
+“`OnStart` 是否返回成功”：
+
+- `Service.OnInit` 失败时，Service 和 Module 都没有进入 `OnStart`，因此都不调用 `OnStop`。
+- `Service.OnStart` 返回错误时，不会调用任何 `Module.OnStart` 或 `Module.OnStop`；但 Service
+  已经进入过 `OnStart`，框架仍调用一次 `Service.OnStop`，清理启动到一半时已经交给 Service
+  持有的资源。
+- `Module.OnStart` 返回错误时，失败 Module 自身和此前进入过 `OnStart` 的 Module 都会严格
+  逆序停止，然后再调用 `Service.OnStop`。
+
+因此，`OnStop` 应允许字段仍处于“只初始化了一部分”的状态，例如关闭连接前先判断连接是否
+已经创建。`OnStart` 中尚未赋给 Service/Module 字段的局部临时资源，则应在返回错误前自行
+清理。某个 Module 的 `OnStop` 返回错误或 panic 不会跳过其余 Module，也不会跳过最后的
+`Service.OnStop`。
 
 运行 [完整生命周期示例](../../../../examples/03-service-and-module/02-module-lifecycle)，按
 `Ctrl+C` 即可直接核对以上启动和停止日志。

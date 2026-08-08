@@ -35,9 +35,10 @@ root module stopped
 game service stopped
 ```
 
-如果 `GameService.OnStart` 返回错误，两个 Module 都不会进入 `OnStart`。如果 child 的
-`OnStart` 返回错误，框架会依次执行 `ChildModule.OnStop`、`RootModule.OnStop` 和
-`GameService.OnStop`，然后把启动错误和可能的回滚错误一起返回。
+如果 `GameService.OnStart` 返回错误，两个 Module 都不会进入 `OnStart`，也不会执行
+`Module.OnStop`；框架仍会调用一次 `GameService.OnStop`，让 Service 清理启动到一半时已经
+持有的资源。如果 child 的 `OnStart` 返回错误，框架会依次执行 `ChildModule.OnStop`、
+`RootModule.OnStop` 和 `GameService.OnStop`，然后把启动错误和可能的回滚错误一起返回。
 
 ## 运行与练习
 
