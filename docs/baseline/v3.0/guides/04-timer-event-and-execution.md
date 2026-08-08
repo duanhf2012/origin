@@ -99,6 +99,40 @@ stats := s.EventStats()
 
 需要观察调度器时读取 `ExecutionStats`，不要直接访问内部队列。
 
+### Await 中不要访问 Service 的公共可变数据
+
+`Await` 的等待函数运行期间，当前 Service 会暂时释放执行权，调度器可以让同一个 Service 的
+其他任务继续执行。因此下面这种写法是不安全的：
+
+```go
+// 错误示例：等待函数仍在执行时读取 Service 的可变字段。
+err := s.Await(ctx, func(waitCtx context.Context) error {
+    s.players = loadPlayers(waitCtx) // 不要在这里读写 Service 公共状态
+    return nil
+})
+```
+
+原因是 `s.Await` 内部等待期间可能已经有另一个 Service 任务同时读写 `s.players`。如果一方
+写入、另一方读取而没有锁或其他同步机制，就会形成数据竞争（data race），可能读到不一致的
+中间状态，也可能被 `go test -race` 报告。`Await` 完成并返回后，当前任务才重新取得 Service
+串行执行权；应在这之后再更新 Service 状态：
+
+```go
+var loaded []Player
+err := s.Await(ctx, func(waitCtx context.Context) error {
+    var loadErr error
+    loaded, loadErr = loadPlayers(waitCtx) // 只操作本次 Await 的局部结果
+    return loadErr
+})
+if err == nil {
+    s.players = loaded // 回到 Service 串行任务后再修改公共状态
+}
+```
+
+等待函数可以使用收到的 `waitCtx`，也可以调用并发安全的日志接口；不要通过 `s` 读取或修改
+普通业务字段。若必须从其他 goroutine 访问 Service 状态，应通过 `DispatchAsync`、事件或
+Await 返回后的当前 Service 任务重新串行化，而不是依赖 `GoSafe` 或 `RunSafe` 自动提供数据保护。
+
 ## 深入一点
 
 同步事件处理器可以嵌套同步事件，但不能在其中 `Await`。异步事件只保证已进入队列，不能在提交后修改事件 payload。Timer、事件和 RPC 回调都遵循 Service 的单执行语义；要并发处理纯计算或外部 I/O 时，应明确隔离状态并选择 `Await` 或受控后台任务。

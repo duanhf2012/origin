@@ -24,17 +24,20 @@ func (target *ExecutionService) OnInit() error {
 // OnStart 先登记 Timer，等 Service 进入 Running 后再执行示例逻辑。
 func (target *ExecutionService) OnStart(context.Context) error {
 	target.AfterFunc(100*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
-		// Await 等待外部操作时释放 Service 执行权，完成后再回到串行任务中。
+		// Await 等待外部操作时释放 Service 执行权；等待函数不能读写 target 的公共业务字段，
+		// 因为同一个 Service 的其他任务可能在此期间并发执行。
 		if err := target.Await(ctx, func(waitCtx context.Context) error {
 			select {
 			case <-time.After(50 * time.Millisecond):
-				target.Logger().Info("awaited operation completed")
 				return nil
 			case <-waitCtx.Done():
 				return waitCtx.Err()
 			}
 		}); err != nil {
 			target.Logger().Error("await failed")
+		} else {
+			// Await 返回后当前任务重新获得 Service 串行执行权，可以更新 Service 状态。
+			target.Logger().Info("awaited operation completed")
 		}
 
 		// RunSafe 在当前 goroutine 同步执行，并把 panic 隔离在安全边界内。
