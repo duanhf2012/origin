@@ -1,4 +1,5 @@
 log:
+  # sync 仍进入日志队列，但调用方等待当前记录写完；本例便于观察 text 与 JSON 的对应输出。
   mode: sync
   console:
     enabled: true

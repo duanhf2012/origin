@@ -58,8 +58,12 @@ goroutine 和已有 RPC Handler 都可以调用；如果通过远程 RPC 暴露�
 - 自定义 `LogHandlerFactory` 若未实现可选的 `log.Controller`，控制接口返回
   `ErrLogControlUnsupported`，普通写日志不受影响。
 - Application 未启动或已经关闭时返回 `ErrLogClosed`。
-- `mode: async` 下，已经排队但尚未写出的记录会按处理当时的最新控制状态过滤。需要严格
-  观察“控制调用前后”的测试或管理脚本可使用 `mode: sync`，生产环境通常继续使用 async。
+- `mode: async` 下，普通日志先进入有界队列，调用可能先返回；已经排队但尚未写出的记录会
+  按处理当时的最新控制状态过滤，断点也可能早于实际写出，队列满时普通日志会按级别计数
+  并丢弃。
+- `mode: sync` 下，记录仍进入同一条队列，但调用会等待日志协程处理完成；它不是绕过队列的
+  直接写出。需要严格观察“控制调用前后”的测试或管理脚本可使用 `mode: sync`，生产环境
+  通常继续使用 `async`。
 
 完整实现见 [`main.go`](./main.go)，配置见
 [`config/application.yaml`](./config/application.yaml)。文件实际写入
