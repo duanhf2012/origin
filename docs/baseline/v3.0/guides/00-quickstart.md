@@ -35,10 +35,28 @@ func (s *HelloService) OnStart(context.Context) error {
 }
 ```
 
+## 运行后你看到什么
+
+这个最小示例已经包含 Origin 的四层对象关系：
+
+```text
+Application
+└── Node
+    └── Service
+        └── Module（可选）
+```
+
+- `Application` 代表一个进程，负责配置、Node、日志、命令和进程级资源。
+- `Node` 是一个独立的配置与运行边界，可以包含多个 Service。
+- `Service` 承载真正的业务代码和串行执行权。
+- `Module` 是 Service 内部的可选组织单元，不单独部署、不单独发现。
+
+这里先记住对象关系即可。模板如何为每个 Node 创建独立 Service、Application/Node 的完整
+启动停止顺序，以及失败回滚规则，集中放在 [01：创建第一个应用](./01-first-application.md)
+的“深入一点”部分；Module 的详细生命周期放在 [03：Service 与 Module](./03-service-and-module.md)。
+
 ## 接下来学什么
 
-不要立即接入 RPC 或服务发现。下一章先自己创建 Application、Node 和 Service，理解日志中的对象来自哪里。
-
-## 深入一点
-
-`app.Setup(&HelloService{})` 登记的是零值类型模板；框架会按配置为每个 Node 创建独立实例。`app.Start()` 统一处理命令行、配置、Node 生命周期和优雅停止。
+继续阅读 [01：创建第一个应用](./01-first-application.md)，学习如何创建多个 Node、配置多个
+Service，并理解 Application 的完整生命周期。之后按 [完整学习路线](./README.md) 进入配置、
+Timer/Event、RPC、服务发现、退休和诊断章节；每章都链接到可以直接运行的示例。

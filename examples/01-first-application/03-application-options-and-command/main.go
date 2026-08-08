@@ -13,7 +13,7 @@ import (
 
 // app 在程序装配阶段创建一次；Options 只影响框架边界，不替代 YAML 业务配置。
 var app = application.New(application.Options{
-	// 0 表示无限等待；示例显式设置，便于展示两个生命周期边界。
+	// 0 表示不设置 Application 级总 Deadline；示例显式设置，便于展示两个生命周期边界。
 	StartTimeout: 30 * time.Second,
 	StopTimeout:  30 * time.Second,
 	Timer: application.TimerOptions{

@@ -88,4 +88,54 @@ Timer 与订阅的本地事件监听器会在 Module 停止时自动取消/失�
 
 ## 深入一点：生命周期和归属
 
-一个 Module 只能绑定一个 Service，不能在运行中迁移或共享。启动时 Service 先于 Module；停止时 Module 先于 Service。Module 可委托使用 Service 的 Timer、事件、配置、Await、Retire 与诊断受限 Application 外观。
+一个 Module 只能绑定一个 Service，不能在运行中迁移或共享。Module 可委托使用 Service 的
+Timer、事件、配置、Await、Retire 与诊断受限 Application 外观，因此所属 Service 是 Module
+的生命周期父级：父级先启动并最后停止。
+
+假设 `GameService` 注册了以下静态树：
+
+```text
+GameService
+├─ RootModuleA
+│  ├─ ChildModuleA1
+│  └─ ChildModuleA2
+└─ RootModuleB
+   └─ ChildModuleB1
+```
+
+完整启动顺序是：
+
+```text
+1. GameService.OnStart
+2. RootModuleA.OnStart
+3. ChildModuleA1.OnStart
+4. ChildModuleA2.OnStart
+5. RootModuleB.OnStart
+6. ChildModuleB1.OnStart
+```
+
+完整停止顺序严格相反：
+
+```text
+1. ChildModuleB1.OnStop
+2. RootModuleB.OnStop
+3. ChildModuleA2.OnStop
+4. ChildModuleA1.OnStop
+5. RootModuleA.OnStop
+6. GameService.OnStop
+```
+
+这个顺序带来两条业务约束：
+
+- `Service.OnStart` 可以创建数据库连接、RPC Client 和共享状态；Module 随后启动，可以使用
+  这些 Service 级资源。`Service.OnStart` 不应调用尚未启动的 Module 执行业务操作。
+- `Module.OnStop` 执行时 Service 仍未停止，可以完成 Await、RPC、存档和 Worker 回收；最后的
+  `Service.OnStop` 汇总 Module 已提交的结果并关闭共享资源，不应再次要求已停止 Module 工作。
+
+失败回滚也遵守同一个生命周期栈：`Service.OnStart` 失败时不启动任何 Module；Module 启动
+失败时，失败 Module 自身和此前进入过 `OnStart` 的 Module 都会严格逆序停止，然后再调用
+`Service.OnStop`。某个 Module 的 `OnStop` 返回错误或 panic 不会跳过其余 Module，也不会跳过
+最后的 `Service.OnStop`。
+
+运行 [完整生命周期示例](../../../../examples/03-service-and-module/02-module-lifecycle)，按
+`Ctrl+C` 即可直接核对以上启动和停止日志。

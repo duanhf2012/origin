@@ -54,7 +54,9 @@ func CompleteModuleInitialization(target IService, serviceSucceeded bool) error 
 	return moduleErr
 }
 
-// StartWithModules 依次启动全部 Module，成功后才进入 Service.OnStart。
+// StartWithModules 先进入 Service.OnStart，再按静态树登记顺序依次启动全部 Module。
+// Service 是 Module 使用调度、Timer、Await、配置和共享资源的生命周期父级，因此必须先启动；
+// 任一回调返回错误后，调用方通过 StopWithModules 严格反序回滚已经进入过 OnStart 的对象。
 func StartWithModules(ctx context.Context, target IService) error {
 	if ctx == nil || target == nil || isNilService(target) {
 		return errs.ErrInvalidArgument
@@ -71,6 +73,17 @@ func StartWithModules(ctx context.Context, target IService) error {
 	modules := base.modules
 	base.bindMu.Unlock()
 
+	// 先记录 Service 已经进入 OnStart，确保回调即使返回错误，回滚也会调用一次
+	// Service.OnStop 清理已经交给 Service 持有的资源。
+	base.bindMu.Lock()
+	base.serviceStartEntered = true
+	base.bindMu.Unlock()
+	if err := target.OnStart(ctx); err != nil {
+		return err
+	}
+
+	// Service 启动成功后再按父先子后、同级添加顺序启动 Module。started 在调用前写入，
+	// 使部分启动后返回错误或 panic 的 Module 也能在独立停止路径中得到一次 OnStop。
 	for _, entry := range modules {
 		if !entry.initialized {
 			continue
@@ -82,13 +95,10 @@ func StartWithModules(ctx context.Context, target IService) error {
 			return err
 		}
 	}
-	base.bindMu.Lock()
-	base.serviceStartEntered = true
-	base.bindMu.Unlock()
-	return target.OnStart(ctx)
+	return nil
 }
 
-// StopWithModules 先停止已经进入 OnStart 的 Service，再按严格逆序停止已启动 Module。
+// StopWithModules 先按严格逆序停止已启动 Module，再停止已经进入 OnStart 的 Service。
 // 每个回调的 error 或 panic 都被聚合，后续资源清理始终继续。
 func StopWithModules(ctx context.Context, target IService) error {
 	if ctx == nil || target == nil || isNilService(target) {
@@ -105,11 +115,8 @@ func StopWithModules(ctx context.Context, target IService) error {
 	base.bindMu.Unlock()
 
 	var result error
-	if serviceEntered {
-		result = errors.Join(result, callServiceLifecycle(base, target, "on_stop", func() error {
-			return target.OnStop(ctx)
-		}))
-	}
+	// Module 按实际启动顺序严格反向释放，使子 Module、后登记 Module 先停止，并保证它们
+	// 的 OnStop 仍可使用尚未关闭的 Service 级能力。单个回调失败不能跳过余下对象。
 	for index := len(modules) - 1; index >= 0; index-- {
 		entry := modules[index]
 		if entry.started && !entry.stopped {
@@ -119,6 +126,14 @@ func StopWithModules(ctx context.Context, target IService) error {
 			}))
 		}
 		entry.base.cleanupScope()
+	}
+
+	// 全部 Module 都完成停止尝试和作用域清理后，Service 最后汇总结果并关闭共享资源。
+	// 即使某个 Module 返回错误或 panic，Service.OnStop 仍必须获得一次执行机会。
+	if serviceEntered {
+		result = errors.Join(result, callServiceLifecycle(base, target, "on_stop", func() error {
+			return target.OnStop(ctx)
+		}))
 	}
 	return result
 }

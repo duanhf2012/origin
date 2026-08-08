@@ -66,6 +66,21 @@ var app = application.New(application.Options{
 | `Timer.Location` | `time.Local` | 该 Application 中所有 Cron 表达式使用的时区。 |
 | `LogHandlerFactory` | `nil`（内置 Zap） | 替换日志输出后端的高级扩展点。常规控制台、文件、滚动等需求应优先使用 YAML/JSON 日志配置。 |
 
+### 启动和停止超时怎么设
+
+| 设置 | 设为正数 | 设为 `0` |
+| --- | --- | --- |
+| `StartTimeout` | 限制本次 Application 中所有选中 Node 完成启动的总时间 | 不设置 Application 级启动总超时 |
+| `StopTimeout` | 限制所有 Node、Service 和底层资源完成停止的总时间 | 不设置 Application 级停止总超时 |
+
+`StartTimeout` 到期时，框架取消启动等待，本次启动返回错误，Application 不进入 `Running`；已经启动的 Node/Service 会按反序回滚并关闭资源。这是所有选中 Node 共享的一份总预算，不是每个 Node 或 `OnStart` 各得一份。
+
+`StopTimeout` 到期时，框架取消可控的等待，继续能安全完成的本地清理，并返回停止超时错误。这也是一份共享的总预算，不会为每个 Service 重新计时。
+
+配置 `0` 只表示“不限制 Application 整体启动/停止时长”，不会取消单次 RPC、`AwaitXxx`、数据库或 HTTP 请求自己的超时。生产环境通常建议为两者设置有限值。
+
+Go 无法强行终止一个忽略 Context 的 goroutine。因此 `OnStart(ctx)`、`OnStop(ctx)` 和其中调用的外部 I/O 仍应传递并响应 Context；否则即使超时已到，框架也不能把该业务函数强行停掉。
+
 只有项目确实需要接入自己的日志 Handler 时才设置 `LogHandlerFactory`。Factory 接收已经合并完成的 `log.Config`，并返回 `log.Handler`；Origin 仍负责异步队列、调用方定位、Flush 与 Close：
 
 ```go
@@ -200,21 +215,122 @@ go build \
 `ORIGIN_BUILD_VERSION`、`ORIGIN_BUILD_COMMIT` 覆盖。它们是 Origin 源码仓库的构建脚本；业务
 项目应在自己的 Makefile、CI 或构建脚本中复用上面的 `-ldflags` 规则，并将值固定在一次构建内。
 
-## 深入一点：四个对象
+## 深入一点：对象关系与 Application 生命周期
 
-```text
-Application
-  # Application 持有进程级资源与全部 Node。
-  └── Node
-        # Node 按配置拥有多个 Service。
-        └── Service
-              # Module 是 Service 内部的生命周期单元。
-              └── Module
+### 四层对象关系
+
+```mermaid
+flowchart TD
+    A["Application<br/>一个进程一个"] --> N1["Node<br/>按配置创建多个"]
+    A --> R["进程级资源<br/>日志 / BufferPool / 命令"]
+    N1 --> S1["Service 实例<br/>按 Node 配置创建"]
+    S1 --> M1["Module 实例<br/>可选，归属一个 Service"]
+    S1 --> T["独立 Scheduler<br/>每个 Service 一个"]
+    N1 --> X["Timer / RPC / Discovery<br/>Node 级资源"]
 ```
 
-- `Application` 管理本进程中的全部 Node 和共享资源。
-- `Node` 是配置、网络身份和 Service 容器。
-- `Service` 是串行执行业务的基本单元。
-- `Module` 是一个 Service 内部的生命周期组织单元，下一章后再实际使用。
+- `Application` 是进程级总协调者，持有配置、全部 Node、日志、命令和共享资源。
+- `Node` 是一个配置和运行边界；一个 Application 可以有多个 Node，每个 Node 有自己的网络身份、Timer 资源、RPC/发现状态和 Service 集合。
+- `Service` 是真正承载业务代码和串行执行权的实例。相同的 Go 类型可以在多个 Node 上创建多个相互独立的实例。
+- `Module` 是 Service 内部的生命周期单元，不是独立 Node，也不会单独出现在发现目录中；它只能归属于一个 Service。
 
-Service 的 `OnInit`、`OnStart`、`OnStop` 分别适合读取配置/登记资源、开始对外工作、释放业务资源。不要在 `OnInit` 发起依赖其他 Service 的 RPC；应在 `OnStart` 或后续任务中进行。
+### `HelloService{}` 如何变成 Node 内的运行实例
+
+`app.Setup` 登记的是 Go 类型模板，不是所有 Node 共享的业务对象：
+
+```go
+var app = application.New()
+
+func init() {
+    // 登记类型模板；框架不会把这个模板实例直接共享给多个 Node。
+    app.Setup(&HelloService{})
+}
+```
+
+配置决定在哪些 Node 创建它：
+
+```yaml
+nodes:
+  - id: hello-1
+    services: [HelloService]
+  - id: hello-2
+    services: [HelloService]
+```
+
+启动时，框架读取 `HelloService` 模板的 Go 类型，为每个配置命中的 Node 创建独立业务实例，
+因此会得到 `hello-1/HelloService` 和 `hello-2/HelloService` 两个实例。它们不共享 Service
+字段、Scheduler、Timer、Module 或生命周期状态；共享的只有 Go 类型定义和 Application 级资源。
+配置使用 `actual-name:TemplateName` 时，左侧是实例的实际名称，右侧是用于查找 Go 模板和 RPC
+契约的名称。
+
+### Application 与 Node 的启动顺序
+
+`app.Start()` 进入 `start` 命令后，Application 先加载并合并配置，再在执行任何业务生命周期
+回调前创建全部选中的 Node 和 Service 实例。Node 的选择顺序是：没有 `--node` 时使用配置
+文件中 `nodes` 的顺序；指定 `--node a,b` 时使用命令行中列出的顺序。
+
+```mermaid
+sequenceDiagram
+    participant Main as main
+    participant App as Application
+    participant N1 as Node-1
+    participant N2 as Node-2
+    participant S as "Service 实例"
+    participant M as "Module"
+
+    Main->>App: Start()
+    App->>App: 解析命令、加载并冻结配置
+    App->>App: 按最终 Node 顺序创建全部 Node
+    App->>N1: Start(ctx)
+    N1->>S: 按 services 顺序创建/绑定 Runtime
+    N1->>S: 依次 OnInit()
+    S->>M: OnInit 中 AddModule()
+    N1->>N1: 准备 Timer、RPC、Discovery
+    N1->>S: 按 services 顺序 PrepareScheduler
+    N1->>S: Service.OnStart(ctx)
+    N1->>M: 按静态树顺序执行 Module.OnStart(ctx)
+    N1->>N1: 激活 Scheduler、开放入站、发布发现
+    N1-->>App: Node Ready
+    App->>N2: 按同样规则启动下一个 Node
+    N2-->>App: Node Ready
+    App-->>Main: 全部 Node 运行
+```
+
+Node 内部有几个容易误解的顺序点：
+
+1. 先让该 Node 的全部 Service 完成 `OnInit`；其中可注册 Module、事件监听器、客户端和静态配置，但不应依赖已经运行的远端业务。
+2. 全部 `OnInit` 成功后，Node 才启动时间轮、网络和发现准备。随后 `OnStart` 可以使用框架提供的生命周期 Context，并在需要时等待其他服务的 RPC 或发现。
+3. `OnStart` 仍按 `services` 列表顺序串行进入。对于每个 Service，先执行 `Service.OnStart`，再按父先子后、同级注册顺序执行 Module 的 `OnStart`；整棵对象树成功后才进入下一个 Service。
+4. 全部 `OnStart` 成功后，框架统一把 Service 置为 `Running`（或通过 `--retired` 直接置为 `Retired`），激活 Scheduler、开放入站 RPC，并发布完整发现快照，Node 才进入 `Ready`。
+5. Application 完成前一个 Node 后，才按最终选择顺序启动下一个 Node；所以多 Node 启动不是所有 Node 的 `OnStart` 并发执行。
+
+### 停止和失败回滚
+
+按 `Ctrl+C`、`stop` 命令或显式 `Application.Stop(ctx)` 后，Application 按 Node 的实际启动顺序
+倒序停止；Node 内再按 Service 启动顺序倒序停止。下面列的是**真实执行顺序**，不是对象层级：
+
+```text
+1. Node-2 停止
+   1.1 后启动的 Service 先停止
+       1.1.1 该 Service 的 Module 按启动顺序严格逆序执行 OnStop
+       1.1.2 最后执行该 Service.OnStop
+   1.2 继续停止前一个 Service
+2. Node-1 按相同规则停止
+```
+
+单个 Service 与 Module 的完整顺序可以记成：
+
+```text
+启动：Service.OnStart → Module.OnStart（父到子、同级注册顺序）
+停止：Module.OnStop（严格逆序、子到父）→ Service.OnStop
+```
+
+如果 `Service.OnStart` 失败，框架不会启动 Module，只调用一次 `Service.OnStop` 回滚。如果某个
+`Module.OnStart` 失败，失败 Module 自身和此前已经进入 `OnStart` 的 Module 会严格逆序执行
+`OnStop`，最后调用 `Service.OnStop`。Application 随后按倒序回滚此前已经 Ready 的 Node；不会
+把未成功启动的 Node 当作可运行对象留下。一次启动失败后的 Node/Application 不能原地重新启动，
+应修复配置或进程依赖后重新创建 Application。
+
+Service 的 `OnInit`、`OnStart`、`OnStop` 分别适合读取配置/登记资源、创建 Service 级共享资源、
+最后关闭共享资源。不要在 `OnInit` 发起依赖其他 Service 的 RPC；应在 `OnStart` 或后续任务中进行。
+Module 的精确父子生命周期、能力委托和资源归属见 [03：Service 与 Module](./03-service-and-module.md)。
