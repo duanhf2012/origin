@@ -253,7 +253,29 @@ Service、普通 goroutine、管理命令和 RPC Handler 都能调用这些并�
 
 ## Diagnostics 中的日志状态
 
-`Application.Diagnostics()` 会在顶层 `log` 字段返回同一份只读状态：
+前面的 `log.CurrentStatus()` 只返回日志控制所需的 Console/File 状态；
+`Application.Diagnostics()` 则采集一份更完整的进程级只读快照，除了 Application、Runtime、
+BufferPool 和 Node 状态，也把同一份日志状态放在快照的 `Log` 字段中。它不会修改日志配置，
+也不会因为读取快照而创建新的日志 Runtime。
+
+在持有 `*application.Application` 的管理代码中，调用入口是：
+
+```go
+snapshot := app.Diagnostics() // app 是当前 Application，snapshot 是这个时间点的只读快照。
+```
+
+如果需要把快照交给诊断 HTTP、文件或监控适配层，可以按标准 JSON 序列化：
+
+```go
+// 本段需要导入标准库 encoding/json 和 fmt。
+data, err := json.MarshalIndent(snapshot, "", "  ") // 将 Go 快照编码为可读 JSON。
+if err != nil {
+    return err // 序列化失败时不要输出不完整的诊断数据。
+}
+fmt.Println(string(data)) // 这里只是示例；HTTP 服务通常直接写入 ResponseWriter。
+```
+
+下面的 JSON 不是另一套日志 API，而是上面 `snapshot` 序列化后的示意片段：
 
 ```json
 {
@@ -274,7 +296,10 @@ Service、普通 goroutine、管理命令和 RPC Handler 都能调用这些并�
 }
 ```
 
-已有诊断 HTTP 服务可以原样导出这个快照；它只读，不会自动提供修改日志状态的 HTTP API。
+字段对应关系是：`snapshot.Log.Console` → `log.console`，`snapshot.Log.File` → `log.file`；
+每个输出端的 `Available`、`Enabled`、`Level`、`ConfigLevel` 则分别对应 JSON 中的
+`available`、`enabled`、`level`、`config_level`。已有诊断 HTTP 服务可以把同一个快照原样
+导出；它只读，不会自动提供修改日志状态的 HTTP API。
 
 ## 自定义 Handler
 
