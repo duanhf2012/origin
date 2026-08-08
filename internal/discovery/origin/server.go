@@ -108,7 +108,7 @@ func NewService(
 	return &Service{
 		config:   config,
 		pool:     pool,
-		logger:   logger.With(originlog.String("service_name", "DiscoveryService")),
+		logger:   logger.WithScope(config.Server.Node, "DiscoveryService"),
 		commands: make(chan serverCommand, actorQueueCommands),
 		done:     make(chan struct{}),
 	}

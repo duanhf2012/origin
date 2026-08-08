@@ -88,6 +88,10 @@ var (
 	ErrLogClosed error = newCodeError(CodeLogClosed)
 	// ErrLogOutputFailed 表示日志输出创建、刷新或关闭失败。
 	ErrLogOutputFailed error = newCodeError(CodeLogOutputFailed)
+	// ErrLogControlUnsupported 表示自定义日志 Handler 不支持运行时控制。
+	ErrLogControlUnsupported error = newCodeError(CodeLogControlUnsupported)
+	// ErrLogOutputUnavailable 表示目标日志输出端没有在启动时建立资源。
+	ErrLogOutputUnavailable error = newCodeError(CodeLogOutputUnavailable)
 	// ErrDiagnosticsUnavailable 表示诊断 Listener、HTTP Serve 或受控关闭无法完成。
 	ErrDiagnosticsUnavailable error = newCodeError(CodeDiagnosticsUnavailable)
 	// ErrDiagnosticsStateConflict 表示当前 Application 或 Listener 状态不允许该诊断操作。
@@ -243,6 +247,10 @@ func New(code Code) error {
 		return ErrLogClosed
 	case CodeLogOutputFailed:
 		return ErrLogOutputFailed
+	case CodeLogControlUnsupported:
+		return ErrLogControlUnsupported
+	case CodeLogOutputUnavailable:
+		return ErrLogOutputUnavailable
 	case CodeDiagnosticsUnavailable:
 		return ErrDiagnosticsUnavailable
 	case CodeDiagnosticsStateConflict:

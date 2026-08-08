@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,16 @@ type lifecycleTestService struct {
 	service.Service
 	started bool
 	stopped bool
+}
+
+// globalLogService 验证业务生命周期可以使用进程默认日志外观。
+type globalLogService struct {
+	service.Service
+}
+
+func (*globalLogService) OnInit() error {
+	originlog.Info("global log from service init")
+	return nil
 }
 
 var startupStopEntered chan struct{}
@@ -96,17 +107,93 @@ var testInitFailure = errors.New("test init failure")
 type silentHandler struct {
 	closed atomic.Bool
 	writes atomic.Uint64
+	mu     sync.Mutex
+	texts  []string
+	fields [][]string
 }
 
 func (*silentHandler) Enabled(originlog.Level) bool { return true }
-func (handler *silentHandler) Write(originlog.Record, []originlog.Field) error {
+func (handler *silentHandler) Write(record originlog.Record, fields []originlog.Field) error {
 	handler.writes.Add(1)
+	handler.mu.Lock()
+	handler.texts = append(handler.texts, record.Message)
+	keys := make([]string, len(fields))
+	for index := range fields {
+		keys[index] = fields[index].Key()
+	}
+	handler.fields = append(handler.fields, keys)
+	handler.mu.Unlock()
 	return nil
+}
+
+func (handler *silentHandler) containsField(key string) bool {
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	for _, fields := range handler.fields {
+		for _, current := range fields {
+			if current == key {
+				return true
+			}
+		}
+	}
+	return false
 }
 func (*silentHandler) Sync() error { return nil }
 func (handler *silentHandler) Close() error {
 	handler.closed.Store(true)
 	return nil
+}
+
+func (handler *silentHandler) contains(message string) bool {
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	for _, current := range handler.texts {
+		if current == message {
+			return true
+		}
+	}
+	return false
+}
+
+// TestApplicationInstallsAndClearsDefaultLogger 防止 Service 生命周期中的 log.Info 仍落到 Nop，
+// 或 Application 停止后留下已经关闭的进程默认 Logger。
+func TestApplicationInstallsAndClearsDefaultLogger(t *testing.T) {
+	originlog.SetDefault(originlog.NewNop())
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: game-1
+    services: [globalLogService]
+`)
+	handler := &silentHandler{}
+	app := New(Options{
+		LogHandlerFactory: func(originlog.Config) (originlog.Handler, error) {
+			return handler, nil
+		},
+	})
+	app.Setup(&globalLogService{})
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- app.run(runCtx, command.StartRequest{
+			AppName:   "global-log-test",
+			ConfigDir: directory,
+		})
+	}()
+	waitForState(t, app, StateRunning)
+	cancel()
+	if err := <-result; err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if !handler.contains("global log from service init") {
+		t.Fatal("Service OnInit package-level log was not written")
+	}
+	if handler.containsField("app_name") {
+		t.Fatal("app_name leaked into log content instead of remaining a file-name prefix")
+	}
+	if originlog.Default().Enabled(originlog.InfoLevel) {
+		t.Fatal("default logger remains enabled after Application close")
+	}
 }
 
 func TestServiceFailureDoesNotCancelApplicationAndIsAggregated(t *testing.T) {
@@ -906,12 +993,20 @@ func TestDecodeLogConfigFullConfiguration(t *testing.T) {
 			"enabled": true,
 			"level":   "debug",
 			"format":  "json",
+			"context_fields": map[string]any{
+				"node_id":      false,
+				"service_name": true,
+			},
 		},
 		"file": map[string]any{
 			"enabled": true,
 			"level":   "warn",
 			"format":  "text",
 			"path":    "logs/game.log",
+			"context_fields": map[string]any{
+				"node_id":      true,
+				"service_name": false,
+			},
 			"rotation": map[string]any{
 				"max_size": "4M",
 				"by_date":  false,
@@ -929,13 +1024,111 @@ func TestDecodeLogConfigFullConfiguration(t *testing.T) {
 	}
 	if configured.Mode != originlog.SyncMode ||
 		configured.Console.Level != originlog.DebugLevel ||
-		configured.Console.Format != originlog.JSONFormat {
+		configured.Console.Format != originlog.JSONFormat ||
+		configured.Console.ContextFields.NodeID ||
+		!configured.Console.ContextFields.ServiceName {
 		t.Fatalf("控制台配置 = %+v", configured.Console)
 	}
 	if configured.File.Rotation.MaxSizeMB != 4 ||
 		configured.File.Rotation.Timezone != originlog.UTCTime ||
-		configured.File.Retention.MaxAgeDays != 2 {
+		configured.File.Retention.MaxAgeDays != 2 ||
+		!configured.File.ContextFields.NodeID ||
+		configured.File.ContextFields.ServiceName {
 		t.Fatalf("文件配置 = %+v", configured.File)
+	}
+}
+
+// TestDecodeLogConfigDefaultsContextFieldsToVisible 防止空对象或省略字段意外隐藏归属信息。
+func TestDecodeLogConfigDefaultsContextFieldsToVisible(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []map[string]any{
+		{},
+		{
+			"console": map[string]any{"context_fields": map[string]any{}},
+			"file":    map[string]any{"context_fields": map[string]any{}},
+		},
+	} {
+		configured, err := decodeLogConfig(raw)
+		if err != nil {
+			t.Fatalf("decodeLogConfig(%v) error = %v", raw, err)
+		}
+		if !configured.Console.ContextFields.NodeID ||
+			!configured.Console.ContextFields.ServiceName ||
+			!configured.File.ContextFields.NodeID ||
+			!configured.File.ContextFields.ServiceName {
+			t.Fatalf(
+				"decodeLogConfig(%v) context fields = %+v / %+v",
+				raw,
+				configured.Console.ContextFields,
+				configured.File.ContextFields,
+			)
+		}
+	}
+}
+
+// TestLoggingTutorialConfigurationsLoad 把 v3.1 独立日志示例纳入配置回归，确保教程中的
+// YAML 不会因为字段改名、默认值或校验规则演进而只在使用者运行时才失败。
+func TestLoggingTutorialConfigurationsLoad(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		directory string
+		check     func(*testing.T, loadedConfig)
+	}{
+		{
+			name:      "global and service",
+			directory: filepath.Join("..", "examples", "12-logging", "01-global-and-service", "config"),
+			check: func(t *testing.T, loaded loadedConfig) {
+				if loaded.log.Mode != originlog.SyncMode || !loaded.log.Console.Enabled {
+					t.Fatalf("unexpected log config: %+v", loaded.log)
+				}
+			},
+		},
+		{
+			name:      "formats and context",
+			directory: filepath.Join("..", "examples", "12-logging", "02-formats-and-context", "config"),
+			check: func(t *testing.T, loaded loadedConfig) {
+				if loaded.log.Console.ContextFields.ServiceName ||
+					!loaded.log.File.ContextFields.ServiceName ||
+					loaded.log.File.Format != originlog.JSONFormat {
+					t.Fatalf("unexpected context/format config: %+v", loaded.log)
+				}
+			},
+		},
+		{
+			name:      "runtime control",
+			directory: filepath.Join("..", "examples", "12-logging", "03-runtime-control", "config"),
+			check: func(t *testing.T, loaded loadedConfig) {
+				if !loaded.log.Console.Enabled || !loaded.log.File.Enabled ||
+					loaded.log.File.Level != originlog.DebugLevel {
+					t.Fatalf("unexpected runtime control config: %+v", loaded.log)
+				}
+			},
+		},
+		{
+			name:      "file rotation",
+			directory: filepath.Join("..", "examples", "12-logging", "04-file-rotation", "config"),
+			check: func(t *testing.T, loaded loadedConfig) {
+				if loaded.log.File.Rotation.MaxSizeMB != 1 ||
+					loaded.log.File.Retention.MaxFiles != 10 ||
+					loaded.log.File.Retention.MaxAgeDays != 7 {
+					t.Fatalf("unexpected rotation config: %+v", loaded.log.File)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			loaded, err := loadConfig(test.directory)
+			if err != nil {
+				t.Fatalf("loadConfig(%q) error = %v", test.directory, err)
+			}
+			test.check(t, loaded)
+		})
 	}
 }
 
@@ -980,6 +1173,59 @@ func TestDecodeLogConfigRejectsInvalidValues(t *testing.T) {
 				t.Fatalf("decodeLogConfig() error = %v", err)
 			}
 		})
+	}
+}
+
+// TestInitializeResourcesPrefixesLogFilesWithApplicationName 防止多个 Application 复用同一份
+// 配置时写入同一个活动、归档或 Crash 文件。
+func TestInitializeResourcesPrefixesLogFilesWithApplicationName(t *testing.T) {
+	directory := t.TempDir()
+	configured := loadedConfig{log: originlog.DefaultConfig()}
+	configured.log.File.Enabled = true
+	configured.log.File.Path = filepath.Join(directory, "origin.log")
+	var received originlog.Config
+	app := New(Options{
+		LogHandlerFactory: func(config originlog.Config) (originlog.Handler, error) {
+			received = config
+			return &silentHandler{}, nil
+		},
+	})
+	if err := app.initializeResources(configured, "game"); err != nil {
+		t.Fatalf("initializeResources() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := app.closeResources(context.Background()); err != nil {
+			t.Errorf("closeResources() error = %v", err)
+		}
+	})
+
+	wantActive := filepath.Join(directory, "game-origin.log")
+	if received.File.Path != wantActive {
+		t.Fatalf("handler file path = %q, want %q", received.File.Path, wantActive)
+	}
+	wantCrash := filepath.Join(directory, "game-origin.crash.log")
+	if _, err := os.Stat(wantCrash); err != nil {
+		t.Fatalf("crash file %q was not created: %v", wantCrash, err)
+	}
+}
+
+// TestApplicationLogPathPrefixIsStable 固定显式文件名、无扩展名和已带前缀的冷路径映射。
+func TestApplicationLogPathPrefixIsStable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "logs/origin.log", want: filepath.Join("logs", "game-origin.log")},
+		{path: "logs/server.log", want: filepath.Join("logs", "game-server.log")},
+		{path: "logs/output", want: filepath.Join("logs", "game-output")},
+		{path: "logs/game-origin.log", want: filepath.Join("logs", "game-origin.log")},
+	}
+	for _, test := range tests {
+		if got := applicationLogPath("game", test.path); got != test.want {
+			t.Errorf("applicationLogPath(game, %q) = %q, want %q", test.path, got, test.want)
+		}
 	}
 }
 

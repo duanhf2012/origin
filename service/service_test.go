@@ -24,13 +24,14 @@ type testRuntime struct {
 	nextID   atomic.Uint64
 	location *time.Location
 	now      time.Time
+	logger   originlog.Logger
 }
 
 func (runtime *testRuntime) ID() string               { return runtime.nodeID }
 func (runtime *testRuntime) NodeID() string           { return runtime.nodeID }
 func (runtime *testRuntime) ServiceName() string      { return runtime.name }
 func (runtime *testRuntime) State() State             { return runtime.state }
-func (runtime *testRuntime) Logger() originlog.Logger { return originlog.NewNop() }
+func (runtime *testRuntime) Logger() originlog.Logger { return runtime.logger }
 func (runtime *testRuntime) Now() time.Time           { return runtime.now }
 func (runtime *testRuntime) SetTime(value time.Time) error {
 	runtime.now = value

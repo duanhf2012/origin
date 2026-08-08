@@ -238,7 +238,7 @@ func New(
 	rpcRuntime, err := rpc.NewRuntime(
 		config.ID,
 		options.BufferPool,
-		logger.With(originlog.String("node_id", config.ID)),
+		logger.WithScope(config.ID, ""),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("创建 Node %q RPC Runtime: %w", config.ID, err)
@@ -253,7 +253,7 @@ func New(
 		sessionID:       sessionID,
 		private:         config.Private,
 		labels:          cloneLabels(config.Labels),
-		logger:          logger.With(originlog.String("node_id", config.ID)),
+		logger:          logger.WithScope(config.ID, ""),
 		config:          options.Config.Root(),
 		schedulerConfig: config.Scheduler,
 		application:     options.Application,
@@ -317,9 +317,7 @@ func New(
 			private:  binding.Private,
 			instance: binding.Service,
 			config:   selectServiceConfig(options.Config, config.ID, binding.Name),
-			logger: instance.logger.With(
-				originlog.String("service_name", binding.Name),
-			),
+			logger:   instance.logger.WithScope(config.ID, binding.Name),
 		}
 		if server, ok := binding.Service.(discoveryServer); ok {
 			if instance.discoveryServer != nil {
@@ -537,6 +535,9 @@ func (node *Node) State() State {
 }
 
 // Logger 返回已经预绑定 NodeID 的 Logger。
+//
+// Deprecated: 业务普通日志使用 log.Xxx，Service 与 Module 使用各自的 Logger。该方法仅为
+// v3.0 源码兼容保留，并将在下一主版本删除。
 func (node *Node) Logger() originlog.Logger {
 	if node == nil {
 		return originlog.NewNop()

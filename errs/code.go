@@ -88,6 +88,10 @@ const (
 	CodeLogClosed Code = 7001
 	// CodeLogOutputFailed 表示日志输出创建、刷新或关闭失败。
 	CodeLogOutputFailed Code = 7002
+	// CodeLogControlUnsupported 表示自定义日志 Handler 没有实现可选运行时控制接口。
+	CodeLogControlUnsupported Code = 7003
+	// CodeLogOutputUnavailable 表示启动配置没有为目标日志输出端建立资源。
+	CodeLogOutputUnavailable Code = 7004
 
 	// CodeDiagnosticsUnavailable 表示诊断 Listener、HTTP Serve 或受控关闭无法完成。
 	CodeDiagnosticsUnavailable Code = 8001
@@ -177,6 +181,10 @@ func codeText(code Code) string {
 		return "log runtime closed"
 	case CodeLogOutputFailed:
 		return "log output failed"
+	case CodeLogControlUnsupported:
+		return "log runtime control unsupported"
+	case CodeLogOutputUnavailable:
+		return "log output unavailable"
 	case CodeDiagnosticsUnavailable:
 		return "diagnostics unavailable"
 	case CodeDiagnosticsStateConflict:

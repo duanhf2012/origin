@@ -22,7 +22,9 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if !config.Console.Enabled ||
 		config.Console.Level != originlog.InfoLevel ||
-		config.Console.Format != originlog.TextFormat {
+		config.Console.Format != originlog.TextFormat ||
+		!config.Console.ContextFields.NodeID ||
+		!config.Console.ContextFields.ServiceName {
 		t.Fatalf("unexpected console defaults: %+v", config.Console)
 	}
 	if config.File.Enabled {
@@ -30,6 +32,27 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if config.File.Path != "logs/origin.log" {
 		t.Fatalf("default file path = %q", config.File.Path)
+	}
+	if !config.File.ContextFields.NodeID || !config.File.ContextFields.ServiceName {
+		t.Fatalf("unexpected file context field defaults: %+v", config.File.ContextFields)
+	}
+}
+
+// TestStatusKeepsConfiguredAndCurrentLevelsSeparate 防止 Reset 所需的启动级别被运行时覆盖。
+func TestStatusKeepsConfiguredAndCurrentLevelsSeparate(t *testing.T) {
+	t.Parallel()
+
+	status := originlog.Status{
+		Console: originlog.OutputStatus{
+			Available:   true,
+			Enabled:     true,
+			Level:       originlog.DebugLevel,
+			ConfigLevel: originlog.InfoLevel,
+		},
+	}
+	if status.Console.Level != originlog.DebugLevel ||
+		status.Console.ConfigLevel != originlog.InfoLevel {
+		t.Fatalf("status loses current/config level distinction: %+v", status.Console)
 	}
 }
 

@@ -28,10 +28,7 @@ func TestPublicZapRuntimeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("zaplog.New() = %v", err)
 	}
-	logger := runtime.Logger().With(
-		originlog.String("node_id", "game-1"),
-		originlog.String("service", "PlayerService"),
-	)
+	logger := runtime.Logger().WithScope("game-1", "PlayerService")
 	logger.Info("ready", originlog.Int64("player_id", 7))
 	// Flush 验证顺序屏障，Close 验证完整公开生命周期。
 	if err := runtime.Flush(context.Background()); err != nil {
@@ -49,7 +46,7 @@ func TestPublicZapRuntimeLifecycle(t *testing.T) {
 	for _, expected := range []string{
 		`"msg":"ready"`,
 		`"node_id":"game-1"`,
-		`"service":"PlayerService"`,
+		`"service_name":"PlayerService"`,
 		`"player_id":7`,
 		`"caller":`,
 	} {

@@ -92,6 +92,18 @@ func (module *Module) GetNode() NodeRuntime {
 	return owner.GetNode()
 }
 
+// Logger 返回所属 Service 已经绑定 NodeID 和 ServiceName 的结构化 Logger。
+//
+// Module 不创建独立日志作用域，也不自动增加 module_name；需要区分业务模块时由调用方
+// 增加 component 等普通字段。未绑定 Module 返回安全的 Nop Logger。
+func (module *Module) Logger() originlog.Logger {
+	owner := module.ownerService()
+	if owner == nil {
+		return originlog.NewNop()
+	}
+	return owner.Logger()
+}
+
 // AddModule 在当前 Module 的 OnInit 调用栈中同步登记并初始化一个子 Module。
 func (module *Module) AddModule(child IModule) error {
 	if module == nil {

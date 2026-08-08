@@ -1,0 +1,19 @@
+log:
+  # 教程使用 sync，确保每次控制调用与下一条日志之间有直观的顺序关系。
+  mode: sync
+  console:
+    enabled: true
+    level: info
+    format: text
+  file:
+    # 只有启动时 enabled=true，运行期才有可暂停/恢复的文件资源。
+    enabled: true
+    level: debug
+    format: json
+    path: examples/12-logging/03-runtime-control/logs/origin.log
+    rotation: {max_size: 10M, by_date: true, timezone: Local}
+    retention: {max_age: 7d, max_files: 10, compress: true}
+
+nodes:
+  - id: game-1
+    services: [ControlService]

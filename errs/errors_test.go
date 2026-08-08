@@ -65,6 +65,8 @@ func TestStableCodes(t *testing.T) {
 		{name: "discovery snapshot invalid", code: errs.CodeDiscoverySnapshotInvalid, want: 5004},
 		{name: "log closed", code: errs.CodeLogClosed, want: 7001},
 		{name: "log output failed", code: errs.CodeLogOutputFailed, want: 7002},
+		{name: "log control unsupported", code: errs.CodeLogControlUnsupported, want: 7003},
+		{name: "log output unavailable", code: errs.CodeLogOutputUnavailable, want: 7004},
 		{name: "diagnostics unavailable", code: errs.CodeDiagnosticsUnavailable, want: 8001},
 		{name: "diagnostics state conflict", code: errs.CodeDiagnosticsStateConflict, want: 8002},
 	}
@@ -221,6 +223,16 @@ func TestNew(t *testing.T) {
 		},
 		{code: errs.CodeLogClosed, want: errs.ErrLogClosed, text: "log runtime closed"},
 		{code: errs.CodeLogOutputFailed, want: errs.ErrLogOutputFailed, text: "log output failed"},
+		{
+			code: errs.CodeLogControlUnsupported,
+			want: errs.ErrLogControlUnsupported,
+			text: "log runtime control unsupported",
+		},
+		{
+			code: errs.CodeLogOutputUnavailable,
+			want: errs.ErrLogOutputUnavailable,
+			text: "log output unavailable",
+		},
 		{
 			code: errs.CodeDiagnosticsUnavailable,
 			want: errs.ErrDiagnosticsUnavailable,

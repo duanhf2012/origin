@@ -6,13 +6,21 @@ log:
     enabled: true
     level: info
     format: text
+    context_fields:
+      # 两项省略时默认都是 true；此处显式写出便于和文件配置对照。
+      node_id: true
+      service_name: true
   file:
     # enabled 省略时默认 false；必须显式 true 才创建文件，并保留 debug 及以上的 JSON Lines。
     enabled: true
     level: debug
     format: json
     # 相对路径以程序启动时的当前工作目录为基准。
-    path: examples/02-configuration/04-log-output-and-rolling/logs/tutorial.log
+    # 启动 app-name 是 log-output，实际活动文件会加前缀成为 log-output-tutorial.log。
+    path: examples/12-logging/04-file-rotation/logs/tutorial.log
+    context_fields:
+      node_id: true
+      service_name: true
     rotation:
       # 下一条完整日志会使活动文件超过 1 MiB 时先滚动；单条日志不拆分，0B 关闭大小滚动。
       # 必须使用 1 MiB 的整数倍，避免字节值转换为整数 MiB 时发生截断。

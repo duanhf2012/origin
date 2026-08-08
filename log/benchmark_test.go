@@ -40,6 +40,45 @@ func BenchmarkDisabled(b *testing.B) {
 	}
 }
 
+func BenchmarkGlobalDisabled(b *testing.B) {
+	// 安装一个禁用全部级别的 Runtime，单独衡量包级原子读取和 caller-skip 包装的过滤快路径。
+	logRuntime, err := NewRuntime(DefaultConfig(), benchmarkHandler{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	SetDefault(logRuntime.Logger())
+	defer func() {
+		SetDefault(NewNop())
+		_ = logRuntime.Close(context.Background())
+	}()
+
+	// 字段构造与直接 Logger 基准保持相同，便于比较便捷外观的增量成本。
+	b.ReportAllocs()
+	for b.Loop() {
+		Info("disabled", Int64("player_id", 1))
+	}
+}
+
+func BenchmarkGlobalSyncFields(b *testing.B) {
+	// 同步 Handler 排除队列堆积差异，对比包级 Info 与 BenchmarkSyncFields 的完整调用成本。
+	config := DefaultConfig()
+	config.Mode = SyncMode
+	logRuntime, err := NewRuntime(config, benchmarkHandler{enabled: true})
+	if err != nil {
+		b.Fatal(err)
+	}
+	SetDefault(logRuntime.Logger())
+	defer func() {
+		SetDefault(NewNop())
+		_ = logRuntime.Close(context.Background())
+	}()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		Info("message", Int64("player_id", 7))
+	}
+}
+
 func BenchmarkAsyncNoFields(b *testing.B) {
 	// 构造开启输出的默认异步 Runtime。
 	runtime, err := NewRuntime(DefaultConfig(), benchmarkHandler{enabled: true})

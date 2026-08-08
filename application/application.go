@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -248,6 +249,9 @@ func (app *Application) Nodes() []*node.Node {
 }
 
 // Logger 返回 Application 根 Logger；日志初始化前返回安全的 Nop Logger。
+//
+// Deprecated: 业务普通日志使用 log.Xxx，Service 与 Module 使用各自的 Logger。该方法仅为
+// v3.0 源码兼容保留，并将在下一主版本删除。
 func (app *Application) Logger() originlog.Logger {
 	if app == nil {
 		return originlog.NewNop()
@@ -518,6 +522,12 @@ func (app *Application) initializeResources(
 	configured loadedConfig,
 	appName string,
 ) error {
+	// 每个 Application 在创建 Handler 和 Crash 输出前派生活动路径；归档 Writer 会自然使用
+	// 同一 stem，因此活动、归档和 Crash 三类文件不会与复用配置的其他进程冲突。
+	logConfig := configured.log
+	if logConfig.File.Enabled {
+		logConfig.File.Path = applicationLogPath(appName, logConfig.File.Path)
+	}
 	factory := app.options.LogHandlerFactory
 	if factory == nil {
 		factory = func(config originlog.Config) (originlog.Handler, error) {
@@ -525,16 +535,17 @@ func (app *Application) initializeResources(
 			return zaplog.NewHandler(config)
 		}
 	}
-	handler, err := factory(configured.log)
+	handler, err := factory(logConfig)
 	if err != nil {
 		return err
 	}
-	runtime, err := originlog.NewRuntime(configured.log, handler)
+	runtime, err := originlog.NewRuntime(logConfig, handler)
 	if err != nil {
 		// NewRuntime 失败时尚未接管 Handler，调用方负责关闭它。
 		return errors.Join(err, handler.Close())
 	}
-	logger := runtime.Logger().With(originlog.String("app_name", appName))
+	// app_name 只用于文件路径派生，不进入日志内容；根 Logger 因此不预绑定归属字段。
+	logger := runtime.Logger()
 	pool := bufferpool.NewPool(bufferpool.Options{
 		TrackUsage: configured.trackBufferPool,
 	})
@@ -548,11 +559,14 @@ func (app *Application) initializeResources(
 	app.resourcesReady = true
 	app.resourcesClosing = false
 	app.mu.Unlock()
+	// 资源字段完整发布后再安装进程默认入口，确保任何 Service 生命周期中的 log.Xxx 都复用
+	// 当前 Application 的唯一 Runtime。Runtime.Close 会按所有者清理，旧实例不能误删新值。
+	originlog.SetDefault(logger)
 
 	// 文件日志启用时同时安装 Go 进程级 Crash 输出。它独立于异步日志队列，因此即使进程
 	// 遭遇未恢复 panic，runtime 仍可把现场直接写入同目录的 .crash.log。
-	if configured.log.File.Enabled {
-		crashOutput, crashErr := originlog.InstallCrashOutput(configured.log.File)
+	if logConfig.File.Enabled {
+		crashOutput, crashErr := originlog.InstallCrashOutput(logConfig.File)
 		if crashErr != nil {
 			return crashErr
 		}
@@ -561,6 +575,21 @@ func (app *Application) initializeResources(
 		app.mu.Unlock()
 	}
 	return nil
+}
+
+// applicationLogPath 把 Application 名称作为活动文件 basename 前缀，并保持重复调用幂等。
+func applicationLogPath(appName, configuredPath string) string {
+	cleaned := filepath.Clean(configuredPath)
+	if appName == "" {
+		return cleaned
+	}
+	directory := filepath.Dir(cleaned)
+	base := filepath.Base(cleaned)
+	prefix := appName + "-"
+	if strings.HasPrefix(base, prefix) {
+		return cleaned
+	}
+	return filepath.Join(directory, prefix+base)
 }
 
 // buildNodes 在启动任何回调前完成全部 Service 实例化和 Runtime 绑定。
@@ -630,7 +659,7 @@ func (app *Application) buildNodes(
 				instance = origindiscovery.NewService(
 					originConfig,
 					app.bufferPool,
-					app.logger.With(originlog.String("node_id", configured.ID)),
+					app.logger.WithScope(configured.ID, "DiscoveryService"),
 				)
 			} else {
 				var err error
@@ -704,10 +733,8 @@ func (app *Application) handleServiceFailure(
 	app.serviceFailures = append(app.serviceFailures, wrapped)
 	logger := app.logger
 	app.mu.Unlock()
-	logger.Error(
+	logger.WithScope(nodeID, serviceName).Error(
 		"service entered failed state",
-		originlog.String("node_id", nodeID),
-		originlog.String("service_name", serviceName),
 		originlog.Uint32("error_code", uint32(errs.CodeServiceFailed)),
 		originlog.Err(cause),
 	)
@@ -859,19 +886,18 @@ func (app *Application) report(err error) error {
 	var located interface {
 		LifecycleContext() (nodeID, serviceName, phase string)
 	}
+	logger := app.logger
 	if errors.As(err, &located) {
 		nodeID, serviceName, phase := located.LifecycleContext()
-		fields = append(fields,
-			originlog.String("node_id", nodeID),
-			originlog.String("service_name", serviceName),
-			originlog.String("lifecycle_phase", phase),
-		)
+		fields = append(fields, originlog.String("lifecycle_phase", phase))
+		// 位置信息属于框架归属字段，必须走 WithScope，不能作为可伪造业务 Field 追加。
+		logger = logger.WithScope(nodeID, serviceName)
 	}
 	var panicked interface{ PanicStack() string }
 	if errors.As(err, &panicked) && panicked.PanicStack() != "" {
-		app.logger.ErrorStack("application lifecycle failed", fields...)
+		logger.ErrorStack("application lifecycle failed", fields...)
 	} else {
-		app.logger.Error("application lifecycle failed", fields...)
+		logger.Error("application lifecycle failed", fields...)
 	}
 	return reportedError{cause: err}
 }

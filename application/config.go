@@ -143,18 +143,26 @@ type logConfigMirror struct {
 }
 
 type consoleConfigMirror struct {
-	Enabled bool   `json:"enabled"`
-	Level   string `json:"level"`
-	Format  string `json:"format"`
+	Enabled       bool                      `json:"enabled"`
+	Level         string                    `json:"level"`
+	Format        string                    `json:"format"`
+	ContextFields contextFieldsConfigMirror `json:"context_fields"`
+}
+
+// contextFieldsConfigMirror 使用预填充 bool 保存“省略为 true、显式 false 覆盖”的语义。
+type contextFieldsConfigMirror struct {
+	NodeID      bool `json:"node_id"`
+	ServiceName bool `json:"service_name"`
 }
 
 type fileConfigMirror struct {
-	Enabled   bool                  `json:"enabled"`
-	Level     string                `json:"level"`
-	Format    string                `json:"format"`
-	Path      string                `json:"path"`
-	Rotation  rotationConfigMirror  `json:"rotation"`
-	Retention retentionConfigMirror `json:"retention"`
+	Enabled       bool                      `json:"enabled"`
+	Level         string                    `json:"level"`
+	Format        string                    `json:"format"`
+	Path          string                    `json:"path"`
+	ContextFields contextFieldsConfigMirror `json:"context_fields"`
+	Rotation      rotationConfigMirror      `json:"rotation"`
+	Retention     retentionConfigMirror     `json:"retention"`
 }
 
 type rotationConfigMirror struct {
@@ -627,12 +635,20 @@ func decodeLogConfig(raw any) (originlog.Config, error) {
 			Enabled: defaults.Console.Enabled,
 			Level:   defaults.Console.Level.String(),
 			Format:  string(defaults.Console.Format),
+			ContextFields: contextFieldsConfigMirror{
+				NodeID:      defaults.Console.ContextFields.NodeID,
+				ServiceName: defaults.Console.ContextFields.ServiceName,
+			},
 		},
 		File: fileConfigMirror{
 			Enabled: defaults.File.Enabled,
 			Level:   defaults.File.Level.String(),
 			Format:  string(defaults.File.Format),
 			Path:    defaults.File.Path,
+			ContextFields: contextFieldsConfigMirror{
+				NodeID:      defaults.File.ContextFields.NodeID,
+				ServiceName: defaults.File.ContextFields.ServiceName,
+			},
 			Rotation: rotationConfigMirror{
 				MaxSize:  originconfig.ByteSize(defaults.File.Rotation.MaxSizeMB * 1024 * 1024),
 				ByDate:   defaults.File.Rotation.ByDate,
@@ -660,6 +676,14 @@ func decodeLogConfig(raw any) (originlog.Config, error) {
 	}
 	result.Console.Enabled = mirror.Console.Enabled
 	result.File.Enabled = mirror.File.Enabled
+	result.Console.ContextFields = originlog.ContextFieldsConfig{
+		NodeID:      mirror.Console.ContextFields.NodeID,
+		ServiceName: mirror.Console.ContextFields.ServiceName,
+	}
+	result.File.ContextFields = originlog.ContextFieldsConfig{
+		NodeID:      mirror.File.ContextFields.NodeID,
+		ServiceName: mirror.File.ContextFields.ServiceName,
+	}
 
 	// 控制台和文件即使关闭也解析其显式字段，避免打开后才暴露拼写错误。
 	consoleLevel, ok := originlog.ParseLevel(mirror.Console.Level)

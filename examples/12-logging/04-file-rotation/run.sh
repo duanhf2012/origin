@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+cd "$root"
+exec go run ./examples/12-logging/04-file-rotation start --app-name log-output --config ./examples/12-logging/04-file-rotation/config --node log-1

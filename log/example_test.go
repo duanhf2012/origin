@@ -8,7 +8,7 @@ import (
 )
 
 func Example() {
-	// 使用默认配置创建完整日志 Runtime。
+	// 库级示例显式创建 Runtime；普通 Application 会在启动时自动完成这一步。
 	config := originlog.DefaultConfig()
 	runtime, err := zaplog.New(config)
 	if err != nil {
@@ -16,9 +16,10 @@ func Example() {
 		return
 	}
 
-	// 预绑定稳定 Service 字段后按普通方式写日志。
-	logger := runtime.Logger().With(originlog.String("service", "PlayerService"))
-	logger.Info("service started")
+	// Application 会自动安装默认 Logger；这里手工安装只是为了展示包级便捷外观。
+	originlog.SetDefault(runtime.Logger())
+	originlog.Info("application logger is ready")
+
 	// 退出前排空队列并释放 Handler。
 	_ = runtime.Close(context.Background())
 }

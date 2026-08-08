@@ -61,6 +61,8 @@ type Runtime struct {
 	// config 在构造后只读；handler 只由日志协程执行 Write/Sync/Close。
 	config  Config
 	handler Handler
+	// controller 是 Handler 可选实现的并发安全冷路径控制面；nil 表示固定 Handler。
+	controller Controller
 	// queue 保存事件指针，slots 单独控制队列准入并为关闭事件预留顺序。
 	queue chan *logEvent
 	slots chan struct{}
@@ -110,11 +112,26 @@ func NewRuntime(config Config, handler Handler) (*Runtime, error) {
 		stopSubmit: make(chan struct{}),
 		closed:     make(chan struct{}),
 	}
+	// 类型断言只在构造阶段执行一次，不给 Enabled 和 Write 热路径增加接口判断。
+	instance.controller, _ = handler.(Controller)
 	// 条件变量与 submitMu 配套，用于关闭阶段等待提交临界区排空。
 	instance.submitCond = sync.NewCond(&instance.submitMu)
 	// Runtime 成功返回前启动唯一日志协程；Close 负责等待它退出。
 	go instance.run()
 	return instance, nil
+}
+
+// OutputStatus 返回当前 Runtime 的 Console/File 状态。
+//
+// 固定第三方 Handler 返回 ErrLogControlUnsupported；关闭中或关闭后返回 ErrLogClosed。
+func (runtime *Runtime) OutputStatus() (Status, error) {
+	if runtime == nil || runtime.state.Load() != runtimeRunning {
+		return Status{}, errs.ErrLogClosed
+	}
+	if runtime.controller == nil {
+		return Status{}, errs.ErrLogControlUnsupported
+	}
+	return runtime.controller.Status(), nil
 }
 
 // Logger 返回共享该 Runtime 的根 Logger。
@@ -183,6 +200,9 @@ func (runtime *Runtime) Close(ctx context.Context) error {
 	if runtime == nil {
 		return nil
 	}
+	// 默认入口不拥有 Runtime；关闭方必须先按所有者清理，避免此后新调用进入关闭队列。
+	// 比较所有者使旧 Application 的延迟关闭不会清除后来安装的新默认 Logger。
+	clearDefault(runtime)
 	// nil Context 使用后台 Context，表示一直等待完整排空。
 	if ctx == nil {
 		ctx = context.Background()

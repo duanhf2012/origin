@@ -51,6 +51,17 @@ const (
 	UTCTime Timezone = "UTC"
 )
 
+// ContextFieldsConfig 控制一个输出端是否显示框架自动附加的归属字段。
+//
+// 该类型的零值表示两个字段都隐藏；面向使用者的配置必须从 DefaultConfig 开始覆盖，
+// 因而字段省略时仍保持默认显示。
+type ContextFieldsConfig struct {
+	// NodeID 控制 node_id 是否进入当前输出端。
+	NodeID bool
+	// ServiceName 控制 service_name 是否进入当前输出端。
+	ServiceName bool
+}
+
 // ConsoleConfig 配置控制台输出。
 type ConsoleConfig struct {
 	// Enabled 控制是否建立控制台输出 Core。
@@ -59,6 +70,8 @@ type ConsoleConfig struct {
 	Level Level
 	// Format 选择内置 text 或 json Encoder。
 	Format Format
+	// ContextFields 独立控制 Node 和 Service 归属字段是否显示。
+	ContextFields ContextFieldsConfig
 }
 
 // RotationConfig 配置文件滚动。
@@ -89,6 +102,8 @@ type FileConfig struct {
 	Level Level
 	// Format 选择内置或自定义 Encoder。
 	Format Format
+	// ContextFields 独立控制 Node 和 Service 归属字段是否显示。
+	ContextFields ContextFieldsConfig
 	// Path 是当前活动日志文件路径，保留 .log 扩展名。
 	Path string
 	// Rotation 定义触发新归档的条件。
@@ -115,12 +130,20 @@ func DefaultConfig() Config {
 			Enabled: true,
 			Level:   InfoLevel,
 			Format:  TextFormat,
+			ContextFields: ContextFieldsConfig{
+				NodeID:      true,
+				ServiceName: true,
+			},
 		},
 		File: FileConfig{
 			Enabled: false,
 			Level:   DebugLevel,
 			Format:  TextFormat,
 			Path:    "logs/origin.log",
+			ContextFields: ContextFieldsConfig{
+				NodeID:      true,
+				ServiceName: true,
+			},
 			Rotation: RotationConfig{
 				MaxSizeMB: defaultFileMaxSizeMB,
 				ByDate:    true,

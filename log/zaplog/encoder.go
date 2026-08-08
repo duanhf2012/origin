@@ -2,6 +2,7 @@ package zaplog
 
 import (
 	"fmt"
+	"time"
 
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"go.uber.org/zap/zapcore"
@@ -47,7 +48,7 @@ func encoderConfig(format originlog.Format) zapcore.EncoderConfig {
 		CallerKey:      "caller",
 		StacktraceKey:  "stack",
 		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeTime:     encodeUTCMilliseconds,
 		EncodeDuration: zapcore.StringDurationEncoder,
 		EncodeCaller:   zapcore.ShortCallerEncoder,
 	}
@@ -59,4 +60,9 @@ func encoderConfig(format originlog.Format) zapcore.EncoderConfig {
 	}
 	// 每次返回值副本，调用方可以安全交给不同 Encoder。
 	return config
+}
+
+// encodeUTCMilliseconds 统一机器格式为 UTC RFC3339 毫秒，避免本地数值偏移增加解析分支。
+func encodeUTCMilliseconds(value time.Time, encoder zapcore.PrimitiveArrayEncoder) {
+	encoder.AppendString(value.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
 }

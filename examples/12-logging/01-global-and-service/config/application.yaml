@@ -1,0 +1,11 @@
+log:
+  # sync 让教程中的每条日志在调用返回前完成写入，便于按顺序观察。
+  mode: sync
+  console:
+    enabled: true
+    level: info
+    format: text
+
+nodes:
+  - id: game-1
+    services: [LoggingService]

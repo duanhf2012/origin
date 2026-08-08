@@ -92,7 +92,14 @@ func TestLoggerAsyncFlushAndFixedFields(t *testing.T) {
 
 	// 派生 Logger 预绑定 service，再写动态 player_id 和被保留的 caller。
 	logger := runtime.Logger().With(String("service", "player"))
-	logger.Info("started", Int64("player_id", 7), String("caller", "blocked"))
+	logger.Info(
+		"started",
+		Int64("player_id", 7),
+		String("caller", "blocked"),
+		String("app_name", "forged"),
+		String("node_id", "forged"),
+		String("service_name", "forged"),
+	)
 	// Flush 建立顺序屏障，返回后内存 Handler 已收到记录。
 	if err := runtime.Flush(context.Background()); err != nil {
 		t.Fatalf("Flush() = %v", err)
@@ -112,6 +119,37 @@ func TestLoggerAsyncFlushAndFixedFields(t *testing.T) {
 	if records[0].fields[0].Key() != "service" ||
 		records[0].fields[1].Key() != "player_id" {
 		t.Fatalf("unexpected fields: %+v", records[0].fields)
+	}
+}
+
+// TestLoggerWithScopeAddsReservedContextOnce 防止框架归属字段被普通 With 过滤后同时丢失，
+// 也防止调用参数伪造 node_id 或 service_name 覆盖真实作用域。
+func TestLoggerWithScopeAddsReservedContextOnce(t *testing.T) {
+	t.Parallel()
+
+	handler := &memoryHandler{enabled: true}
+	config := DefaultConfig()
+	config.Mode = SyncMode
+	runtime, err := NewRuntime(config, handler)
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	t.Cleanup(func() { _ = runtime.Close(context.Background()) })
+
+	runtime.Logger().WithScope("game-1", "PlayerService").Info(
+		"scoped",
+		String("node_id", "forged"),
+		String("service_name", "forged"),
+	)
+	records := handler.snapshot()
+	if len(records) != 1 || len(records[0].fields) != 2 {
+		t.Fatalf("scoped records = %+v", records)
+	}
+	if records[0].fields[0].Key() != "node_id" ||
+		records[0].fields[0].StringValue() != "game-1" ||
+		records[0].fields[1].Key() != "service_name" ||
+		records[0].fields[1].StringValue() != "PlayerService" {
+		t.Fatalf("scoped fields = %+v", records[0].fields)
 	}
 }
 

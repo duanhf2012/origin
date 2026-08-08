@@ -5,7 +5,6 @@ import (
 	"context"
 
 	"github.com/duanhf2012/origin/v3/application"
-	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -24,9 +23,9 @@ func (target *GatewayService) OnStart(context.Context) error {
 // PlayerService 可由配置在不同 Node 上创建相互独立的运行实例。
 type PlayerService struct{ service.Service }
 
-// OnInit 使用 NodeID 证明每个实例已经绑定到自己的所属 Node。
+// OnInit 的 Service Logger 已自动显示 NodeID，可直接观察每个实例的所属 Node。
 func (target *PlayerService) OnInit() error {
-	target.Logger().Info("player initialized", originlog.String("node_id", target.NodeID()))
+	target.Logger().Info("player initialized")
 	return nil
 }
 

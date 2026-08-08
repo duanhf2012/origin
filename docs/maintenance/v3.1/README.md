@@ -15,13 +15,17 @@
 
 - [RPC 可选 Context 与 goroutine 调用设计](./design/RPC可选Context与goroutine调用设计.md)
 - [Node 游戏逻辑时间设计](./design/Node游戏逻辑时间设计.md)
+- [日志易用性、输出格式与运行时控制设计](./design/日志易用性、输出格式与运行时控制设计.md)
 
 ## 使用者变更
 
 - [v3.1 使用变更索引](./guides/README.md)
 - [Node 游戏逻辑时间教程](./guides/node-game-time.md)
+- [日志：调用、格式、滚动与运行时控制](./guides/logging.md)
 
 ## 已完成变更与报告
 
 - [Node 游戏逻辑时间变更摘要](./changes/Node游戏逻辑时间变更摘要.md)
 - [Node 游戏逻辑时间验收报告](./reports/Node游戏逻辑时间验收报告.md)
+- [日志易用性、输出格式与运行时控制变更摘要](./changes/日志易用性、输出格式与运行时控制变更摘要.md)
+- [日志易用性、输出格式与运行时控制验收报告](./reports/日志易用性、输出格式与运行时控制验收报告.md)

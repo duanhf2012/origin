@@ -44,6 +44,11 @@ Application、Node、Service、Logger、BufferPool、Transport、TimerEngine 和
 
 同一进程必须能够创建多个相互独立的 Application，测试之间不得通过隐藏的包级状态相互影响。Origin 框架包不得使用 `init()` 隐式注册 Service、修改运行时注册表或启动 goroutine。
 
+日志包的进程默认便捷外观是经确认的唯一窄例外：允许用一个原子指针引用由 Application
+显式拥有的 Logger/Runtime，但该指针不得拥有、创建或延长 Runtime、Handler、队列及文件
+资源的生命周期；Runtime 关闭时必须按所有者清除。并行多 Application 场景不得依赖包级
+`log.Xxx` 或包级运行时日志控制，各实例本身仍必须完全独立。
+
 最终可执行程序的 `main` 包允许保存唯一的 `Application` 实例，并允许不同的 `init_*.go` 文件在 `func init()` 中对该明确实例调用 `app.Setup(...)`。这只是把服务类型安装到当前实例，不得写入 Origin 包级目录、读取配置、创建运行实例或启动 goroutine；安装顺序也不得影响 Service 的实际启停顺序。单元测试仍应直接创建各自独立的 Application，不复用可执行程序的包级实例。
 
 ### 7. 所有资源必须有明确所有者

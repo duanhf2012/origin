@@ -59,9 +59,24 @@ type Snapshot struct {
 	StartedAt     time.Time           `json:"started_at"`
 	CollectCost   Duration            `json:"collect_cost"`
 	Application   ApplicationSnapshot `json:"application"`
+	Log           LogSnapshot         `json:"log"`
 	Runtime       RuntimeSnapshot     `json:"runtime"`
 	BufferPool    BufferPoolSnapshot  `json:"buffer_pool"`
 	Nodes         []NodeSnapshot      `json:"nodes"`
+}
+
+// LogSnapshot 保存当前被采集 Application 的两个日志输出端状态。
+type LogSnapshot struct {
+	Console LogOutputSnapshot `json:"console"`
+	File    LogOutputSnapshot `json:"file"`
+}
+
+// LogOutputSnapshot 是不会反向依赖 log 包枚举的诊断 DTO。
+type LogOutputSnapshot struct {
+	Available   bool   `json:"available"`
+	Enabled     bool   `json:"enabled"`
+	Level       string `json:"level"`
+	ConfigLevel string `json:"config_level"`
 }
 
 // ApplicationSnapshot 保存进程身份、生命周期和两个诊断 Listener 的当前状态。

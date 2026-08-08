@@ -85,6 +85,34 @@ func (logger Logger) With(fields ...Field) Logger {
 	return logger
 }
 
+// WithScope 返回由框架装配期绑定 NodeID 和 ServiceName 的不可变派生 Logger。
+//
+// 普通业务字段中的 app_name、node_id、service_name 会被过滤；本方法是跨包构造 Service
+// Runtime 时唯一显式写入归属字段的入口。空值表示当前层级没有对应归属。
+func (logger Logger) WithScope(nodeID, serviceName string) Logger {
+	if logger.runtime == nil {
+		return logger
+	}
+
+	// 先写新的唯一作用域，再保留原 Logger 的普通固定字段；已有作用域字段必须被替换，
+	// 否则从 Node Logger 派生 Service Logger 会输出重复 Key。
+	combined := make([]Field, 0, len(logger.fields)+2)
+	if nodeID != "" {
+		combined = append(combined, String("node_id", nodeID))
+	}
+	if serviceName != "" {
+		combined = append(combined, String("service_name", serviceName))
+	}
+	for _, field := range logger.fields {
+		if field.key == "app_name" || field.key == "node_id" || field.key == "service_name" {
+			continue
+		}
+		combined = append(combined, field)
+	}
+	logger.fields = combined
+	return logger
+}
+
 // WithCallerSkip 返回额外跳过调用栈层数的不可变派生 Logger。
 func (logger Logger) WithCallerSkip(skip int) Logger {
 	// 非正数不改变定位；正数只修改值副本，不影响原 Logger。
@@ -126,7 +154,8 @@ func appendValidFields(target []Field, fields []Field) []Field {
 func reservedField(key string) bool {
 	// 显式 switch 比可变 Map 更简单，也不会引入包级状态。
 	switch key {
-	case "time", "level", "message", "msg", "caller", "stack":
+	case "time", "level", "message", "msg", "caller", "stack",
+		"app_name", "node_id", "service_name":
 		return true
 	default:
 		return false

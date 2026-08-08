@@ -1,12 +1,17 @@
 package zaplog
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
@@ -15,13 +20,42 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// handler 把 Origin Record 同步写入一个或多个 Zap Core。
-type handler struct {
-	// cores 分别代表 stdout、stderr 和文件输出；Write 按级别选择。
-	cores []zapcore.Core
-	// file 由 handler 独占，用于停止滚动维护协程。
-	file *rotate.Writer
+// outputState 保存一个输出端的启动配置和可并发更新的当前状态。
+type outputState struct {
+	available   bool
+	configLevel originlog.Level
+	enabled     atomic.Bool
+	level       atomic.Uint32
+}
 
+// consoleOutput 把 stdout/stderr 视为同一个可控 Console，Error 只写 stderr。
+type consoleOutput struct {
+	state  outputState
+	format originlog.Format
+	fields originlog.ContextFieldsConfig
+	stdout io.Writer
+	stderr io.Writer
+	// 非 text 格式继续复用 Zap Encoder；两个 Writer 各自拥有独立 Encoder 状态。
+	stdoutCore zapcore.Core
+	stderrCore zapcore.Core
+}
+
+// fileOutput 保存活动文件及其单个 Encoder；rotate.Writer 是唯一文件资源所有者。
+type fileOutput struct {
+	state  outputState
+	format originlog.Format
+	fields originlog.ContextFieldsConfig
+	writer *rotate.Writer
+	core   zapcore.Core
+}
+
+// handler 把 Origin Record 同步写入独立可控的 Console 和 File 输出。
+type handler struct {
+	console consoleOutput
+	file    fileOutput
+
+	// closed 让控制冷路径和 Enabled 在资源释放后立即返回稳定状态。
+	closed atomic.Bool
 	// closeOnce 和 closeErr 固化首次资源释放结果。
 	closeOnce sync.Once
 	closeErr  error
@@ -29,36 +63,29 @@ type handler struct {
 
 // New 使用默认 Zap Handler 创建日志 Runtime。
 func New(config originlog.Config, supplied ...Option) (*originlog.Runtime, error) {
-	// 先完整构造同步 Handler，失败时没有 Runtime 协程需要回收。
 	logHandler, err := NewHandler(config, supplied...)
 	if err != nil {
 		return nil, err
 	}
-	// Handler 成功后交给 Runtime 接管串行写入和生命周期。
 	runtime, err := originlog.NewRuntime(config, logHandler)
 	if err != nil {
-		// Runtime 未接管时由当前函数立即释放 Handler 已创建资源。
 		_ = logHandler.Close()
 		return nil, err
 	}
-	// 成功后 Runtime 成为 Handler 的唯一生命周期所有者。
 	return runtime, nil
 }
 
 // NewHandler 创建不含第二套事件队列的同步 Zap Handler。
 func NewHandler(config originlog.Config, supplied ...Option) (originlog.Handler, error) {
-	// 默认 Zap Handler 依赖完整输出配置，必须在创建文件前校验。
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
 
-	// 为每次构造建立独立选项状态，默认连接真实标准输出。
 	settings := options{
 		encoders: make(map[string]EncoderFactory),
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,
 	}
-	// 按调用顺序应用选项；任一失败时尚未创建外部资源。
 	for _, option := range supplied {
 		if option == nil {
 			return nil, invalidOption("nil option")
@@ -68,10 +95,15 @@ func NewHandler(config originlog.Config, supplied ...Option) (originlog.Handler,
 		}
 	}
 
-	// 最多建立 stdout、stderr 和 file 三个 Core。
-	cores := make([]zapcore.Core, 0, 3)
-	if config.Console.Enabled {
-		// 每个 Core 必须拥有独立 Encoder，避免内部缓冲或 Clone 状态共享。
+	result := &handler{}
+	result.console = consoleOutput{
+		format: config.Console.Format,
+		fields: config.Console.ContextFields,
+		stdout: settings.stdout,
+		stderr: settings.stderr,
+	}
+	result.console.state.initialize(config.Console.Enabled, config.Console.Level)
+	if config.Console.Enabled && config.Console.Format != originlog.TextFormat {
 		stdoutEncoder, err := newEncoder(config.Console.Format, settings)
 		if err != nil {
 			return nil, err
@@ -80,79 +112,127 @@ func NewHandler(config originlog.Config, supplied ...Option) (originlog.Handler,
 		if err != nil {
 			return nil, err
 		}
-		// 控制台最低级别只计算一次，并在两个 Enabler 闭包中只读使用。
-		minimum := toZapLevel(config.Console.Level)
-		// Debug～Warn 写 stdout；Error 及以上写 stderr，避免一条日志重复。
-		cores = append(cores,
-			zapcore.NewCore(
-				stdoutEncoder,
-				writerSyncer{Writer: settings.stdout},
-				zap.LevelEnablerFunc(func(level zapcore.Level) bool {
-					return level >= minimum && level < zapcore.ErrorLevel
-				}),
-			),
-			zapcore.NewCore(
-				stderrEncoder,
-				writerSyncer{Writer: settings.stderr},
-				zap.LevelEnablerFunc(func(level zapcore.Level) bool {
-					return level >= minimum && level >= zapcore.ErrorLevel
-				}),
-			),
-		)
+		result.console.stdoutCore = newCore(stdoutEncoder, settings.stdout)
+		result.console.stderrCore = newCore(stderrEncoder, settings.stderr)
 	}
 
-	// 先建立空结果，后续文件 Writer 成功后才提交到字段。
-	result := &handler{}
+	result.file = fileOutput{
+		format: config.File.Format,
+		fields: config.File.ContextFields,
+	}
+	result.file.state.initialize(config.File.Enabled, config.File.Level)
 	if config.File.Enabled {
-		// 文件可以选择与控制台不同的格式和最低级别。
-		fileEncoder, err := newEncoder(config.File.Format, settings)
-		if err != nil {
-			return nil, err
-		}
-		// rotate.Writer 同步写文件并独占一个归档维护协程。
 		fileWriter, err := rotate.New(rotateConfig(config.File))
 		if err != nil {
 			return nil, errs.Wrap(errs.CodeLogOutputFailed, err)
 		}
-		// Handler 从此负责在 Close 中停止并释放 fileWriter。
-		result.file = fileWriter
-		cores = append(cores, zapcore.NewCore(
-			fileEncoder,
-			zapcore.AddSync(fileWriter),
-			zap.LevelEnablerFunc(func(level zapcore.Level) bool {
-				return level >= toZapLevel(config.File.Level)
-			}),
-		))
+		result.file.writer = fileWriter
+		if config.File.Format != originlog.TextFormat {
+			fileEncoder, encoderErr := newEncoder(config.File.Format, settings)
+			if encoderErr != nil {
+				_ = fileWriter.Close()
+				return nil, encoderErr
+			}
+			result.file.core = newCore(fileEncoder, fileWriter)
+		}
 	}
-
-	// 最后一次性发布 Core 列表，返回后配置保持只读。
-	result.cores = cores
 	return result, nil
 }
 
-// Enabled 报告任意 Core 是否接收指定 Origin 级别。
-func (handler *handler) Enabled(level originlog.Level) bool {
-	// 先执行稳定级别映射，再逐 Core 查询各自 Enabler。
-	zapLevel := toZapLevel(level)
-	for _, core := range handler.cores {
-		if core.Enabled(zapLevel) {
-			// 找到一个输出端即可提前返回。
-			return true
-		}
-	}
-	return false
+// initialize 在最终字段地址上建立输出状态，禁止复制已经使用过的 atomic.noCopy 值。
+func (state *outputState) initialize(available bool, level originlog.Level) {
+	state.available = available
+	state.configLevel = level
+	state.enabled.Store(available)
+	state.level.Store(uint32(level))
 }
 
-// Write 把一条 Origin Record 和字段同步写到全部匹配的 Zap Core。
+// newCore 只负责非 text 格式的编码与写入；级别和启停已由 handler 统一判定。
+func newCore(encoder zapcore.Encoder, writer io.Writer) zapcore.Core {
+	return zapcore.NewCore(
+		encoder,
+		writerSyncer{Writer: writer},
+		zap.LevelEnablerFunc(func(zapcore.Level) bool { return true }),
+	)
+}
+
+// Enabled 报告当前至少一个可用且已启用输出是否接收指定级别。
+func (handler *handler) Enabled(level originlog.Level) bool {
+	if handler == nil || handler.closed.Load() || !validLevel(level) {
+		return false
+	}
+	return handler.console.state.accepts(level) || handler.file.state.accepts(level)
+}
+
+// Write 把一条 Origin Record 按各输出端当前状态、格式和字段掩码分别写出。
 func (handler *handler) Write(record originlog.Record, fields []originlog.Field) error {
-	// 先转换公共元数据，避免为每个 Core 重复构造 Entry。
+	if handler == nil || handler.closed.Load() {
+		return errs.ErrLogClosed
+	}
+	var result error
+	if handler.console.state.accepts(record.Level) {
+		result = errors.Join(result, handler.console.write(record, fields))
+	}
+	if handler.file.state.accepts(record.Level) {
+		result = errors.Join(result, handler.file.write(record, fields))
+	}
+	return result
+}
+
+// write 按 Error 分流控制台 Writer，并保证同一条日志不会重复。
+func (output *consoleOutput) write(record originlog.Record, fields []originlog.Field) error {
+	if output.format == originlog.TextFormat {
+		writer := output.stdout
+		if record.Level == originlog.ErrorLevel {
+			writer = output.stderr
+		}
+		return writeAll(writer, encodeText(record, fields, output.fields))
+	}
+	core := output.stdoutCore
+	if record.Level == originlog.ErrorLevel {
+		core = output.stderrCore
+	}
+	return writeCore(core, record, fields, output.fields)
+}
+
+// write 使用活动文件 Writer；text 直接编码，JSON/自定义格式继续复用 Zap Encoder。
+func (output *fileOutput) write(record originlog.Record, fields []originlog.Field) error {
+	if output.format == originlog.TextFormat {
+		return writeAll(output.writer, encodeText(record, fields, output.fields))
+	}
+	return writeCore(output.core, record, fields, output.fields)
+}
+
+// writeCore 在单个输出端应用字段掩码后调用其独占 Zap Core。
+func writeCore(
+	core zapcore.Core,
+	record originlog.Record,
+	fields []originlog.Field,
+	mask originlog.ContextFieldsConfig,
+) error {
+	entry := toZapEntry(record)
+	var local [16]zapcore.Field
+	converted := local[:0]
+	if len(fields) > len(local) {
+		converted = make([]zapcore.Field, 0, len(fields))
+	}
+	for _, field := range fields {
+		if !fieldVisible(field, mask) {
+			continue
+		}
+		converted = append(converted, toZapField(field))
+	}
+	return core.Write(entry, converted)
+}
+
+// toZapEntry 把公共 Record 转为 JSON 或自定义 Zap Encoder 使用的元数据。
+func toZapEntry(record originlog.Record) zapcore.Entry {
 	entry := zapcore.Entry{
 		Level:   toZapLevel(record.Level),
 		Time:    record.Time,
 		Message: record.Message,
 		Stack:   record.Stack,
 	}
-	// Caller 为空时保持 Zap 的 Defined=false，避免输出伪造位置。
 	if record.Caller.File != "" {
 		entry.Caller = zapcore.EntryCaller{
 			Defined: true,
@@ -161,58 +241,315 @@ func (handler *handler) Write(record originlog.Record, fields []originlog.Field)
 			Line:    record.Caller.Line,
 		}
 	}
+	return entry
+}
 
-	// 常见日志在栈上容纳 16 个字段，超出时才分配切片。
-	var local [16]zapcore.Field
-	converted := local[:0]
-	if len(fields) > len(local) {
-		converted = make([]zapcore.Field, 0, len(fields))
+// fieldVisible 在编码前应用当前输出端独立的框架归属字段掩码。
+func fieldVisible(field originlog.Field, mask originlog.ContextFieldsConfig) bool {
+	switch field.Key() {
+	case "node_id":
+		return mask.NodeID
+	case "service_name":
+		return mask.ServiceName
+	default:
+		return true
 	}
-	// 字段按 Origin 顺序转换，保留稳定字段在动态字段之前的契约。
+}
+
+// encodeText 生成单行人工可读格式：TIME LEVEL [SCOPE] CALLER MESSAGE key=value。
+func encodeText(
+	record originlog.Record,
+	fields []originlog.Field,
+	mask originlog.ContextFieldsConfig,
+) []byte {
+	result := make([]byte, 0, 256)
+	result = record.Time.In(time.Local).AppendFormat(result, "2006-01-02T15:04:05.000")
+	result = append(result, ' ')
+	result = append(result, strings.ToUpper(record.Level.String())...)
+
+	nodeID, serviceName := scopeValues(fields, mask)
+	if nodeID != "" || serviceName != "" {
+		result = append(result, ' ', '[')
+		if nodeID != "" {
+			result = append(result, nodeID...)
+		}
+		if nodeID != "" && serviceName != "" {
+			result = append(result, '/')
+		}
+		if serviceName != "" {
+			result = append(result, serviceName...)
+		}
+		result = append(result, ']')
+	}
+	if record.Caller.File != "" {
+		result = append(result, ' ')
+		result = append(result, record.Caller.File...)
+		result = append(result, ':')
+		result = strconv.AppendInt(result, int64(record.Caller.Line), 10)
+	}
+	result = append(result, ' ')
+	result = appendMessage(result, record.Message)
 	for _, field := range fields {
-		converted = append(converted, toZapField(field))
+		if !fieldVisible(field, mask) || field.Key() == "node_id" || field.Key() == "service_name" {
+			continue
+		}
+		result = append(result, ' ')
+		result = appendTextKey(result, field.Key())
+		result = append(result, '=')
+		result = appendTextValue(result, field)
 	}
-	// 逐个写入接收该级别的 Core，并汇总所有输出错误。
-	var result error
-	for _, core := range handler.cores {
-		if core.Enabled(entry.Level) {
-			result = errors.Join(result, core.Write(entry, converted))
+	if record.Stack != "" {
+		result = append(result, " stack="...)
+		result = strconv.AppendQuote(result, record.Stack)
+	}
+	return append(result, '\n')
+}
+
+// appendTextKey 在字段名会破坏 key=value 边界时使用 Go 引号保留原始 Key。
+func appendTextKey(target []byte, key string) []byte {
+	for _, current := range key {
+		if unicode.IsSpace(current) || unicode.IsControl(current) || current == '=' ||
+			current == '"' || current == '\\' {
+			return strconv.AppendQuote(target, key)
 		}
 	}
-	return result
+	return append(target, key...)
 }
 
-// Sync 刷新全部 Zap Core，并保留每个输出端的错误。
+// scopeValues 从已经由框架固定在切片前部的字段中提取当前输出可见的作用域。
+func scopeValues(
+	fields []originlog.Field,
+	mask originlog.ContextFieldsConfig,
+) (nodeID, serviceName string) {
+	for _, field := range fields {
+		switch field.Key() {
+		case "node_id":
+			if mask.NodeID {
+				nodeID = field.StringValue()
+			}
+		case "service_name":
+			if mask.ServiceName {
+				serviceName = field.StringValue()
+			}
+		}
+	}
+	return nodeID, serviceName
+}
+
+// appendMessage 保留普通空格，仅在控制字符会破坏单行边界时使用 Go 字符串转义。
+func appendMessage(target []byte, message string) []byte {
+	for _, value := range message {
+		if unicode.IsControl(value) {
+			return strconv.AppendQuote(target, message)
+		}
+	}
+	return append(target, message...)
+}
+
+// appendTextValue 按 FieldKind 生成不会破坏 key=value 边界的紧凑文本。
+func appendTextValue(target []byte, field originlog.Field) []byte {
+	switch field.Kind() {
+	case originlog.StringField, originlog.ErrorField:
+		return appendTextString(target, field.StringValue())
+	case originlog.BoolField:
+		return strconv.AppendBool(target, field.BoolValue())
+	case originlog.IntField, originlog.Int32Field, originlog.Int64Field:
+		return strconv.AppendInt(target, field.Int64Value(), 10)
+	case originlog.UintField, originlog.Uint32Field, originlog.Uint64Field:
+		return strconv.AppendUint(target, field.Uint64Value(), 10)
+	case originlog.Float32Field:
+		return strconv.AppendFloat(target, float64(field.Float32Value()), 'g', -1, 32)
+	case originlog.Float64Field:
+		return strconv.AppendFloat(target, field.Float64Value(), 'g', -1, 64)
+	case originlog.DurationField:
+		return append(target, field.DurationValue().String()...)
+	case originlog.TimeField:
+		return strconv.AppendQuote(target, field.TimeValue().Format(time.RFC3339Nano))
+	case originlog.BytesField:
+		return base64.StdEncoding.AppendEncode(target, field.BytesValue())
+	case originlog.AnyField:
+		return append(target, field.BytesValue()...)
+	default:
+		return append(target, "null"...)
+	}
+}
+
+// appendTextString 仅在空白、引号、反斜杠或控制字符存在时增加引号与转义。
+func appendTextString(target []byte, value string) []byte {
+	if value == "" {
+		return append(target, `""`...)
+	}
+	for _, current := range value {
+		if unicode.IsSpace(current) || unicode.IsControl(current) || current == '"' || current == '\\' {
+			return strconv.AppendQuote(target, value)
+		}
+	}
+	return append(target, value...)
+}
+
+// writeAll 把一条完整日志写到输出端，并把短写转换为标准错误。
+func writeAll(writer io.Writer, content []byte) error {
+	written, err := writer.Write(content)
+	if err != nil {
+		return err
+	}
+	if written != len(content) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+// Sync 刷新非 text Zap Core 和文件 Writer，并保留所有输出错误。
 func (handler *handler) Sync() error {
-	// Runtime 保证 Sync 与 Write 串行，因此无需额外锁。
+	if handler == nil {
+		return nil
+	}
 	var result error
-	for _, core := range handler.cores {
-		result = errors.Join(result, core.Sync())
+	if handler.console.stdoutCore != nil {
+		result = errors.Join(result, handler.console.stdoutCore.Sync())
+	}
+	if handler.console.stderrCore != nil {
+		result = errors.Join(result, handler.console.stderrCore.Sync())
+	}
+	if handler.file.core != nil {
+		result = errors.Join(result, handler.file.core.Sync())
+	} else if handler.file.writer != nil {
+		result = errors.Join(result, handler.file.writer.Sync())
 	}
 	return result
 }
 
-// Close 刷新并关闭 Handler 独占的文件 Writer，重复调用安全。
+// Close 停止新写入、刷新并关闭 Handler 独占的文件 Writer，重复调用安全。
 func (handler *handler) Close() error {
-	// 只有首次调用执行实际释放，后续返回固化结果。
+	if handler == nil {
+		return nil
+	}
 	handler.closeOnce.Do(func() {
-		// 先刷新所有 Core，再停止文件滚动和维护协程。
+		handler.closed.Store(true)
+		handler.console.state.enabled.Store(false)
+		handler.file.state.enabled.Store(false)
 		syncErr := handler.Sync()
 		var fileErr error
-		if handler.file != nil {
-			fileErr = handler.file.Close()
+		if handler.file.writer != nil {
+			fileErr = handler.file.writer.Close()
 		}
-		// 两个阶段都要执行并合并错误，不能因刷新失败跳过资源关闭。
 		handler.closeErr = errors.Join(syncErr, fileErr)
 	})
 	return handler.closeErr
 }
 
+// SetConsoleLevel 修改当前控制台最低级别。
+func (handler *handler) SetConsoleLevel(level originlog.Level) error {
+	return handler.setLevel(&handler.console.state, level)
+}
+
+// ResetConsoleLevel 恢复控制台启动配置级别。
+func (handler *handler) ResetConsoleLevel() error {
+	return handler.resetLevel(&handler.console.state)
+}
+
+// SetFileLevel 修改当前文件最低级别。
+func (handler *handler) SetFileLevel(level originlog.Level) error {
+	return handler.setLevel(&handler.file.state, level)
+}
+
+// ResetFileLevel 恢复文件启动配置级别。
+func (handler *handler) ResetFileLevel() error {
+	return handler.resetLevel(&handler.file.state)
+}
+
+// SetConsoleEnabled 暂停或恢复已在启动时建立的控制台输出。
+func (handler *handler) SetConsoleEnabled(enabled bool) error {
+	return handler.setEnabled(&handler.console.state, enabled)
+}
+
+// SetFileEnabled 暂停或恢复已在启动时建立的文件输出。
+func (handler *handler) SetFileEnabled(enabled bool) error {
+	return handler.setEnabled(&handler.file.state, enabled)
+}
+
+// Status 返回 Console/File 同一时刻附近的原子状态快照。
+func (handler *handler) Status() originlog.Status {
+	if handler == nil {
+		return originlog.Status{}
+	}
+	return originlog.Status{
+		Console: handler.console.state.status(),
+		File:    handler.file.state.status(),
+	}
+}
+
+// setLevel 校验 Handler 生命周期、输出可用性和公开 Level 后原子提交新级别。
+func (handler *handler) setLevel(state *outputState, level originlog.Level) error {
+	if handler == nil || handler.closed.Load() {
+		return errs.ErrLogClosed
+	}
+	if !validLevel(level) {
+		return errs.ErrInvalidArgument
+	}
+	if !state.available {
+		return errs.ErrLogOutputUnavailable
+	}
+	state.level.Store(uint32(level))
+	return nil
+}
+
+// resetLevel 恢复当前输出启动时的独立配置级别。
+func (handler *handler) resetLevel(state *outputState) error {
+	if handler == nil || handler.closed.Load() {
+		return errs.ErrLogClosed
+	}
+	if !state.available {
+		return errs.ErrLogOutputUnavailable
+	}
+	state.level.Store(uint32(state.configLevel))
+	return nil
+}
+
+// setEnabled 只改变逻辑准入；底层 Writer 一直保留到 Application 停止。
+func (handler *handler) setEnabled(state *outputState, enabled bool) error {
+	if handler == nil || handler.closed.Load() {
+		return errs.ErrLogClosed
+	}
+	if !state.available {
+		return errs.ErrLogOutputUnavailable
+	}
+	state.enabled.Store(enabled)
+	return nil
+}
+
+// accepts 是日志热路径使用的两次原子读取，不获取互斥锁。
+func (state *outputState) accepts(level originlog.Level) bool {
+	return state != nil && state.available && state.enabled.Load() &&
+		uint32(level) >= state.level.Load()
+}
+
+// status 复制配置常量和当前原子值；快照允许来自相邻 CPU 时刻。
+func (state *outputState) status() originlog.OutputStatus {
+	if state == nil {
+		return originlog.OutputStatus{}
+	}
+	return originlog.OutputStatus{
+		Available:   state.available,
+		Enabled:     state.available && state.enabled.Load(),
+		Level:       originlog.Level(state.level.Load()),
+		ConfigLevel: state.configLevel,
+	}
+}
+
+// validLevel 隔离 log 包的内部校验实现，避免依赖第三方 Zap 枚举连续性。
+func validLevel(level originlog.Level) bool {
+	switch level {
+	case originlog.DebugLevel, originlog.InfoLevel, originlog.WarnLevel, originlog.ErrorLevel:
+		return true
+	default:
+		return false
+	}
+}
+
 // toZapField 把无 interface{} 装箱的 Origin Field 映射为 Zap Field。
 func toZapField(field originlog.Field) zapcore.Field {
-	// Key 对全部合法 Kind 通用，先读取一次。
 	key := field.Key()
-	// Kind 决定使用哪个类型安全访问器和 Zap 构造函数。
 	switch field.Kind() {
 	case originlog.StringField:
 		return zap.String(key, field.StringValue())
@@ -245,14 +582,12 @@ func toZapField(field originlog.Field) zapcore.Field {
 	case originlog.AnyField:
 		return zap.Reflect(key, json.RawMessage(field.BytesValue()))
 	default:
-		// 无效或未来未知 Kind 使用 Skip，避免错误解释底层存储。
 		return zap.Skip()
 	}
 }
 
 // toZapLevel 把 Origin 稳定级别映射到 Zap 内部级别。
 func toZapLevel(level originlog.Level) zapcore.Level {
-	// 显式 switch 隔离第三方枚举数值，不能依赖强制类型转换。
 	switch level {
 	case originlog.DebugLevel:
 		return zapcore.DebugLevel
@@ -263,14 +598,12 @@ func toZapLevel(level originlog.Level) zapcore.Level {
 	case originlog.ErrorLevel:
 		return zapcore.ErrorLevel
 	default:
-		// 未知值映射到 Invalid，由 Core Enabler 拒绝。
 		return zapcore.InvalidLevel
 	}
 }
 
 // rotateConfig 把公开文件配置转换为内部 Writer 使用的字节和时长单位。
 func rotateConfig(config originlog.FileConfig) rotate.Config {
-	// 所有乘法范围已由 Config.Validate 检查，此处只做确定转换。
 	return rotate.Config{
 		Path:         config.Path,
 		MaxSizeBytes: config.Rotation.MaxSizeMB * 1024 * 1024,
@@ -282,16 +615,21 @@ func rotateConfig(config originlog.FileConfig) rotate.Config {
 	}
 }
 
-// writerSyncer 为控制台 io.Writer 补齐 Zap 所需的 Sync 方法。
+// writerSyncer 为普通 io.Writer 补齐 Zap Core 所需的 Sync 方法。
 type writerSyncer struct {
 	io.Writer
 }
 
-// Sync 对普通控制台 Writer 无可执行刷新操作。
+// Sync 在 Writer 自身支持刷新时委托，否则控制台 Buffer 无需操作。
 func (writer writerSyncer) Sync() error {
-	// writer 字段仅用于满足接口，返回 nil 保持 stdout/stderr 可替换。
+	if syncer, ok := writer.Writer.(interface{ Sync() error }); ok {
+		return syncer.Sync()
+	}
 	return nil
 }
 
-// 编译期确认 handler 完整实现公开 Handler 边界。
-var _ originlog.Handler = (*handler)(nil)
+// 编译期确认默认 Handler 同时实现固定写入和可选运行时控制边界。
+var (
+	_ originlog.Handler    = (*handler)(nil)
+	_ originlog.Controller = (*handler)(nil)
+)

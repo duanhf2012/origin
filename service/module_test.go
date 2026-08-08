@@ -5,7 +5,45 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	originlog "github.com/duanhf2012/origin/v3/log"
 )
+
+// enabledLogHandler 让 Module Logger 委托测试观察到真实 Runtime 的 Enabled 行为。
+type enabledLogHandler struct{}
+
+func (*enabledLogHandler) Enabled(originlog.Level) bool                    { return true }
+func (*enabledLogHandler) Write(originlog.Record, []originlog.Field) error { return nil }
+func (*enabledLogHandler) Sync() error                                     { return nil }
+func (*enabledLogHandler) Close() error                                    { return nil }
+
+// TestModuleLoggerDelegatesToOwnerService 防止 Module 建立独立 Logger 或未绑定时误用全局入口。
+func TestModuleLoggerDelegatesToOwnerService(t *testing.T) {
+	var unbound Module
+	if unbound.Logger().Enabled(originlog.InfoLevel) {
+		t.Fatal("unbound Module.Logger() is enabled")
+	}
+
+	runtime, err := originlog.NewRuntime(originlog.DefaultConfig(), &enabledLogHandler{})
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	t.Cleanup(func() { _ = runtime.Close(context.Background()) })
+	owner := &testService{}
+	if err := BindRuntime(owner, &testRuntime{
+		nodeID: "game-1",
+		name:   "PlayerService",
+		state:  StateRunning,
+		logger: runtime.Logger(),
+	}); err != nil {
+		t.Fatalf("BindRuntime() error = %v", err)
+	}
+	module := &testModule{}
+	module.owner = &owner.Service
+	if !module.Logger().Enabled(originlog.InfoLevel) {
+		t.Fatal("bound Module.Logger() did not delegate to Service Logger")
+	}
+}
 
 type testModule struct {
 	Module

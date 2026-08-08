@@ -44,6 +44,7 @@ go run ./examples/00-quickstart/01-hello-service
 | 09 | 读取诊断、启停 pprof、适配监控 | [Diagnostics 与 pprof](./docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md) | [09-diagnostics-and-pprof](./examples/09-diagnostics-and-pprof/) |
 | 10 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/10-performance.md) | [10-performance](./examples/10-performance/) |
 | 11 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/11-troubleshooting.md) | [11-troubleshooting](./examples/11-troubleshooting/) |
+| 12 | 使用日志、格式、运行时控制与滚动 | [v3.1 日志](./docs/maintenance/v3.1/guides/logging.md) | [12-logging](./examples/12-logging/) |
 
 完整教程见 [v3.0 使用指南](./docs/baseline/v3.0/guides/README.md)，全部可运行示例见 [examples](./examples/README.md)。
 
@@ -57,6 +58,11 @@ Notify 和 Broadcast 接受 nil、Background、TODO 或自定义 Context。完�
 v3.1 还新增 Node 级游戏逻辑时间：Service/Module 通过 `GetNode()` 使用
 `Now`、`SetTime` 和 `AddTime`，并统一驱动当前 Node 的 After、Ticker 和 Cron。见
 [Node 游戏逻辑时间教程](./docs/maintenance/v3.1/guides/node-game-time.md)。
+
+日志从 v3.1 起使用独立章节，覆盖 `log.Xxx`、Service/Module Logger、text/JSON、归属字段、
+文件滚动和运行时调整级别/启停输出。新使用者建议在第 02 章配置之后阅读
+[v3.1 日志教程](./docs/maintenance/v3.1/guides/logging.md)，并直接运行
+[`examples/12-logging`](./examples/12-logging/README.md)。编号 12 用于保持冻结的 v3.0 路径稳定。
 
 ## 学习方式
 

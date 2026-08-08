@@ -17,6 +17,38 @@ type applicationFacadeService struct {
 	service.Service
 }
 
+// diagnosticsLogHandler 让 Application.Diagnostics 测试读取确定的 Controller 状态。
+type diagnosticsLogHandler struct {
+	silentHandler
+	status originlog.Status
+}
+
+func (handler *diagnosticsLogHandler) SetConsoleLevel(level originlog.Level) error {
+	handler.status.Console.Level = level
+	return nil
+}
+func (handler *diagnosticsLogHandler) ResetConsoleLevel() error {
+	handler.status.Console.Level = handler.status.Console.ConfigLevel
+	return nil
+}
+func (handler *diagnosticsLogHandler) SetFileLevel(level originlog.Level) error {
+	handler.status.File.Level = level
+	return nil
+}
+func (handler *diagnosticsLogHandler) ResetFileLevel() error {
+	handler.status.File.Level = handler.status.File.ConfigLevel
+	return nil
+}
+func (handler *diagnosticsLogHandler) SetConsoleEnabled(enabled bool) error {
+	handler.status.Console.Enabled = enabled
+	return nil
+}
+func (handler *diagnosticsLogHandler) SetFileEnabled(enabled bool) error {
+	handler.status.File.Enabled = enabled
+	return nil
+}
+func (handler *diagnosticsLogHandler) Status() originlog.Status { return handler.status }
+
 func (target *applicationFacadeService) OnInit() error {
 	applicationFacadeSeen <- target.Application()
 	return nil
@@ -96,6 +128,56 @@ nodes:
 	if stopped.Application.State != "stopped" || stopped.Nodes[0].State != "stopped" ||
 		stopped.Nodes[0].Services[0].State != "stopped" {
 		t.Fatalf("stopped diagnostics = %+v", stopped)
+	}
+}
+
+// TestDiagnosticsIncludesLogOutputStatus 防止监控快照遗漏运行时调整后的 Console/File 状态。
+func TestDiagnosticsIncludesLogOutputStatus(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: gateway-1
+    services: [lifecycleTestService]
+`)
+	handler := &diagnosticsLogHandler{status: originlog.Status{
+		Console: originlog.OutputStatus{
+			Available:   true,
+			Enabled:     true,
+			Level:       originlog.DebugLevel,
+			ConfigLevel: originlog.InfoLevel,
+		},
+		File: originlog.OutputStatus{
+			Available:   true,
+			Enabled:     false,
+			Level:       originlog.WarnLevel,
+			ConfigLevel: originlog.DebugLevel,
+		},
+	}}
+	app := New(Options{
+		LogHandlerFactory: func(originlog.Config) (originlog.Handler, error) {
+			return handler, nil
+		},
+	})
+	app.Setup(&lifecycleTestService{})
+	runCtx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- app.run(runCtx, command.StartRequest{
+			AppName:   "diagnostics-log-test",
+			ConfigDir: directory,
+		})
+	}()
+	waitForState(t, app, StateRunning)
+
+	snapshot := app.Diagnostics()
+	if snapshot.Log.Console.Level != "debug" ||
+		snapshot.Log.Console.ConfigLevel != "info" ||
+		!snapshot.Log.Console.Available || !snapshot.Log.Console.Enabled ||
+		snapshot.Log.File.Level != "warn" || snapshot.Log.File.Enabled {
+		t.Fatalf("diagnostics log status = %+v", snapshot.Log)
+	}
+	cancel()
+	if err := <-result; err != nil {
+		t.Fatalf("run() error = %v", err)
 	}
 }
 
