@@ -44,7 +44,9 @@ func (s *GatewayService) OnStart(ctx context.Context) error {
         s.NodeID(), s.Name(), s.State(),
     ))
 
-    // 只查询同一个 Node 内的实际实例，不经过发现、网络或 RPC 路由。
+    // 只从当前 GatewayService 所属 Node 的本地 Service 集合中，按实际 ServiceName 查询。
+    // 它不会查询服务发现目录、etcd/NATS，也不会发起网络或 RPC 路由。
+    // 因此这里的 PlayerService 必须确实配置在同一个 Node；其他 Node 即使发布了它也不会命中。
     player, ok := s.LookupService("PlayerService")
     if !ok {
         return fmt.Errorf("local PlayerService is not configured")
@@ -54,7 +56,15 @@ func (s *GatewayService) OnStart(ctx context.Context) error {
 }
 ```
 
-`LookupService` 适合同 Node 的明确管理协作，例如维护 Service 精确退休本地目标；正常业务请求仍应使用生成 RPC 客户端，避免把业务耦合到“必须部署在同一 Node”的假设。返回值是 `IService`，不应依赖不受控制的具体类型断言。`Name`、`NodeID`、`State` 和 `Logger` 在 Setup 样本或未绑定测试对象上仍可安全调用，分别返回空值、`created` 或 Nop Logger。
+`LookupService("PlayerService")` 等价于“从当前 Service 所属 Node 的本地 Service 集合中，查找
+实际名称正好为 `PlayerService` 的实例”。它不会遍历任何已发现的远端服务，也不会读取 etcd、
+NATS 或发起 RPC；本 Node 没有该实例时，即使其他 Node 已发布同名 Service，也只会返回
+`(nil, false)`。
+
+它适合同 Node 的明确管理协作，例如维护 Service 精确退休本地目标；正常业务请求仍应使用生成
+RPC 客户端，避免把业务耦合到“必须部署在同一 Node”的假设。返回值是 `IService`，不应依赖不受
+控制的具体类型断言。`Name`、`NodeID`、`State` 和 `Logger` 在 Setup 样本或未绑定测试对象上仍可
+安全调用，分别返回空值、`created` 或 Nop Logger。
 
 运行期若框架无法证明某个 Service 的调度状态安全，会隔离该 Service 并令其进入 `failed`。此时可从本地诊断代码读取 `Failure()` 获取第一次根因；不要把该 error 原样通过 RPC 暴露给调用方：
 

@@ -28,7 +28,8 @@ func (target *CallerService) OnInit() error {
 // OnStart 先退休目标，再派生允许 Retired 候选的客户端执行调用。
 func (target *CallerService) OnStart(context.Context) error {
 	target.AfterFunc(200*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
-		// LookupService 是同 Node 精确取得 Service 实例的管理外观，不替代业务 RPC。
+		// LookupService 只从当前 Service 所属 Node 的本地实例中按名称查询；
+		// 不会读取发现目录、查询其他 Node，或替代业务 RPC。
 		player, ok := target.LookupService("PlayerService")
 		if !ok || player.Retire(ctx) != nil {
 			target.Logger().Error("retire target failed")
