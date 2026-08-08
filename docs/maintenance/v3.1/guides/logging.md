@@ -186,32 +186,38 @@ logs/game-origin.crash.log
 不需要通过 Application 或 Output 枚举。Console 与 File 使用对称函数：
 
 ```go
-// 临时调整最低级别；Reset 恢复 YAML/JSON 中的启动级别。
-if err := log.SetConsoleLevel(log.DebugLevel); err != nil {
-    return err
+// 只把 Console 的最低输出级别临时调到 Debug；File 的级别不会随之改变。
+if err := log.SetConsoleLevel(log.DebugLevel); err != nil { // 调整 Console 失败时返回错误。
+    return err // 将控制器或输出端返回的错误交给上层处理。
 }
-if err := log.ResetConsoleLevel(); err != nil {
-    return err
+// 把 Console 级别恢复为 YAML/JSON 中 log.console.level 的启动配置值。
+if err := log.ResetConsoleLevel(); err != nil { // 恢复失败时返回错误。
+    return err // 不把启动级别写死在业务代码中。
 }
-if err := log.SetFileLevel(log.WarnLevel); err != nil {
-    return err
+// 只把 File 的最低输出级别临时调到 Warn；Console 仍使用自己的级别。
+if err := log.SetFileLevel(log.WarnLevel); err != nil { // 调整 File 失败时返回错误。
+    return err // 例如 File 未启用或自定义 Handler 不支持控制时会失败。
 }
-if err := log.ResetFileLevel(); err != nil {
-    return err
+// 把 File 级别恢复为 log.file.level 的启动配置值。
+if err := log.ResetFileLevel(); err != nil { // 恢复失败时返回错误。
+    return err // Reset 不会把 File 级别恢复成固定的默认值。
 }
 
-// 暂停或恢复一个已在启动配置中创建的输出端。
-if err := log.SetConsoleEnabled(false); err != nil {
-    return err
+// 暂停 Console 接收新日志；这不会关闭 stdout/stderr，也不会影响 File。
+if err := log.SetConsoleEnabled(false); err != nil { // 暂停失败时返回错误。
+    return err // 只有启动时已创建的输出端才能运行时暂停。
 }
-if err := log.SetConsoleEnabled(true); err != nil {
-    return err
+// 恢复 Console 接收新日志；恢复后继续使用当前 Console 级别。
+if err := log.SetConsoleEnabled(true); err != nil { // 恢复失败时返回错误。
+    return err // 不会重新创建另一套 Runtime、队列或输出资源。
 }
-if err := log.SetFileEnabled(false); err != nil {
-    return err
+// 暂停 File 接收新日志；活动文件和滚动资源仍由原 Runtime 持有。
+if err := log.SetFileEnabled(false); err != nil { // 暂停失败时返回错误。
+    return err // 若启动配置 enabled=false，则这里会返回不可用错误。
 }
-if err := log.SetFileEnabled(true); err != nil {
-    return err
+// 恢复 File 接收新日志；它不会凭空创建启动时没有的 File 输出端。
+if err := log.SetFileEnabled(true); err != nil { // 恢复失败时返回错误。
+    return err // 业务可据此记录管理操作失败并告警。
 }
 ```
 

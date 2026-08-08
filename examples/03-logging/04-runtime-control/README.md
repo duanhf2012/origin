@@ -6,20 +6,45 @@
 公开接口按输出端保持对称：
 
 ```go
-// 修改当前级别；Reset 恢复启动配置中的级别。
-err := log.SetConsoleLevel(log.DebugLevel)
-err = log.ResetConsoleLevel()
-err = log.SetFileLevel(log.WarnLevel)
-err = log.ResetFileLevel()
+// 只把 Console 的最低输出级别临时调到 Debug；File 的级别不会随之改变。
+if err := log.SetConsoleLevel(log.DebugLevel); err != nil {
+    return err // 业务管理命令应把控制失败返回给调用方。
+}
+// 把 Console 级别恢复为配置文件中的 log.console.level。
+if err := log.ResetConsoleLevel(); err != nil {
+    return err // Reset 恢复启动配置，不是恢复到固定的 info。
+}
+// 只把 File 的最低输出级别临时调到 Warn；Console 仍使用自己的级别。
+if err := log.SetFileLevel(log.WarnLevel); err != nil {
+    return err // File 未创建或 Handler 不支持控制时会返回错误。
+}
+// 把 File 级别恢复为配置文件中的 log.file.level。
+if err := log.ResetFileLevel(); err != nil {
+    return err // 业务可以据此记录管理失败并触发告警。
+}
 
-// false 暂停接收新日志，true 恢复；底层资源不会反复创建。
-err = log.SetConsoleEnabled(false)
-err = log.SetConsoleEnabled(true)
-err = log.SetFileEnabled(false)
-err = log.SetFileEnabled(true)
+// false 让 Console 暂停接收新日志；不会关闭 stdout/stderr 或影响 File。
+if err := log.SetConsoleEnabled(false); err != nil {
+    return err // 只有启动时已创建的 Console 才能运行时暂停。
+}
+// true 恢复 Console 接收日志；不会重新创建另一套 Runtime 或队列。
+if err := log.SetConsoleEnabled(true); err != nil {
+    return err // 恢复失败时把错误交给管理调用方。
+}
+// false 让 File 暂停接收新日志；活动文件和滚动资源仍保持原状。
+if err := log.SetFileEnabled(false); err != nil {
+    return err // 启动配置 enabled=false 的 File 不能凭空运行时开启。
+}
+// true 恢复 File 接收日志；恢复后继续使用当前 File 级别。
+if err := log.SetFileEnabled(true); err != nil {
+    return err // 业务可以根据错误决定告警或回退处理。
+}
 
-// 读取 Available、Enabled、当前 Level 和 ConfigLevel。
+// 读取 Console 和 File 的 Available、Enabled、当前 Level、ConfigLevel。
 status, err := log.CurrentStatus()
+if err != nil {
+    return err // 状态读取失败时不要把不完整状态当作真实配置。
+}
 ```
 
 这些包级函数只控制当前默认 Application，不需要传 Output 或 Application。Service、普通
