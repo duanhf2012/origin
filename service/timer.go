@@ -22,8 +22,11 @@ type ITimer interface {
 	NewTicker(interval time.Duration, fn TimerFunc) TimerID
 	CronFunc(expression string, fn TimerFunc) (TimerID, error)
 
+	// PauseTimer 暂停尚未开始的 Timer；周期回调运行中时，在本轮完成后暂停。
 	PauseTimer(timerID TimerID) bool
+	// ResumeTimer 恢复已经暂停的 Timer；Cron 不补执行暂停期间错过的历史点。
 	ResumeTimer(timerID TimerID) bool
+	// CancelTimer 取消 Timer，并把调用方持有的非零 TimerID 清零。
 	CancelTimer(timerID *TimerID) bool
 
 	TimerStats() TimerStats

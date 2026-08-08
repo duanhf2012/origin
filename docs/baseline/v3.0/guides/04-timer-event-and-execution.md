@@ -20,6 +20,58 @@ s.CronFunc("*/1 * * * * *", func(ctx context.Context, id service.TimerID) {
 
 `TimerStats` 返回当前数量与触发、暂停、恢复、取消等累计统计。Timer 回调已经处于所属 Service 的执行上下文；不要再为同一份 Service 状态额外启动 goroutine。
 
+## 我想暂停、恢复或取消一个 Timer
+
+创建 Timer 后保存返回的 `TimerID`，再用同一个 Service 或 Module 的成员函数控制它：
+
+```go
+type MatchService struct {
+    service.Service
+    refreshID service.TimerID
+}
+
+func (s *MatchService) OnStart(context.Context) error {
+    s.refreshID = s.NewTicker(time.Second, func(ctx context.Context, id service.TimerID) {
+        // 周期回调正在执行时，Pause/Cancel 不会强行中断这一轮回调。
+        s.Logger().Info("refresh tick")
+    })
+    if s.refreshID == service.InvalidTimerID {
+        return fmt.Errorf("create refresh timer failed")
+    }
+
+    // 暂停成功后，After/Ticker 保存暂停时的剩余延迟；不会继续产生新的回调。
+    if !s.PauseTimer(s.refreshID) {
+        return fmt.Errorf("pause refresh timer failed")
+    }
+    // 恢复 After/Ticker 时从保存的剩余延迟继续；Cron 从当前时间寻找下一个匹配点。
+    if !s.ResumeTimer(s.refreshID) {
+        return fmt.Errorf("resume refresh timer failed")
+    }
+    // CancelTimer 接收 *TimerID；无论取消是否命中，传入的非零 ID 都会被清零。
+    if !s.CancelTimer(&s.refreshID) {
+        return fmt.Errorf("cancel refresh timer failed")
+    }
+    return nil
+}
+```
+
+三个控制接口的区别如下：
+
+| 接口 | 成功时 | 常见失败情况 |
+| --- | --- | --- |
+| `PauseTimer(id)` | 暂停尚未开始的 Timer，并保存 After/Ticker 的剩余延迟；周期回调正在执行时，标记为本轮结束后暂停 | ID 不存在、属于其他 Service、Timer 已完成/取消；正在执行的 `AfterFunc` 不能暂停 |
+| `ResumeTimer(id)` | 恢复已暂停的 Timer；After/Ticker 继续剩余延迟，Cron 不补执行暂停期间错过的历史点 | ID 未处于暂停状态、属于其他 Service、Service 已停止或重复恢复 |
+| `CancelTimer(&id)` | 取消尚未开始的 Timer；正在执行的 Ticker/Cron 会在本轮结束后不再登记下一轮 | `AfterFunc` 已经开始执行、ID 无效或属于其他 Service；传入的非零 `id` 仍会先清零 |
+
+`PauseTimer`、`ResumeTimer` 返回 `bool`，只表示这次状态操作是否被当前 Timer 接受；它们不会返回
+错误详情。`CancelTimer` 必须传指针，是因为框架会把调用方保存的 ID 清零，避免业务后续误用已经
+失效的标识。Timer 只能由创建它的同一 Service/Module 控制，不能拿另一个 Service 的 `TimerID`
+操作它。Timer 回调开始后，不要依赖取消或暂停去中断已经运行的业务代码；需要中止外部 I/O 时，
+请使用回调收到的 `ctx`。
+
+完整的暂停、恢复、取消和统计顺序见
+[`01-delay-and-cron`](../../../../examples/05-timer-event-and-execution/01-delay-and-cron/README.md)。
+
 ## 我想在同一 Service 内通知事件
 
 运行：[examples/05-timer-event-and-execution/02-local-event](../../../../examples/05-timer-event-and-execution/02-local-event)。先在 `OnInit` 注册监听器，再从业务任务中通知：
