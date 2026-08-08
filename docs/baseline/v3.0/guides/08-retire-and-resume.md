@@ -2,7 +2,7 @@
 
 ## 我想让进程以 Retired 状态启动
 
-运行：[examples/08-retire-and-resume/01-service-retire-resume](../../../../examples/08-retire-and-resume/01-service-retire-resume)。其完整启动命令包含：
+运行：[examples/09-retire-and-resume/01-service-retire-resume](../../../../examples/09-retire-and-resume/01-service-retire-resume)。其完整启动命令包含：
 
 ```text
 # 全部选中 Node 的 Service 正常执行 OnInit/OnStart，但首次对外发布就是 Retired。
@@ -33,7 +33,7 @@ if err := s.Resume(ctx); err != nil {
 
 ## 我想退休一个 Node 或整个 Application
 
-运行：[examples/08-retire-and-resume/02-node-and-application](../../../../examples/08-retire-and-resume/02-node-and-application)。
+运行：[examples/09-retire-and-resume/02-node-and-application](../../../../examples/09-retire-and-resume/02-node-and-application)。
 
 ```go
 // Node 内按 Service 启动顺序的倒序退休。
@@ -51,7 +51,7 @@ if err := app.Retire(ctx); err != nil {
 
 ## 我仍需要精确调用一个 Retired Service
 
-运行：[examples/08-retire-and-resume/03-include-retired](../../../../examples/08-retire-and-resume/03-include-retired)。默认自动路由排除 Retired；精确 `OnNode` 目标原本就可以命中，自动选择时可显式使用 `IncludeRetired()`。
+运行：[examples/09-retire-and-resume/03-include-retired](../../../../examples/09-retire-and-resume/03-include-retired)。默认自动路由排除 Retired；精确 `OnNode` 目标原本就可以命中，自动选择时可显式使用 `IncludeRetired()`。
 
 该示例的 `PlayerService` 是业务目录中的普通结构体，只通过模板名与共享 RPC 契约自动
 关联。Retire/Resume 不重新生成或重新匹配契约，也不改变实际 ServiceName；它们只更新

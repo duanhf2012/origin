@@ -2,7 +2,7 @@
 
 ## 我想稍后或按周期执行任务
 
-运行：[examples/04-timer-event-and-execution/01-delay-and-cron](../../../../examples/04-timer-event-and-execution/01-delay-and-cron)。
+运行：[examples/05-timer-event-and-execution/01-delay-and-cron](../../../../examples/05-timer-event-and-execution/01-delay-and-cron)。
 
 ```go
 s.AfterFunc(300*time.Millisecond, func(ctx context.Context, id service.TimerID) {
@@ -22,7 +22,7 @@ s.CronFunc("*/1 * * * * *", func(ctx context.Context, id service.TimerID) {
 
 ## 我想在同一 Service 内通知事件
 
-运行：[examples/04-timer-event-and-execution/02-local-event](../../../../examples/04-timer-event-and-execution/02-local-event)。先在 `OnInit` 注册监听器，再从业务任务中通知：
+运行：[examples/05-timer-event-and-execution/02-local-event](../../../../examples/05-timer-event-and-execution/02-local-event)。先在 `OnInit` 注册监听器，再从业务任务中通知：
 
 ```go
 // 在 OnInit 注册本 Service 内的事件处理器。
@@ -37,7 +37,7 @@ stats := s.EventStats()
 
 ## 我想等待操作或安全地执行独立工作
 
-运行：[examples/04-timer-event-and-execution/03-await-and-safe](../../../../examples/04-timer-event-and-execution/03-await-and-safe)。
+运行：[examples/05-timer-event-and-execution/03-await-and-safe](../../../../examples/05-timer-event-and-execution/03-await-and-safe)。
 
 - `Await`：等待 I/O、RPC 等操作，并让 Service 在等待时继续处理其他任务。
 - `SetDefaultAwaitTimeout`：为没有显式 Deadline 的 Await 设置统一默认超时。

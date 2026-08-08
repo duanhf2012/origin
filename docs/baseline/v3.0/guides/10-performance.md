@@ -2,7 +2,7 @@
 
 ## 我想自己运行 RPC 基准测试
 
-运行：[examples/10-performance/01-local-rpc-benchmark](../../../../examples/10-performance/01-local-rpc-benchmark)、[TCP](../../../../examples/10-performance/02-tcp-rpc-benchmark) 或 [NATS](../../../../examples/10-performance/03-nats-rpc-benchmark)。每个目录的 `run` 脚本会打印实际执行的 `go test -bench` 命令。
+运行：[examples/11-performance/01-local-rpc-benchmark](../../../../examples/11-performance/01-local-rpc-benchmark)、[TCP](../../../../examples/11-performance/02-tcp-rpc-benchmark) 或 [NATS](../../../../examples/11-performance/03-nats-rpc-benchmark)。每个目录的 `run` 脚本会打印实际执行的 `go test -bench` 命令。
 
 ```bash
 # 只运行指定 Benchmark，跳过普通测试；benchmem 输出分配指标。

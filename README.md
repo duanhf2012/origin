@@ -28,25 +28,24 @@ go run ./examples/00-quickstart/01-hello-service
 
 ## 完整学习路径
 
-教程章节与 `examples/` 路径一一对应；每章先运行对应示例，再阅读使用说明和深入内容。
-学习顺序按依赖关系排列。日志属于 v3.1 的新增章节，路径编号仍为 `12` 以保持冻结的
-v3.0 路径稳定，但学习上放在配置之后，便于尽早统一日志输出。
+教程章节、标题和 `examples/` 目录按同一序号排列；每章先运行对应示例，再阅读使用说明和
+深入内容。
 
-| 路径编号 | 学习目标 | 教程 | 示例目录 |
-| --- | --- | --- | --- |
-| 00 | 运行第一个 Application | [快速入口](./docs/baseline/v3.0/guides/00-quickstart.md) | [00-quickstart](./examples/00-quickstart/) |
-| 01 | 创建 Application、Node 与 Service | [创建第一个应用](./docs/baseline/v3.0/guides/01-first-application.md) | [01-first-application](./examples/01-first-application/) |
-| 02 | 加载 YAML 与业务配置 | [配置应用](./docs/baseline/v3.0/guides/02-configuration.md) | [02-configuration](./examples/02-configuration/) |
-| 12 | 使用日志、格式、滚动与运行时控制（建议在配置后学习） | [v3.1 日志](./docs/maintenance/v3.1/guides/logging.md) | [12-logging](./examples/12-logging/) |
-| 03 | 用 Service、Module 组织业务 | [Service 与 Module](./docs/baseline/v3.0/guides/03-service-and-module.md) | [03-service-and-module](./examples/03-service-and-module/) |
-| 04 | 使用 Timer、Event、Await 与安全执行 | [Timer、Event 与执行](./docs/baseline/v3.0/guides/04-timer-event-and-execution.md) | [04-timer-event-and-execution](./examples/04-timer-event-and-execution/) |
-| 05 | 定义合约并调用同 Node RPC | [RPC 基础](./docs/baseline/v3.0/guides/05-rpc-basics.md) | [05-rpc-basics](./examples/05-rpc-basics/) |
-| 06 | 使用 TCP、NATS 与多实例远程 RPC | [跨节点 RPC](./docs/baseline/v3.0/guides/06-remote-rpc.md) | [06-remote-rpc](./examples/06-remote-rpc/) |
-| 07 | 使用 Origin、etcd 或自定义服务发现 | [服务发现](./docs/baseline/v3.0/guides/07-discovery.md) | [07-discovery](./examples/07-discovery/) |
-| 08 | Retire、Resume 与优雅下线 | [Retire、Resume 与优雅停止](./docs/baseline/v3.0/guides/08-retire-and-resume.md) | [08-retire-and-resume](./examples/08-retire-and-resume/) |
-| 09 | 读取诊断、启停 pprof、适配监控 | [Diagnostics 与 pprof](./docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md) | [09-diagnostics-and-pprof](./examples/09-diagnostics-and-pprof/) |
-| 10 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/10-performance.md) | [10-performance](./examples/10-performance/) |
-| 11 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/11-troubleshooting.md) | [11-troubleshooting](./examples/11-troubleshooting/) |
+| 序号 | 章节 | 学习目标 | 教程 | 示例目录 |
+| --- | --- | --- | --- | --- |
+| 00 | 快速入口 | 运行第一个 Application | [快速入口](./docs/baseline/v3.0/guides/00-quickstart.md) | [00-quickstart](./examples/00-quickstart/) |
+| 01 | 创建第一个应用 | 创建 Application、Node 与 Service | [创建第一个应用](./docs/baseline/v3.0/guides/01-first-application.md) | [01-first-application](./examples/01-first-application/) |
+| 02 | 配置应用 | 加载 YAML 与业务配置 | [配置应用](./docs/baseline/v3.0/guides/02-configuration.md) | [02-configuration](./examples/02-configuration/) |
+| 03 | 日志输出与管理 | 写日志、配置格式与文件滚动、运行时调整输出 | [日志输出与管理](./docs/maintenance/v3.1/guides/logging.md) | [03-logging](./examples/03-logging/) |
+| 04 | Service 与 Module | 用 Service、Module 组织业务 | [Service 与 Module](./docs/baseline/v3.0/guides/03-service-and-module.md) | [04-service-and-module](./examples/04-service-and-module/) |
+| 05 | Timer、Event 与执行 | 使用 Timer、Event、Await 与安全执行 | [Timer、Event 与执行](./docs/baseline/v3.0/guides/04-timer-event-and-execution.md) | [05-timer-event-and-execution](./examples/05-timer-event-and-execution/) |
+| 06 | RPC 基础 | 定义合约并调用同 Node RPC | [RPC 基础](./docs/baseline/v3.0/guides/05-rpc-basics.md) | [06-rpc-basics](./examples/06-rpc-basics/) |
+| 07 | 跨节点 RPC | 使用 TCP、NATS 与多实例远程 RPC | [跨节点 RPC](./docs/baseline/v3.0/guides/06-remote-rpc.md) | [07-remote-rpc](./examples/07-remote-rpc/) |
+| 08 | 服务发现 | 使用 Origin、etcd 或自定义服务发现 | [服务发现](./docs/baseline/v3.0/guides/07-discovery.md) | [08-discovery](./examples/08-discovery/) |
+| 09 | Retire、Resume 与优雅停止 | Retire、Resume 与优雅下线 | [Retire、Resume 与优雅停止](./docs/baseline/v3.0/guides/08-retire-and-resume.md) | [09-retire-and-resume](./examples/09-retire-and-resume/) |
+| 10 | Diagnostics 与 pprof | 读取诊断、启停 pprof、适配监控 | [Diagnostics 与 pprof](./docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md) | [10-diagnostics-and-pprof](./examples/10-diagnostics-and-pprof/) |
+| 11 | 性能测试与容量理解 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/10-performance.md) | [11-performance](./examples/11-performance/) |
+| 12 | 故障排查 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/11-troubleshooting.md) | [12-troubleshooting](./examples/12-troubleshooting/) |
 
 完整教程见 [v3.0 使用指南](./docs/baseline/v3.0/guides/README.md)，全部可运行示例见 [examples](./examples/README.md)。
 
@@ -63,8 +62,8 @@ v3.1 还新增 Node 级游戏逻辑时间：Service/Module 通过 `GetNode()` �
 
 日志从 v3.1 起使用独立章节，覆盖 `log.Xxx`、Service/Module Logger、text/JSON、归属字段、
 文件滚动和运行时调整级别/启停输出。新使用者建议在第 02 章配置之后阅读
-[v3.1 日志教程](./docs/maintenance/v3.1/guides/logging.md)，并直接运行
-[`examples/12-logging`](./examples/12-logging/README.md)。编号 12 用于保持冻结的 v3.0 路径稳定。
+[日志输出与管理](./docs/maintenance/v3.1/guides/logging.md)，并直接运行
+[`examples/03-logging`](./examples/03-logging/README.md)。
 
 ## 学习方式
 

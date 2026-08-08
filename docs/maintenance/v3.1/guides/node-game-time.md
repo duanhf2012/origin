@@ -7,7 +7,7 @@
 
 游戏开发中经常需要验证跨天刷新、活动开启、周期结算和时间回退。Origin 不修改操作系统时钟，而是让每个 Node 拥有一套独立的游戏逻辑时间。
 
-可直接运行 [04-node-game-time](../../../../examples/04-timer-event-and-execution/04-node-game-time/README.md)，观察同 Node 两个 Service 的完整行为。
+可直接运行 [04-node-game-time](../../../../examples/05-timer-event-and-execution/04-node-game-time/README.md)，观察同 Node 两个 Service 的完整行为。
 
 ## 先会用
 

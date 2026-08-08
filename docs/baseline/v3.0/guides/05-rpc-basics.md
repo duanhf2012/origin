@@ -24,13 +24,13 @@ s.players = tutorialrpc.BindPlayerService(s)
 player, err := s.players.AwaitGetPlayer(ctx, playerID)
 ```
 
-直接运行示例：[合约、生成与 Bind](../../../../examples/05-rpc-basics/01-contract-generate-bind)。
+直接运行示例：[合约、生成与 Bind](../../../../examples/06-rpc-basics/01-contract-generate-bind)。
 
 ```text
 REM 修改契约后重新生成契约包代码。
-examples\05-rpc-basics\01-contract-generate-bind\generate.bat
+examples\06-rpc-basics\01-contract-generate-bind\generate.bat
 REM 运行同 Node Await 示例。
-examples\05-rpc-basics\01-contract-generate-bind\run.bat
+examples\06-rpc-basics\01-contract-generate-bind\run.bat
 ```
 
 RPC 合约与业务实现放在不同包中，并使用相同领域名称：合约包的 `PlayerService` 描述远程能力，业务包的 `PlayerService` 提供实现。Go 接口不使用 `I` 前缀。模板中的 Service 实际改名时，使用生成的 `BindPlayerServiceTo` 指定实际 Service 名。
@@ -149,7 +149,7 @@ go run github.com/duanhf2012/origin/v3/cmd/origingen rpc --check ./...
 适合提交前检查和 CI；普通 `rpc` 命令会原子地新增、更新或删除带完整 origingen 头部的陈旧
 生成文件，不会覆盖同名手写文件。
 
-本章的 [生成脚本](../../../../examples/05-rpc-basics/01-contract-generate-bind/generate.bat) 已改为
+本章的 [生成脚本](../../../../examples/06-rpc-basics/01-contract-generate-bind/generate.bat) 已改为
 `go generate` 工作流；对应契约位于
 [examples/_support/tutorialrpc/player_service.go](../../../../examples/_support/tutorialrpc/player_service.go)。先运行
 `generate.bat`/`generate.sh`，再运行示例，最容易观察完整流程。
@@ -170,7 +170,7 @@ if err := client.NotifyRefresh(ctx, version); err != nil {
 }
 ```
 
-直接运行示例：[Async 与 Notify](../../../../examples/05-rpc-basics/02-async-and-notify)。
+直接运行示例：[Async 与 Notify](../../../../examples/06-rpc-basics/02-async-and-notify)。
 
 `Async` 只表示请求已提交，结果在回调中处理；`Notify` 不等待也不返回业务结果，适合可容忍单向语义的通知。
 

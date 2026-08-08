@@ -52,5 +52,5 @@ func (module *Module) GetNode() NodeRuntime
 
 - 设计：[Node 游戏逻辑时间设计](../design/Node游戏逻辑时间设计.md)
 - 使用教程：[Node 游戏逻辑时间](../guides/node-game-time.md)
-- 可运行示例：[04-node-game-time](../../../../examples/04-timer-event-and-execution/04-node-game-time/README.md)
+- 可运行示例：[04-node-game-time](../../../../examples/05-timer-event-and-execution/04-node-game-time/README.md)
 - 验收数据：[Node 游戏逻辑时间验收报告](../reports/Node游戏逻辑时间验收报告.md)

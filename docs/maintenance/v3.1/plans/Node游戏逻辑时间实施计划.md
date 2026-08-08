@@ -172,12 +172,12 @@
 ### Task 5: 教程、示例和 StartTimeout 表达优化
 
 **Files:**
-- Create: `examples/04-timer-event-and-execution/04-node-game-time/main.go`
-- Create: `examples/04-timer-event-and-execution/04-node-game-time/config/application.yaml`
-- Create: `examples/04-timer-event-and-execution/04-node-game-time/README.md`
-- Create: `examples/04-timer-event-and-execution/04-node-game-time/run.bat`
-- Create: `examples/04-timer-event-and-execution/04-node-game-time/run.sh`
-- Modify: `examples/04-timer-event-and-execution/README.md`
+- Create: `examples/05-timer-event-and-execution/04-node-game-time/main.go`
+- Create: `examples/05-timer-event-and-execution/04-node-game-time/config/application.yaml`
+- Create: `examples/05-timer-event-and-execution/04-node-game-time/README.md`
+- Create: `examples/05-timer-event-and-execution/04-node-game-time/run.bat`
+- Create: `examples/05-timer-event-and-execution/04-node-game-time/run.sh`
+- Modify: `examples/05-timer-event-and-execution/README.md`
 - Modify: `docs/maintenance/v3.1/guides/README.md`
 - Modify: `docs/maintenance/v3.1/README.md`
 - Modify: `docs/baseline/v3.0/guides/01-first-application.md`
@@ -205,7 +205,7 @@
 
 - [x] **Step 4: 验证示例构建与 Markdown**
 
-  Run: `go build ./examples/04-timer-event-and-execution/04-node-game-time`
+  Run: `go build ./examples/05-timer-event-and-execution/04-node-game-time`
   Expected: PASS。
 
   Run: `git diff --check`

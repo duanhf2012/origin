@@ -1079,7 +1079,7 @@ func TestLoggingTutorialConfigurationsLoad(t *testing.T) {
 	}{
 		{
 			name:      "global and service",
-			directory: filepath.Join("..", "examples", "12-logging", "01-global-and-service", "config"),
+			directory: filepath.Join("..", "examples", "03-logging", "01-global-and-service", "config"),
 			check: func(t *testing.T, loaded loadedConfig) {
 				if loaded.log.Mode != originlog.SyncMode || !loaded.log.Console.Enabled {
 					t.Fatalf("unexpected log config: %+v", loaded.log)
@@ -1088,7 +1088,7 @@ func TestLoggingTutorialConfigurationsLoad(t *testing.T) {
 		},
 		{
 			name:      "formats and context",
-			directory: filepath.Join("..", "examples", "12-logging", "02-formats-and-context", "config"),
+			directory: filepath.Join("..", "examples", "03-logging", "02-formats-and-context", "config"),
 			check: func(t *testing.T, loaded loadedConfig) {
 				if loaded.log.Console.ContextFields.ServiceName ||
 					!loaded.log.File.ContextFields.ServiceName ||
@@ -1099,7 +1099,7 @@ func TestLoggingTutorialConfigurationsLoad(t *testing.T) {
 		},
 		{
 			name:      "runtime control",
-			directory: filepath.Join("..", "examples", "12-logging", "04-runtime-control", "config"),
+			directory: filepath.Join("..", "examples", "03-logging", "04-runtime-control", "config"),
 			check: func(t *testing.T, loaded loadedConfig) {
 				if !loaded.log.Console.Enabled || !loaded.log.File.Enabled ||
 					loaded.log.File.Level != originlog.DebugLevel {
@@ -1109,7 +1109,7 @@ func TestLoggingTutorialConfigurationsLoad(t *testing.T) {
 		},
 		{
 			name:      "file rotation",
-			directory: filepath.Join("..", "examples", "12-logging", "03-file-rotation", "config"),
+			directory: filepath.Join("..", "examples", "03-logging", "03-file-rotation", "config"),
 			check: func(t *testing.T, loaded loadedConfig) {
 				if loaded.log.File.Rotation.MaxSizeMB != 1 ||
 					loaded.log.File.Retention.MaxFiles != 10 ||

@@ -2,7 +2,7 @@
 
 ## 我想新增一个 Service
 
-运行：[examples/03-service-and-module/01-first-service](../../../../examples/03-service-and-module/01-first-service)。
+运行：[examples/04-service-and-module/01-first-service](../../../../examples/04-service-and-module/01-first-service)。
 
 一个业务 Service 只需要嵌入 `service.Service` 并在 `app.Setup` 中登记：
 
@@ -22,7 +22,7 @@ func init() {
 
 ## 我想把一个 Service 拆成 Module
 
-运行：[examples/03-service-and-module/02-module-lifecycle](../../../../examples/03-service-and-module/02-module-lifecycle)。
+运行：[examples/04-service-and-module/02-module-lifecycle](../../../../examples/04-service-and-module/02-module-lifecycle)。
 
 ```go
 func (s *GameService) OnInit() error {
@@ -147,5 +147,5 @@ GameService
 清理。某个 Module 的 `OnStop` 返回错误或 panic 不会跳过其余 Module，也不会跳过最后的
 `Service.OnStop`。
 
-运行 [完整生命周期示例](../../../../examples/03-service-and-module/02-module-lifecycle)，按
+运行 [完整生命周期示例](../../../../examples/04-service-and-module/02-module-lifecycle)，按
 `Ctrl+C` 即可直接核对以上启动和停止日志。

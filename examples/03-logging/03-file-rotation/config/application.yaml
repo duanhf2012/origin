@@ -1,0 +1,41 @@
+log:
+  # async 使用容量固定的异步队列，避免普通日志阻塞业务；sync 适合本地调试。
+  mode: async
+  console:
+    # enabled 省略时默认 true；本例显式开启控制台，显示 info 及以上的单行文本。
+    enabled: true
+    level: info
+    format: text
+    context_fields:
+      # 两项省略时默认都是 true；此处显式写出便于和文件配置对照。
+      node_id: true
+      service_name: true
+  file:
+    # enabled 省略时默认 false；必须显式 true 才创建文件，并保留 debug 及以上的 JSON Lines。
+    enabled: true
+    level: debug
+    format: json
+    # 相对路径以程序启动时的当前工作目录为基准。
+    # 启动 app-name 是 log-output，实际活动文件会加前缀成为 log-output-tutorial.log。
+    path: examples/03-logging/03-file-rotation/logs/tutorial.log
+    context_fields:
+      node_id: true
+      service_name: true
+    rotation:
+      # 下一条完整日志会使活动文件超过 1 MiB 时先滚动；单条日志不拆分，0B 关闭大小滚动。
+      # 必须使用 1 MiB 的整数倍，避免字节值转换为整数 MiB 时发生截断。
+      max_size: 1M
+      # 跨本地自然日时也滚动；timezone 还可以设置为 UTC。
+      by_date: true
+      timezone: Local
+    retention:
+      # 删除超过七天的归档；0s 表示不按时间删除。
+      max_age: 7d
+      # 只保留最新十个归档；0 表示不限制数量。
+      max_files: 10
+      # 滚动后的普通归档由唯一维护协程压缩为 gzip。
+      compress: true
+
+nodes:
+  - id: log-1
+    services: [LogService]

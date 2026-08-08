@@ -2,7 +2,7 @@
 
 ## 我想使用 Origin 内置发现
 
-运行：[examples/07-discovery/01-origin-provider](../../../../examples/07-discovery/01-origin-provider)。
+运行：[examples/08-discovery/01-origin-provider](../../../../examples/08-discovery/01-origin-provider)。
 
 Origin Provider 需要在任意一个 Node 配置唯一 `DiscoveryService`，并在顶层选择 `discovery.type: origin`：
 
@@ -26,7 +26,7 @@ discovery:
 
 ## 我想使用 etcd
 
-运行：[examples/07-discovery/02-etcd-provider](../../../../examples/07-discovery/02-etcd-provider)。先执行其中的 `deps-up`，它只启动仓库已有 compose 中的 etcd 依赖。
+运行：[examples/08-discovery/02-etcd-provider](../../../../examples/08-discovery/02-etcd-provider)。先执行其中的 `deps-up`，它只启动仓库已有 compose 中的 etcd 依赖。
 
 ```yaml
 discovery:
@@ -81,7 +81,7 @@ nodes:
 
 它最终仍只会看到 `region=cn-east` 的 `PlayerService`。也就是说，Provider 网络范围是第一层筛选，`allow_discovery` 的 Service 和标签规则是第二层筛选。
 
-当前 `examples/07-discovery/02-etcd-provider` 示例默认只启动 `cn-east` 网络的 Node，因此没有配置 `watch_networks`。要观察跨网络读取，需要让另一个进程使用相同的 etcd 集群和 namespace、但使用 `local_network: cn-north` 发布记录；观察进程则在 `watch_networks` 中加入 `cn-north`。该功能的配置归一化和跨网络 Watch 已由 etcd Provider 测试覆盖。
+当前 `examples/08-discovery/02-etcd-provider` 示例默认只启动 `cn-east` 网络的 Node，因此没有配置 `watch_networks`。要观察跨网络读取，需要让另一个进程使用相同的 etcd 集群和 namespace、但使用 `local_network: cn-north` 发布记录；观察进程则在 `watch_networks` 中加入 `cn-north`。该功能的配置归一化和跨网络 Watch 已由 etcd Provider 测试覆盖。
 
 ## 我想按区域筛选目标 Node
 
@@ -244,7 +244,7 @@ allow_discovery:
 
 服务发现不只是用来“找到一个 RPC 地址”，业务通常还需要知道远端实例什么时候出现、状态什么时候变化、什么时候已经不能再使用。监听器就是接收这些可见目录变化的入口。
 
-运行：[examples/07-discovery/03-watch-and-lost](../../../../examples/07-discovery/03-watch-and-lost)。这个示例不依赖 etcd 或真实网络，而是注册一个可控的内存 Provider，故意按以下时间线提交快照：
+运行：[examples/08-discovery/03-watch-and-lost](../../../../examples/08-discovery/03-watch-and-lost)。这个示例不依赖 etcd 或真实网络，而是注册一个可控的内存 Provider，故意按以下时间线提交快照：
 
 ```text
 启动
@@ -256,7 +256,7 @@ allow_discovery:
           └─ 监听器收到 OnLost
 ```
 
-示例中 `watcher-1` 是本地 Node，`DiscoveryWatcherService` 在 `OnInit` 中注册监听器。完整可运行代码见：[03-watch-and-lost/main.go](../../../../examples/07-discovery/03-watch-and-lost/main.go)。
+示例中 `watcher-1` 是本地 Node，`DiscoveryWatcherService` 在 `OnInit` 中注册监听器。完整可运行代码见：[03-watch-and-lost/main.go](../../../../examples/08-discovery/03-watch-and-lost/main.go)。
 
 ```go
 func (target *DiscoveryWatcherService) OnInit() error {
@@ -304,11 +304,11 @@ func (target *DiscoveryWatcherService) OnLost(_ context.Context, event discovery
 
 框架不对 `Lost` 做防抖。一次断开后即使很快恢复，也会先产生 `Lost`，恢复后再产生 `OnDiscovered`，这样业务不会因为短暂中间状态被隐藏而继续使用已经不可确认的实例。监听器回调按所属 Service 的 FIFO 调度执行；回调跨异步等待后，应重新查询当前快照，不要把事件对象当作永久状态保存。
 
-执行 `run.bat` 或 `./run.sh` 后，预期先看到类似 `discovered node=player-1`，约 500ms 后看到 `lost node=player-1`。该示例的 Provider 实现见：[03-watch-and-lost/main.go](../../../../examples/07-discovery/03-watch-and-lost/main.go)。
+执行 `run.bat` 或 `./run.sh` 后，预期先看到类似 `discovered node=player-1`，约 500ms 后看到 `lost node=player-1`。该示例的 Provider 实现见：[03-watch-and-lost/main.go](../../../../examples/08-discovery/03-watch-and-lost/main.go)。
 
 ## 我想等待远端服务出现
 
-运行：[examples/07-discovery/05-await-service](../../../../examples/07-discovery/05-await-service)。在启动依赖另一个 Node 时，先等待发现目录出现目标，再读取其快照：
+运行：[examples/08-discovery/05-await-service](../../../../examples/08-discovery/05-await-service)。在启动依赖另一个 Node 时，先等待发现目录出现目标，再读取其快照：
 
 ```go
 if err := s.AwaitService(ctx, "PlayerService"); err != nil {
@@ -329,7 +329,7 @@ instances := s.ListDiscoveredServices("PlayerService")
 
 ## 我想替换为 Consul 或其他发现系统
 
-运行：[examples/07-discovery/04-custom-provider](../../../../examples/07-discovery/04-custom-provider)。应用只需要注册一个小型 `discovery/provider.Provider` Factory：读取 Provider 配置、发布/撤销当前 Node、向 Host 报告完整快照。
+运行：[examples/08-discovery/04-custom-provider](../../../../examples/08-discovery/04-custom-provider)。应用只需要注册一个小型 `discovery/provider.Provider` Factory：读取 Provider 配置、发布/撤销当前 Node、向 Host 报告完整快照。
 
 示例演示 SPI，不伪装为可直接连接 Consul 的实现；真正的 Consul Provider 应作为独立包实现并通过相同注册点加入 Application。
 

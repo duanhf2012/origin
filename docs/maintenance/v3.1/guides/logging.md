@@ -1,4 +1,4 @@
-# 日志：调用、格式、滚动与运行时控制
+# 03 日志输出与管理
 
 > 状态：已实施
 > 基线：v3.0
@@ -6,7 +6,7 @@
 > 兼容性：新增 API 和配置字段；既有 v3.0 日志配置仍可加载
 
 本章是 v3.1 起的完整日志教程。v3.0 配置教程中的日志小节只保留历史基线意义；新项目
-应以本章和 [`examples/12-logging`](../../../../examples/12-logging/README.md) 为准。
+应以本章和 [`examples/03-logging`](../../../../examples/03-logging/README.md) 为准。
 
 ## 先会用：我应该调用哪个入口
 
@@ -59,7 +59,7 @@ if log.Enabled(log.DebugLevel) {
 | Error + stack | `ErrorStack` | 需要定位调用链的重要异常；成本高于普通 Error |
 
 完整可运行代码见
-[`01-global-and-service`](../../../../examples/12-logging/01-global-and-service/README.md)。
+[`01-global-and-service`](../../../../examples/03-logging/01-global-and-service/README.md)。
 
 ## 配置 Console 和 File
 
@@ -151,7 +151,7 @@ JSON 时间统一为 UTC、毫秒精度并以 `Z` 结尾。日志平台应按字
 业务 Key。
 
 格式和四种开关组合见
-[`02-formats-and-context`](../../../../examples/12-logging/02-formats-and-context/README.md)。
+[`02-formats-and-context`](../../../../examples/03-logging/02-formats-and-context/README.md)。
 
 ## 文件名、滚动和磁盘占用
 
@@ -179,7 +179,7 @@ logs/game-origin.crash.log
 的大小阈值。
 
 完整示例见
-[`03-file-rotation`](../../../../examples/12-logging/03-file-rotation/README.md)。
+[`03-file-rotation`](../../../../examples/03-logging/03-file-rotation/README.md)。
 
 ## 运行时临时打开 Debug 或暂停输出
 
@@ -243,7 +243,7 @@ Service、普通 goroutine、管理命令和 RPC Handler 都能调用这些并�
 
 异步模式下，已经排队但尚未处理的记录按处理时的最新状态过滤，因此调试脚本若要求严格
 观察控制调用前后顺序，可临时使用 `mode: sync`。完整示例见
-[`04-runtime-control`](../../../../examples/12-logging/04-runtime-control/README.md)。
+[`04-runtime-control`](../../../../examples/03-logging/04-runtime-control/README.md)。
 
 ## Diagnostics 中的日志状态
 

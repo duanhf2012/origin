@@ -80,7 +80,7 @@ goroutine 身份。
 ## 完整教程和示例
 
 完整讲解、代码片段和可运行路径见
-[RPC 基础示例](../../../../examples/05-rpc-basics/README.md)。确认后的内部设计与验收边界见
+[RPC 基础示例](../../../../examples/06-rpc-basics/README.md)。确认后的内部设计与验收边界见
 [RPC 可选 Context 与 goroutine 调用设计](../design/RPC可选Context与goroutine调用设计.md)。
 
 ## Node 游戏逻辑时间
@@ -91,7 +91,7 @@ v3.1 为每个 Node 新增独立的游戏逻辑时间。Service 和 Module 通�
 
 完整用法、跳跃规则和可运行示例见 [Node 游戏逻辑时间](./node-game-time.md)。
 
-## 日志
+## 03 日志输出与管理
 
 v3.1 新增包级 `log.Xxx`、Module Logger、Console/File 独立归属字段、可读文本格式、
 Application 文件名前缀，以及运行时独立调整级别和暂停/恢复输出。完整配置、输出样例、

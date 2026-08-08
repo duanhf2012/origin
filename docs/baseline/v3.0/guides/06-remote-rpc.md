@@ -2,7 +2,7 @@
 
 ## 我想先用 TCP 调用另一个 Node
 
-从 TCP 开始，因为它不需要 NATS。运行：[examples/06-remote-rpc/01-tcp-two-nodes](../../../../examples/06-remote-rpc/01-tcp-two-nodes)。
+从 TCP 开始，因为它不需要 NATS。运行：[examples/07-remote-rpc/01-tcp-two-nodes](../../../../examples/07-remote-rpc/01-tcp-two-nodes)。
 
 该示例在同一个 Application 中启动发现服务、`gateway-1` 与 `player-1`，并由网关执行：
 
@@ -22,13 +22,13 @@ player, err := s.players.
 
 ## 我想改用 NATS
 
-先启动开发依赖，再运行：[examples/06-remote-rpc/02-nats-two-nodes](../../../../examples/06-remote-rpc/02-nats-two-nodes)。
+先启动开发依赖，再运行：[examples/07-remote-rpc/02-nats-two-nodes](../../../../examples/07-remote-rpc/02-nats-two-nodes)。
 
 ```text
 REM 启动示例所需的本地 NATS 依赖。
-examples\06-remote-rpc\02-nats-two-nodes\deps-up.bat
+examples\07-remote-rpc\02-nats-two-nodes\deps-up.bat
 REM 启动三个 Node 并执行 NATS RPC。
-examples\06-remote-rpc\02-nats-two-nodes\run.bat
+examples\07-remote-rpc\02-nats-two-nodes\run.bat
 ```
 
 业务客户端外观不变，只替换 Node 的 `rpc.transport` 和 `rpc.nats` 配置。TCP 适合简单、直接的内网连接；NATS 适合已经运行 NATS 集群、希望由消息系统管理连接与恢复的部署。
@@ -39,7 +39,7 @@ examples\06-remote-rpc\02-nats-two-nodes\run.bat
 
 ## 我想按业务键选择实例或广播
 
-运行：[examples/06-remote-rpc/03-route-and-broadcast](../../../../examples/06-remote-rpc/03-route-and-broadcast)。
+运行：[examples/07-remote-rpc/03-route-and-broadcast](../../../../examples/07-remote-rpc/03-route-and-broadcast)。
 
 ```go
 // 用稳定业务键在当前候选集中选择一个实例。

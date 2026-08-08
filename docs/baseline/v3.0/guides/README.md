@@ -28,7 +28,7 @@
 
 ## 示例约定
 
-每个教程小节会给出完整示例路径。以可直接启动的 `examples/06-remote-rpc/01-tcp-two-nodes/` 为例：
+每个教程小节会给出完整示例路径。以可直接启动的 `examples/07-remote-rpc/01-tcp-two-nodes/` 为例：
 
 ```text
 README.md          # 使用步骤和预期输出
