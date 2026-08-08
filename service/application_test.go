@@ -13,17 +13,17 @@ type applicationTestRuntime struct {
 	application ApplicationRuntime
 }
 
-func (*applicationTestRuntime) NodeID() string                        { return "game-1" }
-func (*applicationTestRuntime) ServiceName() string                   { return "PlayerService" }
-func (*applicationTestRuntime) State() State                          { return StateInitializing }
-func (*applicationTestRuntime) Logger() originlog.Logger              { return originlog.NewNop() }
-func (*applicationTestRuntime) LookupService(string) (IService, bool) { return nil, false }
-func (*applicationTestRuntime) AcquireTimerSlot() (TimerID, bool)     { return 1, true }
-func (*applicationTestRuntime) ReleaseTimerSlot()                     {}
-func (*applicationTestRuntime) TimerLimit() int                       { return 1 }
-func (*applicationTestRuntime) TimerLocation() *time.Location         { return time.UTC }
-func (*applicationTestRuntime) Failure() error                        { return nil }
-func (*applicationTestRuntime) ReportFailure(error)                   {}
+func (*applicationTestRuntime) NodeID() string                             { return "game-1" }
+func (*applicationTestRuntime) ServiceName() string                        { return "PlayerService" }
+func (*applicationTestRuntime) State() State                               { return StateInitializing }
+func (*applicationTestRuntime) Logger() originlog.Logger                   { return originlog.NewNop() }
+func (*applicationTestRuntime) LookupLocalService(string) (IService, bool) { return nil, false }
+func (*applicationTestRuntime) AcquireTimerSlot() (TimerID, bool)          { return 1, true }
+func (*applicationTestRuntime) ReleaseTimerSlot()                          {}
+func (*applicationTestRuntime) TimerLimit() int                            { return 1 }
+func (*applicationTestRuntime) TimerLocation() *time.Location              { return time.UTC }
+func (*applicationTestRuntime) Failure() error                             { return nil }
+func (*applicationTestRuntime) ReportFailure(error)                        {}
 func (runtime *applicationTestRuntime) Application() ApplicationRuntime {
 	return runtime.application
 }

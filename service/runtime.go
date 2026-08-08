@@ -18,7 +18,7 @@ type Runtime interface {
 	ServiceName() string
 	State() State
 	Logger() originlog.Logger
-	LookupService(name string) (IService, bool)
+	LookupLocalService(name string) (IService, bool)
 	AcquireTimerSlot() (TimerID, bool)
 	ReleaseTimerSlot()
 	TimerLimit() int
@@ -32,7 +32,7 @@ type Runtime interface {
 // RuntimeOf 返回框架绑定给 target 的只读 Runtime。
 //
 // 该入口只供 rpc 等框架包在生成客户端构造冷路径使用。业务代码应继续调用 Service 上的
-// Name、NodeID、Logger 和 LookupService，不应保存或替换 Runtime。
+// Name、NodeID、Logger 和 LookupLocalService，不应保存或替换 Runtime。
 func RuntimeOf(target IService) Runtime {
 	if target == nil || isNilService(target) {
 		return nil

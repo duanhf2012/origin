@@ -138,13 +138,15 @@ func (service *Service) Logger() originlog.Logger {
 	return service.runtime.Logger()
 }
 
-// LookupService 查询同一 Node 中具有实际名称 name 的 Service。
-func (service *Service) LookupService(name string) (IService, bool) {
+// LookupLocalService 只查询当前 Service 所属 Node 中具有实际名称 name 的本地 Service。
+//
+// 它不读取服务发现目录、不查询其他 Node，也不发起网络或 RPC。
+func (service *Service) LookupLocalService(name string) (IService, bool) {
 	// 未绑定实例没有所属 Node；空名称也不具有有效查询语义。
 	if service == nil || service.runtime == nil || name == "" {
 		return nil, false
 	}
-	return service.runtime.LookupService(name)
+	return service.runtime.LookupLocalService(name)
 }
 
 // DispatchAsync 把新的根任务异步投递到当前 Service 的串行执行上下文。

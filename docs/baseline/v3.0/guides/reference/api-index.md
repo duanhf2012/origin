@@ -8,7 +8,7 @@
 | `config` | `LoadDir`、`LoadSnapshot`、`View`、`Duration`、`ByteSize` |
 | `log` | `Logger`、`Field`、`Runtime`、`Flush`、`Stats`；默认 Zap Handler 位于 `log/zaplog` |
 | `node` | `ID`、`Private`、`State`、`Logger`、`Service`、`Services`、`ServiceStatus`、`HealthStatus`、`TransportStatus`、`DiscoveryStatus`、`Diagnostics`、`Retire`、`Resume`；状态读取与生命周期边界见[第 09 章](../09-diagnostics-and-pprof.md) |
-| `service` | `Name`、`NodeID`、`State`、`Logger`、`LookupService`、`Failure`、三种配置读取、`Module.Service` 见[第 02/03 章](../02-configuration.md)；Timer、事件、执行、统计见[第 04 章](../04-timer-event-and-execution.md)；发现见[第 07 章](../07-discovery.md)；Retire/Resume 见[第 08 章](../08-retire-and-resume.md) |
+| `service` | `Name`、`NodeID`、`State`、`Logger`、`LookupLocalService`、`Failure`、三种配置读取、`Module.Service` 见[第 02/03 章](../02-configuration.md)；Timer、事件、执行、统计见[第 04 章](../04-timer-event-and-execution.md)；发现见[第 07 章](../07-discovery.md)；Retire/Resume 见[第 08 章](../08-retire-and-resume.md) |
 | `rpc` | 生成客户端、`OnNode`、`Route`、`RouteRoundRobin`、`RouteRandom`、`RouteBy`、`IncludeRetired`、广播调用与 `BroadcastError` |
 | `discovery` | 服务目录的事件和值类型；通过 `Service` 使用 `AwaitService`、`AwaitNodeService`、精确查询、列表查询和监听 |
 | `discovery/provider` | 自定义 Provider SPI |

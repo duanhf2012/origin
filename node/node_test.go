@@ -911,8 +911,8 @@ func TestNodeMetadataAndServiceRuntimeQueries(t *testing.T) {
 	if first.State() != service.StateCreated {
 		t.Fatalf("启动前 Service State = %v", first.State())
 	}
-	if peer, ok := first.LookupService("b"); !ok || peer != second {
-		t.Fatalf("LookupService(b) = %v, %v", peer, ok)
+	if peer, ok := first.LookupLocalService("b"); !ok || peer != second {
+		t.Fatalf("LookupLocalService(b) = %v, %v", peer, ok)
 	}
 
 	if err := current.Start(context.Background()); err != nil {

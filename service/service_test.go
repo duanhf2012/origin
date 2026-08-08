@@ -41,7 +41,7 @@ func (runtime *testRuntime) AddTime(delta time.Duration) error {
 	runtime.now = runtime.now.Add(delta)
 	return nil
 }
-func (runtime *testRuntime) LookupService(string) (IService, bool) {
+func (runtime *testRuntime) LookupLocalService(string) (IService, bool) {
 	return runtime.peer, runtime.peer != nil
 }
 func (runtime *testRuntime) AcquireTimerSlot() (TimerID, bool) {
@@ -81,8 +81,8 @@ func TestBindRuntimeAndQueries(t *testing.T) {
 	if target.State() != StateRunning {
 		t.Fatalf("State() = %v", target.State())
 	}
-	if peer, ok := target.LookupService("PlayerService"); !ok || peer != target {
-		t.Fatalf("LookupService() = %v, %v", peer, ok)
+	if peer, ok := target.LookupLocalService("PlayerService"); !ok || peer != target {
+		t.Fatalf("LookupLocalService() = %v, %v", peer, ok)
 	}
 
 	// 同一个实例不能再次归属其他 Node。

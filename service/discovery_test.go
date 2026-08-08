@@ -25,7 +25,7 @@ func (runtime *discoveryServiceTestRuntime) State() State        { return runtim
 func (runtime *discoveryServiceTestRuntime) Logger() originlog.Logger {
 	return originlog.NewNop()
 }
-func (runtime *discoveryServiceTestRuntime) LookupService(string) (IService, bool) {
+func (runtime *discoveryServiceTestRuntime) LookupLocalService(string) (IService, bool) {
 	return nil, false
 }
 func (runtime *discoveryServiceTestRuntime) AcquireTimerSlot() (TimerID, bool) {

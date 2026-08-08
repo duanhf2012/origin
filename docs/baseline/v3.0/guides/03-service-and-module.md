@@ -47,7 +47,7 @@ func (s *GatewayService) OnStart(ctx context.Context) error {
     // 只从当前 GatewayService 所属 Node 的本地 Service 集合中，按实际 ServiceName 查询。
     // 它不会查询服务发现目录、etcd/NATS，也不会发起网络或 RPC 路由。
     // 因此这里的 PlayerService 必须确实配置在同一个 Node；其他 Node 即使发布了它也不会命中。
-    player, ok := s.LookupService("PlayerService")
+    player, ok := s.LookupLocalService("PlayerService")
     if !ok {
         return fmt.Errorf("local PlayerService is not configured")
     }
@@ -56,7 +56,7 @@ func (s *GatewayService) OnStart(ctx context.Context) error {
 }
 ```
 
-`LookupService("PlayerService")` 等价于“从当前 Service 所属 Node 的本地 Service 集合中，查找
+`LookupLocalService("PlayerService")` 等价于“从当前 Service 所属 Node 的本地 Service 集合中，查找
 实际名称正好为 `PlayerService` 的实例”。它不会遍历任何已发现的远端服务，也不会读取 etcd、
 NATS 或发起 RPC；本 Node 没有该实例时，即使其他 Node 已发布同名 Service，也只会返回
 `(nil, false)`。

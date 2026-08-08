@@ -39,7 +39,7 @@ func (*prepareTestServiceRuntime) Logger() originlog.Logger {
 	return originlog.NewNop()
 }
 
-func (*prepareTestServiceRuntime) LookupService(string) (service.IService, bool) {
+func (*prepareTestServiceRuntime) LookupLocalService(string) (service.IService, bool) {
 	return nil, false
 }
 

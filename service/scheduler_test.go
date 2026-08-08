@@ -63,7 +63,7 @@ func (runtime *schedulerTestRuntime) AddTime(delta time.Duration) error {
 	runtime.gameTimeOffset.Add(int64(delta))
 	return nil
 }
-func (runtime *schedulerTestRuntime) LookupService(string) (IService, bool) {
+func (runtime *schedulerTestRuntime) LookupLocalService(string) (IService, bool) {
 	return nil, false
 }
 func (runtime *schedulerTestRuntime) AcquireTimerSlot() (TimerID, bool) {

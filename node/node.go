@@ -1143,8 +1143,8 @@ func (runtime *serviceRuntime) Logger() originlog.Logger {
 	return runtime.entry.logger
 }
 
-// LookupService 实现 service.Runtime，只查询当前 Node。
-func (runtime *serviceRuntime) LookupService(name string) (service.IService, bool) {
+// LookupLocalService 实现 service.Runtime，只查询当前 Node。
+func (runtime *serviceRuntime) LookupLocalService(name string) (service.IService, bool) {
 	return runtime.node.Service(name)
 }
 
