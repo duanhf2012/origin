@@ -20,7 +20,7 @@ func init() {
 
 然后在 Node 配置的 `services` 列表中写入 `InventoryService`。
 
-## 我想把一个 Service 拆成 Module
+## 我想向 Service 添加 Module
 
 运行：[examples/04-service-and-module/02-module-lifecycle](../../../../examples/04-service-and-module/02-module-lifecycle)。
 

@@ -1,6 +1,6 @@
 # Module 生命周期
 
-Module 用于把一个 Service 内部的职责拆开，而不是创建独立调度器或配置根。示例的 Service 添加根 Module，根 Module 在自己的 `OnInit` 中再添加 child Module。
+Module 用于在一个 Service 内组织多个内部职责，而不是创建独立调度器或配置根。示例的 Service 添加根 Module，根 Module 在自己的 `OnInit` 中再添加 child Module。
 
 Module 归属 Service 后，可以直接使用与 Service 同语义的配置、异步派发、本地事件、Await、安全执行、Timer 和退休/恢复接口；这些调用仍由所属 Service 调度。为避免把生命周期示例写成 API 大杂烩，本例只展示 `AddModule` 和生命周期顺序；配置委托见 [`02-configuration/03-service-module-config`](../../02-configuration/03-service-module-config/README.md)，其余接口的完整用法见第 04、08 章，代码中的 `target` 可以同样是嵌入了 `service.Module` 的 Module。
 
