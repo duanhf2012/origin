@@ -137,19 +137,54 @@ Await 返回后的当前 Service 任务重新串行化，而不是依赖 `GoSafe
 
 ## 深入一点
 
-同步事件处理器可以嵌套同步事件：例如事件 A 的监听器同步通知事件 B，B 的全部监听器执行完后，A 的监听器才继续返回。它不能在其中 `Await`，因为 `Await` 会暂时释放 Service 执行权，其他任务可能插入执行，破坏同步事件的连续处理边界；这种场景应改用 `NotifyEventAsync`，或先在事件外完成 `Await`。
+这里的“同步事件处理器”是 `SubscribeEvent` 注册的 `EventHandler`。调用链是：Service 任务调用
+`NotifyEventSync`，框架立即按订阅顺序调用监听器，监听器返回后 `NotifyEventSync` 才返回。监听器可以
+同步通知另一个事件；例如事件 A 的监听器同步通知事件 B，B 的全部监听器执行完后，A 的监听器才继续返回。
 
 ```go
-// 允许：事件 B 会在当前 Service 任务中完成后，onA 才返回。
-func onA(ctx context.Context, _ service.Event) error {
-    return s.NotifyEventSync(ctx, EventB{ID: 1001})
+const (
+    playerLoadedEvent service.EventID = 1
+    playerAuditEvent  service.EventID = 2
+)
+
+type PlayerLoaded struct{ PlayerID int64 }
+func (PlayerLoaded) EventID() service.EventID { return playerLoadedEvent }
+
+type PlayerAudit struct{ PlayerID int64 }
+func (PlayerAudit) EventID() service.EventID { return playerAuditEvent }
+
+func (s *PlayerService) OnInit() error {
+    return s.SubscribeEvent(playerLoadedEvent, func(ctx context.Context, raw service.Event) error {
+        loaded := raw.(PlayerLoaded)
+        // 这是同步监听器：直接处理，或继续同步通知另一个事件。
+        return s.NotifyEventSync(ctx, PlayerAudit{PlayerID: loaded.PlayerID})
+    })
 }
 
-// 不允许：同步监听器中调用 Await 会返回 ErrInvalidArgument。
-func onA(ctx context.Context, _ service.Event) error {
-    return s.Await(ctx, loadFromDatabase)
+// 必须从 Service 任务（例如 Timer 回调）中触发同步通知。
+func (s *PlayerService) publishLoaded(ctx context.Context, playerID int64) error {
+    return s.NotifyEventSync(ctx, PlayerLoaded{PlayerID: playerID})
 }
 ```
+
+同步监听器不能调用 `Await`：
+
+```go
+func (s *PlayerService) onLoaded(ctx context.Context, raw service.Event) error {
+    loaded := raw.(PlayerLoaded)
+    return s.Await(ctx, func(waitCtx context.Context) error {
+        return s.loadExtraData(waitCtx, loaded.PlayerID)
+    }) // 返回 ErrInvalidArgument
+}
+```
+
+`Await` 会暂时释放 Service 执行权；如果同步监听器暂停，其他 Service 任务可能插入，外层事件的
+“调用后才返回”和监听器顺序就不再成立。框架因此直接拒绝这种调用，而不是隐式把同步事件改成异步。
+如果监听器确实要等待数据库或 RPC，有两种写法：
+
+1. 在普通 Service 任务中先 `Await`，等待完成后再调用 `NotifyEventSync`。
+2. 改用 `NotifyEventAsync`。它把完整事件作为后续 Service 任务排队，监听器不处于同步事件帧中，
+   因而可以在监听器内部 `Await`；但调用方只得到“已入队”的保证。
 
 异步事件只保证已进入队列，不能在提交后修改事件 payload。Timer、事件和 RPC 回调都遵循
 Service 的单执行语义；要并发处理纯计算或外部 I/O 时，应明确隔离状态并选择 `Await` 或受控后台任务。
