@@ -55,6 +55,36 @@ func TestModuleScopeCancelsOwnedTimers(t *testing.T) {
 	}
 }
 
+// TestModuleGetNodeDelegatesOwnerRuntime 防止 Module 建立第二份时间作用域；它必须返回所属
+// Service 已经绑定的同一个 Node 运行外观。
+func TestModuleGetNodeDelegatesOwnerRuntime(t *testing.T) {
+	unbound := &testModule{}
+	if unbound.GetNode() != nil {
+		t.Fatal("未绑定 Module.GetNode() 未返回 nil")
+	}
+
+	owner := &testService{}
+	runtime := &testRuntime{
+		nodeID: "game-1",
+		name:   "Owner",
+		state:  StateRunning,
+		now:    time.Date(2031, 2, 3, 4, 5, 6, 0, time.UTC),
+	}
+	if err := BindRuntime(owner, runtime); err != nil {
+		t.Fatalf("BindRuntime() error = %v", err)
+	}
+	module := &testModule{}
+	module.owner = &owner.Service
+
+	currentNode := module.GetNode()
+	if currentNode == nil || currentNode.ID() != "game-1" {
+		t.Fatalf("Module.GetNode() = %#v", currentNode)
+	}
+	if !currentNode.Now().Equal(runtime.now) {
+		t.Fatalf("Module.GetNode().Now() = %v, want %v", currentNode.Now(), runtime.now)
+	}
+}
+
 func (module *testModule) OnInit() error {
 	if module.init != nil {
 		return module.init()

@@ -327,27 +327,10 @@ func (engine *Engine) scheduleAfter(
 		return InvalidDeadlineID, invalidArgument("DeadlineQueue 不属于当前 Engine")
 	}
 
-	// 使用 Engine 基准的单调相对时间计算绝对 Deadline，并显式检查 Duration 加法溢出。
-	elapsed := engine.clock.Now().Sub(engine.startTime)
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	if delay > 0 && elapsed > time.Duration(math.MaxInt64)-delay {
+	deadlineTick, err := engine.deadlineTickAfterLocked(delay)
+	if err != nil {
 		engine.mu.Unlock()
-		return InvalidDeadlineID, internalError("Deadline 相对时间溢出")
-	}
-	deadlineElapsed := elapsed + delay
-	deadlineTick := ceilTick(deadlineElapsed)
-	if delay == 0 {
-		// 零延迟只能在后续工作轮次到期，不能由 ScheduleAfter 调用栈同步交付。
-		deadlineTick = floorTick(elapsed) + 1
-	}
-	if deadlineTick <= engine.currentTick {
-		if engine.currentTick == math.MaxUint64 {
-			engine.mu.Unlock()
-			return InvalidDeadlineID, internalError("Deadline Tick 已耗尽")
-		}
-		deadlineTick = engine.currentTick + 1
+		return InvalidDeadlineID, err
 	}
 
 	// ID 为零表示已经耗尽 uint64 空间；旧 ID 永远不能绕回并指向新条目。
@@ -380,6 +363,84 @@ func (engine *Engine) scheduleAfter(
 	// 新 Deadline 可能早于当前睡眠目标，使用容量 1 Channel 合并结构变更。
 	engine.notifyChange()
 	return id, nil
+}
+
+// rescheduleAfter 在 Engine 单锁内原地移动已登记条目，不换 ID、不更换 Map Key、不经过对象池。
+func (engine *Engine) rescheduleAfter(
+	queue *DeadlineQueue,
+	id DeadlineID,
+	delay time.Duration,
+) (bool, error) {
+	if id == InvalidDeadlineID {
+		return false, invalidArgument("DeadlineID 不能为零")
+	}
+	if delay < 0 {
+		return false, invalidArgument("Deadline 延迟不能为负数")
+	}
+
+	engine.mu.Lock()
+	if engine.state == engineClosed {
+		engine.mu.Unlock()
+		return false, ErrEngineClosed
+	}
+	if engine.state != engineRunning {
+		engine.mu.Unlock()
+		return false, invalidArgument("timerwheel Engine 尚未启动")
+	}
+	if queue.closed {
+		engine.mu.Unlock()
+		return false, ErrDeadlineQueueClosed
+	}
+	if _, exists := engine.queues[queue]; !exists {
+		engine.mu.Unlock()
+		return false, invalidArgument("DeadlineQueue 不属于当前 Engine")
+	}
+	entry, exists := engine.entries[id]
+	if !exists || entry.queue != queue || entry.state != entryScheduled {
+		engine.mu.Unlock()
+		return false, nil
+	}
+	deadlineTick, err := engine.deadlineTickAfterLocked(delay)
+	if err != nil {
+		engine.mu.Unlock()
+		return false, err
+	}
+
+	oldLevel := engine.wheel.removeLocked(entry)
+	engine.stats.levelEntries[oldLevel]--
+	entry.deadlineTick = deadlineTick
+	newLevel := engine.wheel.insertLocked(entry, engine.currentTick)
+	engine.stats.levelEntries[newLevel]++
+	engine.mu.Unlock()
+
+	// 新位置可能早于当前底层休眠目标，也可能移走原最早点；统一要求工作协程重算。
+	engine.notifyChange()
+	return true, nil
+}
+
+// deadlineTickAfterLocked 使用 Engine 基准的单调相对时间计算目标 Tick。
+// 调用方必须持有 engine.mu，并先验证 delay 非负。
+func (engine *Engine) deadlineTickAfterLocked(delay time.Duration) (uint64, error) {
+	elapsed := engine.clock.Now().Sub(engine.startTime)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if delay > 0 && elapsed > time.Duration(math.MaxInt64)-delay {
+		return 0, internalError("Deadline 相对时间溢出")
+	}
+	deadlineElapsed := elapsed + delay
+	deadlineTick := ceilTick(deadlineElapsed)
+	if delay == 0 {
+		// 零延迟只能在后续工作轮次到期，不能由登记调用栈同步交付。
+		deadlineTick = floorTick(elapsed) + 1
+	}
+	if deadlineTick <= engine.currentTick {
+		if engine.currentTick == math.MaxUint64 {
+			return 0, internalError("Deadline Tick 已耗尽")
+		}
+		deadlineTick = engine.currentTick + 1
+	}
+	return deadlineTick, nil
 }
 
 // cancel 在 Engine 单锁内裁决取消与到期竞争。

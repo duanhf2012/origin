@@ -105,7 +105,7 @@ func (scheduler *serviceScheduler) createCron(
 	if location == nil {
 		location = time.Local
 	}
-	now := scheduler.timerEngine.Now().In(location)
+	now := scheduler.businessTimerNow().In(location)
 	next := schedule.Next(now)
 	if next.IsZero() || !next.After(now) {
 		scheduler.timerStats.RejectedTotal++

@@ -213,6 +213,54 @@ func TestEngineNowUsesInjectedClock(t *testing.T) {
 	}
 }
 
+// TestDeadlineQueueRescheduleAfterPreservesID 验证已登记 Deadline 可以在不更换身份、
+// 不变更 Queue 统计的前提下修改到期 Tick，供大批量业务 Timer 冷路径重排。
+func TestDeadlineQueueRescheduleAfterPreservesID(t *testing.T) {
+	engine, queue, clock, wake := newFakeTimerEngine(t, false)
+	id, err := queue.ScheduleAfter(time.Hour)
+	if err != nil {
+		t.Fatalf("ScheduleAfter() error = %v", err)
+	}
+	before := engine.Stats()
+
+	rescheduled, err := queue.RescheduleAfter(id, 2*time.Hour)
+	if err != nil || !rescheduled {
+		t.Fatalf("RescheduleAfter() rescheduled=%t error=%v", rescheduled, err)
+	}
+	after := engine.Stats()
+	if after.Scheduled != before.Scheduled || after.ScheduledTotal != before.ScheduledTotal {
+		t.Fatalf("RescheduleAfter() changed stats: before=%+v after=%+v", before, after)
+	}
+
+	advanceFake(clock, wake, time.Hour)
+	waitForStats(t, engine, func(stats Stats) bool { return stats.TimerWakeups > 0 })
+	if stats := engine.Stats(); stats.Expired != 0 {
+		t.Fatalf("旧到期时刻仍触发 Deadline: %+v", stats)
+	}
+	advanceFake(clock, wake, time.Hour)
+	got := drainAfterSignal(t, queue, 1)
+	if len(got) != 1 || got[0] != id {
+		t.Fatalf("重排后到期 ID = %v, want [%d]", got, id)
+	}
+}
+
+// TestDeadlineQueueRescheduleAfterMissing 固定已取消或已到期 ID 只返回 false，
+// 使上层可在到期竞争中安全改用新 Deadline。
+func TestDeadlineQueueRescheduleAfterMissing(t *testing.T) {
+	_, queue, _, _ := newFakeTimerEngine(t, false)
+	id, err := queue.ScheduleAfter(time.Hour)
+	if err != nil {
+		t.Fatalf("ScheduleAfter() error = %v", err)
+	}
+	if !queue.Cancel(id) {
+		t.Fatal("Cancel() failed")
+	}
+	rescheduled, err := queue.RescheduleAfter(id, time.Minute)
+	if err != nil || rescheduled {
+		t.Fatalf("RescheduleAfter(canceled) rescheduled=%t error=%v", rescheduled, err)
+	}
+}
+
 func TestZeroDelayRunsOnLaterEngineRound(t *testing.T) {
 	_, queue, clock, wake := newFakeTimerEngine(t, false)
 

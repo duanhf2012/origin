@@ -8,7 +8,7 @@
 | `01-first-application` | Application、Options、自定义命令、Node、Service 与生命周期 |
 | `02-configuration` | YAML、默认值与 Service 配置 |
 | `03-service-and-module` | Service、Module 与配置归属 |
-| `04-timer-event-and-execution` | Timer、事件、Await 与安全执行 |
+| [`04-timer-event-and-execution`](./04-timer-event-and-execution/README.md) | Timer、事件、Await、安全执行与 v3.1 Node 游戏逻辑时间 |
 | [`05-rpc-basics`](./05-rpc-basics/README.md) | 合约生成，以及 Await、Call、Async、Notify、Broadcast |
 | `06-remote-rpc` | TCP、NATS、路由与广播 |
 | `07-discovery` | Origin、etcd、自定义 Provider 与等待目标服务 |

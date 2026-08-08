@@ -18,4 +18,5 @@
 
 ## 使用者变更
 
-- [v3.1 RPC 调用、Context 与 Deadline 规则](./guides/README.md)
+- [v3.1 使用变更索引](./guides/README.md)
+- [Node 游戏逻辑时间教程](./guides/node-game-time.md)

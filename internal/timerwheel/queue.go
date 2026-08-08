@@ -27,6 +27,20 @@ func (queue *DeadlineQueue) ScheduleAfter(delay time.Duration) (DeadlineID, erro
 	return queue.engine.scheduleAfter(queue, delay)
 }
 
+// RescheduleAfter 保留已登记 Deadline 的 ID 和 Queue 所有权，只把它的到期点改为从当前起的 delay。
+//
+// 返回 false、nil 表示 ID 不存在、已取消、已到期或不属于当前 Queue。该区分让上层
+// 在到期竞争中可以改用新 Deadline；非 nil error 只表示参数、Engine 或 Queue 状态无效。
+func (queue *DeadlineQueue) RescheduleAfter(
+	id DeadlineID,
+	delay time.Duration,
+) (bool, error) {
+	if queue == nil || queue.engine == nil {
+		return false, invalidArgument("DeadlineQueue 不能为空")
+	}
+	return queue.engine.rescheduleAfter(queue, id, delay)
+}
+
 // Cancel 取消仍位于当前 Queue 时间轮中的 Deadline。
 //
 // ID 不存在、已经到期、已取消或属于其他 Queue 时返回 false。

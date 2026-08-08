@@ -3,7 +3,7 @@
 > 状态：已实施
 > 基线：v3.0
 > 目标版本：v3.1.0
-> 兼容性：RPC 契约和线协议兼容；有响应方法新增 `CallXxx`，既有 RPC 方法放宽 Context
+> 兼容性：RPC 契约和线协议兼容；新增 `CallXxx`、`NodeRuntime` 与 `GetNode`，既有方法签名不变
 
 ## RPC 调用方式
 
@@ -82,3 +82,11 @@ goroutine 身份。
 完整讲解、代码片段和可运行路径见
 [RPC 基础示例](../../../../examples/05-rpc-basics/README.md)。确认后的内部设计与验收边界见
 [RPC 可选 Context 与 goroutine 调用设计](../design/RPC可选Context与goroutine调用设计.md)。
+
+## Node 游戏逻辑时间
+
+v3.1 为每个 Node 新增独立的游戏逻辑时间。Service 和 Module 通过 `GetNode()`
+读取当前所属 Node，并可以使用 `Now`、`SetTime` 和 `AddTime`。时间跳跃会统一
+重排当前 Node 的 After、Ticker 和 Cron，但不影响 RPC/Await/Context 等基础设施 Deadline。
+
+完整用法、跳跃规则和可运行示例见 [Node 游戏逻辑时间](./node-game-time.md)。

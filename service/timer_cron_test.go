@@ -8,6 +8,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/duanhf2012/origin/v3/errs"
+	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 )
 
 func TestCronCalendarSemantics(t *testing.T) {
@@ -142,6 +143,38 @@ func TestCronAcceptsOnlyNumericFiveOrSixFields(t *testing.T) {
 	}
 }
 
+// TestGameTimeRebaseCoalescesCron 验证时间向前跨过多个日历点时，Cron 不补执行历史，
+// 而是只提交一次当前回调，再从新逻辑时间寻找下一个未来匹配点。
+func TestGameTimeRebaseCoalescesCron(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	fired := make(chan struct{}, 2)
+	id, err := fixture.service.CronFunc("* * * * *", func(context.Context, TimerID) {
+		fired <- struct{}{}
+	})
+	if err != nil || id == InvalidTimerID {
+		t.Fatalf("CronFunc() id = %d, error = %v", id, err)
+	}
+	if err := fixture.runtime.AddTime(3 * time.Minute); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); err != nil {
+		t.Fatalf("RebaseTimers() error = %v", err)
+	}
+	advanceTimerFixture(t, fixture, timerwheel.TickDuration)
+	receive(t, fired)
+	waitForTimerStats(t, fixture.service, func(stats TimerStats) bool {
+		return stats.Running == 0 && stats.Scheduled == 1
+	})
+	select {
+	case <-fired:
+		t.Fatal("向前跳时补执行了多个 Cron 历史回调")
+	default:
+	}
+	if !fixture.service.CancelTimer(&id) {
+		t.Fatal("CancelTimer() 失败")
+	}
+}
+
 func TestCronUsesNodeFrozenLocation(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	location, err := time.LoadLocation("Asia/Shanghai")
@@ -166,6 +199,34 @@ func TestCronUsesNodeFrozenLocation(t *testing.T) {
 	select {
 	case <-fired:
 		t.Fatal("Cron 在本地名义时间前触发")
+	default:
+	}
+	advanceTimerFixture(t, fixture, time.Second)
+	receive(t, fired)
+}
+
+// TestCronUsesNodeGameTime 防止 Cron 仍使用 TimerEngine 的真实墙上时间。Node 逻辑时间处于
+// 20:00 时，20:01 的 Cron 应在一分钟真实等待后到期，而不是等待真实时钟走到 20:01。
+func TestCronUsesNodeGameTime(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	if err := fixture.runtime.AddTime(8 * time.Hour); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	fired := make(chan struct{}, 1)
+	id, err := fixture.service.CronFunc("1 20 * * *", func(
+		context.Context,
+		TimerID,
+	) {
+		fired <- struct{}{}
+	})
+	if err != nil || id == InvalidTimerID {
+		t.Fatalf("CronFunc() id = %d, error = %v", id, err)
+	}
+
+	advanceTimerFixture(t, fixture, 59*time.Second)
+	select {
+	case <-fired:
+		t.Fatal("Cron 在 Node 逻辑名义时间前触发")
 	default:
 	}
 	advanceTimerFixture(t, fixture, time.Second)

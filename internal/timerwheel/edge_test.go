@@ -65,6 +65,9 @@ func TestNilReceiversAndClosedState(t *testing.T) {
 	if _, err := queue.ScheduleAfter(time.Second); !errs.IsCode(err, errs.CodeInvalidArgument) {
 		t.Fatalf("nil Queue ScheduleAfter() error = %v", err)
 	}
+	if _, err := queue.RescheduleAfter(1, time.Second); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("nil Queue RescheduleAfter() error = %v", err)
+	}
 	if queue.Cancel(1) {
 		t.Fatal("nil Queue Cancel() 意外成功")
 	}
@@ -84,6 +87,9 @@ func TestNilReceiversAndClosedState(t *testing.T) {
 	if _, err := active.ScheduleAfter(time.Second); !errors.Is(err, ErrEngineClosed) {
 		t.Fatalf("Engine 关闭后 ScheduleAfter() error = %v", err)
 	}
+	if _, err := active.RescheduleAfter(1, time.Second); !errors.Is(err, ErrEngineClosed) {
+		t.Fatalf("Engine 关闭后 RescheduleAfter() error = %v", err)
+	}
 }
 
 func TestScheduleRejectsForeignQueueOverflowAndExhaustedID(t *testing.T) {
@@ -99,6 +105,15 @@ func TestScheduleRejectsForeignQueueOverflowAndExhaustedID(t *testing.T) {
 	firstClock.Advance(time.Duration(math.MaxInt64))
 	if _, err := firstQueue.ScheduleAfter(time.Nanosecond); !errs.IsCode(err, errs.CodeInternal) {
 		t.Fatalf("Deadline Duration 溢出 error = %v", err)
+	}
+	if _, err := firstQueue.RescheduleAfter(InvalidDeadlineID, time.Second); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("零 DeadlineID RescheduleAfter() error = %v", err)
+	}
+	if _, err := firstQueue.RescheduleAfter(1, -time.Nanosecond); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("负延迟 RescheduleAfter() error = %v", err)
+	}
+	if _, err := first.rescheduleAfter(foreign, 1, time.Second); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("跨 Engine Queue RescheduleAfter() error = %v", err)
 	}
 
 	// ID 零值代表 uint64 空间耗尽，禁止绕回并复用旧 ID。

@@ -2,12 +2,27 @@ package node
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
+
+// BenchmarkNodeGameTimeNow 验证业务热路径只执行真实时钟读取、原子偏移读取和时区转换。
+func BenchmarkNodeGameTimeNow(b *testing.B) {
+	current := &Node{
+		timerResources: nodeTimerResources{timerLocation: time.UTC},
+	}
+	var now time.Time
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		now = current.Now()
+	}
+	runtime.KeepAlive(now)
+}
 
 // BenchmarkServiceLookup 建立本地 Service O(1) 查询的 M7 性能基线。
 func BenchmarkServiceLookup(b *testing.B) {

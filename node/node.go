@@ -49,6 +49,10 @@ type Node struct {
 
 	// state 为查询提供无锁快照，生命周期写入由单一控制路径串行执行。
 	state atomic.Uint32
+	// gameTimeOffset 是当前 Node 相对真实时间的纳秒偏移；Now 热路径只执行原子读取。
+	gameTimeOffset atomic.Int64
+	// gameTimeMu 串行化低频 Set/Add，并在后续同时保护 Timer 重排和停止准入边界。
+	gameTimeMu sync.Mutex
 	// stopMu/stopComplete 把正常 Stop 与启动失败 Rollback 串行化，并保留首次最终结果。
 	stopMu       sync.Mutex
 	stopComplete bool
@@ -120,6 +124,9 @@ type serviceRuntime struct {
 	node  *Node
 	entry *serviceEntry
 }
+
+// 编译期固定生产 Runtime 必须完整实现业务可见的最小 Node 时间外观。
+var _ service.NodeRuntime = (*serviceRuntime)(nil)
 
 // prepareRPCDispatchers 在创建 Node 资源和绑定 Service Runtime 前完成静态契约预检。
 // 成功返回的 Dispatcher 与 bindings 顺序一一对应，nil 表示普通非 RPC Service。
@@ -817,6 +824,11 @@ func (node *Node) Rollback(ctx context.Context) error {
 	if node.stopComplete {
 		return node.stopResult
 	}
+	// 先关闭逻辑时间修改准入，再回收 TimerEngine，避免 SetTime/AddTime
+	// 在回滚期间重新登记业务 Deadline。
+	node.gameTimeMu.Lock()
+	node.state.Store(uint32(StateFailed))
+	node.gameTimeMu.Unlock()
 	// 失败实例仍先获得反序 OnStop，最后再关闭 Node 时间轮并等待其 goroutine 退出。
 	node.stopDiscoveryPublication()
 	result := node.withdrawDiscovery(ctx)
@@ -829,7 +841,6 @@ func (node *Node) Rollback(ctx context.Context) error {
 	result = errors.Join(result, node.rpcRuntime.Close(ctx))
 	result = errors.Join(result, node.timerEngine.Close())
 	node.closeDiscoverySubscription()
-	node.state.Store(uint32(StateFailed))
 	node.refreshHealth()
 	node.stopComplete = true
 	node.stopResult = result
@@ -862,7 +873,10 @@ func (node *Node) Stop(ctx context.Context) error {
 	}
 
 	// 正常停止会发布 Stopping/Stopped；失败回滚由 Rollback 保持 Failed。
+	// 时间修改锁只覆盖状态发布：已在执行的重排先完成，之后的修改稳定返回 Stopping。
+	node.gameTimeMu.Lock()
 	node.state.Store(uint32(StateStopping))
+	node.gameTimeMu.Unlock()
 	node.refreshHealth()
 	node.logger.Info("node stopping")
 	node.stopDiscoveryPublication()
@@ -1079,6 +1093,38 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 // NodeID 实现 service.Runtime。
 func (runtime *serviceRuntime) NodeID() string {
 	return runtime.node.id
+}
+
+// ID 实现 service.NodeRuntime，并返回所属 Node 的稳定身份。
+func (runtime *serviceRuntime) ID() string {
+	if runtime == nil || runtime.node == nil {
+		return ""
+	}
+	return runtime.node.ID()
+}
+
+// Now 实现 service.NodeRuntime，读取所属 Node 的游戏逻辑时间。
+func (runtime *serviceRuntime) Now() time.Time {
+	if runtime == nil || runtime.node == nil {
+		return time.Time{}
+	}
+	return runtime.node.Now()
+}
+
+// SetTime 实现 service.NodeRuntime，设置所属 Node 的游戏逻辑时间。
+func (runtime *serviceRuntime) SetTime(value time.Time) error {
+	if runtime == nil || runtime.node == nil {
+		return invalidArgument("Service Runtime 没有所属 Node")
+	}
+	return runtime.node.SetTime(value)
+}
+
+// AddTime 实现 service.NodeRuntime，调整所属 Node 的游戏逻辑时间偏移。
+func (runtime *serviceRuntime) AddTime(delta time.Duration) error {
+	if runtime == nil || runtime.node == nil {
+		return invalidArgument("Service Runtime 没有所属 Node")
+	}
+	return runtime.node.AddTime(delta)
 }
 
 // ServiceName 实现 service.Runtime。

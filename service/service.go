@@ -36,6 +36,7 @@ type IService interface {
 	EventStats() EventStats
 	Retire(ctx context.Context) error
 	Resume(ctx context.Context) error
+	GetNode() NodeRuntime
 
 	baseService() *Service
 }
@@ -102,6 +103,21 @@ func (service *Service) NodeID() string {
 		return ""
 	}
 	return service.runtime.NodeID()
+}
+
+// GetNode 返回当前 Service 所属 Node 的最小运行外观。
+//
+// 未绑定的类型模板返回 nil。生产 Runtime 必须实现 NodeRuntime；该方法使用独立小接口保持
+// 既有 Runtime 扩展兼容性，并避免 service 包反向依赖具体 node 包形成循环依赖。
+func (service *Service) GetNode() NodeRuntime {
+	if service == nil || service.runtime == nil {
+		return nil
+	}
+	current, ok := service.runtime.(NodeRuntime)
+	if !ok {
+		return nil
+	}
+	return current
 }
 
 // State 返回当前 Service 的无锁生命周期状态快照。

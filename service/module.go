@@ -81,6 +81,17 @@ func (module *Module) Service() IService {
 	return module.target
 }
 
+// GetNode 返回当前 Module 所属 Service 已绑定的同一个 Node 最小运行外观。
+//
+// 未绑定 Module 返回 nil；Module 不建立独立时间作用域，也不缓存第二份 Node 状态。
+func (module *Module) GetNode() NodeRuntime {
+	owner := module.ownerService()
+	if owner == nil {
+		return nil
+	}
+	return owner.GetNode()
+}
+
 // AddModule 在当前 Module 的 OnInit 调用栈中同步登记并初始化一个子 Module。
 func (module *Module) AddModule(child IModule) error {
 	if module == nil {

@@ -1,0 +1,7 @@
+log:
+  # 使用文本日志，方便直接对比真实日志时间与业务输出的逻辑时间。
+  console: {enabled: true, level: info, format: text}
+nodes:
+  - id: game-1
+    # 配置顺序使控制 Service 先在 OnStart 设置初始时间，业务 Service 再注册 Timer。
+    services: [ClockControlService, TimedService]

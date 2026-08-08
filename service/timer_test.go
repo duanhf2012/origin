@@ -110,6 +110,7 @@ func newTimerFixtureWithConfig(
 		name:          "PlayerService",
 		timerLimit:    timerLimit,
 		timerLocation: time.UTC,
+		nowSource:     clock.Now,
 	}
 	runtimeState.state.Store(uint32(StateStarting))
 	if err := BindRuntime(target, runtimeState); err != nil {
@@ -176,6 +177,351 @@ func waitForTimerStats(
 }
 
 var noopTimerCallback TimerFunc = func(context.Context, TimerID) {}
+
+// TestRebaseTimersValidatesTargetAndLifecycle 固定框架内部入口对空对象、尚未准备的
+// Service 和已关闭准入的 Scheduler 返回稳定结果。
+func TestRebaseTimersValidatesTargetAndLifecycle(t *testing.T) {
+	if err := RebaseTimers(nil); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("RebaseTimers(nil) error = %v", err)
+	}
+	var typedNil *testService
+	if err := RebaseTimers(typedNil); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("RebaseTimers(typed nil) error = %v", err)
+	}
+	// 未进入 OnStart 的绑定 Service 没有 Scheduler 和 Timer，因此是无工作可做的成功。
+	if err := RebaseTimers(&testService{}); err != nil {
+		t.Fatalf("RebaseTimers(unprepared) error = %v", err)
+	}
+
+	fixture := newTimerFixture(t, 8)
+	if err := BeginStopScheduler(fixture.service); err != nil {
+		t.Fatalf("BeginStopScheduler() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); !errors.Is(err, errs.ErrServiceStopping) {
+		t.Fatalf("RebaseTimers(Draining) error = %v", err)
+	}
+}
+
+// TestBusinessTimerPauseUsesNodeTime 防止 After/Ticker 的剩余时间仍从真实 TimerEngine 读取；
+// 游戏时间已经前进时，暂停必须保存逻辑目标与当前逻辑时间之间的剩余量。
+func TestBusinessTimerPauseUsesNodeTime(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	fired := make(chan struct{}, 1)
+	id := fixture.service.AfterFunc(time.Hour, func(context.Context, TimerID) {
+		fired <- struct{}{}
+	})
+	if id == InvalidTimerID {
+		t.Fatal("AfterFunc() 创建失败")
+	}
+
+	// 只推进 Node 逻辑时间，不推进真实 Engine；暂停后恢复应只再等待剩余 30 分钟。
+	if err := fixture.runtime.AddTime(30 * time.Minute); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if !fixture.service.PauseTimer(id) || !fixture.service.ResumeTimer(id) {
+		t.Fatal("PauseTimer()/ResumeTimer() 失败")
+	}
+	advanceTimerFixture(t, fixture, 29*time.Minute)
+	select {
+	case <-fired:
+		t.Fatal("AfterFunc 在逻辑剩余时间前触发")
+	default:
+	}
+	advanceTimerFixture(t, fixture, time.Minute)
+	receive(t, fired)
+}
+
+// TestTickerContinuationUsesNodeTime 防止周期回调完成后忽略回调中发生的 Node 时间跳跃；
+// 跳过的名义周期必须合并为一次并从新逻辑时间继续。
+func TestTickerContinuationUsesNodeTime(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	fired := make(chan struct{}, 1)
+	id := fixture.service.NewTicker(time.Minute, func(context.Context, TimerID) {
+		if err := fixture.runtime.AddTime(5 * time.Minute); err != nil {
+			t.Errorf("AddTime() error = %v", err)
+		}
+		fired <- struct{}{}
+	})
+	if id == InvalidTimerID {
+		t.Fatal("NewTicker() 创建失败")
+	}
+
+	advanceTimerFixture(t, fixture, time.Minute)
+	receive(t, fired)
+	stats := waitForTimerStats(t, fixture.service, func(stats TimerStats) bool {
+		return stats.Scheduled == 1 && stats.Running == 0
+	})
+	if stats.CoalescedTotal != 5 {
+		t.Fatalf("Ticker CoalescedTotal = %d, want 5", stats.CoalescedTotal)
+	}
+	if !fixture.service.CancelTimer(&id) {
+		t.Fatal("CancelTimer() 失败")
+	}
+}
+
+// TestGameTimeRebaseMakesOverdueAfterReady 防止 Node 时间只修改 Now 返回值而不唤醒已经登记的
+// 业务 Deadline；向前跨过名义点后，After 必须经过时间轮异步进入 Service Ready 队列。
+func TestGameTimeRebaseMakesOverdueAfterReady(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	fired := make(chan struct{}, 1)
+	id := fixture.service.AfterFunc(time.Hour, func(context.Context, TimerID) {
+		fired <- struct{}{}
+	})
+	if id == InvalidTimerID {
+		t.Fatal("AfterFunc() 创建失败")
+	}
+
+	if err := fixture.runtime.AddTime(2 * time.Hour); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); err != nil {
+		t.Fatalf("RebaseTimers() error = %v", err)
+	}
+	// 零延迟仍登记到时间轮的下一 Tick，不允许 RebaseTimers 调用栈同步执行用户回调。
+	select {
+	case <-fired:
+		t.Fatal("RebaseTimers() 同步执行了业务回调")
+	default:
+	}
+	advanceTimerFixture(t, fixture, timerwheel.TickDuration)
+	receive(t, fired)
+}
+
+// TestGameTimeRebaseExtendsScheduledTimer 防止向后调整后旧真实 Deadline 继续提前触发。
+func TestGameTimeRebaseExtendsScheduledTimer(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	fired := make(chan struct{}, 1)
+	id := fixture.service.AfterFunc(time.Hour, func(context.Context, TimerID) {
+		fired <- struct{}{}
+	})
+	if id == InvalidTimerID {
+		t.Fatal("AfterFunc() 创建失败")
+	}
+
+	if err := fixture.runtime.AddTime(-time.Hour); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); err != nil {
+		t.Fatalf("RebaseTimers() error = %v", err)
+	}
+	advanceTimerFixture(t, fixture, time.Hour)
+	select {
+	case <-fired:
+		t.Fatal("AfterFunc 在向后调整后的逻辑目标前触发")
+	default:
+	}
+	advanceTimerFixture(t, fixture, time.Hour)
+	receive(t, fired)
+}
+
+// TestGameTimeRebasePreservesScheduledDeadlineID 防止大批量逻辑时间重排为每个 Timer
+// 生成新 DeadlineID，从而引起时间轮与 Scheduler Map 换键、扩容和额外 GC 压力。
+func TestGameTimeRebasePreservesScheduledDeadlineID(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	id := fixture.service.AfterFunc(time.Hour, noopTimerCallback)
+	if id == InvalidTimerID {
+		t.Fatal("AfterFunc() 创建失败")
+	}
+	scheduler := fixture.service.scheduler.Load()
+	scheduler.mu.Lock()
+	before := scheduler.timers[id].deadlineID
+	scheduler.mu.Unlock()
+
+	if err := fixture.runtime.AddTime(-time.Hour); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); err != nil {
+		t.Fatalf("RebaseTimers() error = %v", err)
+	}
+	scheduler.mu.Lock()
+	after := scheduler.timers[id].deadlineID
+	scheduler.mu.Unlock()
+	if after != before {
+		t.Fatalf("RebaseTimers() deadlineID = %d, want preserved %d", after, before)
+	}
+	if !fixture.service.CancelTimer(&id) {
+		t.Fatal("CancelTimer() 失败")
+	}
+}
+
+// TestGameTimeRebaseReplacesAlreadyExpiredDeadline 模拟时间轮已经取得旧 ID、
+// Scheduler watcher 尚未处理 Binding 的竞争窗口；原地重排返回 false 后必须换用新 ID。
+func TestGameTimeRebaseReplacesAlreadyExpiredDeadline(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	id := fixture.service.AfterFunc(time.Hour, noopTimerCallback)
+	if id == InvalidTimerID {
+		t.Fatal("AfterFunc() 创建失败")
+	}
+	scheduler := fixture.service.scheduler.Load()
+	scheduler.mu.Lock()
+	timer := scheduler.timers[id]
+	before := timer.deadlineID
+	if !scheduler.deadlineQueue.Cancel(before) {
+		scheduler.mu.Unlock()
+		t.Fatal("模拟旧 Deadline 离开时间轮失败")
+	}
+	// 故意保留 Binding 和 Timer.deadlineID，它们正是 watcher 取得 Scheduler 锁前的可见状态。
+	scheduler.mu.Unlock()
+
+	if err := fixture.runtime.AddTime(-time.Hour); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); err != nil {
+		t.Fatalf("RebaseTimers() error = %v", err)
+	}
+	scheduler.mu.Lock()
+	after := scheduler.timers[id].deadlineID
+	_, oldBindingExists := scheduler.deadlineBindings[before]
+	_, newBindingExists := scheduler.deadlineBindings[after]
+	scheduler.mu.Unlock()
+	if after == before || oldBindingExists || !newBindingExists {
+		t.Fatalf(
+			"竞争回退状态: before=%d after=%d oldBinding=%t newBinding=%t",
+			before,
+			after,
+			oldBindingExists,
+			newBindingExists,
+		)
+	}
+	if !fixture.service.CancelTimer(&id) {
+		t.Fatal("CancelTimer() 失败")
+	}
+}
+
+// TestGameTimeRebaseCoalescesTicker 验证向前跨过多个周期时只执行一次，
+// 且后续节拍从新的 Node 逻辑时间之后继续。
+func TestGameTimeRebaseCoalescesTicker(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	fired := make(chan struct{}, 2)
+	id := fixture.service.NewTicker(time.Minute, func(context.Context, TimerID) {
+		fired <- struct{}{}
+	})
+	if id == InvalidTimerID {
+		t.Fatal("NewTicker() 创建失败")
+	}
+
+	if err := fixture.runtime.AddTime(3 * time.Minute); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); err != nil {
+		t.Fatalf("RebaseTimers() error = %v", err)
+	}
+	advanceTimerFixture(t, fixture, timerwheel.TickDuration)
+	receive(t, fired)
+	stats := waitForTimerStats(t, fixture.service, func(stats TimerStats) bool {
+		return stats.Running == 0 && stats.Scheduled == 1
+	})
+	if stats.CoalescedTotal != 2 {
+		t.Fatalf("Ticker CoalescedTotal = %d, want 2", stats.CoalescedTotal)
+	}
+	select {
+	case <-fired:
+		t.Fatal("向前跳时补执行了多个 Ticker 历史回调")
+	default:
+	}
+	if !fixture.service.CancelTimer(&id) {
+		t.Fatal("CancelTimer() 失败")
+	}
+}
+
+// TestGameTimeRebaseSkipsPausedTimer 固定暂停期间的时间跳跃不会消耗已保存的逻辑剩余时间。
+func TestGameTimeRebaseSkipsPausedTimer(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	fired := make(chan struct{}, 1)
+	id := fixture.service.AfterFunc(time.Hour, func(context.Context, TimerID) {
+		fired <- struct{}{}
+	})
+	if id == InvalidTimerID || !fixture.service.PauseTimer(id) {
+		t.Fatal("AfterFunc()/PauseTimer() 失败")
+	}
+	if err := fixture.runtime.AddTime(24 * time.Hour); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); err != nil {
+		t.Fatalf("RebaseTimers() error = %v", err)
+	}
+	if !fixture.service.ResumeTimer(id) {
+		t.Fatal("ResumeTimer() 失败")
+	}
+	advanceTimerFixture(t, fixture, 59*time.Minute)
+	select {
+	case <-fired:
+		t.Fatal("暂停 Timer 的剩余时间被 Node 时间跳跃消耗")
+	default:
+	}
+	advanceTimerFixture(t, fixture, time.Minute)
+	receive(t, fired)
+}
+
+// TestGameTimeRebaseDoesNotRetractDueTimer 防止向后调时把 OnStart 期间已经到期的
+// DuePending 工作撤回；Scheduler 激活后必须继续提升并执行该回调。
+func TestGameTimeRebaseDoesNotRetractDueTimer(t *testing.T) {
+	fixture := newPreparedTimerFixture(t, 8)
+	fired := make(chan struct{}, 1)
+	id := fixture.service.AfterFunc(time.Minute, func(context.Context, TimerID) {
+		fired <- struct{}{}
+	})
+	if id == InvalidTimerID {
+		t.Fatal("AfterFunc() 创建失败")
+	}
+	advanceTimerFixture(t, fixture, time.Minute)
+	waitForTimerStats(t, fixture.service, func(stats TimerStats) bool {
+		return stats.DuePending == 1
+	})
+	if err := fixture.runtime.AddTime(-time.Hour); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); err != nil {
+		t.Fatalf("RebaseTimers() error = %v", err)
+	}
+	fixture.runtime.state.Store(uint32(StateRunning))
+	if err := ActivateScheduler(fixture.service); err != nil {
+		t.Fatalf("ActivateScheduler() error = %v", err)
+	}
+	receive(t, fired)
+}
+
+// TestGameTimeDoesNotExpireInfrastructureDeadline 证明 Node 游戏时间只改变业务 Timer，
+// 同一 TimerEngine 上的 RPC/Await 类基础设施 Deadline 仍按真实单调时间等待。
+func TestGameTimeDoesNotExpireInfrastructureDeadline(t *testing.T) {
+	fixture := newTimerFixture(t, 8)
+	queue, err := fixture.engine.NewDeadlineQueue()
+	if err != nil {
+		t.Fatalf("NewDeadlineQueue() error = %v", err)
+	}
+	defer queue.Close()
+	deadlineID, err := queue.ScheduleAfter(time.Hour)
+	if err != nil {
+		t.Fatalf("ScheduleAfter() error = %v", err)
+	}
+
+	if err := fixture.runtime.AddTime(24 * time.Hour); err != nil {
+		t.Fatalf("AddTime() error = %v", err)
+	}
+	if err := RebaseTimers(fixture.service); err != nil {
+		t.Fatalf("RebaseTimers() error = %v", err)
+	}
+	advanceTimerFixture(t, fixture, timerwheel.TickDuration)
+	select {
+	case <-queue.ExpiredSignal():
+		t.Fatal("Node 游戏时间使基础设施 Deadline 提前到期")
+	default:
+	}
+
+	advanceTimerFixture(t, fixture, time.Hour)
+	select {
+	case <-queue.ExpiredSignal():
+		ids, drainErr := queue.DrainExpired(nil, 1)
+		if drainErr != nil {
+			t.Fatalf("DrainExpired() error = %v", drainErr)
+		}
+		if len(ids) != 1 || ids[0] != deadlineID {
+			t.Fatalf("expired IDs = %v, want [%d]", ids, deadlineID)
+		}
+	case <-time.After(schedulerTestTimeout):
+		t.Fatal("等待真实基础设施 Deadline 超时")
+	}
+}
 
 func TestAfterFuncRunsAsServiceTaskAndReleasesQuota(t *testing.T) {
 	fixture := newTimerFixture(t, 8)

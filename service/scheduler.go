@@ -363,12 +363,16 @@ func ActivateScheduler(target IService) error {
 	}
 	scheduler.state = schedulerRunning
 	scheduler.activated = true
+	// OnStart 可以登记零延迟 Timer，其 Deadline 可能在 Scheduler 激活前已经到期。
+	// 进入 Running 的同一锁事务中先把它们提升到 Ready，避免 DuePending 只能等待
+	// 下一次无关任务投递才被偶然唤醒。
+	promotedTimer := scheduler.promoteDueTimersLocked()
 	promotedDiscovery := scheduler.promoteDiscoveryLocked()
 	scheduler.mu.Unlock()
 
 	// 最后一个活动 Runner 关闭 runnerDone；Deadline watcher 已在 Prepare 阶段启动。
 	scheduler.startRunner()
-	if promotedDiscovery {
+	if promotedTimer || promotedDiscovery {
 		scheduler.notifyRunner()
 	}
 	return nil

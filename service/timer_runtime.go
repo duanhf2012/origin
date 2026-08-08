@@ -1,7 +1,10 @@
 package service
 
 import (
+	"errors"
+	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
@@ -202,6 +205,126 @@ func (service *Service) TimerStats() TimerStats {
 	return scheduler.timerStatsSnapshot()
 }
 
+// RebaseTimers 在 Node 逻辑时间改变后，按原有名义触发时刻重排 target 已登记的业务 Timer。
+//
+// 该入口仅供 Node 运行时使用：暂停、已到期、Ready 和正在执行的 Timer 不会被拉回或
+// 重复执行。向前跨过触发点的 Timer 仍经由时间轮异步唤醒，不在调用栈中同步执行用户回调。
+func RebaseTimers(target IService) error {
+	if target == nil || isNilService(target) {
+		return invalidArgument("Service 不能为空")
+	}
+	base := target.baseService()
+	if base == nil {
+		return invalidArgument("Service 基础对象不能为空")
+	}
+	scheduler := base.scheduler.Load()
+	if scheduler == nil {
+		// Created 和 OnInit 阶段还没有 Scheduler，也不可能存在需要重排的业务 Timer。
+		return nil
+	}
+	return scheduler.rebaseBusinessTimers()
+}
+
+// rebaseBusinessTimers 以稳定 TimerID 顺序重新登记 Scheduled Timer 的真实等待时间。
+//
+// 逻辑时间修改是管理冷路径；这里允许一次临时 ID Slice，换取跨 Service 可重现的重排顺序。
+func (scheduler *serviceScheduler) rebaseBusinessTimers() error {
+	if scheduler.failureLockUnsafe.Load() {
+		return errs.ErrServiceFailed
+	}
+
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	switch scheduler.state {
+	case schedulerPrepared, schedulerRunning:
+		// 继续执行重排。
+	case schedulerDraining:
+		return errs.ErrServiceStopping
+	case schedulerFailed:
+		return errs.ErrServiceFailed
+	case schedulerStopped:
+		return errs.ErrServiceStopped
+	default:
+		return errs.ErrServiceNotReady
+	}
+
+	timerIDs := make([]TimerID, 0, scheduler.timerStats.Scheduled)
+	for timerID, timer := range scheduler.timers {
+		if timer != nil && timer.state == businessTimerScheduled {
+			timerIDs = append(timerIDs, timerID)
+		}
+	}
+	slices.Sort(timerIDs)
+	now := scheduler.businessTimerNow()
+	var result error
+	for _, timerID := range timerIDs {
+		timer := scheduler.timers[timerID]
+		if timer == nil || timer.state != businessTimerScheduled {
+			continue
+		}
+
+		delay := timer.fireAt.Sub(now)
+		if delay < 0 {
+			delay = 0
+		}
+		rescheduled, err := scheduler.deadlineQueue.RescheduleAfter(
+			timer.deadlineID,
+			delay,
+		)
+		if err == nil && rescheduled {
+			// 通常路径原地保留 DeadlineID 和 Binding，避免大批量 Timer 重排使两张 Map 换键。
+			continue
+		}
+
+		// false 表示时间轮已经使旧 ID 到期，但 Scheduler watcher 还没有取得状态锁。
+		// 删除旧 Binding 并增加代次，使晚到的旧 ID 只成为可忽略的墓碑。
+		oldDeadlineID := timer.deadlineID
+		if err != nil {
+			scheduler.deadlineQueue.Cancel(oldDeadlineID)
+		}
+		delete(scheduler.deadlineBindings, oldDeadlineID)
+		timer.deadlineID = timerwheel.InvalidDeadlineID
+		timer.generation++
+		if err != nil {
+			timer.state = businessTimerCanceled
+			scheduler.timerStats.Scheduled--
+			scheduler.timerStats.Active--
+			scheduler.timerStats.CanceledTotal++
+			scheduler.releaseTerminalTimerIfUnreferencedLocked(timer)
+			result = errors.Join(result, fmt.Errorf(
+				"重排 Service Timer %d: %w",
+				timerID,
+				err,
+			))
+			continue
+		}
+
+		deadlineID, err := scheduler.deadlineQueue.ScheduleAfter(delay)
+		if err != nil {
+			// Queue 在 Scheduler 可接受任务时不应关闭。保守取消该 Timer，避免留下
+			// 永远处于 Scheduled 但没有 Deadline 的孤儿对象。
+			timer.state = businessTimerCanceled
+			scheduler.timerStats.Scheduled--
+			scheduler.timerStats.Active--
+			scheduler.timerStats.CanceledTotal++
+			scheduler.releaseTerminalTimerIfUnreferencedLocked(timer)
+			result = errors.Join(result, fmt.Errorf(
+				"重排 Service Timer %d: %w",
+				timerID,
+				err,
+			))
+			continue
+		}
+		timer.deadlineID = deadlineID
+		scheduler.deadlineBindings[deadlineID] = deadlineBinding{
+			kind:       deadlineBindingTimer,
+			timer:      timer,
+			generation: timer.generation,
+		}
+	}
+	return result
+}
+
 // pauseTimer 在线性化锁内裁决到期、开始执行和暂停之间的先后顺序。
 func (scheduler *serviceScheduler) pauseTimer(timerID TimerID) bool {
 	if scheduler.failureLockUnsafe.Load() {
@@ -221,7 +344,7 @@ func (scheduler *serviceScheduler) pauseTimer(timerID TimerID) bool {
 		scheduler.deadlineQueue.Cancel(timer.deadlineID)
 		delete(scheduler.deadlineBindings, timer.deadlineID)
 		timer.deadlineID = timerwheel.InvalidDeadlineID
-		timer.remaining = timer.fireAt.Sub(scheduler.timerEngine.Now())
+		timer.remaining = timer.fireAt.Sub(scheduler.businessTimerNow())
 		if timer.remaining < 0 {
 			timer.remaining = 0
 		}
@@ -291,7 +414,7 @@ func (scheduler *serviceScheduler) resumeTimer(timerID TimerID) bool {
 
 	// Cron 暂停期间不补历史触发，恢复时从当前墙上时间重新寻找未来匹配点。
 	// After/Ticker 则使用暂停时保存的剩余相对延迟。
-	now := scheduler.timerEngine.Now()
+	now := scheduler.businessTimerNow()
 	delay := timer.remaining
 	fireAt := now.Add(delay)
 	if timer.kind == businessTimerCron {
@@ -429,7 +552,7 @@ func (scheduler *serviceScheduler) createRelativeTimer(
 		scheduler.mu.Unlock()
 		return InvalidTimerID
 	}
-	now := scheduler.timerEngine.Now()
+	now := scheduler.businessTimerNow()
 	timerID, quotaRejected := scheduler.createTimerLocked(
 		kind,
 		now.Add(delay),
@@ -490,7 +613,7 @@ func (scheduler *serviceScheduler) createTimerLocked(
 	timer.location = location
 	timer.fireAt = fireAt
 
-	delay := fireAt.Sub(scheduler.timerEngine.Now())
+	delay := fireAt.Sub(scheduler.businessTimerNow())
 	if delay < 0 {
 		delay = 0
 	}
@@ -567,6 +690,19 @@ func (scheduler *serviceScheduler) releaseTerminalTimerIfUnreferencedLocked(
 	return true
 }
 
+// businessTimerNow 返回当前 Node 的游戏逻辑时间。
+//
+// 正式 Node Runtime 必须实现 NodeRuntime；兼容自定义测试 Runtime 时回退到 TimerEngine
+// 真实时钟。该函数只在 Scheduler 已持有运行资源的路径调用，不创建对象或 goroutine。
+func (scheduler *serviceScheduler) businessTimerNow() time.Time {
+	if runtime, ok := scheduler.runtime.(NodeRuntime); ok {
+		if now := runtime.Now(); !now.IsZero() {
+			return now
+		}
+	}
+	return scheduler.timerEngine.Now()
+}
+
 // enqueueExpiredTimerLocked 把一个已到期 Timer 转换成普通 Service Task。
 //
 // M10 后续步骤会在此处补充 DuePending 队列；基础 AfterFunc 路径先确保容量充足时与普通
@@ -578,31 +714,29 @@ func (scheduler *serviceScheduler) enqueueExpiredTimerLocked(timer *businessTime
 		return false
 	}
 
-	// Cron 使用墙上名义时间。若系统时间在内部 Deadline 等待期间向后调整，旧 Deadline
-	// 到期不代表 Cron 已到名义点；重新登记剩余时间，不能提前执行回调。
-	if timer.kind == businessTimerCron {
-		now := scheduler.timerEngine.Now().In(timer.location)
-		if now.Before(timer.fireAt) {
-			deadlineID, err := scheduler.deadlineQueue.ScheduleAfter(
-				timer.fireAt.Sub(now),
-			)
-			if err != nil {
-				timer.state = businessTimerCanceled
-				scheduler.timerStats.Scheduled--
-				scheduler.timerStats.Active--
-				scheduler.timerStats.CanceledTotal++
-				scheduler.releaseTerminalTimerIfUnreferencedLocked(timer)
-				return false
-			}
-			timer.generation++
-			timer.deadlineID = deadlineID
-			scheduler.deadlineBindings[deadlineID] = deadlineBinding{
-				kind:       deadlineBindingTimer,
-				timer:      timer,
-				generation: timer.generation,
-			}
+	// 全部业务 Timer 都使用 Node 逻辑名义时间。若时间在内部真实 Deadline 等待期间向后
+	// 调整，旧 Deadline 到期不代表业务目标已到；重新登记剩余时间，不能提前执行回调。
+	now := scheduler.businessTimerNow()
+	if now.Before(timer.fireAt) {
+		deadlineID, err := scheduler.deadlineQueue.ScheduleAfter(
+			timer.fireAt.Sub(now),
+		)
+		if err != nil {
+			timer.state = businessTimerCanceled
+			scheduler.timerStats.Scheduled--
+			scheduler.timerStats.Active--
+			scheduler.timerStats.CanceledTotal++
+			scheduler.releaseTerminalTimerIfUnreferencedLocked(timer)
 			return false
 		}
+		timer.generation++
+		timer.deadlineID = deadlineID
+		scheduler.deadlineBindings[deadlineID] = deadlineBinding{
+			kind:       deadlineBindingTimer,
+			timer:      timer,
+			generation: timer.generation,
+		}
+		return false
 	}
 
 	timer.state = businessTimerDuePending
@@ -793,7 +927,7 @@ func (scheduler *serviceScheduler) finishTimerTaskLocked(
 	}
 
 	// Ticker 按固定节拍计算下一点；Cron 每轮从当前墙上时间寻找下一匹配点。
-	now := scheduler.timerEngine.Now()
+	now := scheduler.businessTimerNow()
 	var next time.Time
 	var skipped uint64
 	var valid bool

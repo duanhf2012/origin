@@ -47,12 +47,16 @@ go run ./examples/00-quickstart/01-hello-service
 
 完整教程见 [v3.0 使用指南](./docs/baseline/v3.0/guides/README.md)，全部可运行示例见 [examples](./examples/README.md)。
 
-### v3.1 RPC 调用更新
+### v3.1 使用更新
 
 v3.1 为有响应 RPC 新增普通 goroutine 使用的 `CallXxx`，并允许 Await、Call、Async、
 Notify 和 Broadcast 接受 nil、Background、TODO 或自定义 Context。完整的调用位置、
 15 秒默认预算、显式长 Deadline 和 Async 回调规则见
 [v3.1 RPC 使用变更](./docs/maintenance/v3.1/guides/README.md)。
+
+v3.1 还新增 Node 级游戏逻辑时间：Service/Module 通过 `GetNode()` 使用
+`Now`、`SetTime` 和 `AddTime`，并统一驱动当前 Node 的 After、Ticker 和 Cron。见
+[Node 游戏逻辑时间教程](./docs/maintenance/v3.1/guides/node-game-time.md)。
 
 ## 学习方式
 

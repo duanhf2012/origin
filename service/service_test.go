@@ -23,12 +23,23 @@ type testRuntime struct {
 	active   atomic.Int64
 	nextID   atomic.Uint64
 	location *time.Location
+	now      time.Time
 }
 
+func (runtime *testRuntime) ID() string               { return runtime.nodeID }
 func (runtime *testRuntime) NodeID() string           { return runtime.nodeID }
 func (runtime *testRuntime) ServiceName() string      { return runtime.name }
 func (runtime *testRuntime) State() State             { return runtime.state }
 func (runtime *testRuntime) Logger() originlog.Logger { return originlog.NewNop() }
+func (runtime *testRuntime) Now() time.Time           { return runtime.now }
+func (runtime *testRuntime) SetTime(value time.Time) error {
+	runtime.now = value
+	return nil
+}
+func (runtime *testRuntime) AddTime(delta time.Duration) error {
+	runtime.now = runtime.now.Add(delta)
+	return nil
+}
 func (runtime *testRuntime) LookupService(string) (IService, bool) {
 	return runtime.peer, runtime.peer != nil
 }
@@ -96,5 +107,39 @@ func TestUnboundServiceUsesSafeDefaults(t *testing.T) {
 	}
 	if target.Logger().Enabled(originlog.InfoLevel) {
 		t.Fatal("未绑定 Logger 不应启用输出")
+	}
+}
+
+// TestServiceGetNodeReturnsBoundRuntime 防止业务通过 GetNode 取得错误 Node、复制的时钟外观，
+// 或在未绑定类型模板上得到伪造运行对象。
+func TestServiceGetNodeReturnsBoundRuntime(t *testing.T) {
+	unbound := &testService{}
+	if unbound.GetNode() != nil {
+		t.Fatal("未绑定 Service.GetNode() 未返回 nil")
+	}
+
+	target := &testService{}
+	runtime := &testRuntime{
+		nodeID: "game-1",
+		name:   "PlayerService",
+		state:  StateRunning,
+		now:    time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC),
+	}
+	if err := BindRuntime(target, runtime); err != nil {
+		t.Fatalf("BindRuntime() error = %v", err)
+	}
+
+	currentNode := target.GetNode()
+	if currentNode == nil || currentNode.ID() != "game-1" {
+		t.Fatalf("GetNode() = %#v", currentNode)
+	}
+	if !currentNode.Now().Equal(runtime.now) {
+		t.Fatalf("GetNode().Now() = %v, want %v", currentNode.Now(), runtime.now)
+	}
+	if err := currentNode.AddTime(24 * time.Hour); err != nil {
+		t.Fatalf("GetNode().AddTime() error = %v", err)
+	}
+	if want := time.Date(2030, 1, 3, 3, 4, 5, 0, time.UTC); !runtime.now.Equal(want) {
+		t.Fatalf("runtime time = %v, want %v", runtime.now, want)
 	}
 }

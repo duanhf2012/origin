@@ -27,19 +27,42 @@ type schedulerTestRuntime struct {
 	nextID        atomic.Uint64
 	timerLimit    int
 	timerLocation *time.Location
-	failure       atomic.Pointer[schedulerTestFailure]
+	// nowSource 与 gameTimeOffset 把业务逻辑时间和 TimerEngine 真实时钟显式分离。
+	nowSource      func() time.Time
+	gameTimeOffset atomic.Int64
+	failure        atomic.Pointer[schedulerTestFailure]
 }
 
 type schedulerTestFailure struct {
 	cause error
 }
 
+func (runtime *schedulerTestRuntime) ID() string          { return runtime.nodeID }
 func (runtime *schedulerTestRuntime) NodeID() string      { return runtime.nodeID }
 func (runtime *schedulerTestRuntime) ServiceName() string { return runtime.name }
 func (runtime *schedulerTestRuntime) State() State {
 	return State(runtime.state.Load())
 }
 func (runtime *schedulerTestRuntime) Logger() originlog.Logger { return originlog.NewNop() }
+func (runtime *schedulerTestRuntime) Now() time.Time {
+	now := time.Now()
+	if runtime.nowSource != nil {
+		now = runtime.nowSource()
+	}
+	return now.Add(time.Duration(runtime.gameTimeOffset.Load()))
+}
+func (runtime *schedulerTestRuntime) SetTime(value time.Time) error {
+	base := time.Now()
+	if runtime.nowSource != nil {
+		base = runtime.nowSource()
+	}
+	runtime.gameTimeOffset.Store(int64(value.Sub(base)))
+	return nil
+}
+func (runtime *schedulerTestRuntime) AddTime(delta time.Duration) error {
+	runtime.gameTimeOffset.Add(int64(delta))
+	return nil
+}
 func (runtime *schedulerTestRuntime) LookupService(string) (IService, bool) {
 	return nil, false
 }
@@ -111,8 +134,9 @@ func newSchedulerFixtureWithServiceTimeout(
 	// PrepareScheduler、Service Running、ActivateScheduler。
 	target := &testService{}
 	runtimeState := &schedulerTestRuntime{
-		nodeID: "game-1",
-		name:   "PlayerService",
+		nodeID:    "game-1",
+		name:      "PlayerService",
+		nowSource: time.Now,
 	}
 	runtimeState.state.Store(uint32(StateCreated))
 	if err := BindRuntime(target, runtimeState); err != nil {

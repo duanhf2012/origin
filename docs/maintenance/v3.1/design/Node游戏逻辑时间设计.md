@@ -122,8 +122,8 @@ Failed 的 Node 返回稳定参数或生命周期错误，不修改已有偏移�
 
 1. 提交新的 Node 时间偏移；
 2. 遍历该 Node 已经准备好的 ServiceScheduler；
-3. 取消仍处于 Scheduled 的旧业务 Deadline；
-4. 按新的逻辑时间登记新 Deadline；
+3. 把仍处于 Scheduled 的业务 Deadline 原地移到新 Tick，保留 DeadlineID；
+4. 若旧 Deadline 正好已到期，删除旧 Binding 并回退为登记新 Deadline；
 5. 唤醒 Node TimerEngine 处理已经到期的项目。
 
 返回成功只表示重排已经提交，不等待业务回调执行完成。回调仍必须进入所属 Service 的有界
@@ -162,7 +162,10 @@ Node 使用独立冷路径锁串行化 `SetTime`、`AddTime` 与进入 Stopping 
 原子读取偏移，不获取该锁。ServiceScheduler 仍使用自己的既有互斥锁保护 Timer Map、状态、
 代次和 Deadline Binding。
 
-时间更新先发布偏移，再依次取得各 Scheduler 锁重排 Timer。Timer 创建在 Scheduler 锁内
+时间更新先发布偏移，再依次取得各 Scheduler 锁重排 Timer。重排使用 TimerEngine
+内部 `RescheduleAfter` 保留 DeadlineID 并原地移动时间轮节点，避免两张 ID Map 批量
+换键；时间轮已经使旧 ID 到期时，Scheduler 删除旧 Binding、增加代次并登记
+新 ID，晚到的旧到期通知因 Binding 或代次不匹配而失效。Timer 创建在 Scheduler 锁内
 读取当前逻辑时间，因此并发创建只有两种合法结果：在更新前创建并被随后重排，或在更新后
 直接按新时间登记，不会遗漏旧时间 Timer。
 
@@ -178,7 +181,8 @@ Node Stop 先关闭时间修改准入，再进入业务排空。时间修改不�
 
 时间修改属于开发、测试和管理冷路径，允许以 `O(当前 Node 活跃业务 Timer 数)` 重排。该
 选择避免每个 Node 增加第二套 TimerEngine 和 goroutine，也不在普通 Timer 到期热路径增加
-多时钟查找。重排 Benchmark 记录 1、1,000 和 100,000 个 Scheduled Timer 的 `ns/op`、
+多时钟查找。冷路径只为稳定 TimerID 排序分配一个线性 Slice，不为每个 Timer 生成
+新 Deadline 对象或 Map Key。重排 Benchmark 记录 1、1,000 和 100,000 个 Scheduled Timer 的 `ns/op`、
 `B/op` 与 `allocs/op`，用于识别意外退化，不承诺时间修改是常数时间。
 
 ## 8. 错误与可观测性
@@ -206,6 +210,7 @@ Node Stop 先关闭时间修改准入，再进入业务排空。时间修改不�
 9. OnInit、OnStart、Running 可修改，Stopping 以后拒绝；
 10. `go test -race ./node ./service`、全仓测试、`go vet ./...`、跨平台构建；
 11. `Now` 零分配 Benchmark 和批量 Timer 重排 Benchmark。
+12. TimerEngine 原地重排保留 DeadlineID，取消/到期竞争回退到新 ID。
 
 ## 10. 教程与示例
 

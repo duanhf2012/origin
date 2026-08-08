@@ -39,6 +39,31 @@ func BenchmarkTimerPauseResume(b *testing.B) {
 	}
 }
 
+// BenchmarkGameTimeRebase 记录 Node 逻辑时间冷路径按 Scheduled Timer 数量线性重排的成本。
+func BenchmarkGameTimeRebase(b *testing.B) {
+	for _, timerCount := range []int{1, 1_000, 100_000} {
+		b.Run(fmt.Sprintf("timers_%d", timerCount), func(b *testing.B) {
+			fixture := newTimerFixture(b, timerCount)
+			for index := 0; index < timerCount; index++ {
+				if id := fixture.service.AfterFunc(time.Hour, noopTimerCallback); id == InvalidTimerID {
+					b.Fatalf("第 %d 个 AfterFunc 创建失败", index)
+				}
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := 0; index < b.N; index++ {
+				if err := fixture.runtime.AddTime(time.Second); err != nil {
+					b.Fatal(err)
+				}
+				if err := RebaseTimers(fixture.service); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkTimerTickerReschedule(b *testing.B) {
 	fixture := newTimerFixture(b, 1)
 	fired := make(chan struct{}, 1)
