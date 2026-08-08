@@ -154,11 +154,14 @@ type PlayerAudit struct{ PlayerID int64 }
 func (PlayerAudit) EventID() service.EventID { return playerAuditEvent }
 
 func (s *PlayerService) OnInit() error {
-    return s.SubscribeEvent(playerLoadedEvent, func(ctx context.Context, raw service.Event) error {
-        loaded := raw.(PlayerLoaded)
-        // 这是同步监听器：直接处理，或继续同步通知另一个事件。
-        return s.NotifyEventSync(ctx, PlayerAudit{PlayerID: loaded.PlayerID})
-    })
+    // 注册后，框架才会在 PlayerLoaded 通知时调用 s.onLoaded。
+    return s.SubscribeEvent(playerLoadedEvent, s.onLoaded)
+}
+
+func (s *PlayerService) onLoaded(ctx context.Context, raw service.Event) error {
+    loaded := raw.(PlayerLoaded)
+    // 这是同步监听器：直接处理，或继续同步通知另一个事件。
+    return s.NotifyEventSync(ctx, PlayerAudit{PlayerID: loaded.PlayerID})
 }
 
 // 必须从 Service 任务（例如 Timer 回调）中触发同步通知。
@@ -167,15 +170,21 @@ func (s *PlayerService) publishLoaded(ctx context.Context, playerID int64) error
 }
 ```
 
-同步监听器不能调用 `Await`：
+如果把 `OnInit` 注册的 `s.onLoaded` 替换成下面的实现，就会在同步通知时出错：
 
 ```go
-func (s *PlayerService) onLoaded(ctx context.Context, raw service.Event) error {
+func (s *PlayerService) onLoadedWithAwait(ctx context.Context, raw service.Event) error {
     loaded := raw.(PlayerLoaded)
     return s.Await(ctx, func(waitCtx context.Context) error {
         return s.loadExtraData(waitCtx, loaded.PlayerID)
     }) // 返回 ErrInvalidArgument
 }
+```
+
+这个函数只有在这样注册后才会成为监听器：
+
+```go
+_ = s.SubscribeEvent(playerLoadedEvent, s.onLoadedWithAwait) // 错误示例
 ```
 
 `Await` 会暂时释放 Service 执行权；如果同步监听器暂停，其他 Service 任务可能插入，外层事件的

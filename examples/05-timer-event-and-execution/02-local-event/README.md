@@ -6,10 +6,14 @@
 
 Timer 先进入 Service 任务上下文，再同步通知玩家 `1001`；监听器在当前任务中立即完成，并同步通知一个嵌套的审计事件。嵌套事件的监听器执行完成后，外层监听器才返回。随后异步通知玩家 `1002`，它作为普通后续 Service 任务排队执行。异步提交只保存 Event 接口值，提交成功后生产者不能再修改 payload。
 
-同步监听器可以这样嵌套另一个同步事件：
+同步监听器需要先通过 `SubscribeEvent` 注册，框架才会在通知时调用它。可以这样注册并嵌套另一个同步事件：
 
 ```go
-func onPlayerJoined(ctx context.Context, event service.Event) error {
+func (target *EventService) OnInit() error {
+    return target.SubscribeEvent(playerJoinedEvent, target.onPlayerJoined)
+}
+
+func (target *EventService) onPlayerJoined(ctx context.Context, event service.Event) error {
     joined := event.(PlayerJoined)
     return target.NotifyEventSync(ctx, PlayerAudit{PlayerID: joined.PlayerID})
 }
@@ -20,8 +24,13 @@ func onPlayerJoined(ctx context.Context, event service.Event) error {
 例如，需要在监听器中等待数据库时，改成异步通知：
 
 ```go
+// 将 OnInit 中原来的同步监听器注册替换为这个异步监听器。
+func (target *EventService) OnInit() error {
+    return target.SubscribeEvent(playerJoinedEvent, target.onPlayerJoinedAsync)
+}
+
 // 异步事件监听器作为后续 Service 任务执行，因此可以 Await。
-func onPlayerJoinedAsync(ctx context.Context, event service.Event) error {
+func (target *EventService) onPlayerJoinedAsync(ctx context.Context, event service.Event) error {
     joined := event.(PlayerJoined)
     return target.Await(ctx, func(waitCtx context.Context) error {
         return loadPlayerExtraData(waitCtx, joined.PlayerID)

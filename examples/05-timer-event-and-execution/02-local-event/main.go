@@ -41,24 +41,30 @@ type EventService struct{ service.Service }
 
 // OnInit 是唯一允许登记事件监听器的生命周期阶段。
 func (target *EventService) OnInit() error {
-	if err := target.SubscribeEvent(playerJoinedEvent, func(ctx context.Context, event service.Event) error {
-		// 同一 EventID 首次通知后会绑定具体 Go 类型，因此这里可断言 PlayerJoined。
-		joined := event.(PlayerJoined)
-		target.Logger().Info(fmt.Sprintf(
-			"player %d joined by %s event",
-			joined.PlayerID,
-			joined.Mode,
-		))
-		// 在同步监听器中嵌套同步通知：审计监听器完成后，本监听器才返回。
-		return target.NotifyEventSync(ctx, PlayerAudit{PlayerID: joined.PlayerID})
-	}); err != nil {
+	if err := target.SubscribeEvent(playerJoinedEvent, target.onPlayerJoined); err != nil {
 		return err
 	}
-	return target.SubscribeEvent(playerAuditEvent, func(_ context.Context, event service.Event) error {
-		audit := event.(PlayerAudit)
-		target.Logger().Info(fmt.Sprintf("player %d audit completed", audit.PlayerID))
-		return nil
-	})
+	return target.SubscribeEvent(playerAuditEvent, target.onPlayerAudit)
+}
+
+// onPlayerJoined 是通过 SubscribeEvent 注册的同步监听器。
+func (target *EventService) onPlayerJoined(ctx context.Context, event service.Event) error {
+	// 同一 EventID 首次通知后会绑定具体 Go 类型，因此这里可断言 PlayerJoined。
+	joined := event.(PlayerJoined)
+	target.Logger().Info(fmt.Sprintf(
+		"player %d joined by %s event",
+		joined.PlayerID,
+		joined.Mode,
+	))
+	// 在同步监听器中嵌套同步通知：审计监听器完成后，本监听器才返回。
+	return target.NotifyEventSync(ctx, PlayerAudit{PlayerID: joined.PlayerID})
+}
+
+// onPlayerAudit 是嵌套同步事件的监听器。
+func (target *EventService) onPlayerAudit(_ context.Context, event service.Event) error {
+	audit := event.(PlayerAudit)
+	target.Logger().Info(fmt.Sprintf("player %d audit completed", audit.PlayerID))
+	return nil
 }
 
 // OnStart 通过一次性 Timer 进入正常的 Service 任务上下文后发送事件。
