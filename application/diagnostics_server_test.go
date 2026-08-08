@@ -81,7 +81,7 @@ func TestDiagnosticsServerRuntimeLifecycle(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
 		t.Fatalf("decode diagnostics error = %v", err)
 	}
-	if snapshot.SchemaVersion != 1 || snapshot.Application.Name != "http-test" ||
+	if snapshot.SchemaVersion != 2 || snapshot.Application.Name != "http-test" ||
 		snapshot.Application.DiagnosticsServer.State != "serving" ||
 		snapshot.Application.DiagnosticsServer.Address != address {
 		t.Fatalf("HTTP snapshot = %+v", snapshot)

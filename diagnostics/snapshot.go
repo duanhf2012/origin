@@ -54,29 +54,15 @@ func (duration *Duration) UnmarshalJSON(data []byte) error {
 
 // Snapshot 是一次 Application.Diagnostics 调用拥有的不可变进程快照。
 type Snapshot struct {
+	// SchemaVersion 是 Diagnostics JSON 的结构版本；当前 v2 不再包含日志输出控制状态。
 	SchemaVersion uint32              `json:"schema_version"`
 	CollectedAt   time.Time           `json:"collected_at"`
 	StartedAt     time.Time           `json:"started_at"`
 	CollectCost   Duration            `json:"collect_cost"`
 	Application   ApplicationSnapshot `json:"application"`
-	Log           LogSnapshot         `json:"log"`
 	Runtime       RuntimeSnapshot     `json:"runtime"`
 	BufferPool    BufferPoolSnapshot  `json:"buffer_pool"`
 	Nodes         []NodeSnapshot      `json:"nodes"`
-}
-
-// LogSnapshot 保存当前被采集 Application 的两个日志输出端状态。
-type LogSnapshot struct {
-	Console LogOutputSnapshot `json:"console"`
-	File    LogOutputSnapshot `json:"file"`
-}
-
-// LogOutputSnapshot 是不会反向依赖 log 包枚举的诊断 DTO。
-type LogOutputSnapshot struct {
-	Available   bool   `json:"available"`
-	Enabled     bool   `json:"enabled"`
-	Level       string `json:"level"`
-	ConfigLevel string `json:"config_level"`
 }
 
 // ApplicationSnapshot 保存进程身份、生命周期和两个诊断 Listener 的当前状态。

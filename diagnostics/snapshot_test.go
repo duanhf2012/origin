@@ -25,7 +25,7 @@ var _ diagnostics.Source = staticSource{}
 func TestSnapshotJSONSchema(t *testing.T) {
 	collectedAt := time.Date(2026, 8, 1, 1, 2, 3, 456789000, time.FixedZone("CST", 8*60*60))
 	snapshot := diagnostics.Snapshot{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		CollectedAt:   collectedAt,
 		StartedAt:     collectedAt.Add(-time.Minute),
 		CollectCost:   diagnostics.Duration(1500 * time.Microsecond),
@@ -66,8 +66,8 @@ func TestSnapshotJSONSchema(t *testing.T) {
 	if err := json.Unmarshal(encoded, &document); err != nil {
 		t.Fatalf("json.Unmarshal(snapshot) failed: %v", err)
 	}
-	if got := document["schema_version"]; got != float64(1) {
-		t.Fatalf("schema_version = %#v, want 1", got)
+	if got := document["schema_version"]; got != float64(2) {
+		t.Fatalf("schema_version = %#v, want 2", got)
 	}
 	if got := document["collected_at"]; got != "2026-08-01T01:02:03.456789+08:00" {
 		t.Fatalf("collected_at = %#v", got)

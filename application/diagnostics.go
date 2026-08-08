@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/diagnostics"
-	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/node"
 )
 
@@ -16,7 +15,8 @@ import (
 func (app *Application) Diagnostics() diagnostics.Snapshot {
 	collectedAt := time.Now()
 	result := diagnostics.Snapshot{
-		SchemaVersion: 1,
+		// v2 移除了与诊断主体无关的日志输出状态；日志管理改用 log.CurrentStatus。
+		SchemaVersion: 2,
 		CollectedAt:   collectedAt,
 		Nodes:         make([]diagnostics.NodeSnapshot, 0),
 	}
@@ -39,15 +39,8 @@ func (app *Application) Diagnostics() diagnostics.Snapshot {
 	}
 	nodes := append([]*node.Node(nil), app.nodes...)
 	pool := app.bufferPool
-	logRuntime := app.logRuntime
 	app.mu.Unlock()
 
-	if status, err := logRuntime.OutputStatus(); err == nil {
-		result.Log = diagnostics.LogSnapshot{
-			Console: logOutputSnapshot(status.Console),
-			File:    logOutputSnapshot(status.File),
-		}
-	}
 	result.Runtime = collectRuntimeSnapshot()
 	if pool != nil {
 		stats := pool.Stats()
@@ -66,16 +59,6 @@ func (app *Application) Diagnostics() diagnostics.Snapshot {
 	}
 	result.CollectCost = diagnostics.Duration(time.Since(collectedAt))
 	return result
-}
-
-// logOutputSnapshot 把日志包的当前状态复制为稳定、无反向依赖的诊断 DTO。
-func logOutputSnapshot(status originlog.OutputStatus) diagnostics.LogOutputSnapshot {
-	return diagnostics.LogOutputSnapshot{
-		Available:   status.Available,
-		Enabled:     status.Enabled,
-		Level:       status.Level.String(),
-		ConfigLevel: status.ConfigLevel.String(),
-	}
 }
 
 func collectRuntimeSnapshot() diagnostics.RuntimeSnapshot {

@@ -41,7 +41,7 @@ func (target *DiagnosticsService) OnStart(context.Context) error {
 	// 进程级管理与观测事件使用包级日志，不需要暴露 Application.Logger。
 	originlog.Info("application diagnostics snapshot collected")
 	target.Logger().Info(fmt.Sprintf(
-		"diagnostics: app_state=%v snapshot_state=%s nodes=%d node=%s private=%t services=%d local_found=%t status_found=%t service_state=%s ready=%t degraded=%t transport=%v discovery=%v goroutines=%d console_enabled=%t console_level=%s file_enabled=%t file_level=%s",
+		"diagnostics: app_state=%v snapshot_state=%s nodes=%d node=%s private=%t services=%d local_found=%t status_found=%t service_state=%s ready=%t degraded=%t transport=%v discovery=%v goroutines=%d",
 		app.State(),
 		snapshot.Application.State,
 		len(nodes),
@@ -56,10 +56,6 @@ func (target *DiagnosticsService) OnStart(context.Context) error {
 		transport.State,
 		discovery.State,
 		snapshot.Runtime.Goroutines,
-		snapshot.Log.Console.Enabled,
-		snapshot.Log.Console.Level,
-		snapshot.Log.File.Enabled,
-		snapshot.Log.File.Level,
 	))
 	return nil
 }

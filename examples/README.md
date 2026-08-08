@@ -8,7 +8,7 @@
 | `00-quickstart` | 第一个可运行 Application |
 | `01-first-application` | Application、Options、自定义命令、Node、Service 与生命周期 |
 | `02-configuration` | YAML、默认值与 Service 配置 |
-| [`03-logging`](./03-logging/README.md) | 日志调用、格式、文件滚动与运行时控制 |
+| [`03-logging`](./03-logging/README.md) | 日志调用、格式、文件滚动、运行时控制与自定义 Handler |
 | `04-service-and-module` | Service、Module 与配置归属 |
 | [`05-timer-event-and-execution`](./05-timer-event-and-execution/README.md) | Timer、事件、Await、安全执行与 v3.1 Node 游戏逻辑时间 |
 | [`06-rpc-basics`](./06-rpc-basics/README.md) | 合约生成，以及 Await、Call、Async、Notify、Broadcast |

@@ -269,60 +269,72 @@ Service、普通 goroutine、管理命令和 RPC Handler 都能调用这些并�
 要求严格观察控制调用前后顺序，可临时使用 `mode: sync`。完整示例见
 [`04-runtime-control`](../../../../examples/03-logging/04-runtime-control/README.md)。
 
-## Diagnostics 中的日志状态
+## Diagnostics 与日志状态
 
-前面的 `log.CurrentStatus()` 只返回日志控制所需的 Console/File 状态；
-`Application.Diagnostics()` 则采集一份更完整的进程级只读快照，除了 Application、Runtime、
-BufferPool 和 Node 状态，也把同一份日志状态放在快照的 `Log` 字段中。它不会修改日志配置，
-也不会因为读取快照而创建新的日志 Runtime。
+`Application.Diagnostics()` 只返回 Application、Runtime、BufferPool、Node、RPC、发现和调度
+等运行诊断数据，不包含 Console/File 的日志控制状态。诊断 HTTP 导出的也是同一份快照；移除
+该字段后 `schema_version` 为 `2`，方便 JSON 消费方明确识别这个结构变化。
 
-在持有 `*application.Application` 的管理代码中，调用入口是：
-
-```go
-snapshot := app.Diagnostics() // app 是当前 Application，snapshot 是这个时间点的只读快照。
-```
-
-如果需要把快照交给诊断 HTTP、文件或监控适配层，可以按标准 JSON 序列化：
+日志状态是管理面专用信息，需要时单独读取 `log.CurrentStatus()`：
 
 ```go
-// 本段需要导入标准库 encoding/json 和 fmt。
-data, err := json.MarshalIndent(snapshot, "", "  ") // 将 Go 快照编码为可读 JSON。
+// 当前 Application 已启动且 Handler 支持运行时控制时，读取两个输出端的状态。
+status, err := log.CurrentStatus()
 if err != nil {
-    return err // 序列化失败时不要输出不完整的诊断数据。
+    return err // Handler 不支持控制时为 ErrLogControlUnsupported；未启动/已关闭时为 ErrLogClosed。
 }
-fmt.Println(string(data)) // 这里只是示例；HTTP 服务通常直接写入 ResponseWriter。
+// status.Console 与 status.File 分别提供 Available、Enabled、Level、ConfigLevel。
 ```
 
-下面的 JSON 不是另一套日志 API，而是上面 `snapshot` 序列化后的示意片段：
-
-```json
-{
-  "log": {
-    "console": {
-      "available": true,
-      "enabled": true,
-      "level": "debug",
-      "config_level": "info"
-    },
-    "file": {
-      "available": true,
-      "enabled": false,
-      "level": "warn",
-      "config_level": "debug"
-    }
-  }
-}
-```
-
-字段对应关系是：`snapshot.Log.Console` → `log.console`，`snapshot.Log.File` → `log.file`；
-每个输出端的 `Available`、`Enabled`、`Level`、`ConfigLevel` 则分别对应 JSON 中的
-`available`、`enabled`、`level`、`config_level`。已有诊断 HTTP 服务可以把同一个快照原样
-导出；它只读，不会自动提供修改日志状态的 HTTP API。
+这样常规诊断快照保持聚焦；需要调整或审计日志设置的业务管理接口再显式调用
+`log.CurrentStatus()`、`SetConsoleLevel` 等函数。Origin 不自动提供可修改日志状态的 HTTP API。
 
 ## 自定义 Handler
 
-项目仍通过 `application.Options.LogHandlerFactory` 替换输出端。固定日志后端只需要实现
-`log.Handler`；若还要支持包级运行时控制，再可选实现 `log.Controller`：
+项目通过 `application.Options.LogHandlerFactory` 替换输出端。它只适合已经有统一日志平台、
+审计链路或必须接入其他日志库的项目；常规 Console、File、滚动和 JSON 输出应直接使用 YAML/JSON
+配置，无需自定义 Handler。
+
+Factory 在 Application 启动时接收最终合并后的 `log.Config`，并返回一个由 Origin Runtime 持有的
+Handler：
+
+```go
+var app = application.New(application.Options{
+    LogHandlerFactory: newProjectHandler,
+})
+
+func newProjectHandler(config log.Config) (log.Handler, error) {
+    // config 可用于读取项目自己的最低级别、地址或其他输出策略。
+    return newHandler(config), nil
+}
+```
+
+固定输出后端只需要实现四个 `log.Handler` 方法：
+
+```go
+type Handler interface {
+    Enabled(level log.Level) bool
+    Write(record log.Record, fields []log.Field) error
+    Sync() error
+    Close() error
+}
+```
+
+- `Enabled` 可能被多个业务 goroutine 并发调用，必须并发安全；它只判断是否接收该级别。
+- `Write` 只由 Origin 的唯一日志协程串行调用。`Record` 包含时间、级别、调用位置、消息和可选
+  堆栈；`fields` 是本次调用有效的结构化字段，不能保存到返回后的异步任务中。
+- `Sync` 用于刷新目标库的缓冲；`Close` 只调用一次，用于释放 Handler 自己创建的资源。不要关闭
+  `os.Stdout` 这类由进程拥有的资源。
+
+Origin 仍负责唯一日志队列、调用位置、Service/Module 归属、Flush 和关闭顺序。第三方 Handler
+应在 `Write` 内调用目标库的同步写入入口，不能再建立第二条后台日志队列或输出 goroutine。
+内置 Console/File 的 `rotation`、`retention`、`context_fields` 等配置不会自动套用到自定义
+Handler，项目需要自行定义并实现相应策略。
+
+完整可运行的 JSON Lines Handler、全部 `FieldKind` 映射和生命周期注释见
+[`05-custom-handler`](../../../../examples/03-logging/05-custom-handler/README.md)。
+
+若还要支持包级运行时控制，再可选实现 `log.Controller`：
 
 ```go
 type Controller interface {
@@ -336,9 +348,9 @@ type Controller interface {
 }
 ```
 
-第三方 Handler 未实现 Controller 时，写日志仍正常，控制与状态接口返回
-`errs.ErrLogControlUnsupported`（错误码 7003）。实现 Controller 的方法必须并发安全，且不应
-自行建立第二套 Runtime 或队列。
+第三方 Handler 未实现 Controller 时，写日志仍正常；`SetConsoleLevel`、`SetFileEnabled` 和
+`CurrentStatus` 会返回 `errs.ErrLogControlUnsupported`（错误码 7003）。实现 Controller 的方法
+必须并发安全，且只能控制 Handler 已有的资源，不能重建 Origin Runtime 或队列。
 
 ## 选择建议
 

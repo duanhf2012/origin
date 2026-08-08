@@ -36,7 +36,7 @@ go run ./examples/00-quickstart/01-hello-service
 | 00 | 快速入口 | 运行第一个 Application | [快速入口](./docs/baseline/v3.0/guides/00-quickstart.md) | [00-quickstart](./examples/00-quickstart/) |
 | 01 | 创建第一个应用 | 创建 Application、Node 与 Service | [创建第一个应用](./docs/baseline/v3.0/guides/01-first-application.md) | [01-first-application](./examples/01-first-application/) |
 | 02 | 配置应用 | 加载 YAML 与业务配置 | [配置应用](./docs/baseline/v3.0/guides/02-configuration.md) | [02-configuration](./examples/02-configuration/) |
-| 03 | 日志输出与管理 | 写日志、配置格式与文件滚动、运行时调整输出 | [日志输出与管理](./docs/maintenance/v3.1/guides/logging.md) | [03-logging](./examples/03-logging/) |
+| 03 | 日志输出与管理 | 写日志、配置格式与文件滚动、运行时调整与替换输出后端 | [日志输出与管理](./docs/maintenance/v3.1/guides/logging.md) | [03-logging](./examples/03-logging/) |
 | 04 | Service 与 Module | 用 Service、Module 组织业务 | [Service 与 Module](./docs/baseline/v3.0/guides/03-service-and-module.md) | [04-service-and-module](./examples/04-service-and-module/) |
 | 05 | Timer、Event 与执行 | 使用 Timer、Event、Await 与安全执行 | [Timer、Event 与执行](./docs/baseline/v3.0/guides/04-timer-event-and-execution.md) | [05-timer-event-and-execution](./examples/05-timer-event-and-execution/) |
 | 06 | RPC 基础 | 定义合约并调用同 Node RPC | [RPC 基础](./docs/baseline/v3.0/guides/05-rpc-basics.md) | [06-rpc-basics](./examples/06-rpc-basics/) |

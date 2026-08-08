@@ -1,13 +1,13 @@
 # 读取 Diagnostics 快照
 
-`Application.Diagnostics()` 返回统一的不可变诊断快照，适合业务代码、诊断 HTTP 和监控适配层共同读取。示例同时展示 `Application.State`、`Nodes`、`Node(id)`、`Node.ID`、`Node.Private`、`Node.Service`、`Node.ServiceStatus`、`HealthStatus`、`TransportStatus`、`DiscoveryStatus`、`Node.Diagnostics()`、顶层 `Log` 状态与进程级 `log.Info()`。
+`Application.Diagnostics()` 返回统一的不可变诊断快照，适合业务代码、诊断 HTTP 和监控适配层共同读取。示例同时展示 `Application.State`、`Nodes`、`Node(id)`、`Node.ID`、`Node.Private`、`Node.Service`、`Node.ServiceStatus`、`HealthStatus`、`TransportStatus`、`DiscoveryStatus`、`Node.Diagnostics()` 与进程级 `log.Info()`。
 
 ## 示例流程
 
-应用启动后读取一次快照，输出 Application 状态、Node 数量、Go goroutine 数量，以及
-Console/File 的当前启用状态和级别。`Log.Console`、`Log.File` 中的 `Available` 表示启动时
-是否创建了资源，`Enabled` 表示当前是否接收日志，`Level` 是当前级别，`ConfigLevel` 是
-Reset 将恢复的配置级别。代码只依赖公开诊断外观，不直接访问 Node、日志或 RPC 内部对象。
+应用启动后读取一次快照，输出 Application 状态、Node 数量和 Go goroutine 数量。快照不包含
+日志输出状态，避免把低频的日志管理配置混入常用的进程、Node、RPC、发现和调度诊断数据。
+确实需要查询 Console/File 当前启用状态与级别时，使用日志包的 `log.CurrentStatus()`；代码只
+依赖公开诊断和日志外观，不直接访问 Node、日志或 RPC 内部对象。
 
 ## 运行与练习
 

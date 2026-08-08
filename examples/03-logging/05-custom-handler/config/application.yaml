@@ -1,0 +1,9 @@
+log:
+  # 自定义 Handler 读取此处的 console.level 作为自身的最低级别；不会使用内置 Console/File Writer。
+  mode: sync
+  console:
+    level: info
+
+nodes:
+  - id: handler-1
+    services: [CustomHandlerService]

@@ -10,6 +10,7 @@
 | [`02-formats-and-context`](./02-formats-and-context/README.md) | 配置 text/JSON 和独立的归属字段开关 |
 | [`03-file-rotation`](./03-file-rotation/README.md) | 配置文件名、大小/日期滚动、清理和压缩 |
 | [`04-runtime-control`](./04-runtime-control/README.md) | 运行时调整级别、暂停/恢复输出并读取状态 |
+| [`05-custom-handler`](./05-custom-handler/README.md) | 替换默认输出后端，并理解 Handler 生命周期与可选控制 |
 
 每个子目录都有完整源码、配置、`run.bat` 和 `run.sh`。完整规则见
 [日志输出与管理教程](../../docs/maintenance/v3.1/guides/logging.md)。

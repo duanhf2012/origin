@@ -1118,6 +1118,15 @@ func TestLoggingTutorialConfigurationsLoad(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:      "custom handler",
+			directory: filepath.Join("..", "examples", "03-logging", "05-custom-handler", "config"),
+			check: func(t *testing.T, loaded loadedConfig) {
+				if loaded.log.Mode != originlog.SyncMode || loaded.log.Console.Level != originlog.InfoLevel {
+					t.Fatalf("unexpected custom handler config: %+v", loaded.log)
+				}
+			},
+		},
 	}
 
 	for _, test := range tests {
