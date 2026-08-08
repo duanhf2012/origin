@@ -94,8 +94,10 @@ stats := s.EventStats()
 - `Await`：等待 I/O、RPC 等操作，并让 Service 在等待时继续处理其他任务。
 - `SetDefaultAwaitTimeout`：为没有显式 Deadline 的 Await 设置统一默认超时。
 - `DispatchAsync`：把函数放入当前 Service 的有界队列，稍后由调度器取得执行权并串行执行。适合在 `Await` 或后台 I/O 完成后把结果交回 Service 更新业务状态；返回成功只表示任务已入队，不表示已经执行完成，Service 已停止或队列无法接收时会返回错误。
-- `RunSafe`：当前 goroutine 的独立、已隔离工作；不授予并发修改 Service 状态的权限。
-- `GoSafe`：业务自行管理生命周期的后台 goroutine 的 panic 保底；仍要自行使用 Context、CancelFunc、WaitGroup 在 `OnStop` 清理。
+- `RunSafe`：在当前 goroutine 同步执行 `fn`，内部用 `recover` 隔离 panic；正常返回 `nil`，发生 panic 时返回错误。适合长驻 Worker 为每个独立 Job 设置边界，让单个 Job 失败后继续处理下一项。
+- `GoSafe`：相当于启动一个带最外层 `recover` 的 `go func`，调用会立即返回；它只提供 panic 保底，不等待、重启或取消后台 goroutine。适合启动独立 Worker，但业务仍须用 `Context`、`CancelFunc`、`WaitGroup` 管理生命周期，并在 `OnStop` 清理。
+
+简单选择：需要当前调用等待任务结束并取得错误，用 `RunSafe`；需要后台运行，用 `GoSafe`；需要把后台结果交回 Service 串行修改状态，用 `DispatchAsync`。两者都不会授予后台 goroutine Service 的串行执行权。
 
 需要观察调度器时读取 `ExecutionStats`，不要直接访问内部队列。
 
