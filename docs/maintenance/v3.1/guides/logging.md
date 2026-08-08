@@ -269,11 +269,7 @@ Service、普通 goroutine、管理命令和 RPC Handler 都能调用这些并�
 要求严格观察控制调用前后顺序，可临时使用 `mode: sync`。完整示例见
 [`04-runtime-control`](../../../../examples/03-logging/04-runtime-control/README.md)。
 
-## Diagnostics 与日志状态
-
-`Application.Diagnostics()` 只返回 Application、Runtime、BufferPool、Node、RPC、发现和调度
-等运行诊断数据，不包含 Console/File 的日志控制状态。诊断 HTTP 导出的也是同一份快照；移除
-该字段后 `schema_version` 为 `2`，方便 JSON 消费方明确识别这个结构变化。
+## 查询当前日志状态
 
 日志状态是管理面专用信息，需要时单独读取 `log.CurrentStatus()`：
 
@@ -286,8 +282,8 @@ if err != nil {
 // status.Console 与 status.File 分别提供 Available、Enabled、Level、ConfigLevel。
 ```
 
-这样常规诊断快照保持聚焦；需要调整或审计日志设置的业务管理接口再显式调用
-`log.CurrentStatus()`、`SetConsoleLevel` 等函数。Origin 不自动提供可修改日志状态的 HTTP API。
+需要调整或审计日志设置的业务管理接口再显式调用 `log.CurrentStatus()`、
+`SetConsoleLevel` 等函数。Origin 不自动提供可修改日志状态的 HTTP API。
 
 ## 自定义 Handler
 
