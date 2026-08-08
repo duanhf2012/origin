@@ -42,18 +42,22 @@ func (target *ExecutionService) OnStart(context.Context) error {
 
 		// RunSafe 在当前 goroutine 同步执行，并把 panic 隔离在安全边界内。
 		_ = target.RunSafe(func() { target.Logger().Info("safe synchronous job completed") })
-		// GoSafe 创建后台 goroutine，只提供 panic 保底，不允许无锁修改 Service 状态。
-		_ = target.GoSafe(func() { target.Logger().Info("safe background job completed") })
-		// DispatchAsync 把函数提交成后续串行 Service 任务。
-		_ = target.DispatchAsync(func(context.Context) {
-			target.Logger().Info("dispatched service task completed")
-			stats := target.ExecutionStats()
-			target.Logger().Info(fmt.Sprintf(
-				"execution stats: accepted=%d awaiting=%d await_total=%d",
-				stats.Accepted,
-				stats.Awaiting,
-				stats.AwaitTotal,
-			))
+		// GoSafe 创建后台 goroutine，只提供 panic 保底；后台不直接修改 Service 状态。
+		_ = target.GoSafe(func() {
+			result := "safe background job completed"
+			// 后台工作完成后，用 DispatchAsync 把结果交回 Service 串行任务处理。
+			if err := target.DispatchAsync(func(context.Context) {
+				target.Logger().Info(result)
+				stats := target.ExecutionStats()
+				target.Logger().Info(fmt.Sprintf(
+					"execution stats: accepted=%d awaiting=%d await_total=%d",
+					stats.Accepted,
+					stats.Awaiting,
+					stats.AwaitTotal,
+				))
+			}); err != nil {
+				target.Logger().Error("dispatch background result failed")
+			}
 		})
 	})
 	return nil

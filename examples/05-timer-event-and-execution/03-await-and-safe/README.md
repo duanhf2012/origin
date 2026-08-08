@@ -4,7 +4,7 @@
 
 ## 如何阅读示例
 
-`Await` 在等待外部操作时协作式让出执行权；`DispatchAsync` 把函数放入 Service 的有界串行队列，适合在 Await 或后台 I/O 完成后回到 Service 更新状态，返回成功只表示入队；`RunSafe` 在当前 goroutine 同步执行并返回 panic 错误；`GoSafe` 类似 `go func`，启动后台 goroutine 并只记录 panic。示例没有故意触发 panic，因为安全边界不应成为正常控制流。
+`Await` 在等待外部操作时协作式让出执行权；`DispatchAsync` 把函数放入 Service 的有界串行队列，常与 `GoSafe` 配合，让后台 goroutine 完成 I/O 或计算后把结果交回 Service 更新状态，返回成功只表示入队；`RunSafe` 在当前 goroutine 同步执行并返回 panic 错误；`GoSafe` 类似 `go func`，启动后台 goroutine 并只记录 panic。示例没有故意触发 panic，因为安全边界不应成为正常控制流。
 
 ## RunSafe 与 GoSafe 怎么选
 
@@ -27,6 +27,15 @@ _ = target.GoSafe(func() { runWorker(workerCtx) })
 
 如果后台 Worker 需要修改 Service 状态，先在 Worker 中计算局部结果，再通过
 `DispatchAsync` 交回 Service 串行任务；不要因为使用了 `RunSafe` 或 `GoSafe` 就直接并发读写 Service 字段。
+
+```go
+_ = target.GoSafe(func() {
+    result := "background result" // 后台只处理局部数据。
+    _ = target.DispatchAsync(func(context.Context) {
+        target.Logger().Info(result) // 回到 Service 串行任务后再处理结果。
+    })
+})
+```
 
 注意：`Await` 的等待函数执行期间，当前 Service 已让出执行权，同一个 Service 的其他任务可能
 同时运行。因此不要在等待函数中读取或修改 Service 的公共可变字段；否则等待函数与其他任务
