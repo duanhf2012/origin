@@ -20,3 +20,8 @@
 
 - [v3.1 使用变更索引](./guides/README.md)
 - [Node 游戏逻辑时间教程](./guides/node-game-time.md)
+
+## 已完成变更与报告
+
+- [Node 游戏逻辑时间变更摘要](./changes/Node游戏逻辑时间变更摘要.md)
+- [Node 游戏逻辑时间验收报告](./reports/Node游戏逻辑时间验收报告.md)
