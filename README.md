@@ -28,13 +28,16 @@ go run ./examples/00-quickstart/01-hello-service
 
 ## 完整学习路径
 
-教程章节与 `examples/` 编号目录一一对应；每章先运行对应示例，再阅读使用说明和深入内容。
+教程章节与 `examples/` 路径一一对应；每章先运行对应示例，再阅读使用说明和深入内容。
+学习顺序按依赖关系排列。日志属于 v3.1 的新增章节，路径编号仍为 `12` 以保持冻结的
+v3.0 路径稳定，但学习上放在配置之后，便于尽早统一日志输出。
 
-| 顺序 | 学习目标 | 教程 | 示例目录 |
+| 路径编号 | 学习目标 | 教程 | 示例目录 |
 | --- | --- | --- | --- |
 | 00 | 运行第一个 Application | [快速入口](./docs/baseline/v3.0/guides/00-quickstart.md) | [00-quickstart](./examples/00-quickstart/) |
 | 01 | 创建 Application、Node 与 Service | [创建第一个应用](./docs/baseline/v3.0/guides/01-first-application.md) | [01-first-application](./examples/01-first-application/) |
 | 02 | 加载 YAML 与业务配置 | [配置应用](./docs/baseline/v3.0/guides/02-configuration.md) | [02-configuration](./examples/02-configuration/) |
+| 12 | 使用日志、格式、滚动与运行时控制（建议在配置后学习） | [v3.1 日志](./docs/maintenance/v3.1/guides/logging.md) | [12-logging](./examples/12-logging/) |
 | 03 | 用 Service、Module 组织业务 | [Service 与 Module](./docs/baseline/v3.0/guides/03-service-and-module.md) | [03-service-and-module](./examples/03-service-and-module/) |
 | 04 | 使用 Timer、Event、Await 与安全执行 | [Timer、Event 与执行](./docs/baseline/v3.0/guides/04-timer-event-and-execution.md) | [04-timer-event-and-execution](./examples/04-timer-event-and-execution/) |
 | 05 | 定义合约并调用同 Node RPC | [RPC 基础](./docs/baseline/v3.0/guides/05-rpc-basics.md) | [05-rpc-basics](./examples/05-rpc-basics/) |
@@ -44,7 +47,6 @@ go run ./examples/00-quickstart/01-hello-service
 | 09 | 读取诊断、启停 pprof、适配监控 | [Diagnostics 与 pprof](./docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md) | [09-diagnostics-and-pprof](./examples/09-diagnostics-and-pprof/) |
 | 10 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/10-performance.md) | [10-performance](./examples/10-performance/) |
 | 11 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/11-troubleshooting.md) | [11-troubleshooting](./examples/11-troubleshooting/) |
-| 12 | 使用日志、格式、运行时控制与滚动 | [v3.1 日志](./docs/maintenance/v3.1/guides/logging.md) | [12-logging](./examples/12-logging/) |
 
 完整教程见 [v3.0 使用指南](./docs/baseline/v3.0/guides/README.md)，全部可运行示例见 [examples](./examples/README.md)。
 

@@ -179,7 +179,7 @@ logs/game-origin.crash.log
 的大小阈值。
 
 完整示例见
-[`04-file-rotation`](../../../../examples/12-logging/04-file-rotation/README.md)。
+[`03-file-rotation`](../../../../examples/12-logging/03-file-rotation/README.md)。
 
 ## 运行时临时打开 Debug 或暂停输出
 
@@ -243,7 +243,7 @@ Service、普通 goroutine、管理命令和 RPC Handler 都能调用这些并�
 
 异步模式下，已经排队但尚未处理的记录按处理时的最新状态过滤，因此调试脚本若要求严格
 观察控制调用前后顺序，可临时使用 `mode: sync`。完整示例见
-[`03-runtime-control`](../../../../examples/12-logging/03-runtime-control/README.md)。
+[`04-runtime-control`](../../../../examples/12-logging/04-runtime-control/README.md)。
 
 ## Diagnostics 中的日志状态
 

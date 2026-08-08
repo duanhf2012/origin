@@ -1099,7 +1099,7 @@ func TestLoggingTutorialConfigurationsLoad(t *testing.T) {
 		},
 		{
 			name:      "runtime control",
-			directory: filepath.Join("..", "examples", "12-logging", "03-runtime-control", "config"),
+			directory: filepath.Join("..", "examples", "12-logging", "04-runtime-control", "config"),
 			check: func(t *testing.T, loaded loadedConfig) {
 				if !loaded.log.Console.Enabled || !loaded.log.File.Enabled ||
 					loaded.log.File.Level != originlog.DebugLevel {
@@ -1109,7 +1109,7 @@ func TestLoggingTutorialConfigurationsLoad(t *testing.T) {
 		},
 		{
 			name:      "file rotation",
-			directory: filepath.Join("..", "examples", "12-logging", "04-file-rotation", "config"),
+			directory: filepath.Join("..", "examples", "12-logging", "03-file-rotation", "config"),
 			check: func(t *testing.T, loaded loadedConfig) {
 				if loaded.log.File.Rotation.MaxSizeMB != 1 ||
 					loaded.log.File.Retention.MaxFiles != 10 ||

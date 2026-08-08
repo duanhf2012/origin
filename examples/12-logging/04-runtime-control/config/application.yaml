@@ -10,7 +10,7 @@ log:
     enabled: true
     level: debug
     format: json
-    path: examples/12-logging/03-runtime-control/logs/origin.log
+    path: examples/12-logging/04-runtime-control/logs/origin.log
     rotation: {max_size: 10M, by_date: true, timezone: Local}
     retention: {max_age: 7d, max_files: 10, compress: true}
 
