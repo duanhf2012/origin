@@ -14,6 +14,7 @@
 ## 已确认设计
 
 - [RPC 可选 Context 与 goroutine 调用设计](./design/RPC可选Context与goroutine调用设计.md)
+- [Node 游戏逻辑时间设计](./design/Node游戏逻辑时间设计.md)
 
 ## 使用者变更
 
