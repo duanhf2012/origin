@@ -23,4 +23,4 @@ go run ./examples/01-first-application/01-application-node-service start \
 
 日志会先显示 `gateway-1`，再显示 `game-1`；停止时顺序相反。尝试交换命令中 Node ID 的顺序，或将一个 Service 加到另一个 Node，观察实例归属和生命周期顺序的变化。
 
-对应教程：[创建第一个应用](../../../docs/baseline/v3.0/guides/01-first-application.md)。
+对应教程：[创建第一个应用](../../../docs/baseline/v3.0/guides/01.first-application.md)。

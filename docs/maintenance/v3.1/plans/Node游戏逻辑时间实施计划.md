@@ -180,7 +180,7 @@
 - Modify: `examples/05-timer-event-and-execution/README.md`
 - Modify: `docs/maintenance/v3.1/guides/README.md`
 - Modify: `docs/maintenance/v3.1/README.md`
-- Modify: `docs/baseline/v3.0/guides/01-first-application.md`
+- Modify: `docs/baseline/v3.0/guides/01.first-application.md`
 - Modify: `examples/01-first-application/03-application-options-and-command/README.md`
 
 **Interfaces:**

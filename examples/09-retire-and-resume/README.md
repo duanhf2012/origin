@@ -6,4 +6,4 @@
 - [02-node-and-application](./02-node-and-application/README.md)：Node/Application 批量切换顺序。
 - [03-include-retired](./03-include-retired/README.md)：显式包含 Retired 候选。
 
-对应教程：[Retire、Resume 与优雅停止](../../docs/baseline/v3.0/guides/08-retire-and-resume.md)。
+对应教程：[Retire、Resume 与优雅停止](../../docs/baseline/v3.0/guides/09.retire-and-resume.md)。

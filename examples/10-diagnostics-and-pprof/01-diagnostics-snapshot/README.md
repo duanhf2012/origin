@@ -13,5 +13,5 @@
 
 执行 `run.bat` 或 `./run.sh`，阅读输出字段。可在 Timer 中周期性重新读取快照，比较数值变化；不要缓存第一次返回的快照来代表未来状态。
 
-对应教程：[Diagnostics 与 pprof](../../../docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md)。
-日志状态和运行时控制见[日志输出与管理教程](../../../docs/maintenance/v3.1/guides/logging.md)。
+对应教程：[Diagnostics 与 pprof](../../../docs/baseline/v3.0/guides/10.diagnostics-and-pprof.md)。
+日志状态和运行时控制见[日志输出与管理教程](../../../docs/maintenance/v3.1/guides/03.logging.md)。

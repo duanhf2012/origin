@@ -8,4 +8,4 @@ NATS 共用 `_support/tutorialrpc` 的契约和生成客户端；每个示例在
 - [02-nats-two-nodes](./02-nats-two-nodes/README.md)：Origin Discovery + NATS，需要先启动依赖。
 - [03-route-and-broadcast](./03-route-and-broadcast/README.md)：业务 Key 路由与广播错误处理。
 
-对应教程：[跨节点 RPC](../../docs/baseline/v3.0/guides/06-remote-rpc.md)。
+对应教程：[跨节点 RPC](../../docs/baseline/v3.0/guides/07.remote-rpc.md)。

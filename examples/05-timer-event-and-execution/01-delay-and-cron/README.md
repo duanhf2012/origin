@@ -24,4 +24,4 @@ Timer 回调始终回到所属 Service 的串行执行语义中，因此适合�
 
 执行 `run.bat` 或 `./run.sh`，观察 After 只执行一次、Ticker 的暂停/恢复/取消顺序，以及每秒一条 Cron 日志。可修改 Ticker 间隔和 Cron 秒字段验证调度差异；耗时 I/O 应使用 `Await`，不要长期阻塞 Timer 回调。
 
-对应教程：[Timer、Event 与执行](../../../docs/baseline/v3.0/guides/04-timer-event-and-execution.md)。
+对应教程：[Timer、Event 与执行](../../../docs/baseline/v3.0/guides/05.timer-event-and-execution.md)。

@@ -14,4 +14,4 @@ Factory 从 `provider.Context` 读取自己的配置并创建 Provider；Provide
 
 不要让业务 Service 直接依赖具体 Consul 客户端。这样将来可替换 Provider，而业务发现查询、监听和 RPC 路由代码保持不变。
 
-对应教程：[服务发现](../../../docs/baseline/v3.0/guides/07-discovery.md)。
+对应教程：[服务发现](../../../docs/baseline/v3.0/guides/08.discovery.md)。

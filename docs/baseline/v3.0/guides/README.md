@@ -6,18 +6,19 @@
 
 | 顺序 | 主题 | 首要问题 |
 | --- | --- | --- |
-| 00 | [快速入口](./00-quickstart.md) | 怎样立即运行一个 Origin 应用？ |
-| 01 | [创建第一个应用](./01-first-application.md) | 怎样创建 Application、Node 和 Service？ |
-| 02 | [配置应用](./02-configuration.md) | 怎样用 YAML 配置应用和业务？ |
-| 03 | [Service 与 Module](./03-service-and-module.md) | 怎样组织业务代码？ |
-| 04 | [Timer、Event 与执行](./04-timer-event-and-execution.md) | 怎样写定时任务、事件和安全后台工作？ |
-| 05 | [RPC 基础](./05-rpc-basics.md) | 怎样调用同一 Node 中的另一个 Service？ |
-| 06 | [跨节点 RPC](./06-remote-rpc.md) | 怎样用 TCP 或 NATS 调用其他 Node？ |
-| 07 | [服务发现](./07-discovery.md) | 怎样发现服务、使用 etcd 或替换 Provider？ |
-| 08 | [Retire 与 Resume](./08-retire-and-resume.md) | 怎样优雅地下线和恢复业务？ |
-| 09 | [Diagnostics 与 pprof](./09-diagnostics-and-pprof.md) | 怎样观察运行状态和按需诊断？ |
-| 10 | [性能](./10-performance.md) | 怎样运行和理解 RPC 基准测试？ |
-| 11 | [故障排查](./11-troubleshooting.md) | 怎样定位常见配置、RPC 和发现故障？ |
+| 00 | [快速入口](./00.quickstart.md) | 怎样立即运行一个 Origin 应用？ |
+| 01 | [创建第一个应用](./01.first-application.md) | 怎样创建 Application、Node 和 Service？ |
+| 02 | [配置应用](./02.configuration.md) | 怎样用 YAML 配置应用和业务？ |
+| 03 | [日志输出与管理](../../../maintenance/v3.1/guides/03.logging.md) | 怎样写日志、配置输出、滚动文件与运行时控制？ |
+| 04 | [Service 与 Module](./04.service-and-module.md) | 怎样组织业务代码？ |
+| 05 | [Timer、Event 与执行](./05.timer-event-and-execution.md) | 怎样写定时任务、事件和安全后台工作？ |
+| 06 | [RPC 基础](./06.rpc-basics.md) | 怎样调用同一 Node 中的另一个 Service？ |
+| 07 | [跨节点 RPC](./07.remote-rpc.md) | 怎样用 TCP 或 NATS 调用其他 Node？ |
+| 08 | [服务发现](./08.discovery.md) | 怎样发现服务、使用 etcd 或替换 Provider？ |
+| 09 | [Retire 与 Resume](./09.retire-and-resume.md) | 怎样优雅地下线和恢复业务？ |
+| 10 | [Diagnostics 与 pprof](./10.diagnostics-and-pprof.md) | 怎样观察运行状态和按需诊断？ |
+| 11 | [性能](./11.performance.md) | 怎样运行和理解 RPC 基准测试？ |
+| 12 | [故障排查](./12.troubleshooting.md) | 怎样定位常见配置、RPC 和发现故障？ |
 
 ## 参考资料
 

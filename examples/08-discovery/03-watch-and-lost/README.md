@@ -27,6 +27,6 @@ func (target *DiscoveryWatcherService) OnInit() error {
 1. 先出现 `discovered node=player-1`；
 2. 约 500ms 后出现 `lost node=player-1`。
 
-业务代码应将 `Lost` 用作移除候选、恢复、降级或告警输入；不要为了平滑日志而吞掉这类状态事件。完整教程见[服务发现](../../../docs/baseline/v3.0/guides/07-discovery.md#我想监听上线下线和-lost)。
+业务代码应将 `Lost` 用作移除候选、恢复、降级或告警输入；不要为了平滑日志而吞掉这类状态事件。完整教程见[服务发现](../../../docs/baseline/v3.0/guides/08.discovery.md#我想监听上线下线和-lost)。
 
-对应教程：[服务发现](../../../docs/baseline/v3.0/guides/07-discovery.md)。
+对应教程：[服务发现](../../../docs/baseline/v3.0/guides/08.discovery.md)。

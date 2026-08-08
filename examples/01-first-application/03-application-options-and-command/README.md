@@ -18,4 +18,4 @@ custom command args=[Alice]
 
 `main.go` 中的 `StartTimeout`、`StopTimeout`、每 Node Timer 上限和 Cron 时区均通过 `application.New(application.Options{...})` 设置。`StartTimeout` 是所有选中 Node 共享的总启动时间；到期后启动失败，框架回滚已启动资源。`StopTimeout` 是整个停止过程共享的总时间；到期后框架取消可控等待、继续安全清理并返回错误。两者设为 `0` 都表示不设置 Application 级总超时；单次 RPC、`AwaitXxx` 和外部客户端仍使用自己的超时。这些超时无法强行停止忽略 Context 的 goroutine，所以生命周期和外部 I/O 代码仍应正确传递 Context。
 
-完整说明见：[创建第一个应用](../../../docs/baseline/v3.0/guides/01-first-application.md)。
+完整说明见：[创建第一个应用](../../../docs/baseline/v3.0/guides/01.first-application.md)。

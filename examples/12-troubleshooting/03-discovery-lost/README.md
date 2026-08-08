@@ -10,4 +10,4 @@
 
 Lost 是立即状态事实；业务应据此降级、清理本地关联状态、触发重连或告警。不要加业务层防抖来掩盖中间断线，否则可能造成服务间状态不一致。
 
-对应教程：[服务发现](../../../docs/baseline/v3.0/guides/07-discovery.md) 与 [故障排查](../../../docs/baseline/v3.0/guides/11-troubleshooting.md)。
+对应教程：[服务发现](../../../docs/baseline/v3.0/guides/08.discovery.md) 与 [故障排查](../../../docs/baseline/v3.0/guides/12.troubleshooting.md)。

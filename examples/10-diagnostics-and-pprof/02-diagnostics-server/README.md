@@ -21,4 +21,4 @@ curl http://127.0.0.1:6061/debug/origin/diagnostics
 才会读取 Go 内存统计、复制 Node/Service 快照并编码 JSON，因此不应按业务请求频率抓取。
 通常以秒级间隔供监控适配器或故障采集工具读取即可。
 
-对应教程：[Diagnostics 与 pprof](../../../docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md)。
+对应教程：[Diagnostics 与 pprof](../../../docs/baseline/v3.0/guides/10.diagnostics-and-pprof.md)。

@@ -14,4 +14,4 @@
 
 可在 `discovery-1` 的 `services` 增加自己的普通 Service，验证它仍能共存；生产环境应将地址设为受限内网地址，并用网络策略保护发现端口。
 
-对应教程：[服务发现](../../../docs/baseline/v3.0/guides/07-discovery.md)。
+对应教程：[服务发现](../../../docs/baseline/v3.0/guides/08.discovery.md)。

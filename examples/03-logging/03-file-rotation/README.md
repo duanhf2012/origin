@@ -43,4 +43,4 @@ log-output-tutorial.crash.log
 
 完整代码见 [`main.go`](./main.go)，逐字段配置注释见
 [`config/application.yaml`](./config/application.yaml)。更完整的调用与格式规则见
-[日志输出与管理教程](../../../docs/maintenance/v3.1/guides/logging.md)。
+[日志输出与管理教程](../../../docs/maintenance/v3.1/guides/03.logging.md)。

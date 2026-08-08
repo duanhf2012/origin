@@ -24,4 +24,4 @@ Node 根据 Service 模板名 `PlayerService` 自动关联契约。TCP 只改变
 
 把 `OnNode` 去掉可改为从 Running 实例自动选择；修改 `player-1` 为不存在的 Node 则会观察到调用失败。生产环境应把 `listen/advertise` 改为真实内网地址。
 
-对应教程：[跨节点 RPC](../../../docs/baseline/v3.0/guides/06-remote-rpc.md)。
+对应教程：[跨节点 RPC](../../../docs/baseline/v3.0/guides/07.remote-rpc.md)。

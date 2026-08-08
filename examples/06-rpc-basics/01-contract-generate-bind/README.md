@@ -31,5 +31,5 @@ Background、TODO 或显式 Deadline，但普通 goroutine 必须使用 `CallXxx
 
 若配置写成 `player-1:PlayerService`，`player-1` 是发现、路由和配置使用的实际名，`PlayerService` 仍是自动关联契约的模板名。Service 没有 `SetName`：实际名由配置决定，避免业务代码和配置产生两个名称来源；调用改名实例时使用 `BindPlayerServiceTo(target, "player-1")`。
 
-完整的安装、目录、`go generate` 与 CI 工作流见 [RPC 基础](../../../docs/baseline/v3.0/guides/05-rpc-basics.md)；v3.1 变更索引见
+完整的安装、目录、`go generate` 与 CI 工作流见 [RPC 基础](../../../docs/baseline/v3.0/guides/06.rpc-basics.md)；v3.1 变更索引见
 [RPC 调用与 Context](../../../docs/maintenance/v3.1/guides/README.md)。

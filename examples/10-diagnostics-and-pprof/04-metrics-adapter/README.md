@@ -10,4 +10,4 @@
 
 执行 `run.bat` 或 `./run.sh`，观察输出的指标名和值。可新增自己的 Sink 实现，注意采集失败不能影响业务调度，也不要把高基数业务 ID 作为指标标签。
 
-对应教程：[Diagnostics 与 pprof](../../../docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md)。
+对应教程：[Diagnostics 与 pprof](../../../docs/baseline/v3.0/guides/10.diagnostics-and-pprof.md)。

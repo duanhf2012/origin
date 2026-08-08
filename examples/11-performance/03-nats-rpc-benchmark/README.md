@@ -14,4 +14,4 @@ NATS 的请求路径、服务器调度和消息协议与 TCP 直连不同。某�
 
 用与 TCP 基准完全一致的 Go 版本、机器与采样时长对比。若要测真实集群，请单独记录 NATS 拓扑、网络、认证和服务器版本。
 
-对应教程：[性能测试与容量理解](../../../docs/baseline/v3.0/guides/10-performance.md)。
+对应教程：[性能测试与容量理解](../../../docs/baseline/v3.0/guides/11.performance.md)。

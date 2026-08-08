@@ -22,4 +22,4 @@ go run ./examples/00-quickstart/01-hello-service start \
 
 依次会看到 `initialized`、`hello, Origin v3`、`stopped`。按 `Ctrl+C` 才会出现最后一条日志，说明停止也经过 Service 生命周期。可把 `HelloService` 改名为自己的业务类型，并同步修改 YAML 的 `services` 项，体会 Go 类型名与配置名必须一致。
 
-对应教程：[快速入口](../../../docs/baseline/v3.0/guides/00-quickstart.md)。
+对应教程：[快速入口](../../../docs/baseline/v3.0/guides/00.quickstart.md)。

@@ -95,4 +95,4 @@ v3.1 为每个 Node 新增独立的游戏逻辑时间。Service 和 Module 通�
 
 v3.1 新增包级 `log.Xxx`、Module Logger、Console/File 独立归属字段、可读文本格式、
 Application 文件名前缀，以及运行时独立调整级别和暂停/恢复输出。完整配置、输出样例、
-错误边界、自定义 Handler 与可运行程序见 [日志：调用、格式、滚动与运行时控制](./logging.md)。
+错误边界、自定义 Handler 与可运行程序见 [日志：调用、格式、滚动与运行时控制](./03.logging.md)。

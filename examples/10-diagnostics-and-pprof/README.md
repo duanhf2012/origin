@@ -7,4 +7,4 @@
 - [03-pprof-toggle](./03-pprof-toggle/README.md)：运行期启停 pprof。
 - [04-metrics-adapter](./04-metrics-adapter/README.md)：业务监控适配层。
 
-对应教程：[Diagnostics 与 pprof](../../docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md)。
+对应教程：[Diagnostics 与 pprof](../../docs/baseline/v3.0/guides/10.diagnostics-and-pprof.md)。

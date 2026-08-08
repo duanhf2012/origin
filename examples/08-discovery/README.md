@@ -8,4 +8,4 @@
 - [04-custom-provider](./04-custom-provider/README.md)：自定义 Provider SPI。
 - [05-await-service](./05-await-service/README.md)：等待并查询目标服务。
 
-对应教程：[服务发现](../../docs/baseline/v3.0/guides/07-discovery.md)。
+对应教程：[服务发现](../../docs/baseline/v3.0/guides/08.discovery.md)。

@@ -20,4 +20,4 @@ nodes:
 
 执行 `run.bat` 或 `./run.sh`，应看到 `minimal YAML loaded`。可先删除 `log` 块确认其为可选项；不要删除 `nodes` 或写成不存在的 Service 名，它们会使启动失败。
 
-对应教程：[配置应用](../../../docs/baseline/v3.0/guides/02-configuration.md)。
+对应教程：[配置应用](../../../docs/baseline/v3.0/guides/02.configuration.md)。

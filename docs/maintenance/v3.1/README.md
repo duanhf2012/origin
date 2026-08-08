@@ -21,7 +21,7 @@
 
 - [v3.1 使用变更索引](./guides/README.md)
 - [Node 游戏逻辑时间教程](./guides/node-game-time.md)
-- [日志：调用、格式、滚动与运行时控制](./guides/logging.md)
+- [日志：调用、格式、滚动与运行时控制](./guides/03.logging.md)
 
 ## 已完成变更与报告
 

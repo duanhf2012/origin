@@ -59,4 +59,4 @@ if err == nil {
 
 执行 `run.bat` 或 `./run.sh`，观察 Await、同步安全任务、后台任务、派发任务和执行统计日志。可把等待时间改到超过默认 500ms，观察超时统计；不要把 `GoSafe` 当作可以无锁读写 Service 状态的许可。
 
-对应教程：[Timer、Event 与执行](../../../docs/baseline/v3.0/guides/04-timer-event-and-execution.md)。
+对应教程：[Timer、Event 与执行](../../../docs/baseline/v3.0/guides/05.timer-event-and-execution.md)。

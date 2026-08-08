@@ -30,4 +30,4 @@ config/
 
 修改文件后需要重新启动 Application；配置加载后冻结，不做运行期热更新。
 
-对应教程：[配置应用](../../../docs/baseline/v3.0/guides/02-configuration.md)。
+对应教程：[配置应用](../../../docs/baseline/v3.0/guides/02.configuration.md)。

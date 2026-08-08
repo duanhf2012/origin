@@ -15,4 +15,4 @@ go_version: go...
 
 脚本中的三项值是固定演示数据。生产构建应由 CI 或构建脚本写入真实发布版本、Git Commit 和构建时间；不要在运行时伪造这些数据。运行 `help` 也可观察到非空 BuildTime 出现在帮助头部。
 
-完整的 Windows、Linux/macOS 编译命令和变量说明见：[创建第一个应用](../../../docs/baseline/v3.0/guides/01-first-application.md)。
+完整的 Windows、Linux/macOS 编译命令和变量说明见：[创建第一个应用](../../../docs/baseline/v3.0/guides/01.first-application.md)。

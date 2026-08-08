@@ -18,4 +18,4 @@ services:
 
 执行 `run.bat` 或 `./run.sh`，预期输出 `parsed_region="cn-east" path_region="cn-east" first_node="game-1"`。将 `region` 或 Node ID 改为另一值，可验证三种读取方式的路径范围。
 
-对应教程：[配置应用](../../../docs/baseline/v3.0/guides/02-configuration.md)。
+对应教程：[配置应用](../../../docs/baseline/v3.0/guides/02.configuration.md)。

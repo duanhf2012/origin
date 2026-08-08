@@ -48,4 +48,4 @@ if err := target.NotifyEventAsync(PlayerJoined{PlayerID: 1002, Mode: "async"}); 
 执行 `run.bat` 或 `./run.sh`，预期依次看到 sync 玩家日志、audit 日志和 async 玩家日志，随后看到
 `sync=2 async=1 failures=0` 的统计（外层和嵌套事件各计一次同步通知）。可增加第二个监听器观察订阅顺序；同步监听器不能在嵌套调用中执行 `Await`。
 
-对应教程：[Timer、Event 与执行](../../../docs/baseline/v3.0/guides/04-timer-event-and-execution.md)。
+对应教程：[Timer、Event 与执行](../../../docs/baseline/v3.0/guides/05.timer-event-and-execution.md)。

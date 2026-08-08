@@ -22,4 +22,4 @@
 
 重复使用同一 player ID，观察稳定路由；更换 ID，观察可能选择另一实例。不要对需要严格单目标语义的业务使用广播。
 
-对应教程：[跨节点 RPC](../../../docs/baseline/v3.0/guides/06-remote-rpc.md)。
+对应教程：[跨节点 RPC](../../../docs/baseline/v3.0/guides/07.remote-rpc.md)。

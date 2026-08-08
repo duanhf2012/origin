@@ -28,4 +28,4 @@ http://127.0.0.1:6060/debug/pprof/
 
 pprof 可能暴露调用栈、内存和 CPU 细节。生产上优先绑定回环地址，通过受认证的跳板、代理或运维通道采集，完成后及时关闭。CPU Profile 和 Trace 是进程级互斥资源；采集本身会增加开销，Heap、goroutine 等大快照也可能短时增加 CPU、内存和响应延迟，不要把 pprof 作为高频监控接口。
 
-对应教程：[Diagnostics 与 pprof](../../../docs/baseline/v3.0/guides/09-diagnostics-and-pprof.md)。
+对应教程：[Diagnostics 与 pprof](../../../docs/baseline/v3.0/guides/10.diagnostics-and-pprof.md)。

@@ -20,4 +20,4 @@ nodes:
 
 不要通过吞掉启动错误继续运行；先修复配置源，再重启。Node ID、实际 Service 名和端口等框架配置错误应在部署阶段尽早暴露。
 
-对应教程：[故障排查](../../../docs/baseline/v3.0/guides/11-troubleshooting.md)。
+对应教程：[故障排查](../../../docs/baseline/v3.0/guides/12.troubleshooting.md)。

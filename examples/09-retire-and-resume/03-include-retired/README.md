@@ -26,4 +26,4 @@ Retire 只改变候选状态，不改变冷启动时已经完成的模板名—�
 
 执行 `run.bat` 或 `./run.sh`，确认退休后仍能在显式包含时调用成功。删除 `IncludeRetired()` 后应按默认规则没有候选；不要把它作为常规兜底重试。
 
-对应教程：[Retire、Resume 与优雅停止](../../../docs/baseline/v3.0/guides/08-retire-and-resume.md)。
+对应教程：[Retire、Resume 与优雅停止](../../../docs/baseline/v3.0/guides/09.retire-and-resume.md)。

@@ -24,4 +24,4 @@ Service 的生成或识别逻辑。
 
 执行 `run.bat` 或 `./run.sh`，预期日志为 `remote NATS result: player-1001`。可只改 `urls` 指向其他可用 NATS，不需要改变任何业务 RPC 代码。
 
-对应教程：[跨节点 RPC](../../../docs/baseline/v3.0/guides/06-remote-rpc.md)。
+对应教程：[跨节点 RPC](../../../docs/baseline/v3.0/guides/07.remote-rpc.md)。

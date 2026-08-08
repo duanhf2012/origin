@@ -14,4 +14,4 @@
 
 保持测试提交和 Go 版本一致，分别运行本地、TCP、NATS 三个基准后再比较。不要把一次异常低/高的结果直接用于容量承诺。
 
-对应教程：[性能测试与容量理解](../../../docs/baseline/v3.0/guides/10-performance.md)。
+对应教程：[性能测试与容量理解](../../../docs/baseline/v3.0/guides/11.performance.md)。

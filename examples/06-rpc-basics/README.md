@@ -321,7 +321,7 @@ Await；只发通知时可直接用 Notify/Broadcast。
 - [契约、生成、绑定、Await 与 Call](./01-contract-generate-bind/README.md)
 - [Async、Notify 与 Broadcast](./02-async-and-notify/README.md)
 - [v3.1 完整 RPC 调用规则](../../docs/maintenance/v3.1/guides/README.md)
-- [跨节点 RPC](../../docs/baseline/v3.0/guides/06-remote-rpc.md)
+- [跨节点 RPC](../../docs/baseline/v3.0/guides/07.remote-rpc.md)
 
 同 Node、TCP 和 NATS 使用完全相同的生成客户端外观；跨节点章节只增加发现、路由和传输
 配置，不改变本章的 Await、Call、Async、Notify 与 Broadcast 语义。

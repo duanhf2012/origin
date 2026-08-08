@@ -46,4 +46,4 @@ game service stopped
 可给 Service、root 与 child 各增加一项独立状态，确认 Module 的状态只服务于所属 Service，
 不用于跨 Service 通信。
 
-对应教程：[Service 与 Module](../../../docs/baseline/v3.0/guides/03-service-and-module.md)。
+对应教程：[Service 与 Module](../../../docs/baseline/v3.0/guides/04.service-and-module.md)。

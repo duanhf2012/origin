@@ -25,4 +25,4 @@ node_services:
 
 执行 `run.bat` 或 `./run.sh`，预期日志为 `welcome="hello-from-game-1" max_players=10`。删除 `node_services` 块后会看到公共值；在专属块补上 `max_players: 50` 后会看到 `50`。
 
-对应教程：[配置应用](../../../docs/baseline/v3.0/guides/02-configuration.md)。
+对应教程：[配置应用](../../../docs/baseline/v3.0/guides/02.configuration.md)。

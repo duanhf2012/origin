@@ -16,4 +16,4 @@ if errs.CodeOf(err) == errs.CodeDeadlineExceeded {
 
 超时不等同于目标一定没有执行，因此写操作应设计幂等键或可查询结果，不能盲目无限重试。
 
-对应教程：[故障排查](../../../docs/baseline/v3.0/guides/11-troubleshooting.md)。
+对应教程：[故障排查](../../../docs/baseline/v3.0/guides/12.troubleshooting.md)。

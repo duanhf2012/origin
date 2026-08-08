@@ -13,4 +13,4 @@
 | [`05-custom-handler`](./05-custom-handler/README.md) | 替换默认输出后端，并理解 Handler 生命周期与可选控制 |
 
 每个子目录都有完整源码、配置、`run.bat` 和 `run.sh`。完整规则见
-[日志输出与管理教程](../../docs/maintenance/v3.1/guides/logging.md)。
+[日志输出与管理教程](../../docs/maintenance/v3.1/guides/03.logging.md)。

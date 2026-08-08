@@ -7,4 +7,4 @@
 - [03-await-and-safe](./03-await-and-safe/README.md)：Await、异步派发、panic 边界、默认超时和执行统计。
 - [04-node-game-time](./04-node-game-time/README.md)：v3.1 Node 游戏逻辑时间，以及跨 Service 的 After、Ticker、Cron 统一重排。
 
-对应教程：[Timer、Event 与执行](../../docs/baseline/v3.0/guides/04-timer-event-and-execution.md)。
+对应教程：[Timer、Event 与执行](../../docs/baseline/v3.0/guides/05.timer-event-and-execution.md)。

@@ -20,4 +20,4 @@ go test ./tests/integration/rpcfixture -run '^$' \
 
 可增大 `-benchtime` 获得更稳定采样。不要用本地结果直接推断跨 Node 吞吐，它不包含网络、发现或传输调度开销。
 
-对应教程：[性能测试与容量理解](../../../docs/baseline/v3.0/guides/10-performance.md)。
+对应教程：[性能测试与容量理解](../../../docs/baseline/v3.0/guides/11.performance.md)。

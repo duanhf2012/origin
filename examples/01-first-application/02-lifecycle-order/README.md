@@ -13,4 +13,4 @@
 
 可交换 YAML 中的两个名称后再次运行；不要依赖 Go 文件的书写顺序，真正决定顺序的是最终的 Node 配置。
 
-对应教程：[创建第一个应用](../../../docs/baseline/v3.0/guides/01-first-application.md)。
+对应教程：[创建第一个应用](../../../docs/baseline/v3.0/guides/01.first-application.md)。

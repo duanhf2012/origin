@@ -21,4 +21,4 @@ go run ./examples/09-retire-and-resume/01-service-retire-resume start --app-name
 
 执行 `run.bat` 或 `./run.sh`，预期依次看到 `retired`、`running`。可在两次调用之间加入自己的“停止接收新任务”逻辑；不要把 Retire 当作释放不可恢复资源的机会，那应放在 `OnStop`。
 
-对应教程：[Retire、Resume 与优雅停止](../../../docs/baseline/v3.0/guides/08-retire-and-resume.md)。
+对应教程：[Retire、Resume 与优雅停止](../../../docs/baseline/v3.0/guides/09.retire-and-resume.md)。
