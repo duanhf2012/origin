@@ -12,7 +12,7 @@ services:
     region: cn-east
 ```
 
-`ParseServiceConfig` 解析完整有效业务配置；`GetServiceConfig("region", ...)` 从同一业务配置按相对路径读取单字段；`GetConfig("nodes", ...)` 从 Application 根配置读取显式路径。Module 不需要也不应在 YAML 中另写名字。
+`ParseServiceConfig` 解析完整有效业务配置；`GetServiceConfig("region", ...)` 从同一业务配置按相对路径读取单字段；如果 YAML 是 `limits: {max_players: 100}`，对应路径就是 `GetServiceConfig("limits.max_players", ...)`。这里的路径从当前 Service 配置块根部开始，不需要写 `services.ConfigService` 或 Node ID；`GetConfig("nodes", ...)` 才是从 Application 根配置读取显式路径。Module 不需要也不应在 YAML 中另写名字。
 
 ## 运行与练习
 

@@ -2,19 +2,20 @@ log:
   # async 使用容量固定的异步队列，避免普通日志阻塞业务；sync 适合本地调试。
   mode: async
   console:
-    # 控制台只显示 info 及以上，并使用便于人工阅读的单行文本。
+    # enabled 省略时默认 true；本例显式开启控制台，显示 info 及以上的单行文本。
     enabled: true
     level: info
     format: text
   file:
-    # 文件保留 debug 及以上，并输出便于采集系统解析的 JSON Lines。
+    # enabled 省略时默认 false；必须显式 true 才创建文件，并保留 debug 及以上的 JSON Lines。
     enabled: true
     level: debug
     format: json
     # 相对路径以程序启动时的当前工作目录为基准。
     path: examples/02-configuration/04-log-output-and-rolling/logs/tutorial.log
     rotation:
-      # 活动文件在下一条完整日志会使其超过 1 MiB 前滚动；0B 关闭大小滚动。
+      # 下一条完整日志会使活动文件超过 1 MiB 时先滚动；单条日志不拆分，0B 关闭大小滚动。
+      # 必须使用 1 MiB 的整数倍，避免字节值转换为整数 MiB 时发生截断。
       max_size: 1M
       # 跨本地自然日时也滚动；timezone 还可以设置为 UTC。
       by_date: true

@@ -22,17 +22,23 @@ examples\02-configuration\01-minimal-yaml\run.bat
 ## 我想为 Service 设置业务参数
 
 业务公共配置放在 `services.<实际ServiceName>`，Node 专属配置放在
-`node_services.<NodeID>.<实际ServiceName>`：
+`node_services.<NodeID>.<实际ServiceName>`。选择和覆盖顺序是：
+
+1. 当前 Node 存在对应的 `node_services` Service 块时，选中这一整块；它不会再与公共
+   `services` 块逐字段递归合并。
+2. 当前 Node 没有专属块时，选中 `services` 中的公共块。
+3. 选中的配置块再覆盖到业务代码预先写入的 Go 结构体默认值上；配置中没有出现的字段
+   保留 Go 默认值。两个配置块都不存在时，也只保留 Go 默认值。
 
 ```yaml
 services:
-  # 所有未提供 Node 专属块的 ConfigService 使用该完整配置。
+  # 公共配置：没有 Node 专属块的 ConfigService 使用它。
   ConfigService:
     welcome: hello
     max_players: 100
 
 node_services:
-  # game-1 使用这一个完整替代块。
+  # game-1 存在专属块后，整体选中下面的 ConfigService；不会逐字段回退到公共块。
   game-1:
     ConfigService:
       welcome: hello-game-1
@@ -54,12 +60,13 @@ if err := module.ParseServiceConfig(&module.config); err != nil {
 
 ## 我该使用哪一种 Service 配置读取方法
 
-`Service` 与 `Module` 都提供相同的三种只读配置方法。它们读取的是启动时已经合并并冻结的快照，不会触发磁盘 I/O，也不支持运行期热更新：
+`Service` 与 `Module` 都提供相同的三种只读配置方法。它们读取的是启动时已经选择、覆盖并
+冻结的快照，不会触发磁盘 I/O，也不支持运行期热更新：
 
 | 方法 | 读取范围 | 常见用途 |
 | --- | --- | --- |
 | `ParseServiceConfig(&dst)` | 当前 Node 与当前实际 ServiceName 最终选中的**完整**业务配置 | 在 `OnInit` 一次性解码本 Service 的 settings 结构体，最常用。 |
-| `GetServiceConfig("path", &dst)` | 同一份有效业务配置中的相对路径 | 只读取一个小字段或嵌套子块，例如 `limits.max_players`。 |
+| `GetServiceConfig("path", &dst)` | 同一份有效业务配置中的相对路径 | 只读取一个小字段或嵌套子块；`path` 是参数占位名，实际传入配置内部路径，例如 `limits.max_players`。 |
 | `GetConfig("path", &dst)` | Application 的完整根配置中的绝对路径 | 少量需要读取共享框架配置或其他已知配置块的场景。 |
 
 已有完整可运行代码：[Service 与 Module 配置](../../../../examples/02-configuration/03-service-module-config)。它同时演示这三种调用：
@@ -84,9 +91,30 @@ func (s *ConfigService) OnInit() error {
 }
 ```
 
-路径使用点号分隔，例如 `limits.max_players`；空路径、空分段、通配符和数组下标不属于这套
-稳定 API。没有业务配置时，`ParseServiceConfig` 保留目标结构体预填的默认值；读取不存在路径
-则返回错误。推荐只在 `OnInit` 解析并保存强类型结果，避免在 RPC、Timer 和事件热路径重复解码。
+`GetServiceConfig` 的路径从当前 Service 配置块的根开始，不需要写 `services.ConfigService`，
+也不需要写 `node_services.game-1.ConfigService`。例如配置为：
+
+```yaml
+services:
+  PlayerService:
+    limits:
+      max_players: 100
+```
+
+代码就写成：
+
+```go
+var maxPlayers int
+if err := s.GetServiceConfig("limits.max_players", &maxPlayers); err != nil {
+    return err
+}
+```
+
+这里的 `limits.max_players` 依次表示当前 Service 配置中的 `limits` 对象和其中的
+`max_players` 字段；如果配置是平铺的 `region: cn-east`，路径就应该写成 `"region"`。
+空路径、空分段、通配符和数组下标不属于这套稳定 API。没有业务配置时，
+`ParseServiceConfig` 保留目标结构体预填的默认值；读取不存在路径则返回错误。推荐只在
+`OnInit` 解析并保存强类型结果，避免在 RPC、Timer 和事件热路径重复解码。
 
 ## 我想配置控制台和滚动文件日志
 
@@ -94,40 +122,52 @@ func (s *ConfigService) OnInit() error {
 
 ```yaml
 log:
-  # async 不等待普通日志写盘；sync 适合测试和本地即时观察。
+  # 日志调用模式：async 使用固定有界队列，不等待普通日志写盘；sync 适合测试和本地即时观察。
   mode: async
   console:
-    # 控制台输出 info 及以上的人类可读文本。
+    # 控制台输出端。未填写 enabled 时默认开启；这里显式开启，便于读者看出该输出端存在。
     enabled: true
+    # 只输出 info、warn、error 等不低于 info 的日志。
     level: info
+    # text 适合人工阅读；也可以改成 json。
     format: text
   file:
-    # 文件额外保留 debug，并使用一行一个对象的 JSON Lines。
+    # 文件输出端。未填写 enabled 时默认关闭；必须显式写 true 才会创建日志文件。
     enabled: true
+    # 文件比控制台多保留 debug 级别日志。
     level: debug
+    # json 表示一行一个 JSON 对象，便于日志采集系统解析。
     format: json
+    # 相对路径以程序启动时的当前工作目录为基准。
     path: logs/origin.log
     rotation:
-      # 下一条完整日志会使活动文件超过 512 MiB 时先滚动。
+      # 下一条完整日志写入后会超过 512 MiB 时，先把当前活动文件归档，再写入新文件。
+      # 单条日志不会被拆开；0B 可关闭按大小滚动。
       max_size: 512M
-      # 跨本地自然日时也滚动；可改为 UTC。
+      # true 表示跨自然日时滚动；false 表示不按日期滚动。
       by_date: true
+      # by_date 的自然日边界使用本机时区，也可以写 UTC。
       timezone: Local
     retention:
-      # 删除超过 14 天的归档，并最多保留最新 30 个。
+      # 删除超过 14 个自然日的归档，并最多保留最新 30 个归档文件。
       max_age: 14d
       max_files: 30
-      # 归档由一个维护协程压缩为 gzip。
+      # true 表示归档由维护协程压缩为 gzip；false 保留原始归档。
       compress: true
 ```
 
-未配置 `log` 时的默认值与上面相同，但文件输出默认是 `enabled: false`，控制台默认开启。
-`level` 支持 `debug`、`info`、`warn`、`error`；`format` 支持 `text`、`json`。控制台和文件
-可以使用不同级别和格式，但不能同时关闭。
+完全不配置 `log` 时，控制台默认 `enabled: true`，文件默认 `enabled: false`；因此默认会
+看到控制台日志，但不会创建日志文件。只写 `log.console` 而省略 `enabled` 时，控制台仍
+保持开启；只写 `log.file` 而省略 `enabled` 时，文件仍保持关闭。要启用文件必须显式写
+`log.file.enabled: true`；两个输出端不能同时关闭，否则配置无效。`level` 支持 `debug`、
+`info`、`warn`、`error`；`format` 支持 `text`、`json`。控制台和文件可以使用不同级别和格式。
 
-`max_size` 使用 Origin 二进制容量单位 `B/KB/M/G/T`，且日志滚动值必须是 1 MiB 的整数倍；
-`0B` 关闭大小滚动。`max_age` 使用 `ns/us/ms/s/m/h/d`，日志保留要求整天，`0s` 表示不按
-时间删除；`max_files: 0` 表示不按数量删除。相对 `path` 以程序启动工作目录为基准。
+`max_size` 使用 Origin 二进制容量单位 `B/KB/M/G/T`，其中 `1M` 表示 `1 MiB = 1024²`
+字节。配置先解析为字节，再转换成日志运行时使用的整数 MiB 数；如果允许 `512KB` 这类
+值，整数转换就必须截断或四舍五入，实际滚动阈值会悄悄偏离配置。因此除特殊值 `0B` 外，
+日志滚动值必须是 1 MiB 的整数倍。这是为了保持配置值与实际阈值完全一致，并不是文件系统
+或性能的限制。`0B` 关闭大小滚动。`max_age` 使用 `ns/us/ms/s/m/h/d`，日志保留要求整天，
+`0s` 表示不按时间删除；`max_files: 0` 表示不按数量删除。
 
 `mode: async` 使用固定有界队列，队列满时普通日志按级别累计丢弃而不是无限占内存；该容量
 不是业务配置项。`ErrorStack` 会附加有界调用栈并使用可靠写路径，但仍不应替代正常错误返回。
