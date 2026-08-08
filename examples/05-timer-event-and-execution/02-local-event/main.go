@@ -13,6 +13,9 @@ import (
 // EventID 必须稳定且非零；真实项目通常集中管理这些常量。
 const playerJoinedEvent service.EventID = 1
 
+// playerAuditEvent 演示同步监听器中嵌套通知另一个同步事件。
+const playerAuditEvent service.EventID = 2
+
 // PlayerJoined 是不可变的事件值。Mode 仅用于区分本示例的两种通知方式。
 type PlayerJoined struct {
 	PlayerID int64
@@ -22,6 +25,14 @@ type PlayerJoined struct {
 // EventID 把 payload 类型绑定到稳定事件 ID。
 func (PlayerJoined) EventID() service.EventID { return playerJoinedEvent }
 
+// PlayerAudit 是 PlayerJoined 监听器同步触发的嵌套事件。
+type PlayerAudit struct {
+	PlayerID int64
+}
+
+// EventID 将审计 payload 绑定到独立事件 ID。
+func (PlayerAudit) EventID() service.EventID { return playerAuditEvent }
+
 // app 是当前示例唯一的 Application。
 var app = application.New()
 
@@ -30,7 +41,7 @@ type EventService struct{ service.Service }
 
 // OnInit 是唯一允许登记事件监听器的生命周期阶段。
 func (target *EventService) OnInit() error {
-	return target.SubscribeEvent(playerJoinedEvent, func(_ context.Context, event service.Event) error {
+	if err := target.SubscribeEvent(playerJoinedEvent, func(ctx context.Context, event service.Event) error {
 		// 同一 EventID 首次通知后会绑定具体 Go 类型，因此这里可断言 PlayerJoined。
 		joined := event.(PlayerJoined)
 		target.Logger().Info(fmt.Sprintf(
@@ -38,6 +49,14 @@ func (target *EventService) OnInit() error {
 			joined.PlayerID,
 			joined.Mode,
 		))
+		// 在同步监听器中嵌套同步通知：审计监听器完成后，本监听器才返回。
+		return target.NotifyEventSync(ctx, PlayerAudit{PlayerID: joined.PlayerID})
+	}); err != nil {
+		return err
+	}
+	return target.SubscribeEvent(playerAuditEvent, func(_ context.Context, event service.Event) error {
+		audit := event.(PlayerAudit)
+		target.Logger().Info(fmt.Sprintf("player %d audit completed", audit.PlayerID))
 		return nil
 	})
 }

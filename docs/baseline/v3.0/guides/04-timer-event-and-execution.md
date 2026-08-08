@@ -137,7 +137,22 @@ Await 返回后的当前 Service 任务重新串行化，而不是依赖 `GoSafe
 
 ## 深入一点
 
-同步事件处理器可以嵌套同步事件，但不能在其中 `Await`。异步事件只保证已进入队列，不能在提交后修改事件 payload。Timer、事件和 RPC 回调都遵循 Service 的单执行语义；要并发处理纯计算或外部 I/O 时，应明确隔离状态并选择 `Await` 或受控后台任务。
+同步事件处理器可以嵌套同步事件：例如事件 A 的监听器同步通知事件 B，B 的全部监听器执行完后，A 的监听器才继续返回。它不能在其中 `Await`，因为 `Await` 会暂时释放 Service 执行权，其他任务可能插入执行，破坏同步事件的连续处理边界；这种场景应改用 `NotifyEventAsync`，或先在事件外完成 `Await`。
+
+```go
+// 允许：事件 B 会在当前 Service 任务中完成后，onA 才返回。
+func onA(ctx context.Context, _ service.Event) error {
+    return s.NotifyEventSync(ctx, EventB{ID: 1001})
+}
+
+// 不允许：同步监听器中调用 Await 会返回 ErrInvalidArgument。
+func onA(ctx context.Context, _ service.Event) error {
+    return s.Await(ctx, loadFromDatabase)
+}
+```
+
+异步事件只保证已进入队列，不能在提交后修改事件 payload。Timer、事件和 RPC 回调都遵循
+Service 的单执行语义；要并发处理纯计算或外部 I/O 时，应明确隔离状态并选择 `Await` 或受控后台任务。
 
 `SetDefaultAwaitTimeout` 只能由当前真实 Service 在 `OnInit` 调用，并且必须传入正时长；它只覆盖
 该 Service 未带 Deadline 的 `Await`/有响应 RPC 默认预算，不能在运行期动态调整。传入显式
