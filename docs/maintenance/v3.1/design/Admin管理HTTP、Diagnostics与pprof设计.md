@@ -3,7 +3,7 @@
 > 状态：已确认，允许实施
 > 基线：v3.0
 > 目标：v3.1.0
-> 兼容性：新增 Admin Server、GET/POST 管理端点和低成本 Diagnostics Summary；保留 v3.0 `--diagnostics`、`Application.Diagnostics()`、原诊断 JSON 和独立 pprof Listener
+> 兼容性：以 Admin Server 取代 v3.0 独立 Diagnostics HTTP Server；保留本地 `Application.Diagnostics()` 快照能力和独立 pprof Listener
 > 确认日期：2026-08-09
 
 ## 1. 目标与边界
@@ -304,9 +304,7 @@ HTTP Context、端点 Timeout 和 Service/Application 生命周期共同形成�
 
 ## 6. Admin Server 生命周期与兼容
 
-### 6.1 新接口与命令行
-
-新增：
+### 6.1 接口与命令行
 
 ```go
 func (app *Application) StartAdminServer(address string) error
@@ -314,18 +312,18 @@ func (app *Application) StopAdminServer(ctx context.Context) error
 func (app *Application) AdminAddress() (string, bool)
 ```
 
-命令行新增：
-
 ```text
 --admin 127.0.0.1:6061
 ```
 
-`--admin` 与 `--diagnostics` 互斥。前者开启完整 Admin 路由；后者保留 v3.0 只读行为，只提供
-`GET /debug/origin/diagnostics`。v3.0 的三个 Diagnostics Server 方法继续保留并标记 Deprecated，
-仍只启动只读模式，不会因为升级而意外暴露控制端点。
+`--admin` 是唯一管理 HTTP 启动参数，固定安装 Diagnostics、生命周期控制和已注册的自定义
+端点。删除 `--diagnostics`、`StartDiagnosticsServer`、`StopDiagnosticsServer`、
+`DiagnosticsAddress` 和旧 `/debug/origin/diagnostics` 路由，避免两套 Listener 模式、互斥规则和
+运行时外观。需要本地快照的代码继续直接调用 `Application.Diagnostics()`。
 
-Admin 与只读 Diagnostics 复用同一个 Application HTTP 资源槽；运行中切换模式必须先 Stop
-再 Start。相同模式、相同请求地址重复 Start 幂等成功；不同模式或不同地址返回状态冲突。
+相同请求地址重复 Start 幂等成功；已启动时改用不同地址返回状态冲突，调用方必须先 Stop
+再 Start。运行中允许关闭、重开 Admin Listener；路由在首次启动前已经冻结，不随 Listener
+重启改变。
 
 ### 6.2 启动顺序
 
@@ -336,7 +334,7 @@ Admin 与只读 Diagnostics 复用同一个 Application HTTP 资源槽；运行�
 → 加载配置并初始化日志等资源
 → 构建全部 Node/Service 实例并绑定 Runtime
 → 收集、校验并冻结 Admin 路由
-→ 绑定 Admin 或只读 Diagnostics Listener
+→ 绑定 Admin Listener
 → 依次执行 Node/Service OnInit 与 OnStart
 ```
 
@@ -344,7 +342,7 @@ Listener 仍在任何业务生命周期回调前开放，因此可以观察 OnIn
 存在，但在目标 Scheduler 未就绪时返回 503。Admin 绑定失败发生在 OnInit 前，Application
 按已创建资源逆序回滚。
 
-正常停止保持 Admin 与 pprof 可用，直到全部 Node 停止完成；随后先关闭 Admin/Diagnostics，
+正常停止保持 Admin 与 pprof 可用，直到全部 Node 停止完成；随后先关闭 Admin，
 再关闭 pprof、Crash 和日志。Stop Context 耗尽时必须强制 Close Listener，不能泄漏端口和
 goroutine。
 
@@ -359,12 +357,11 @@ Profile 和 Trace 的高敏感入口，也允许两者采用不同暴露时长�
 完整 Admin Server 包含任意业务写操作，默认策略必须从 v3.0 的“非环回警告”收紧：
 
 1. 没有 Guard 时只允许绑定环回地址；非环回绑定直接失败；
-2. 只读 `--diagnostics` 保留 v3.0 非环回警告兼容行为；
-3. CORS 默认关闭，不设置跨域允许头；
-4. 不使用 Cookie Session，不从 Query 读取 Token；
-5. 框架不记录 Authorization、Cookie、请求 Body、响应 Body或业务字段；
-6. 所有 POST、认证失败、授权失败和异常结果都写结构化审计日志；
-7. GET 只记录 RequestID、身份、端点、目标、状态、时长和响应大小。
+2. CORS 默认关闭，不设置跨域允许头；
+3. 不使用 Cookie Session，不从 Query 读取 Token；
+4. 框架不记录 Authorization、Cookie、请求 Body、响应 Body或业务字段；
+5. 所有 POST、认证失败、授权失败和异常结果都写结构化审计日志；
+6. GET 只记录 RequestID、身份、端点、目标、状态、时长和响应大小。
 
 Application 可以在启动前设置唯一 Guard：
 
@@ -455,8 +452,8 @@ Summary 不输出逐 Service 名称和完整明细，因此大小随 Node 数增
 GET /admin/v1/diagnostics?detail=full
 ```
 
-Full 复用 `Application.Diagnostics()` 的 v3.0 Snapshot v2，保留现有 Go 和 JSON 兼容。旧
-`GET /debug/origin/diagnostics` 继续返回 Full。非法 detail 返回 400。
+Full 复用 `Application.Diagnostics()` 的 v3.0 Snapshot v2，保留现有 Go 快照类型和 JSON
+字段含义。非法 detail 返回 400。
 
 ### 9.3 字段兼容与修正
 
@@ -486,7 +483,7 @@ Admin Listener 空闲时不执行周期采样，只有 Listener、HTTP Server �
 ### 10.2 Application Admin Server
 
 - 私有 ServeMux、固定路由、方法约束、保留路径和重复 Endpoint；
-- `--admin`、`--diagnostics` 互斥与 v3.0 兼容路径；
+- `--admin` 解析、启动和删除 `--diagnostics` 后的未知参数错误；
 - Start/Stop/Restart、`:0` 实际地址、并发启停、绑定失败和异常 Serve 退出；
 - 无 Guard 环回成功、非环回失败、Guard 401/403/成功和 Principal 传播；
 - 全局并发上限、Body/Response/Header/Timeout 上限和客户端取消；
