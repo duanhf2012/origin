@@ -42,7 +42,7 @@ go run ./examples/00-quickstart/01-hello-service
 | 06 | RPC 基础 | 定义合约并调用同 Node RPC | [RPC 基础](./docs/baseline/v3.0/guides/06.rpc-basics.md) | [06-rpc-basics](./examples/06-rpc-basics/) |
 | 07 | 跨节点 RPC | 使用 TCP、NATS 与多实例远程 RPC | [跨节点 RPC](./docs/baseline/v3.0/guides/07.remote-rpc.md) | [07-remote-rpc](./examples/07-remote-rpc/) |
 | 08 | 服务发现 | 使用 Origin、etcd 或自定义服务发现 | [服务发现](./docs/baseline/v3.0/guides/08.discovery.md) | [08-discovery](./examples/08-discovery/) |
-| 09 | Retire、Resume 与优雅停止 | Retire、Resume 与优雅下线 | [Retire、Resume 与优雅停止](./docs/baseline/v3.0/guides/09.retire-and-resume.md) | [09-retire-and-resume](./examples/09-retire-and-resume/) |
+| 09 | Retire、Resume 与优雅停止 | 用命令在运行期退休/恢复整个 Application，并监听 Service 状态事件 | [Retire、Resume 与优雅停止](./docs/baseline/v3.0/guides/09.retire-and-resume.md) | [09-retire-and-resume](./examples/09-retire-and-resume/) |
 | 10 | Diagnostics 与 pprof | 读取诊断、启停 pprof、适配监控 | [Diagnostics 与 pprof](./docs/baseline/v3.0/guides/10.diagnostics-and-pprof.md) | [10-diagnostics-and-pprof](./examples/10-diagnostics-and-pprof/) |
 | 11 | 性能测试与容量理解 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/11.performance.md) | [11-performance](./examples/11-performance/) |
 | 12 | 故障排查 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/12.troubleshooting.md) | [12-troubleshooting](./examples/12-troubleshooting/) |
