@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"runtime"
 	runtimemetrics "runtime/metrics"
@@ -108,7 +109,7 @@ nodes:
 		t.Fatalf("buffer pool diagnostics = %+v", running.BufferPool)
 	}
 	summary := app.DiagnosticsSummary()
-	if summary.SchemaVersion != 1 || summary.Application.Name != "diagnostics-test" ||
+	if summary.SchemaVersion != 2 || summary.Application.Name != "diagnostics-test" ||
 		summary.Application.State != "running" || len(summary.Nodes) != 1 ||
 		summary.Nodes[0].NodeID != "gateway-1" || summary.Nodes[0].Services.Total != 1 ||
 		!summary.BufferPool.Enabled {
@@ -140,7 +141,7 @@ func TestNilApplicationDiagnostics(t *testing.T) {
 		t.Fatalf("nil diagnostics = %+v", snapshot)
 	}
 	summary := app.DiagnosticsSummary()
-	if summary.SchemaVersion != 1 || summary.Application.State != "failed" ||
+	if summary.SchemaVersion != 2 || summary.Application.State != "failed" ||
 		summary.Application.AdminServer.State != "stopped" ||
 		summary.Application.Pprof.State != "stopped" || summary.Nodes == nil {
 		t.Fatalf("nil diagnostics Summary = %+v", summary)
@@ -156,7 +157,7 @@ func TestDiagnosticsRuntimeFieldsUseRealRuntime(t *testing.T) {
 		t.Fatalf("Full MemoryLimitBytes = %d, want > 0", full.Runtime.MemoryLimitBytes)
 	}
 	summary := app.DiagnosticsSummary()
-	if summary.Runtime.MemoryLimitBytes <= 0 || summary.Runtime.Goroutines <= 0 ||
+	if summary.Runtime.Goroutines <= 0 ||
 		summary.Runtime.GOMAXPROCS <= 0 {
 		t.Fatalf("RuntimeSummary = %+v", summary.Runtime)
 	}
@@ -172,6 +173,33 @@ func TestDiagnosticsRuntimeFieldsUseRealRuntime(t *testing.T) {
 	}
 }
 
+// TestRuntimeSummaryMemoryLimitAndHeapGoal keeps the default Summary useful for
+// capacity alerts: the Go unlimited sentinel is not misreported as capacity.
+func TestRuntimeSummaryMemoryLimitAndHeapGoal(t *testing.T) {
+	memory := runtime.MemStats{Sys: 100, HeapReleased: 40}
+	if bytes, configured := mapRuntimeMemoryLimit(uint64(math.MaxInt64)); configured || bytes != 0 {
+		t.Fatalf("unlimited GOMEMLIMIT = (%d, %t), want (0, false)", bytes, configured)
+	}
+	if bytes, configured := mapRuntimeMemoryLimit(512); !configured || bytes != 512 {
+		t.Fatalf("explicit GOMEMLIMIT = (%d, %t), want (512, true)", bytes, configured)
+	}
+	unlimited := runtimeSummaryFrom(memory, runtimeMetricValues{
+		memoryLimitBytes: math.MaxInt64,
+		heapGoalBytes:    81,
+	})
+	if unlimited.MemoryLimitConfigured || unlimited.MemoryLimitBytes != 0 || unlimited.HeapGoalBytes != 81 {
+		t.Fatalf("unlimited Summary = %+v", unlimited)
+	}
+	explicit := runtimeSummaryFrom(memory, runtimeMetricValues{
+		memoryLimitConfigured: true,
+		memoryLimitBytes:      512,
+		heapGoalBytes:         256,
+	})
+	if !explicit.MemoryLimitConfigured || explicit.MemoryLimitBytes != 512 || explicit.HeapGoalBytes != 256 {
+		t.Fatalf("explicit Summary = %+v", explicit)
+	}
+}
+
 // TestRuntimeMetricKindsAndMissingAreZero 防止 runtime/metrics 名称缺失或 KindBad 时调用错误
 // Value getter panic；每个缺失指标必须保持稳定零值。
 func TestRuntimeMetricKindsAndMissingAreZero(t *testing.T) {
@@ -183,6 +211,8 @@ func TestRuntimeMetricKindsAndMissingAreZero(t *testing.T) {
 		{Name: runtimeGCCPUSecondsMetric},
 		{Name: runtimeMutexWaitSecondsMetric},
 		{Name: runtimeMemoryLimitMetric},
+		{Name: runtimeHeapGoalMetric},
+		{Name: "/unknown/metric:unit"},
 	}
 	if got := runtimeMetricValuesFrom(samples); got != (runtimeMetricValues{}) {
 		t.Fatalf("KindBad metrics = %+v", got)
@@ -197,12 +227,14 @@ func TestRuntimeMetricNamesHaveGo126Kinds(t *testing.T) {
 		{Name: runtimeGCCPUSecondsMetric},
 		{Name: runtimeMutexWaitSecondsMetric},
 		{Name: runtimeMemoryLimitMetric},
+		{Name: runtimeHeapGoalMetric},
 	}
 	runtimemetrics.Read(samples)
 	wantKinds := []runtimemetrics.ValueKind{
 		runtimemetrics.KindUint64,
 		runtimemetrics.KindFloat64,
 		runtimemetrics.KindFloat64,
+		runtimemetrics.KindUint64,
 		runtimemetrics.KindUint64,
 	}
 	for index := range samples {
@@ -290,7 +322,7 @@ func TestAdminDiagnosticsDetailRouting(t *testing.T) {
 		wantSchema float64
 		wantAllow  string
 	}{
-		{name: "summary", method: http.MethodGet, wantStatus: http.StatusOK, wantSchema: 1},
+		{name: "summary", method: http.MethodGet, wantStatus: http.StatusOK, wantSchema: 2},
 		{name: "full", method: http.MethodGet, query: "?detail=full", wantStatus: http.StatusOK, wantSchema: 2},
 		{name: "invalid", method: http.MethodGet, query: "?detail=x", wantStatus: http.StatusBadRequest},
 		{name: "empty", method: http.MethodGet, query: "?detail=", wantStatus: http.StatusBadRequest},
@@ -329,6 +361,18 @@ func TestAdminDiagnosticsDetailRouting(t *testing.T) {
 			}
 			if document["schema_version"] != test.wantSchema {
 				t.Fatalf("schema_version = %v, want %v", document["schema_version"], test.wantSchema)
+			}
+			applicationDocument := document["application"].(map[string]any)
+			adminDocument := applicationDocument["admin_server"].(map[string]any)
+			if test.query == "" {
+				if _, exists := adminDocument["address"]; exists {
+					t.Fatalf("Summary leaks admin address: %s", body)
+				}
+				if _, exists := document["runtime"].(map[string]any)["heap_objects"]; exists {
+					t.Fatalf("Summary leaks heap_objects: %s", body)
+				}
+			} else if _, exists := adminDocument["address"]; !exists {
+				t.Fatalf("Full Snapshot lost detailed admin address field: %s", body)
 			}
 			if nodes, ok := document["nodes"].([]any); !ok || len(nodes) != 0 {
 				t.Fatalf("nodes = %#v, want []", document["nodes"])

@@ -2,7 +2,10 @@ package node
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +15,7 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -152,21 +156,29 @@ func TestDiagnosticsSummaryAggregates64Services(t *testing.T) {
 	configured := make([]string, serviceCount)
 	targets := make([]*diagnosticsSummaryService, serviceCount)
 	var wantAccepted, wantReady, wantExecutionRunning, wantAwaiting int
-	var wantExecutionRejected, wantExecutionPanic uint64
+	var wantExecutionDispatched, wantExecutionCompleted, wantExecutionRejected, wantExecutionAwaitTimeout, wantExecutionPanic uint64
 	var wantActive, wantDuePending, wantTimerReady, wantTimerRunning int
-	var wantTimerRejected, wantTimerPanic, wantEventFailures uint64
+	var wantTimerTriggered, wantTimerCompleted, wantTimerRejected, wantTimerPanic uint64
+	var wantTimerMaxReadyDelay time.Duration
+	var wantEventSync, wantEventAsync, wantEventFailures uint64
 	for index := range serviceCount {
 		value := index + 1
 		target := &diagnosticsSummaryService{
 			execution: service.ExecutionStats{
 				Accepted: value, Ready: value + 1, Running: index % 2, Awaiting: value + 2,
-				RejectedTotal: uint64(value * 3), PanicTotal: uint64(value * 5),
+				DispatchedTotal: uint64(value * 2), CompletedTotal: uint64(value * 3),
+				RejectedTotal: uint64(value * 5), AwaitTimeoutTotal: uint64(value * 7), PanicTotal: uint64(value * 11),
 			},
 			timer: service.TimerStats{
 				Active: value + 3, DuePending: value + 4, Ready: value + 5, Running: index % 2,
-				RejectedTotal: uint64(value * 7), PanicTotal: uint64(value * 11),
+				TriggeredTotal: uint64(value * 13), CompletedTotal: uint64(value * 17),
+				RejectedTotal: uint64(value * 19), PanicTotal: uint64(value * 23),
+				MaxReadyDelay: time.Duration(value) * time.Millisecond,
 			},
-			event: service.EventStats{HandlerFailureTotal: uint64(value * 13)},
+			event: service.EventStats{
+				SyncNotifiedTotal: uint64(value * 29), AsyncNotifiedTotal: uint64(value * 31),
+				HandlerFailureTotal: uint64(value * 37),
+			},
 		}
 		name := "service-" + strconv.Itoa(index)
 		targets[index] = target
@@ -176,14 +188,24 @@ func TestDiagnosticsSummaryAggregates64Services(t *testing.T) {
 		wantReady += target.execution.Ready
 		wantExecutionRunning += target.execution.Running
 		wantAwaiting += target.execution.Awaiting
+		wantExecutionDispatched += target.execution.DispatchedTotal
+		wantExecutionCompleted += target.execution.CompletedTotal
 		wantExecutionRejected += target.execution.RejectedTotal
+		wantExecutionAwaitTimeout += target.execution.AwaitTimeoutTotal
 		wantExecutionPanic += target.execution.PanicTotal
 		wantActive += target.timer.Active
 		wantDuePending += target.timer.DuePending
 		wantTimerReady += target.timer.Ready
 		wantTimerRunning += target.timer.Running
+		wantTimerTriggered += target.timer.TriggeredTotal
+		wantTimerCompleted += target.timer.CompletedTotal
 		wantTimerRejected += target.timer.RejectedTotal
 		wantTimerPanic += target.timer.PanicTotal
+		if target.timer.MaxReadyDelay > wantTimerMaxReadyDelay {
+			wantTimerMaxReadyDelay = target.timer.MaxReadyDelay
+		}
+		wantEventSync += target.event.SyncNotifiedTotal
+		wantEventAsync += target.event.AsyncNotifiedTotal
 		wantEventFailures += target.event.HandlerFailureTotal
 	}
 	current, err := New(
@@ -215,17 +237,38 @@ func TestDiagnosticsSummaryAggregates64Services(t *testing.T) {
 	execution := summary.Services.Execution
 	if execution.Accepted != wantAccepted || execution.Ready != wantReady ||
 		execution.Running != wantExecutionRunning || execution.Awaiting != wantAwaiting ||
-		execution.RejectedTotal != wantExecutionRejected || execution.PanicTotal != wantExecutionPanic {
+		execution.DispatchedTotal != wantExecutionDispatched || execution.CompletedTotal != wantExecutionCompleted ||
+		execution.RejectedTotal != wantExecutionRejected || execution.AwaitTimeoutTotal != wantExecutionAwaitTimeout ||
+		execution.PanicTotal != wantExecutionPanic {
 		t.Fatalf("Execution aggregate = %+v", execution)
 	}
 	timer := summary.Services.Timer
 	if timer.Active != wantActive || timer.DuePending != wantDuePending ||
 		timer.Ready != wantTimerReady || timer.Running != wantTimerRunning ||
-		timer.RejectedTotal != wantTimerRejected || timer.PanicTotal != wantTimerPanic {
+		timer.TriggeredTotal != wantTimerTriggered || timer.CompletedTotal != wantTimerCompleted ||
+		timer.RejectedTotal != wantTimerRejected || timer.PanicTotal != wantTimerPanic ||
+		timer.MaxReadyDelay != diagnostics.Duration(wantTimerMaxReadyDelay) {
 		t.Fatalf("Timer aggregate = %+v", timer)
 	}
-	if summary.Services.Event.HandlerFailureTotal != wantEventFailures {
+	if summary.Services.Event.SyncNotifiedTotal != wantEventSync ||
+		summary.Services.Event.AsyncNotifiedTotal != wantEventAsync ||
+		summary.Services.Event.HandlerFailureTotal != wantEventFailures {
 		t.Fatalf("Event aggregate = %+v", summary.Services.Event)
+	}
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"created"`) || strings.Contains(string(encoded), `"scheduled"`) ||
+		strings.Contains(string(encoded), `"active_high_watermark"`) {
+		t.Fatalf("Summary JSON unexpectedly exposes per-Service detail: %s", encoded)
+	}
+	if reflect.TypeOf(summary.Services).Kind() == reflect.Slice || document["services"] == nil {
+		t.Fatalf("Summary allocates a per-Service DTO slice: %#v", summary.Services)
 	}
 }
 
@@ -254,10 +297,29 @@ func TestDiagnosticsSummaryCountsEveryServiceState(t *testing.T) {
 		)
 	}
 	if aggregate.Total != len(states) || aggregate.States != (diagnostics.ServiceStateAggregate{
-		Created: 1, Initializing: 1, Initialized: 1, Starting: 1, Running: 1,
-		Retired: 1, Stopping: 1, Stopped: 1, Failed: 1, Unknown: 1,
+		Running: 1, Retired: 1, Failed: 1, Unknown: 7,
 	}) {
 		t.Fatalf("state aggregate = %+v", aggregate)
+	}
+}
+
+// TestDiagnosticsSummaryAggregatesTransportStats verifies that default
+// monitoring sees one node-level work aggregate, not a Local/TCP/NATS tree.
+func TestDiagnosticsSummaryAggregatesTransportStats(t *testing.T) {
+	stats := rpc.Stats{
+		Local: rpc.TransportStats{Pending: 2, PendingHighWater: 4, OutboundAccepted: 99, OutboundCompleted: 3, OutboundFailed: 5, OutboundTimeout: 7, OutboundRejected: 11, InboundAccepted: 98, InboundCompleted: 13, InboundFailed: 17, InboundTimeout: 19, InboundRejected: 23, PayloadSentBytes: 29, PayloadReceivedBytes: 31},
+		TCP:   rpc.TransportStats{Pending: 37, PendingHighWater: 41, OutboundAccepted: 97, OutboundCompleted: 43, OutboundFailed: 47, OutboundTimeout: 53, OutboundRejected: 59, InboundAccepted: 96, InboundCompleted: 61, InboundFailed: 67, InboundTimeout: 71, InboundRejected: 73, PayloadSentBytes: 79, PayloadReceivedBytes: 83},
+		NATS:  rpc.TransportStats{Pending: 89, PendingHighWater: 97, OutboundAccepted: 95, OutboundCompleted: 101, OutboundFailed: 103, OutboundTimeout: 107, OutboundRejected: 109, InboundAccepted: 94, InboundCompleted: 113, InboundFailed: 127, InboundTimeout: 131, InboundRejected: 137, PayloadSentBytes: 139, PayloadReceivedBytes: 149},
+	}
+	got := mapRPCSummary(stats)
+	want := diagnostics.RPCSummary{
+		Pending: 128, PendingHighWater: 97,
+		OutboundCompleted: 147, OutboundFailed: 155, OutboundTimeout: 167, OutboundRejected: 179,
+		InboundCompleted: 187, InboundFailed: 211, InboundTimeout: 221, InboundRejected: 233,
+		PayloadSentBytes: 247, PayloadReceivedBytes: 263,
+	}
+	if got != want {
+		t.Fatalf("aggregate RPC = %+v, want %+v", got, want)
 	}
 }
 

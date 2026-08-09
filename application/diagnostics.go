@@ -1,6 +1,7 @@
 package application
 
 import (
+	"math"
 	"runtime"
 	runtimemetrics "runtime/metrics"
 	"time"
@@ -15,6 +16,7 @@ const (
 	runtimeGCCPUSecondsMetric       = "/cpu/classes/gc/total:cpu-seconds"
 	runtimeMutexWaitSecondsMetric   = "/sync/mutex/wait/total:seconds"
 	runtimeMemoryLimitMetric        = "/gc/gomemlimit:bytes"
+	runtimeHeapGoalMetric           = "/gc/heap/goal:bytes"
 )
 
 // runtimeMetricValues 是一次固定 runtime/metrics 读取的内部强类型结果。
@@ -23,7 +25,9 @@ type runtimeMetricValues struct {
 	runnableGoroutines    uint64
 	gcCPUSecondsTotal     float64
 	mutexWaitSecondsTotal float64
+	memoryLimitConfigured bool
 	memoryLimitBytes      int64
+	heapGoalBytes         uint64
 }
 
 // Diagnostics 聚合当前 Application、Go Runtime、BufferPool 和全部 Node 的不可变快照。
@@ -92,7 +96,7 @@ func mapBufferPoolStats(stats bufferpool.Stats) diagnostics.BufferPoolSnapshot {
 func (app *Application) DiagnosticsSummary() diagnostics.Summary {
 	collectedAt := time.Now()
 	result := diagnostics.Summary{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		CollectedAt:   collectedAt,
 		Nodes:         make([]diagnostics.NodeSummary, 0),
 	}
@@ -110,8 +114,8 @@ func (app *Application) DiagnosticsSummary() diagnostics.Summary {
 	result.Application = diagnostics.ApplicationSummary{
 		Name:        app.appName,
 		State:       applicationStateText(app.State()),
-		AdminServer: app.adminHTTP.snapshot(),
-		Pprof:       app.pprofHTTP.snapshot(),
+		AdminServer: mapListenerSummary(app.adminHTTP.snapshot()),
+		Pprof:       mapListenerSummary(app.pprofHTTP.snapshot()),
 	}
 	nodes := append([]*node.Node(nil), app.nodes...)
 	pool := app.bufferPool
@@ -127,6 +131,13 @@ func (app *Application) DiagnosticsSummary() diagnostics.Summary {
 	}
 	result.CollectCost = diagnostics.Duration(time.Since(collectedAt))
 	return result
+}
+
+func mapListenerSummary(snapshot diagnostics.ServerSnapshot) diagnostics.ListenerSummary {
+	return diagnostics.ListenerSummary{
+		State:     snapshot.State,
+		ErrorCode: snapshot.ErrorCode,
+	}
 }
 
 func collectRuntimeSnapshot() diagnostics.RuntimeSnapshot {
@@ -174,9 +185,10 @@ func runtimeSummaryFrom(
 		RunnableGoroutines:    metricValues.runnableGoroutines,
 		GOMAXPROCS:            runtime.GOMAXPROCS(0),
 		GoMemoryUsedBytes:     goMemoryUsed,
-		MemoryLimitBytes:      metricValues.memoryLimitBytes,
+		MemoryLimitConfigured: metricValues.memoryLimitConfigured,
+		MemoryLimitBytes:      summaryMemoryLimit(metricValues),
+		HeapGoalBytes:         metricValues.heapGoalBytes,
 		HeapAllocBytes:        memory.HeapAlloc,
-		HeapObjects:           memory.HeapObjects,
 		TotalAllocBytes:       memory.TotalAlloc,
 		GCCycles:              memory.NumGC,
 		GCPauseTotal:          diagnostics.Duration(memory.PauseTotalNs),
@@ -192,6 +204,7 @@ func collectRuntimeMetricValues() runtimeMetricValues {
 		{Name: runtimeGCCPUSecondsMetric},
 		{Name: runtimeMutexWaitSecondsMetric},
 		{Name: runtimeMemoryLimitMetric},
+		{Name: runtimeHeapGoalMetric},
 	}
 	runtimemetrics.Read(samples[:])
 	return runtimeMetricValuesFrom(samples[:])
@@ -219,11 +232,36 @@ func runtimeMetricValuesFrom(samples []runtimemetrics.Sample) runtimeMetricValue
 			if sample.Value.Kind() == runtimemetrics.KindUint64 {
 				// Go 内存上限由 debug.SetMemoryLimit 的 int64 契约产生，metrics 仅以
 				// Uint64 传输同一个非负值，因此这里恢复其原始类型。
-				result.memoryLimitBytes = int64(sample.Value.Uint64())
+				raw := sample.Value.Uint64()
+				if raw <= uint64(math.MaxInt64) {
+					result.memoryLimitBytes = int64(raw)
+				}
+				_, result.memoryLimitConfigured = mapRuntimeMemoryLimit(raw)
+			}
+		case runtimeHeapGoalMetric:
+			if sample.Value.Kind() == runtimemetrics.KindUint64 {
+				result.heapGoalBytes = sample.Value.Uint64()
 			}
 		}
 	}
 	return result
+}
+
+func summaryMemoryLimit(values runtimeMetricValues) int64 {
+	if !values.memoryLimitConfigured {
+		return 0
+	}
+	return values.memoryLimitBytes
+}
+
+// mapRuntimeMemoryLimit translates runtime/metrics' uint64 wire value into
+// the documented debug.SetMemoryLimit semantics. MaxInt64 is Go's unlimited
+// sentinel and must never appear in the Summary as a fake usable capacity.
+func mapRuntimeMemoryLimit(raw uint64) (int64, bool) {
+	if raw > uint64(math.MaxInt64) || raw == uint64(math.MaxInt64) {
+		return 0, false
+	}
+	return int64(raw), true
 }
 
 func applicationStateText(state State) string {

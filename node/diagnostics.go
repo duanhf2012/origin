@@ -95,22 +95,10 @@ func aggregateService(
 ) {
 	result.Total++
 	switch state {
-	case service.StateCreated:
-		result.States.Created++
-	case service.StateInitializing:
-		result.States.Initializing++
-	case service.StateInitialized:
-		result.States.Initialized++
-	case service.StateStarting:
-		result.States.Starting++
 	case service.StateRunning:
 		result.States.Running++
 	case service.StateRetired:
 		result.States.Retired++
-	case service.StateStopping:
-		result.States.Stopping++
-	case service.StateStopped:
-		result.States.Stopped++
 	case service.StateFailed:
 		result.States.Failed++
 	default:
@@ -121,16 +109,26 @@ func aggregateService(
 	result.Execution.Ready += execution.Ready
 	result.Execution.Running += execution.Running
 	result.Execution.Awaiting += execution.Awaiting
+	result.Execution.DispatchedTotal += execution.DispatchedTotal
+	result.Execution.CompletedTotal += execution.CompletedTotal
 	result.Execution.RejectedTotal += execution.RejectedTotal
+	result.Execution.AwaitTimeoutTotal += execution.AwaitTimeoutTotal
 	result.Execution.PanicTotal += execution.PanicTotal
 
 	result.Timer.Active += timer.Active
 	result.Timer.DuePending += timer.DuePending
 	result.Timer.Ready += timer.Ready
 	result.Timer.Running += timer.Running
+	result.Timer.TriggeredTotal += timer.TriggeredTotal
+	result.Timer.CompletedTotal += timer.CompletedTotal
 	result.Timer.RejectedTotal += timer.RejectedTotal
 	result.Timer.PanicTotal += timer.PanicTotal
+	if diagnostics.Duration(timer.MaxReadyDelay) > result.Timer.MaxReadyDelay {
+		result.Timer.MaxReadyDelay = diagnostics.Duration(timer.MaxReadyDelay)
+	}
 
+	result.Event.SyncNotifiedTotal += event.SyncNotifiedTotal
+	result.Event.AsyncNotifiedTotal += event.AsyncNotifiedTotal
 	result.Event.HandlerFailureTotal += event.HandlerFailureTotal
 }
 
@@ -185,30 +183,28 @@ func mapRPCStats(stats rpc.Stats) diagnostics.RPCSnapshot {
 }
 
 func mapRPCSummary(stats rpc.Stats) diagnostics.RPCSummary {
-	return diagnostics.RPCSummary{
-		Local: mapRPCTransportSummary(stats.Local),
-		TCP:   mapRPCTransportSummary(stats.TCP),
-		NATS:  mapRPCTransportSummary(stats.NATS),
-	}
+	var result diagnostics.RPCSummary
+	aggregateRPCSummary(&result, stats.Local)
+	aggregateRPCSummary(&result, stats.TCP)
+	aggregateRPCSummary(&result, stats.NATS)
+	return result
 }
 
-func mapRPCTransportSummary(stats rpc.TransportStats) diagnostics.RPCTransportSummary {
-	return diagnostics.RPCTransportSummary{
-		Pending:              stats.Pending,
-		PendingHighWater:     stats.PendingHighWater,
-		OutboundAccepted:     stats.OutboundAccepted,
-		OutboundCompleted:    stats.OutboundCompleted,
-		OutboundFailed:       stats.OutboundFailed,
-		OutboundTimeout:      stats.OutboundTimeout,
-		OutboundRejected:     stats.OutboundRejected,
-		InboundAccepted:      stats.InboundAccepted,
-		InboundCompleted:     stats.InboundCompleted,
-		InboundFailed:        stats.InboundFailed,
-		InboundTimeout:       stats.InboundTimeout,
-		InboundRejected:      stats.InboundRejected,
-		PayloadSentBytes:     stats.PayloadSentBytes,
-		PayloadReceivedBytes: stats.PayloadReceivedBytes,
+func aggregateRPCSummary(result *diagnostics.RPCSummary, stats rpc.TransportStats) {
+	result.Pending += stats.Pending
+	if stats.PendingHighWater > result.PendingHighWater {
+		result.PendingHighWater = stats.PendingHighWater
 	}
+	result.OutboundCompleted += stats.OutboundCompleted
+	result.OutboundFailed += stats.OutboundFailed
+	result.OutboundTimeout += stats.OutboundTimeout
+	result.OutboundRejected += stats.OutboundRejected
+	result.InboundCompleted += stats.InboundCompleted
+	result.InboundFailed += stats.InboundFailed
+	result.InboundTimeout += stats.InboundTimeout
+	result.InboundRejected += stats.InboundRejected
+	result.PayloadSentBytes += stats.PayloadSentBytes
+	result.PayloadReceivedBytes += stats.PayloadReceivedBytes
 }
 
 func mapRPCTransportStats(stats rpc.TransportStats) diagnostics.RPCTransportSnapshot {
