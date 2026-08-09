@@ -15,7 +15,7 @@
 | `07-remote-rpc` | TCP、NATS、路由与广播 |
 | `08-discovery` | Origin、etcd、自定义 Provider 与等待目标服务 |
 | `09-retire-and-resume` | 优雅退休与恢复 |
-| `10-diagnostics-and-pprof` | 诊断快照与动态 pprof |
+| [`10-admin-diagnostics-and-pprof`](./10-admin-diagnostics-and-pprof/README.md) | Admin 扩展、诊断快照、内置 Diagnostics 与动态 pprof |
 | `11-performance` | 可重复执行的性能测试 |
 | `12-troubleshooting` | 可控故障与修复练习 |
 

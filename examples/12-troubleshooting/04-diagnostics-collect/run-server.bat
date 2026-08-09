@@ -1,4 +1,4 @@
 @echo off
 setlocal
 cd /d "%~dp0..\..\.."
-go run ./examples/10-diagnostics-and-pprof/02-diagnostics-server start --app-name diagnostics-lab --config ./examples/10-diagnostics-and-pprof/02-diagnostics-server/config --node game-1
+go run ./examples/10-admin-diagnostics-and-pprof/04-admin-diagnostics start --app-name diagnostics-lab --config ./examples/10-admin-diagnostics-and-pprof/04-admin-diagnostics/config --node game-1 --admin 127.0.0.1:6063
