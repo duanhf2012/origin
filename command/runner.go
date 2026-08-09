@@ -122,8 +122,7 @@ func (runner *Runner) Run(
 		return ExitUsage, invalidArgumentf("command is required")
 	}
 
-	// 只归一化首参数，其他参数完整交给对应内置或自定义命令。
-	name := normalizeCommandName(args[0])
+	name := args[0]
 	commandArgs := args[1:]
 	switch name {
 	case "help":
@@ -165,20 +164,6 @@ func (runner *Runner) runCustom(
 		return ExitFailure, err
 	}
 	return ExitSuccess, nil
-}
-
-// normalizeCommandName 把确认保留的 v2 首参数别名转换为正式子命令名。
-func normalizeCommandName(name string) string {
-	switch name {
-	case "-start":
-		return "start"
-	case "-stop":
-		return "stop"
-	case "-help", "-h", "--help":
-		return "help"
-	default:
-		return name
-	}
 }
 
 // isBuiltInCommand 报告名称是否属于不能被自定义命令覆盖的内置命令。

@@ -107,7 +107,7 @@ func TestHelpAndVersion(t *testing.T) {
 	}
 }
 
-func TestRunUsageErrorsAndAliases(t *testing.T) {
+func TestRunUsageErrorsAndRejectsLegacyCommands(t *testing.T) {
 	t.Parallel()
 
 	// 每个样本创建独立 Runner，确保首次 Run 冻结行为不会掩盖参数结果。
@@ -119,24 +119,11 @@ func TestRunUsageErrorsAndAliases(t *testing.T) {
 	}{
 		{name: "no command", args: nil, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
 		{name: "unknown", args: []string{"missing"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
-		{
-			name:     "help alias",
-			args:     []string{"-help"},
-			wantCode: ExitSuccess,
-			wantErr:  errs.CodeOK,
-		},
-		{
-			name:     "help short alias",
-			args:     []string{"-h"},
-			wantCode: ExitSuccess,
-			wantErr:  errs.CodeOK,
-		},
-		{
-			name:     "help long alias",
-			args:     []string{"--help"},
-			wantCode: ExitSuccess,
-			wantErr:  errs.CodeOK,
-		},
+		{name: "legacy start", args: []string{"-start"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
+		{name: "legacy stop", args: []string{"-stop"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
+		{name: "legacy help", args: []string{"-help"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
+		{name: "legacy short help", args: []string{"-h"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
+		{name: "legacy long help", args: []string{"--help"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
 		{
 			name:     "version extra argument",
 			args:     []string{"version", "extra"},
@@ -248,12 +235,11 @@ func TestStartBuildsRequestAndPIDRecord(t *testing.T) {
 		return nil
 	})
 	code, err := runner.Run(context.Background(), []string{
-		"-start",
+		"start",
 		"--app-name", "game-dev",
 		"--config", configDir,
 		"--pid-dir", pidDir,
 		"--node", " gateway-1,game-1 ",
-		"--retired",
 		"--diagnostics", "127.0.0.1:6061",
 		"--pprof", "127.0.0.1:6060",
 	})
@@ -268,9 +254,6 @@ func TestStartBuildsRequestAndPIDRecord(t *testing.T) {
 	}
 	if want := []string{"gateway-1", "game-1"}; !reflect.DeepEqual(received.NodeIDs, want) {
 		t.Fatalf("NodeIDs = %#v, want %#v", received.NodeIDs, want)
-	}
-	if !received.InitialRetired {
-		t.Fatal("InitialRetired = false, want true")
 	}
 	if received.DiagnosticsAddress != "127.0.0.1:6061" ||
 		received.PprofAddress != "127.0.0.1:6060" {
@@ -319,6 +302,11 @@ func TestStartRejectsInvalidArgumentsBeforeHandler(t *testing.T) {
 		{
 			name: "duplicate node",
 			args: []string{"start", "--app-name", "game", "--config", configDir, "--node", "a,a"},
+			code: errs.CodeInvalidArgument,
+		},
+		{
+			name: "removed retired option",
+			args: []string{"start", "--app-name", "game", "--config", configDir, "--retired"},
 			code: errs.CodeInvalidArgument,
 		},
 		{
@@ -495,7 +483,7 @@ func TestDuplicateStartAndStopRoundTrip(t *testing.T) {
 	// stop 使用平台入口取消目标 Context，并等待目标返回后释放锁。
 	stopper, _, _ := newTestRunner(t, noOpStart)
 	code, err = stopper.Run(context.Background(), []string{
-		"-stop",
+		"stop",
 		"--app-name", "round-trip",
 		"--pid-dir", pidDir,
 		"--timeout", "3s",
