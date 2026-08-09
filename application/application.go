@@ -31,6 +31,7 @@ import (
 type Application struct {
 	options Options
 	catalog serviceCatalog
+	adminState
 
 	// state 提供无锁只读快照；生命周期写操作仍由 run/Stop 的互斥路径串行化。
 	state atomic.Uint32
