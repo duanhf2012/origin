@@ -19,6 +19,7 @@ type IService interface {
 	ITimer
 	IServiceConfig
 
+	Name() string
 	OnInit() error
 	OnStart(ctx context.Context) error
 	OnStop(ctx context.Context) error

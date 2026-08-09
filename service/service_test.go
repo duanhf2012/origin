@@ -91,6 +91,21 @@ func TestBindRuntimeAndQueries(t *testing.T) {
 	}
 }
 
+// TestIServiceExposesBoundName 防止框架持有 IService 后无法读取真实 ServiceName，
+// 从而迫使 Admin 等使用方绕过最小接口访问具体嵌入对象。
+func TestIServiceExposesBoundName(t *testing.T) {
+	target := &testService{}
+	runtime := &testRuntime{name: "PlayerService", state: StateRunning}
+	if err := BindRuntime(target, runtime); err != nil {
+		t.Fatalf("BindRuntime() error = %v", err)
+	}
+
+	var current IService = target
+	if current.Name() != "PlayerService" {
+		t.Fatalf("IService.Name() = %q", current.Name())
+	}
+}
+
 func TestBindRuntimeRejectsTypedNil(t *testing.T) {
 	var target *testService
 	if err := BindRuntime(target, &testRuntime{}); err == nil {
