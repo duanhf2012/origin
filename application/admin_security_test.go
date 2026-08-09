@@ -417,6 +417,35 @@ func TestAdminSecurityOuterBoundary(t *testing.T) {
 	}
 }
 
+// TestAdminSecurityRawMuxResponseLimit catches any private raw handler that can
+// bypass Endpoint MaxResponseBytes and grow the outer response buffer without bound.
+func TestAdminSecurityRawMuxResponseLimit(t *testing.T) {
+	app := New()
+	chunk := strings.Repeat("x", int(admin.DefaultMaxResponseBytes/2)+1)
+	var secondWriteErr error
+	handler := app.adminHTTPBoundary(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, chunk)
+		_, secondWriteErr = io.WriteString(w, chunk)
+	}))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/raw-response", nil),
+	)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("raw overflow status = %d, want 500", response.Code)
+	}
+	if secondWriteErr == nil {
+		t.Fatal("raw overflow second Write error = nil")
+	}
+	if response.Body.Len() > len(http.StatusText(http.StatusInternalServerError))+1 {
+		t.Fatalf("raw overflow response bytes = %d, want fixed safe error", response.Body.Len())
+	}
+	if active := len(app.adminHTTP.requestSlots); active != 0 {
+		t.Fatalf("active request slots after overflow = %d, want 0", active)
+	}
+}
+
 // TestAdminSecurityPanicRecovery fixes the outermost recovery contract for both
 // authentication and custom invocation code, without exposing panic values.
 func TestAdminSecurityPanicRecovery(t *testing.T) {
@@ -502,6 +531,58 @@ func TestAdminSecurityPanicRecovery(t *testing.T) {
 				t.Fatalf("panic audit leaked %q: %q", secret, record.text)
 			}
 		}
+	}
+}
+
+// TestAdminSecurityInvalidBufferedStatus requires invalid status validation to
+// panic inside the outer recovery point, where it becomes one sanitized 500.
+func TestAdminSecurityInvalidBufferedStatus(t *testing.T) {
+	handler := &adminAuditHandler{}
+	logRuntime, err := originlog.NewRuntime(originlog.Config{Mode: originlog.SyncMode}, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = logRuntime.Close(context.Background()) })
+
+	const secret = "invalid-status-panic-secret"
+	app := New()
+	app.logger = logRuntime.Logger()
+	observedInvalidPanic := false
+	boundary := app.adminHTTPBoundary(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		defer func() {
+			if recover() != nil {
+				observedInvalidPanic = true
+				panic(secret)
+			}
+		}()
+		w.Header().Set("X-Private-Value", secret)
+		w.WriteHeader(99)
+	}))
+	response := httptest.NewRecorder()
+	boundary.ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/invalid-status", nil),
+	)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", response.Code)
+	}
+	if !observedInvalidPanic {
+		t.Fatal("invalid WriteHeader did not panic inside raw handler")
+	}
+	if response.Header().Get("X-Private-Value") != "" ||
+		strings.Contains(response.Body.String(), secret) {
+		t.Fatalf("safe response leaked invalid status panic data: header=%q body=%q",
+			response.Header().Get("X-Private-Value"), response.Body.String())
+	}
+	records := handler.snapshot()
+	if len(records) != 1 || records[0].status != http.StatusInternalServerError {
+		t.Fatalf("invalid status audit = %+v, want one 500 record", records)
+	}
+	if strings.Contains(records[0].text, secret) {
+		t.Fatalf("invalid status audit leaked panic value: %q", records[0].text)
+	}
+	if active := len(app.adminHTTP.requestSlots); active != 0 {
+		t.Fatalf("active request slots after invalid status = %d, want 0", active)
 	}
 }
 

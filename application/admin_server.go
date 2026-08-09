@@ -23,6 +23,8 @@ const adminHTTPMaxHeaderBytes = 1 << 20
 
 const adminHTTPMaxActiveRequests = 64
 
+var errAdminHTTPResponseTooLarge = errors.New("admin HTTP response exceeds limit")
+
 type adminHTTPBoundaryKey struct{}
 
 // adminHTTPAuditState is request-local metadata owned by the outer HTTP
@@ -37,28 +39,62 @@ type adminHTTPAuditState struct {
 }
 
 type adminBufferedResponse struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
+	header          http.Header
+	committedHeader http.Header
+	status          int
+	body            []byte
+	maxBodyBytes    int
+	overflowed      bool
 }
 
-func newAdminBufferedResponse() *adminBufferedResponse {
-	return &adminBufferedResponse{header: make(http.Header)}
+func newAdminBufferedResponse(maxBodyBytes int) *adminBufferedResponse {
+	return &adminBufferedResponse{
+		header:       make(http.Header),
+		maxBodyBytes: maxBodyBytes,
+	}
 }
 
 func (response *adminBufferedResponse) Header() http.Header { return response.header }
 
 func (response *adminBufferedResponse) WriteHeader(status int) {
-	if response.status == 0 {
-		response.status = status
+	if response.status != 0 {
+		return
 	}
+	if status < 100 || status > 999 {
+		panic("invalid admin HTTP status")
+	}
+	// Match net/http's final-header boundary: informational responses other
+	// than 101 do not freeze the eventual response Header.
+	if status >= 100 && status <= 199 && status != http.StatusSwitchingProtocols {
+		return
+	}
+	response.status = status
+	response.committedHeader = response.header.Clone()
 }
 
 func (response *adminBufferedResponse) Write(body []byte) (int, error) {
 	if response.status == 0 {
-		response.status = http.StatusOK
+		response.WriteHeader(http.StatusOK)
 	}
-	return response.body.Write(body)
+	if response.overflowed || len(body) > response.maxBodyBytes-len(response.body) {
+		response.overflowed = true
+		return 0, errAdminHTTPResponseTooLarge
+	}
+	required := len(response.body) + len(body)
+	if required > cap(response.body) {
+		capacity := cap(response.body) * 2
+		if capacity < required {
+			capacity = required
+		}
+		if capacity > response.maxBodyBytes {
+			capacity = response.maxBodyBytes
+		}
+		grown := make([]byte, len(response.body), capacity)
+		copy(grown, response.body)
+		response.body = grown
+	}
+	response.body = append(response.body, body...)
+	return len(body), nil
 }
 
 func (response *adminBufferedResponse) resetError(status int) {
@@ -66,24 +102,29 @@ func (response *adminBufferedResponse) resetError(status int) {
 		"Content-Type":           {"text/plain; charset=utf-8"},
 		"X-Content-Type-Options": {"nosniff"},
 	}
+	response.committedHeader = response.header.Clone()
 	response.status = status
-	response.body.Reset()
-	_, _ = response.body.WriteString(http.StatusText(status) + "\n")
+	response.body = response.body[:0]
+	response.overflowed = false
+	message := []byte(http.StatusText(status) + "\n")
+	if len(message) > response.maxBodyBytes {
+		message = message[:response.maxBodyBytes]
+	}
+	_, _ = response.Write(message)
 }
 
 func (response *adminBufferedResponse) commit(target http.ResponseWriter) {
-	for key, values := range response.header {
+	if response.status == 0 {
+		response.WriteHeader(http.StatusOK)
+	}
+	for key, values := range response.committedHeader {
 		for _, value := range values {
 			target.Header().Add(key, value)
 		}
 	}
-	status := response.status
-	if status == 0 {
-		status = http.StatusOK
-	}
-	target.WriteHeader(status)
-	if response.body.Len() != 0 {
-		_, _ = target.Write(response.body.Bytes())
+	target.WriteHeader(response.status)
+	if len(response.body) != 0 {
+		_, _ = target.Write(response.body)
 	}
 }
 
@@ -100,7 +141,7 @@ func (app *Application) adminHTTPBoundary(next http.Handler) http.Handler {
 				Endpoint: "unknown",
 			},
 		}
-		response := newAdminBufferedResponse()
+		response := newAdminBufferedResponse(int(admin.DefaultMaxResponseBytes))
 		acquired := app.adminHTTP.tryAcquireRequestSlot(adminHTTPMaxActiveRequests)
 		if !acquired {
 			response.resetError(http.StatusTooManyRequests)
@@ -110,7 +151,7 @@ func (app *Application) adminHTTPBoundary(next http.Handler) http.Handler {
 		}
 		defer app.adminHTTP.releaseRequestSlot()
 		defer func() {
-			if recover() != nil {
+			if recover() != nil || response.overflowed {
 				// Panic values and error chains are deliberately ignored: neither the
 				// response nor audit fields may expose authentication or business data.
 				response.resetError(http.StatusInternalServerError)
@@ -153,7 +194,7 @@ func (app *Application) auditAdminRequest(
 		originlog.String("target_service_name", state.operation.ServiceName),
 		originlog.Int("status", status),
 		originlog.Duration("duration", time.Since(state.startedAt)),
-		originlog.Int("response_bytes", response.body.Len()),
+		originlog.Int("response_bytes", len(response.body)),
 		originlog.String("outcome", adminAuditOutcome(status)),
 	)
 }

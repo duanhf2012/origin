@@ -210,6 +210,83 @@ func TestAdminServerHTTPConfiguration(t *testing.T) {
 	}
 }
 
+// TestAdminBufferedResponseCapacityBound catches both append-after-overflow and
+// bytes.Buffer-style capacity growth beyond the configured hard limit.
+func TestAdminBufferedResponseCapacityBound(t *testing.T) {
+	response := newAdminBufferedResponse(8)
+	if written, err := response.Write([]byte("12345")); err != nil || written != 5 {
+		t.Fatalf("first Write = (%d, %v), want (5, nil)", written, err)
+	}
+	if length, capacity := len(response.body), cap(response.body); length != 5 || capacity > 8 {
+		t.Fatalf("after first Write len/cap = %d/%d, want 5/cap<=8", length, capacity)
+	}
+	if written, err := response.Write([]byte("6789")); err == nil || written != 0 {
+		t.Fatalf("overflow Write = (%d, %v), want (0, error)", written, err)
+	}
+	if length, capacity := len(response.body), cap(response.body); length != 5 || capacity > 8 {
+		t.Fatalf("after overflow len/cap = %d/%d, want unchanged 5/cap<=8", length, capacity)
+	}
+}
+
+// TestAdminBufferedResponseHeaderSnapshot catches live Header aliasing after the
+// first explicit or implicit final response, and repeated final status changes.
+func TestAdminBufferedResponseHeaderSnapshot(t *testing.T) {
+	t.Run("explicit final header", func(t *testing.T) {
+		response := newAdminBufferedResponse(int(admin.DefaultMaxResponseBytes))
+		response.Header().Set("X-Result", "before")
+		response.Header()["X-Multi"] = []string{"one", "two"}
+		response.WriteHeader(http.StatusCreated)
+		response.Header().Set("X-Result", "after")
+		response.Header()["X-Multi"][0] = "mutated"
+		response.WriteHeader(http.StatusAccepted)
+
+		target := httptest.NewRecorder()
+		response.commit(target)
+		if target.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201", target.Code)
+		}
+		if got := target.Header().Get("X-Result"); got != "before" {
+			t.Fatalf("committed Header = %q, want before", got)
+		}
+		if got := target.Header().Values("X-Multi"); len(got) != 2 || got[0] != "one" || got[1] != "two" {
+			t.Fatalf("committed multi Header = %q, want [one two]", got)
+		}
+	})
+
+	t.Run("implicit final header", func(t *testing.T) {
+		response := newAdminBufferedResponse(int(admin.DefaultMaxResponseBytes))
+		response.Header().Set("X-Result", "before")
+		if written, err := response.Write([]byte("ok")); err != nil || written != 2 {
+			t.Fatalf("Write = (%d, %v), want (2, nil)", written, err)
+		}
+		response.Header().Set("X-Result", "after")
+
+		target := httptest.NewRecorder()
+		response.commit(target)
+		if target.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", target.Code)
+		}
+		if got := target.Header().Get("X-Result"); got != "before" {
+			t.Fatalf("committed Header = %q, want before", got)
+		}
+	})
+
+	t.Run("informational header remains mutable", func(t *testing.T) {
+		response := newAdminBufferedResponse(int(admin.DefaultMaxResponseBytes))
+		response.Header().Set("X-Result", "informational")
+		response.WriteHeader(http.StatusEarlyHints)
+		response.Header().Set("X-Result", "final")
+		response.WriteHeader(http.StatusCreated)
+
+		target := httptest.NewRecorder()
+		response.commit(target)
+		if target.Code != http.StatusCreated || target.Header().Get("X-Result") != "final" {
+			t.Fatalf("final response = status %d Header %q, want 201/final",
+				target.Code, target.Header().Get("X-Result"))
+		}
+	})
+}
+
 // TestAdminServerConcurrentLifecycle 固定并发同地址 Start 只发布一个 Listener，并发 Stop 都等待
 // 同一资源退出；该路径由 Race 门禁验证锁顺序和终态可见性。
 func TestAdminServerConcurrentLifecycle(t *testing.T) {
