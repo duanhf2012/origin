@@ -19,6 +19,8 @@ type stringOption struct {
 	value string
 	// set 区分选项完全未出现和显式传入空字符串。
 	set bool
+	// rejectDuplicate 用于只允许声明一次的单值选项。
+	rejectDuplicate bool
 }
 
 // String 返回 flag 包显示当前值所需的文本。
@@ -28,9 +30,24 @@ func (option *stringOption) String() string {
 
 // Set 保存显式参数值并标记该选项已经出现。
 func (option *stringOption) Set(value string) error {
+	if option.rejectDuplicate && option.set {
+		return fmt.Errorf("option is duplicated")
+	}
 	option.value = value
 	option.set = true
 	return nil
+}
+
+// registerSingleStringOption 注册只能显式声明一次的字符串选项。
+func registerSingleStringOption(
+	flags *flag.FlagSet,
+	name string,
+	defaultValue string,
+	usage string,
+) *stringOption {
+	option := &stringOption{value: defaultValue, rejectDuplicate: true}
+	flags.Var(option, name, usage)
+	return option
 }
 
 // registerStringOption 把带默认值和显式出现状态的字符串选项注册到 FlagSet。

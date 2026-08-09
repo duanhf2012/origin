@@ -33,12 +33,12 @@ type applicationTestFacade struct{}
 func (*applicationTestFacade) Diagnostics() diagnostics.Snapshot {
 	return diagnostics.Snapshot{SchemaVersion: 1}
 }
-func (*applicationTestFacade) StartDiagnosticsServer(string) error         { return nil }
-func (*applicationTestFacade) StopDiagnosticsServer(context.Context) error { return nil }
-func (*applicationTestFacade) DiagnosticsAddress() (string, bool)          { return "127.0.0.1:6061", true }
-func (*applicationTestFacade) StartPprof(string) error                     { return nil }
-func (*applicationTestFacade) StopPprof(context.Context) error             { return nil }
-func (*applicationTestFacade) PprofAddress() (string, bool)                { return "127.0.0.1:6060", true }
+func (*applicationTestFacade) StartAdminServer(string) error         { return nil }
+func (*applicationTestFacade) StopAdminServer(context.Context) error { return nil }
+func (*applicationTestFacade) AdminAddress() (string, bool)          { return "127.0.0.1:6061", true }
+func (*applicationTestFacade) StartPprof(string) error               { return nil }
+func (*applicationTestFacade) StopPprof(context.Context) error       { return nil }
+func (*applicationTestFacade) PprofAddress() (string, bool)          { return "127.0.0.1:6060", true }
 
 var _ ApplicationRuntime = (*applicationTestFacade)(nil)
 

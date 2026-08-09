@@ -349,7 +349,7 @@ func TestStartBuildsRequestAndPIDRecord(t *testing.T) {
 		"--config", configDir,
 		"--pid-dir", pidDir,
 		"--node", " gateway-1,game-1 ",
-		"--diagnostics", "127.0.0.1:6061",
+		"--admin", "127.0.0.1:6061",
 		"--pprof", "127.0.0.1:6060",
 	})
 	if err != nil || code != ExitSuccess {
@@ -364,7 +364,7 @@ func TestStartBuildsRequestAndPIDRecord(t *testing.T) {
 	if want := []string{"gateway-1", "game-1"}; !reflect.DeepEqual(received.NodeIDs, want) {
 		t.Fatalf("NodeIDs = %#v, want %#v", received.NodeIDs, want)
 	}
-	if received.DiagnosticsAddress != "127.0.0.1:6061" ||
+	if received.AdminAddress != "127.0.0.1:6061" ||
 		received.PprofAddress != "127.0.0.1:6060" {
 		t.Fatalf("HTTP addresses = %#v", received)
 	}
@@ -380,6 +380,56 @@ func TestStartBuildsRequestAndPIDRecord(t *testing.T) {
 	}
 	if record.PID != os.Getpid() {
 		t.Fatalf("pid record = %d, want %d", record.PID, os.Getpid())
+	}
+}
+
+// TestStartAdminFlagValidation 固定 Admin 是唯一通用 HTTP 入口：显式空值、重复声明和
+// 已删除的 diagnostics 参数都必须在调用 Handler 前返回 Usage；Admin 与 pprof 可以并存。
+func TestStartAdminFlagValidation(t *testing.T) {
+	t.Parallel()
+
+	configDir := t.TempDir()
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "empty admin",
+			args: []string{"start", "--app-name", "game", "--config", configDir, "--admin", ""},
+		},
+		{
+			name: "duplicate admin",
+			args: []string{
+				"start", "--app-name", "game", "--config", configDir,
+				"--admin", "127.0.0.1:6061", "--admin", "127.0.0.1:6062",
+			},
+		},
+		{
+			name: "removed diagnostics",
+			args: []string{
+				"start", "--app-name", "game", "--config", configDir,
+				"--diagnostics", "127.0.0.1:6061",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			called := false
+			runner, _, _ := newTestRunner(t, func(context.Context, StartRequest) error {
+				called = true
+				return nil
+			})
+			code, err := runner.Run(context.Background(), test.args)
+			if code != ExitUsage || !errs.IsCode(err, errs.CodeInvalidArgument) {
+				t.Fatalf("Run() = (%d, %v), want (%d, invalid argument)", code, err, ExitUsage)
+			}
+			if called {
+				t.Fatal("invalid Admin flag called Start Handler")
+			}
+		})
 	}
 }
 

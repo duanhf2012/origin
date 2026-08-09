@@ -22,7 +22,7 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 	configDir := flags.String("config", "./config", "配置目录")
 	pidDir := flags.String("pid-dir", "./run", "PID 目录")
 	nodeOption := registerStringOption(flags, "node", "", "逗号分隔的 NodeID")
-	diagnosticsAddress := flags.String("diagnostics", "", "Diagnostics JSON 监听地址")
+	adminAddress := registerSingleStringOption(flags, "admin", "", "Admin HTTP 监听地址")
 	pprofAddress := flags.String("pprof", "", "Go pprof 监听地址")
 	if err := flags.Parse(args); err != nil {
 		return ExitUsage, invalidArgumentf("parse start arguments: %v", err)
@@ -38,6 +38,9 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 	nodeIDs, err := parseNodeIDs(nodeOption)
 	if err != nil {
 		return ExitUsage, err
+	}
+	if adminAddress.set && strings.TrimSpace(adminAddress.value) == "" {
+		return ExitUsage, invalidArgumentf("admin address is empty")
 	}
 	absoluteConfigDir, err := resolveExistingDir(*configDir, "config directory")
 	if err != nil {
@@ -86,13 +89,13 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 
 	// 复制 NodeIDs 形成 Handler 独占的参数快照，防止修改解析期切片。
 	request := StartRequest{
-		AppName:            *appName,
-		ConfigDir:          absoluteConfigDir,
-		PIDDir:             absolutePIDDir,
-		NodeIDs:            append([]string(nil), nodeIDs...),
-		Controls:           mailbox.requests,
-		DiagnosticsAddress: strings.TrimSpace(*diagnosticsAddress),
-		PprofAddress:       strings.TrimSpace(*pprofAddress),
+		AppName:      *appName,
+		ConfigDir:    absoluteConfigDir,
+		PIDDir:       absolutePIDDir,
+		NodeIDs:      append([]string(nil), nodeIDs...),
+		Controls:     mailbox.requests,
+		AdminAddress: strings.TrimSpace(adminAddress.value),
+		PprofAddress: strings.TrimSpace(*pprofAddress),
 	}
 	handlerErr := callSafely("start handler", func() error {
 		return runner.start(runCtx, request)

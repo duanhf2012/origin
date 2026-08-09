@@ -69,30 +69,33 @@ func TestPprofRuntimeLifecycleAndPrivateMux(t *testing.T) {
 	}
 }
 
-// TestPprofAndDiagnosticsAreIndependent 防止复用同一个 Server 导致任一 Stop 关闭另一端点。
-func TestPprofAndDiagnosticsAreIndependent(t *testing.T) {
+// TestPprofAndAdminAreIndependent 防止复用同一个 Server 导致任一 Stop 关闭另一端点。
+func TestPprofAndAdminAreIndependent(t *testing.T) {
 	app := newHTTPTestApplication(t)
-	if err := app.StartDiagnosticsServer("127.0.0.1:0"); err != nil {
+	if err := app.freezeAdminRoutes(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.StartAdminServer("127.0.0.1:0"); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.StartPprof("127.0.0.1:0"); err != nil {
 		t.Fatal(err)
 	}
-	diagnosticsAddress, _ := app.DiagnosticsAddress()
+	adminAddress, _ := app.AdminAddress()
 	pprofAddress, _ := app.PprofAddress()
-	if diagnosticsAddress == pprofAddress {
-		t.Fatalf("servers share address %q", diagnosticsAddress)
+	if adminAddress == pprofAddress {
+		t.Fatalf("servers share address %q", adminAddress)
 	}
 	if err := app.StopPprof(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	response, err := http.Get("http://" + diagnosticsAddress + diagnosticsPath)
+	response, err := http.Get("http://" + adminAddress + "/admin/v1/diagnostics")
 	if err != nil {
-		t.Fatalf("Diagnostics after StopPprof error = %v", err)
+		t.Fatalf("Admin diagnostics after StopPprof error = %v", err)
 	}
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		t.Fatalf("Diagnostics after StopPprof status = %d", response.StatusCode)
+		t.Fatalf("Admin diagnostics after StopPprof status = %d", response.StatusCode)
 	}
 }
 

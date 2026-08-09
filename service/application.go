@@ -6,16 +6,16 @@ import (
 	"github.com/duanhf2012/origin/v3/diagnostics"
 )
 
-// ApplicationRuntime 是业务管理 Service 可以访问的最小进程级诊断外观。
+// ApplicationRuntime 是业务管理 Service 可以访问的最小进程级管理与诊断外观。
 //
 // 接口故意不包含 Application.Stop、Setup、Provider 注册、Node 构建或配置修改。两个 Stop
 // 方法可能等待 HTTP 请求排空，业务 RPC 应通过 Service.Await 调用。
 type ApplicationRuntime interface {
 	diagnostics.Source
 
-	StartDiagnosticsServer(address string) error
-	StopDiagnosticsServer(ctx context.Context) error
-	DiagnosticsAddress() (string, bool)
+	StartAdminServer(address string) error
+	StopAdminServer(ctx context.Context) error
+	AdminAddress() (string, bool)
 
 	StartPprof(address string) error
 	StopPprof(ctx context.Context) error

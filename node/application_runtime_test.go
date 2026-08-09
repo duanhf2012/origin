@@ -14,12 +14,12 @@ type nodeApplicationFacade struct{}
 func (*nodeApplicationFacade) Diagnostics() diagnostics.Snapshot {
 	return diagnostics.Snapshot{SchemaVersion: 1}
 }
-func (*nodeApplicationFacade) StartDiagnosticsServer(string) error         { return nil }
-func (*nodeApplicationFacade) StopDiagnosticsServer(context.Context) error { return nil }
-func (*nodeApplicationFacade) DiagnosticsAddress() (string, bool)          { return "", false }
-func (*nodeApplicationFacade) StartPprof(string) error                     { return nil }
-func (*nodeApplicationFacade) StopPprof(context.Context) error             { return nil }
-func (*nodeApplicationFacade) PprofAddress() (string, bool)                { return "", false }
+func (*nodeApplicationFacade) StartAdminServer(string) error         { return nil }
+func (*nodeApplicationFacade) StopAdminServer(context.Context) error { return nil }
+func (*nodeApplicationFacade) AdminAddress() (string, bool)          { return "", false }
+func (*nodeApplicationFacade) StartPprof(string) error               { return nil }
+func (*nodeApplicationFacade) StopPprof(context.Context) error       { return nil }
+func (*nodeApplicationFacade) PprofAddress() (string, bool)          { return "", false }
 
 // TestServiceApplicationAvailableFromOnInit 验证 Node 在任何业务生命周期回调前完成外观装配。
 func TestServiceApplicationAvailableFromOnInit(t *testing.T) {

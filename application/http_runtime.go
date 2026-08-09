@@ -67,17 +67,17 @@ type httpRuntimeErrors struct {
 	stateConflict   error
 }
 
-// diagnosticsHTTPRuntimeErrors 保留 v3.0 Diagnostics/pprof 已发布的错误语义。
-func diagnosticsHTTPRuntimeErrors() httpRuntimeErrors {
+// pprofHTTPRuntimeErrors 保留 pprof 已发布的 Diagnostics 错误族语义。
+func pprofHTTPRuntimeErrors() httpRuntimeErrors {
 	return httpRuntimeErrors{
 		unavailableCode: errs.CodeDiagnosticsUnavailable,
 		stateConflict:   errs.ErrDiagnosticsStateConflict,
 	}
 }
 
-// start 使用既有 Diagnostics 错误族启动 Listener，保持 pprof 和旧 Diagnostics 调用点兼容。
+// start 使用既有 Diagnostics 错误族启动 pprof Listener。
 func (runtime *httpRuntime) start(address string, server *http.Server) error {
-	return runtime.startWithErrors(address, server, diagnosticsHTTPRuntimeErrors())
+	return runtime.startWithErrors(address, server, pprofHTTPRuntimeErrors())
 }
 
 // startWithErrors 串行启动 Listener，并由调用方指定当前 HTTP 子系统的稳定错误族。
@@ -161,9 +161,9 @@ func (runtime *httpRuntime) serve(
 	runtime.mu.Unlock()
 }
 
-// stop 使用既有 Diagnostics 错误族停止 Listener，保持 pprof 和旧 Diagnostics 调用点兼容。
+// stop 使用既有 Diagnostics 错误族停止 pprof Listener。
 func (runtime *httpRuntime) stop(ctx context.Context) error {
-	return runtime.stopWithErrors(ctx, diagnosticsHTTPRuntimeErrors())
+	return runtime.stopWithErrors(ctx, pprofHTTPRuntimeErrors())
 }
 
 // stopWithErrors 关闭 Listener、等待 Serve 退出，并按所属子系统映射关闭失败。

@@ -65,9 +65,8 @@ type Application struct {
 	// resourcesReady/resourcesClosing 把运行时 HTTP Start 与最终资源清理线性化。
 	resourcesReady   bool
 	resourcesClosing bool
-	// 两个 HTTP Runtime 使用独立 Listener、ServeMux、状态锁和 goroutine 所有权。
-	diagnosticsHTTP httpRuntime
-	pprofHTTP       httpRuntime
+	// Admin 与 pprof 使用独立 Listener、ServeMux、状态锁和 goroutine 所有权。
+	pprofHTTP httpRuntime
 }
 
 // New 创建一个尚未绑定配置和 Service 类型的 Application。
@@ -371,19 +370,6 @@ func (app *Application) run(
 	if err := app.initializeResources(configured, request.AppName); err != nil {
 		return err
 	}
-	// 命令行只决定两个进程级诊断 Listener 的初始状态；它们必须先于任何 Node 生命周期
-	// 回调完成绑定，运行中仍可通过公开 API 独立关闭或重新开启。
-	if request.DiagnosticsAddress != "" {
-		if err := app.StartDiagnosticsServer(request.DiagnosticsAddress); err != nil {
-			return err
-		}
-	}
-	if request.PprofAddress != "" {
-		if err := app.StartPprof(request.PprofAddress); err != nil {
-			return err
-		}
-	}
-
 	selected, err := selectNodes(configured.nodes, request.NodeIDs)
 	if err != nil {
 		return app.report(err)
@@ -398,6 +384,21 @@ func (app *Application) run(
 	app.mu.Lock()
 	app.nodes = nodes
 	app.mu.Unlock()
+	// Admin Provider 必须绑定真实 Service 实例，并在任何 OnInit 前一次冻结。命令行只决定
+	// Admin/pprof Listener 的初始状态；运行中仍可通过公开 API 独立关闭或重新开启。
+	if err := app.freezeAdminRoutes(nodes); err != nil {
+		return app.rollbackStartup(ensureCleanupContext(), err, false)
+	}
+	if request.AdminAddress != "" {
+		if err := app.StartAdminServer(request.AdminAddress); err != nil {
+			return app.rollbackStartup(ensureCleanupContext(), err, false)
+		}
+	}
+	if request.PprofAddress != "" {
+		if err := app.StartPprof(request.PprofAddress); err != nil {
+			return app.rollbackStartup(ensureCleanupContext(), err, false)
+		}
+	}
 
 	lifecycleCtx, lifecycleCancel := context.WithCancel(runCtx)
 	app.mu.Lock()
@@ -849,7 +850,7 @@ func (app *Application) newStopContext() (context.Context, context.CancelFunc) {
 	return context.WithCancel(context.Background())
 }
 
-// closeResources 使用总体停止 Context 完成 Buffer 诊断、Crash 注销和日志关闭。
+// closeResources 使用总体停止 Context 完成 Admin、pprof、Buffer 诊断、Crash 注销和日志关闭。
 func (app *Application) closeResources(ctx context.Context) error {
 	app.mu.Lock()
 	app.resourcesClosing = true
@@ -859,12 +860,12 @@ func (app *Application) closeResources(ctx context.Context) error {
 	logger := app.logger
 	app.resourcesReady = false
 	app.mu.Unlock()
-	// Node Stop/Rollback 已在调用方完成；先关闭两个进程诊断入口，再检查 Buffer 并关闭
+	// Node Stop/Rollback 已在调用方完成；先关闭 Admin，再关闭 pprof，随后检查 Buffer 并关闭
 	// Crash/日志。即使 ctx 已耗尽，httpRuntime.stop 也会强制 Close Listener。
-	diagnosticsErr := app.diagnosticsHTTP.stop(ctx)
+	adminErr := app.adminHTTP.stopWithErrors(ctx, adminHTTPRuntimeErrors())
 	pprofErr := app.pprofHTTP.stop(ctx)
 	if runtime == nil {
-		return errors.Join(diagnosticsErr, pprofErr)
+		return errors.Join(adminErr, pprofErr)
 	}
 
 	// BufferPool 没有 Close；只有开启统计时才在全部 Node 回收后读取一次最终快照。
@@ -879,7 +880,7 @@ func (app *Application) closeResources(ctx context.Context) error {
 	}
 	crashErr := crashOutput.Close()
 	logErr := runtime.Close(ctx)
-	return errors.Join(diagnosticsErr, pprofErr, crashErr, logErr)
+	return errors.Join(adminErr, pprofErr, crashErr, logErr)
 }
 
 // finish 保存唯一最终结果并唤醒所有 Stop 等待者。

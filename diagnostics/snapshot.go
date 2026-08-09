@@ -65,15 +65,15 @@ type Snapshot struct {
 	Nodes         []NodeSnapshot      `json:"nodes"`
 }
 
-// ApplicationSnapshot 保存进程身份、生命周期和两个诊断 Listener 的当前状态。
+// ApplicationSnapshot 保存进程身份、生命周期、Admin 和 pprof Listener 的当前状态。
 type ApplicationSnapshot struct {
-	Name              string         `json:"name"`
-	State             string         `json:"state"`
-	DiagnosticsServer ServerSnapshot `json:"diagnostics_server"`
-	Pprof             ServerSnapshot `json:"pprof"`
+	Name        string         `json:"name"`
+	State       string         `json:"state"`
+	AdminServer ServerSnapshot `json:"admin_server"`
+	Pprof       ServerSnapshot `json:"pprof"`
 }
 
-// ServerSnapshot 是 Diagnostics 或 pprof Server 的有界状态摘要。
+// ServerSnapshot 是 Admin 或 pprof Server 的有界状态摘要。
 type ServerSnapshot struct {
 	State     string    `json:"state"`
 	Address   string    `json:"address"`

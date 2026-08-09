@@ -32,7 +32,7 @@ func TestSnapshotJSONSchema(t *testing.T) {
 		Application: diagnostics.ApplicationSnapshot{
 			Name:  "player",
 			State: "running",
-			DiagnosticsServer: diagnostics.ServerSnapshot{
+			AdminServer: diagnostics.ServerSnapshot{
 				State:     "serving",
 				Address:   "127.0.0.1:6061",
 				ErrorCode: errs.CodeOK,
@@ -74,6 +74,13 @@ func TestSnapshotJSONSchema(t *testing.T) {
 	}
 	if got := document["collect_cost"]; got != "1.5ms" {
 		t.Fatalf("collect_cost = %#v, want 1.5ms", got)
+	}
+	applicationSnapshot := document["application"].(map[string]any)
+	if _, exists := applicationSnapshot["admin_server"]; !exists {
+		t.Fatalf("application.admin_server missing: %#v", applicationSnapshot)
+	}
+	if _, exists := applicationSnapshot["diagnostics_server"]; exists {
+		t.Fatalf("legacy application.diagnostics_server remains: %#v", applicationSnapshot)
 	}
 
 	runtimeSnapshot := document["runtime"].(map[string]any)
