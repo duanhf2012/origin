@@ -2,7 +2,7 @@
 
 这些示例区分“暂时从自动路由和发现中下线”与“停止并释放资源”。先理解单 Service 状态，再看批量控制，最后仅在必要时学习包含 Retired 候选。
 
-- [01-service-retire-resume](./01-service-retire-resume/README.md)：单个 Service 状态切换。
+- [01-service-retire-resume](./01-service-retire-resume/README.md)：用 `retire/resume` 命令控制整个 Application，并监听 Service 状态事件。
 - [02-node-and-application](./02-node-and-application/README.md)：Node/Application 批量切换顺序。
 - [03-include-retired](./03-include-retired/README.md)：显式包含 Retired 候选。
 
