@@ -5,6 +5,7 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	"github.com/duanhf2012/origin/v3/rpc"
+	"github.com/duanhf2012/origin/v3/service"
 )
 
 // Diagnostics 返回当前 Node 拥有的独立只读诊断 DTO。
@@ -41,6 +42,96 @@ func (node *Node) Diagnostics() diagnostics.NodeSnapshot {
 		result.Services[index] = mapService(entry)
 	}
 	return result
+}
+
+// DiagnosticsSummary 返回当前 Node 的固定大小监控摘要。
+//
+// 静态 services Slice 在装配后保持只读，因此本方法直接遍历每个 Service 的并发安全叶子
+// 快照并累加到一个 ServiceAggregate，不调用 Full Diagnostics，也不建立中间 Service Slice。
+func (node *Node) DiagnosticsSummary() diagnostics.NodeSummary {
+	if node == nil {
+		return diagnostics.NodeSummary{
+			State: "failed",
+			Health: diagnostics.HealthSnapshot{
+				Degraded:  true,
+				ErrorCode: errs.CodeInternal,
+			},
+		}
+	}
+
+	result := diagnostics.NodeSummary{
+		NodeID:    node.id,
+		State:     nodeStateText(node.State()),
+		Health:    mapHealthStatus(node.HealthStatus()),
+		Transport: mapTransportStatus(node.TransportStatus()),
+		Discovery: mapDiscoveryStatus(node.DiscoveryStatus()),
+	}
+	if node.rpcRuntime != nil {
+		result.RPC = mapRPCSummary(node.rpcRuntime.Stats())
+	}
+	if node.discovery != nil && node.discovery.directory != nil {
+		result.Directory = mapDirectory(node.discovery.directory)
+	}
+	for _, entry := range node.services {
+		state := entry.loadState()
+		aggregateService(
+			&result.Services,
+			state.State,
+			entry.instance.ExecutionStats(),
+			entry.instance.TimerStats(),
+			entry.instance.EventStats(),
+		)
+	}
+	return result
+}
+
+// aggregateService 把一个 Service 的四个独立叶子累加进 Node 唯一聚合对象。
+func aggregateService(
+	result *diagnostics.ServiceAggregate,
+	state service.State,
+	execution service.ExecutionStats,
+	timer service.TimerStats,
+	event service.EventStats,
+) {
+	result.Total++
+	switch state {
+	case service.StateCreated:
+		result.States.Created++
+	case service.StateInitializing:
+		result.States.Initializing++
+	case service.StateInitialized:
+		result.States.Initialized++
+	case service.StateStarting:
+		result.States.Starting++
+	case service.StateRunning:
+		result.States.Running++
+	case service.StateRetired:
+		result.States.Retired++
+	case service.StateStopping:
+		result.States.Stopping++
+	case service.StateStopped:
+		result.States.Stopped++
+	case service.StateFailed:
+		result.States.Failed++
+	default:
+		result.States.Unknown++
+	}
+
+	result.Execution.Accepted += execution.Accepted
+	result.Execution.Ready += execution.Ready
+	result.Execution.Running += execution.Running
+	result.Execution.Awaiting += execution.Awaiting
+	result.Execution.RejectedTotal += execution.RejectedTotal
+	result.Execution.PanicTotal += execution.PanicTotal
+
+	result.Timer.Active += timer.Active
+	result.Timer.DuePending += timer.DuePending
+	result.Timer.Ready += timer.Ready
+	result.Timer.Running += timer.Running
+	result.Timer.RejectedTotal += timer.RejectedTotal
+	result.Timer.PanicTotal += timer.PanicTotal
+
+	result.Event.HandlerFailureTotal += event.HandlerFailureTotal
 }
 
 func mapHealthStatus(status HealthStatus) diagnostics.HealthSnapshot {
@@ -98,6 +189,33 @@ func mapRPCStats(stats rpc.Stats) diagnostics.RPCSnapshot {
 		Local: mapRPCTransportStats(stats.Local),
 		TCP:   mapRPCTransportStats(stats.TCP),
 		NATS:  mapRPCTransportStats(stats.NATS),
+	}
+}
+
+func mapRPCSummary(stats rpc.Stats) diagnostics.RPCSummary {
+	return diagnostics.RPCSummary{
+		Local: mapRPCTransportSummary(stats.Local),
+		TCP:   mapRPCTransportSummary(stats.TCP),
+		NATS:  mapRPCTransportSummary(stats.NATS),
+	}
+}
+
+func mapRPCTransportSummary(stats rpc.TransportStats) diagnostics.RPCTransportSummary {
+	return diagnostics.RPCTransportSummary{
+		Pending:              stats.Pending,
+		PendingHighWater:     stats.PendingHighWater,
+		OutboundAccepted:     stats.OutboundAccepted,
+		OutboundCompleted:    stats.OutboundCompleted,
+		OutboundFailed:       stats.OutboundFailed,
+		OutboundTimeout:      stats.OutboundTimeout,
+		OutboundRejected:     stats.OutboundRejected,
+		InboundAccepted:      stats.InboundAccepted,
+		InboundCompleted:     stats.InboundCompleted,
+		InboundFailed:        stats.InboundFailed,
+		InboundTimeout:       stats.InboundTimeout,
+		InboundRejected:      stats.InboundRejected,
+		PayloadSentBytes:     stats.PayloadSentBytes,
+		PayloadReceivedBytes: stats.PayloadReceivedBytes,
 	}
 }
 

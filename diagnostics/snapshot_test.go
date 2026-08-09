@@ -148,3 +148,22 @@ func TestDurationJSONRejectsInvalidInput(t *testing.T) {
 		t.Fatalf("nil Duration.UnmarshalJSON() error = nil")
 	}
 }
+
+// TestFullRPCRecoveryFieldsRemainCompatible 固定 Full v2 的重复恢复字段仍存在；Summary 会使用
+// 独立窄 DTO，而不能通过删除既有字段破坏 v3.0 消费方。
+func TestFullRPCRecoveryFieldsRemainCompatible(t *testing.T) {
+	encoded, err := json.Marshal(diagnostics.RPCTransportSnapshot{
+		Reconnects:          7,
+		ConsecutiveFailures: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document["reconnects"] != float64(7) || document["consecutive_failures"] != float64(3) {
+		t.Fatalf("Full RPC recovery JSON = %s", encoded)
+	}
+}

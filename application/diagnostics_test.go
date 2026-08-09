@@ -3,12 +3,16 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"runtime"
+	runtimemetrics "runtime/metrics"
 	"testing"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/command"
 	"github.com/duanhf2012/origin/v3/diagnostics"
 	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -100,6 +104,13 @@ nodes:
 	if !running.BufferPool.Enabled {
 		t.Fatalf("buffer pool diagnostics = %+v", running.BufferPool)
 	}
+	summary := app.DiagnosticsSummary()
+	if summary.SchemaVersion != 1 || summary.Application.Name != "diagnostics-test" ||
+		summary.Application.State != "running" || len(summary.Nodes) != 1 ||
+		summary.Nodes[0].NodeID != "gateway-1" || summary.Nodes[0].Services.Total != 1 ||
+		!summary.BufferPool.Enabled {
+		t.Fatalf("running diagnostics Summary = %+v", summary)
+	}
 
 	cancel()
 	select {
@@ -124,6 +135,196 @@ func TestNilApplicationDiagnostics(t *testing.T) {
 	if snapshot.SchemaVersion != 2 || snapshot.Application.State != "failed" ||
 		snapshot.Nodes == nil {
 		t.Fatalf("nil diagnostics = %+v", snapshot)
+	}
+	summary := app.DiagnosticsSummary()
+	if summary.SchemaVersion != 1 || summary.Application.State != "failed" ||
+		summary.Application.AdminServer.State != "stopped" ||
+		summary.Application.Pprof.State != "stopped" || summary.Nodes == nil {
+		t.Fatalf("nil diagnostics Summary = %+v", summary)
+	}
+}
+
+// TestDiagnosticsRuntimeFieldsUseRealRuntime 固定 Full 的内存上限已赋值，并验证 Summary 的
+// Go 管理内存严格使用 Sys-HeapReleased 且防止理论下溢。
+func TestDiagnosticsRuntimeFieldsUseRealRuntime(t *testing.T) {
+	app := New()
+	full := app.Diagnostics()
+	if full.Runtime.MemoryLimitBytes <= 0 {
+		t.Fatalf("Full MemoryLimitBytes = %d, want > 0", full.Runtime.MemoryLimitBytes)
+	}
+	summary := app.DiagnosticsSummary()
+	if summary.Runtime.MemoryLimitBytes <= 0 || summary.Runtime.Goroutines <= 0 ||
+		summary.Runtime.GOMAXPROCS <= 0 {
+		t.Fatalf("RuntimeSummary = %+v", summary.Runtime)
+	}
+
+	memory := runtime.MemStats{Sys: 100, HeapReleased: 40}
+	got := runtimeSummaryFrom(memory, runtimeMetricValues{})
+	if got.GoMemoryUsedBytes != 60 {
+		t.Fatalf("GoMemoryUsedBytes = %d, want 60", got.GoMemoryUsedBytes)
+	}
+	memory.HeapReleased = 101
+	if got := runtimeSummaryFrom(memory, runtimeMetricValues{}).GoMemoryUsedBytes; got != 0 {
+		t.Fatalf("underflow GoMemoryUsedBytes = %d, want 0", got)
+	}
+}
+
+// TestRuntimeMetricKindsAndMissingAreZero 防止 runtime/metrics 名称缺失或 KindBad 时调用错误
+// Value getter panic；每个缺失指标必须保持稳定零值。
+func TestRuntimeMetricKindsAndMissingAreZero(t *testing.T) {
+	if got := runtimeMetricValuesFrom(nil); got != (runtimeMetricValues{}) {
+		t.Fatalf("missing metrics = %+v", got)
+	}
+	samples := []runtimemetrics.Sample{
+		{Name: runtimeRunnableGoroutinesMetric},
+		{Name: runtimeGCCPUSecondsMetric},
+		{Name: runtimeMutexWaitSecondsMetric},
+		{Name: runtimeMemoryLimitMetric},
+	}
+	if got := runtimeMetricValuesFrom(samples); got != (runtimeMetricValues{}) {
+		t.Fatalf("KindBad metrics = %+v", got)
+	}
+}
+
+// TestRuntimeMetricNamesHaveGo126Kinds 直接向当前 Go Runtime 请求 brief 固定的四个名称，
+// 防止拼写或单位漂移退化成静默 KindBad。
+func TestRuntimeMetricNamesHaveGo126Kinds(t *testing.T) {
+	samples := []runtimemetrics.Sample{
+		{Name: runtimeRunnableGoroutinesMetric},
+		{Name: runtimeGCCPUSecondsMetric},
+		{Name: runtimeMutexWaitSecondsMetric},
+		{Name: runtimeMemoryLimitMetric},
+	}
+	runtimemetrics.Read(samples)
+	wantKinds := []runtimemetrics.ValueKind{
+		runtimemetrics.KindUint64,
+		runtimemetrics.KindFloat64,
+		runtimemetrics.KindFloat64,
+		runtimemetrics.KindUint64,
+	}
+	for index := range samples {
+		if got := samples[index].Value.Kind(); got != wantKinds[index] {
+			t.Fatalf("metric %q Kind = %v, want %v", samples[index].Name, got, wantKinds[index])
+		}
+	}
+}
+
+type blockingDiagnosticsService struct {
+	service.Service
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (target *blockingDiagnosticsService) ExecutionStats() service.ExecutionStats {
+	close(target.entered)
+	<-target.release
+	return service.ExecutionStats{}
+}
+
+// TestDiagnosticsSummaryReleasesApplicationLockBeforeLeafCollection 使用阻塞叶子证明 Runtime、
+// Pool、Node 采集和后续 JSON 所需 DTO 构造都不持有 Application 锁。
+func TestDiagnosticsSummaryReleasesApplicationLockBeforeLeafCollection(t *testing.T) {
+	target := &blockingDiagnosticsService{entered: make(chan struct{}), release: make(chan struct{})}
+	current, err := node.New(
+		node.Config{ID: "lock-boundary", Services: []string{"worker"}},
+		[]node.ServiceBinding{{Name: "worker", Template: "blockingDiagnosticsService", Service: target}},
+		originlog.NewNop(),
+		node.Options{MaxTimersPerNode: 8, TimerLocation: time.UTC},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = current.Rollback(context.Background()) })
+	app := New()
+	app.mu.Lock()
+	app.nodes = []*node.Node{current}
+	app.mu.Unlock()
+	done := make(chan diagnostics.Summary, 1)
+	go func() {
+		done <- app.DiagnosticsSummary()
+	}()
+	select {
+	case <-target.entered:
+	case <-time.After(time.Second):
+		t.Fatal("DiagnosticsSummary did not reach Service leaf")
+	}
+	lockAcquired := make(chan struct{})
+	go func() {
+		app.mu.Lock()
+		app.mu.Unlock()
+		close(lockAcquired)
+	}()
+	select {
+	case <-lockAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("Application lock remained held during Node leaf collection")
+	}
+	time.Sleep(20 * time.Millisecond)
+	close(target.release)
+	select {
+	case summary := <-done:
+		if summary.CollectCost < diagnostics.Duration(20*time.Millisecond) {
+			t.Fatalf("CollectCost = %v, want to include blocked leaf collection", summary.CollectCost)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("DiagnosticsSummary did not finish")
+	}
+}
+
+// TestAdminDiagnosticsDetailRouting 固定默认 Summary、唯一 full、非法和重复 detail，以及
+// ServeMux 自动生成的 POST 405/Allow。所有成功响应必须是预编码 JSON。
+func TestAdminDiagnosticsDetailRouting(t *testing.T) {
+	app := New()
+	if err := app.freezeAdminRoutes(nil); err != nil {
+		t.Fatal(err)
+	}
+	baseURL := startAdminRouteTestServer(t, app)
+	tests := []struct {
+		name       string
+		method     string
+		query      string
+		wantStatus int
+		wantSchema float64
+		wantAllow  string
+	}{
+		{name: "summary", method: http.MethodGet, wantStatus: http.StatusOK, wantSchema: 1},
+		{name: "full", method: http.MethodGet, query: "?detail=full", wantStatus: http.StatusOK, wantSchema: 2},
+		{name: "invalid", method: http.MethodGet, query: "?detail=x", wantStatus: http.StatusBadRequest},
+		{name: "empty", method: http.MethodGet, query: "?detail=", wantStatus: http.StatusBadRequest},
+		{name: "repeated", method: http.MethodGet, query: "?detail=full&detail=full", wantStatus: http.StatusBadRequest},
+		{name: "post", method: http.MethodPost, wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodGet},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := http.NewRequest(test.method, baseURL+"/admin/v1/diagnostics"+test.query, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := readAdminRouteResponse(t, response)
+			if response.StatusCode != test.wantStatus || response.Header.Get("Allow") != test.wantAllow {
+				t.Fatalf("status=%d Allow=%q Body=%q", response.StatusCode, response.Header.Get("Allow"), body)
+			}
+			if test.wantSchema == 0 {
+				return
+			}
+			if response.Header.Get("Content-Type") != "application/json" {
+				t.Fatalf("Content-Type = %q", response.Header.Get("Content-Type"))
+			}
+			var document map[string]any
+			if err := json.Unmarshal([]byte(body), &document); err != nil {
+				t.Fatalf("JSON body = %q: %v", body, err)
+			}
+			if document["schema_version"] != test.wantSchema {
+				t.Fatalf("schema_version = %v, want %v", document["schema_version"], test.wantSchema)
+			}
+			if nodes, ok := document["nodes"].([]any); !ok || len(nodes) != 0 {
+				t.Fatalf("nodes = %#v, want []", document["nodes"])
+			}
+		})
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/duanhf2012/origin/v3/admin"
+	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/service"
 )
@@ -35,6 +36,7 @@ func (app *Application) newAdminServeMux(
 ) *http.ServeMux {
 	mux := http.NewServeMux()
 	controls := buildAdminControlTargets(nodes)
+	app.registerAdminDiagnosticsRoute(mux)
 	app.registerAdminControlRoutes(mux, controls)
 
 	// GET/POST 使用两个显式 Method Pattern。相同 EndpointName 可以分别绑定查询和修改，
@@ -56,6 +58,38 @@ func (app *Application) newAdminServeMux(
 		app.serviceAdminEndpointHandler(routes, http.MethodPost),
 	)
 	return mux
+}
+
+// registerAdminDiagnosticsRoute 安装唯一只读诊断路由；统一 Endpoint 边界为其他方法生成
+// 405 和精确 Allow: GET，采样只在成功进入 Endpoint Handler 后发生。
+func (app *Application) registerAdminDiagnosticsRoute(mux *http.ServeMux) {
+	endpoint := admin.Get("diagnostics", func(
+		_ context.Context,
+		request admin.Request,
+	) (admin.Response, error) {
+		query := request.Query()
+		detail, exists := query["detail"]
+		switch {
+		case !exists:
+			return admin.JSON(http.StatusOK, app.DiagnosticsSummary())
+		case len(detail) == 1 && detail[0] == "full":
+			return admin.JSON(http.StatusOK, app.Diagnostics())
+		default:
+			return admin.Response{}, errs.ErrInvalidArgument
+		}
+	})
+	mux.HandleFunc(
+		"/admin/v1/diagnostics",
+		func(w http.ResponseWriter, request *http.Request) {
+			app.serveAdminEndpoint(
+				w,
+				request,
+				admin.Operation{},
+				endpoint,
+				endpoint.Invoke,
+			)
+		},
+	)
 }
 
 // buildAdminControlTargets 在 Listener 启动前一次索引真实 Node/Service；请求期不再扫描。

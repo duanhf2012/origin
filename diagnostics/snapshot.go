@@ -177,8 +177,10 @@ type RPCTransportSnapshot struct {
 	InboundRejected      uint64 `json:"inbound_rejected"`
 	PayloadSentBytes     uint64 `json:"payload_sent_bytes"`
 	PayloadReceivedBytes uint64 `json:"payload_received_bytes"`
-	Reconnects           uint64 `json:"reconnects"`
-	ConsecutiveFailures  uint64 `json:"consecutive_failures"`
+	// Deprecated: Summary 只在 Node Transport 保存恢复次数；Full v2 为兼容既有 JSON 保留本字段。
+	Reconnects uint64 `json:"reconnects"`
+	// Deprecated: Summary 只在 Node Transport 保存连续失败；Full v2 为兼容既有 JSON 保留本字段。
+	ConsecutiveFailures uint64 `json:"consecutive_failures"`
 }
 
 // ServiceSnapshot 保存一个本地 Service 的生命周期和现有三个叶子统计。
