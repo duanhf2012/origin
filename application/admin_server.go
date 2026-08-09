@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -164,12 +165,40 @@ func (app *Application) adminHTTPBoundary(next http.Handler) http.Handler {
 			app.auditAdminRequest(state, response)
 			response.commit(target)
 		}()
+		if !canonicalAdminRequestPath(request) {
+			// net/http ServeMux 会在路由前清理 slash 和 dot segment，并可能把保留
+			// Method/Body 的请求重定向到合法写 Endpoint。Admin 控制面不接受这种
+			// 等价改写：在唯一 admission/audit 边界内 fail closed，且不把原始路径
+			// 或 Query 写入响应和审计。
+			response.resetError(http.StatusNotFound)
+			return
+		}
 
 		contextRequest := request.WithContext(
 			context.WithValue(request.Context(), adminHTTPBoundaryKey{}, state),
 		)
 		next.ServeHTTP(response, contextRequest)
 	})
+}
+
+// canonicalAdminRequestPath 只接受绝对、已是 path.Clean 终态且无需任何转义表达的
+// Admin URL。NodeID 为配置层限定的 ASCII kebab-case，EndpointName 也仅允许 ASCII，
+// 因而拒绝 RawPath、encoded unreserved 字符和 Unicode escape 不会丢失受支持身份。
+func canonicalAdminRequestPath(request *http.Request) bool {
+	if request == nil || request.URL == nil {
+		return false
+	}
+	value := request.URL.Path
+	if value == "" || value[0] != '/' {
+		return false
+	}
+	if request.URL.RawPath != "" || request.URL.EscapedPath() != value {
+		return false
+	}
+	if value != "/" && strings.HasSuffix(value, "/") {
+		return false
+	}
+	return path.Clean(value) == value
 }
 
 func safeAdminHTTPMethod(method string) string {
@@ -395,7 +424,7 @@ func adminInvokeErrorStatus(err error) int {
 	}
 	status := http.StatusInternalServerError
 	switch errs.CodeOf(err) {
-	case errs.CodeInvalidArgument:
+	case errs.CodeInvalidArgument, errs.CodeInvalidConfig:
 		status = http.StatusBadRequest
 	case errs.CodeConfigNotFound:
 		status = http.StatusNotFound

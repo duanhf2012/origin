@@ -193,6 +193,166 @@ func TestAdminApplicationEndpointRoutes(t *testing.T) {
 	}
 }
 
+// TestAdminCanonicalPathAdmissionRejectsMuxRedirects 防止 ServeMux 在进入冻结路由前清理
+// 非规范 URL 并重定向到合法 POST Endpoint。所有探针都走真实 Listener，Client 明确禁止
+// 自动跟随 redirect，因而能同时固定 404、无 Location、Handler 未执行和单次安全审计。
+func TestAdminCanonicalPathAdmissionRejectsMuxRedirects(t *testing.T) {
+	handler := &adminAuditHandler{}
+	logRuntime, err := originlog.NewRuntime(originlog.Config{Mode: originlog.SyncMode}, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = logRuntime.Close(context.Background()) })
+
+	app := New()
+	app.logger = logRuntime.Logger()
+	var invoked atomic.Int32
+	if err := app.RegisterAdminEndpoint(admin.Post("reload", func(
+		context.Context,
+		admin.Request,
+	) (admin.Response, error) {
+		invoked.Add(1)
+		return admin.Empty(http.StatusNoContent), nil
+	})); err != nil {
+		t.Fatalf("Register reload endpoint error = %v", err)
+	}
+	if err := app.freezeAdminRoutes(nil); err != nil {
+		t.Fatalf("freezeAdminRoutes() error = %v", err)
+	}
+	baseURL := startAdminRouteTestServer(t, app)
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	probes := []struct {
+		name string
+		path string
+	}{
+		{name: "trailing slash", path: "/admin/v1/application/endpoints/reload/"},
+		{name: "duplicate slash", path: "/admin//v1/application/endpoints/reload"},
+		{name: "dot segment", path: "/admin/v1/application/endpoints/./reload"},
+		{name: "dot suffix", path: "/admin/v1/application/endpoints/reload/./"},
+		{name: "parent segment", path: "/admin/v1/application/endpoints/ignored/../reload"},
+		{name: "encoded dot", path: "/admin/v1/application/endpoints/ignored/%2e%2e/reload"},
+		{name: "encoded slash", path: "/admin/v1/application/endpoints%2Freload"},
+		{name: "encoded unreserved", path: "/admin/v1/application/endpoints/%72eload"},
+		{name: "lowercase escape", path: "/admin/v1/application/endpoints/re%6coad"},
+		{name: "double encoded dot", path: "/admin/v1/application/endpoints/%252e"},
+		{name: "extra segment", path: "/admin/v1/application/endpoints/reload/extra"},
+	}
+	for _, probe := range probes {
+		t.Run(probe.name, func(t *testing.T) {
+			before := len(handler.snapshot())
+			request, requestErr := http.NewRequest(
+				http.MethodPost,
+				baseURL+probe.path+"?token=noncanonical-query-secret",
+				strings.NewReader(`{"secret":"noncanonical-body-secret"}`),
+			)
+			if requestErr != nil {
+				t.Fatal(requestErr)
+			}
+			request.Header.Set("Content-Type", "application/json")
+			response, requestErr := client.Do(request)
+			if requestErr != nil {
+				t.Fatalf("POST %s error = %v", probe.path, requestErr)
+			}
+			body := readAdminRouteResponse(t, response)
+			if response.StatusCode != http.StatusNotFound ||
+				body != http.StatusText(http.StatusNotFound)+"\n" {
+				t.Fatalf("POST %s status=%d Body=%q, want stable 404", probe.path, response.StatusCode, body)
+			}
+			if location := response.Header.Get("Location"); location != "" {
+				t.Fatalf("POST %s Location = %q, want empty", probe.path, location)
+			}
+			if got := invoked.Load(); got != 0 {
+				t.Fatalf("POST %s invoked Handler %d times", probe.path, got)
+			}
+			records := handler.snapshot()
+			if len(records) != before+1 {
+				t.Fatalf("POST %s audit records delta = %d, want 1", probe.path, len(records)-before)
+			}
+			last := records[len(records)-1]
+			if last.status != http.StatusNotFound || last.endpoint != "unknown" {
+				t.Fatalf("POST %s audit = %+v, want unknown/404", probe.path, last)
+			}
+			for _, secret := range []string{
+				"noncanonical-query-secret",
+				"noncanonical-body-secret",
+				probe.path,
+			} {
+				if strings.Contains(last.text, secret) {
+					t.Fatalf("POST %s audit leaked %q: %q", probe.path, secret, last.text)
+				}
+			}
+		})
+	}
+
+	// 正常 ASCII canonical 路径不应被 admission 误拒绝。
+	canonical, err := http.NewRequest(
+		http.MethodPost,
+		baseURL+"/admin/v1/application/endpoints/reload",
+		strings.NewReader(`{}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(canonical)
+	if err != nil {
+		t.Fatalf("canonical POST reload error = %v", err)
+	}
+	if body := readAdminRouteResponse(t, response); response.StatusCode != http.StatusNoContent || body != "" {
+		t.Fatalf("canonical POST reload status=%d Body=%q", response.StatusCode, body)
+	}
+	if got := invoked.Load(); got != 1 {
+		t.Fatalf("canonical POST reload invoked Handler %d times, want 1", got)
+	}
+
+	// 非规范路径也必须先经过同一个 64 请求额度。预占全部额度后，它只能得到单次安全 429，
+	// 不能绕过 admission 进入 canonical 检查或业务 Handler。
+	for range adminHTTPMaxActiveRequests {
+		if !app.adminHTTP.tryAcquireRequestSlot(adminHTTPMaxActiveRequests) {
+			t.Fatal("pre-acquire Admin request slot failed")
+		}
+	}
+	defer func() {
+		for range adminHTTPMaxActiveRequests {
+			app.adminHTTP.releaseRequestSlot()
+		}
+	}()
+	before := len(handler.snapshot())
+	overloaded, err := http.NewRequest(
+		http.MethodPost,
+		baseURL+"/admin/v1/application/endpoints/%72eload?token=quota-query-secret",
+		strings.NewReader(`{}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overloaded.Header.Set("Content-Type", "application/json")
+	response, err = client.Do(overloaded)
+	if err != nil {
+		t.Fatalf("overloaded noncanonical POST error = %v", err)
+	}
+	if body := readAdminRouteResponse(t, response); response.StatusCode != http.StatusTooManyRequests ||
+		body != http.StatusText(http.StatusTooManyRequests)+"\n" {
+		t.Fatalf("overloaded noncanonical POST status=%d Body=%q", response.StatusCode, body)
+	}
+	if location := response.Header.Get("Location"); location != "" {
+		t.Fatalf("overloaded noncanonical Location = %q, want empty", location)
+	}
+	if got := invoked.Load(); got != 1 {
+		t.Fatalf("overloaded noncanonical invoked Handler %d times, want 1", got)
+	}
+	records := handler.snapshot()
+	if len(records) != before+1 || records[len(records)-1].status != http.StatusTooManyRequests ||
+		records[len(records)-1].endpoint != "unknown" {
+		t.Fatalf("overloaded noncanonical audit tail = %+v", records[before:])
+	}
+}
+
 // TestAdminApplicationEndpointFrozenInstancesStayIsolated 防止两个 Application 的同名冻结
 // Endpoint 在 Server 注册时共享闭包或误查另一个实例的 Route Table。
 func TestAdminApplicationEndpointFrozenInstancesStayIsolated(t *testing.T) {
@@ -366,6 +526,7 @@ func TestAdminBuiltinErrorMapping(t *testing.T) {
 		want int
 	}{
 		{name: "invalid", err: errs.ErrInvalidArgument, want: http.StatusBadRequest},
+		{name: "invalid config", err: errs.ErrInvalidConfig, want: http.StatusBadRequest},
 		{name: "unauthenticated", err: admin.ErrUnauthenticated, want: http.StatusUnauthorized},
 		{name: "forbidden", err: admin.ErrForbidden, want: http.StatusForbidden},
 		{name: "not found", err: errs.ErrConfigNotFound, want: http.StatusNotFound},
@@ -387,6 +548,31 @@ func TestAdminBuiltinErrorMapping(t *testing.T) {
 				t.Fatalf("adminInvokeErrorStatus() = %d, want %d", got, test.want)
 			}
 		})
+	}
+}
+
+// TestAdminBuiltinInvalidConfigResponse 证明配置错误只按错误码选择 400，私有配置内容不进入 Body。
+func TestAdminBuiltinInvalidConfigResponse(t *testing.T) {
+	app := New()
+	if err := app.RegisterAdminEndpoint(admin.Post("validate", func(
+		context.Context,
+		admin.Request,
+	) (admin.Response, error) {
+		return admin.Response{}, errs.NewMessage(errs.CodeInvalidConfig, "private-config-secret")
+	})); err != nil {
+		t.Fatalf("Register validate endpoint error = %v", err)
+	}
+	if err := app.freezeAdminRoutes(nil); err != nil {
+		t.Fatalf("freezeAdminRoutes() error = %v", err)
+	}
+	baseURL := startAdminRouteTestServer(t, app)
+	status, body := postAdminControl(
+		t,
+		baseURL+"/admin/v1/application/endpoints/validate",
+	)
+	if status != http.StatusBadRequest || body != http.StatusText(http.StatusBadRequest)+"\n" ||
+		strings.Contains(body, "private-config-secret") {
+		t.Fatalf("invalid config response status=%d Body=%q", status, body)
 	}
 }
 
