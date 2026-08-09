@@ -11,6 +11,7 @@ Admin 的内置只读路由，也可在进程内直接采样；pprof 使用独�
 4. [Admin Diagnostics](./04-admin-diagnostics/README.md)：默认 Summary、按需 Full 和真实请求成本。
 5. [动态 pprof](./05-pprof-toggle/README.md)：`--pprof` 初态与关闭—重开—查询—关闭。
 6. [Metrics Adapter](./06-metrics-adapter/README.md)：一次 Summary 采样供多个监控消费者复用。
+7. [运行期启停 Admin](./07-admin-toggle/README.md)：不传 `--admin`，由代码打开、查询、关闭和重开 Listener。
 
 端口均只绑定回环地址，避免示例默认暴露管理数据：
 
@@ -22,6 +23,7 @@ Admin 的内置只读路由，也可在进程内直接采样；pprof 使用独�
 | 04 | `127.0.0.1:6063` | 未启用 |
 | 05 | `127.0.0.1:6064` | `127.0.0.1:6060` |
 | 06 | 未启用 | 未启用 |
+| 07 | 初始关闭；代码短时启用 `127.0.0.1:6065` | 未启用 |
 
 同一时间运行多组时使用了不同 Admin 端口。生产如果需要非回环绑定，必须先设置 Admin Guard，
 并配套 TLS、网络访问控制、审计和限流；pprof 仍建议只在受控排障窗口短时开启。
