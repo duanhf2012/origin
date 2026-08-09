@@ -434,7 +434,25 @@ func (app *Application) run(
 
 	app.state.Store(uint32(StateRunning))
 	app.logger.Info("application running")
-	<-lifecycleCtx.Done()
+	controls := request.Controls
+	for lifecycleCtx.Err() == nil {
+		select {
+		case <-lifecycleCtx.Done():
+		case control, open := <-controls:
+			if !open {
+				controls = nil
+				continue
+			}
+			if control == nil {
+				continue
+			}
+			if lifecycleCtx.Err() != nil {
+				control.Complete(errs.ErrServiceStopping)
+				continue
+			}
+			control.Complete(app.handleControlRequest(lifecycleCtx, control))
+		}
+	}
 	stopErr := app.stopStartedNodes(ensureCleanupContext())
 	serviceFailures := app.serviceFailureResult()
 	finalResult := stopErr
