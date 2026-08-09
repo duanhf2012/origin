@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
 )
@@ -45,7 +44,7 @@ func TestHelpCoversBuiltInCustomAndErrors(t *testing.T) {
 	}
 
 	// 所有内置分支和自定义命令帮助都必须返回成功且写出非空内容。
-	for _, name := range []string{"start", "stop", "help", "version", "doctor"} {
+	for _, name := range []string{"start", "retire", "resume", "stop", "help", "version", "doctor"} {
 		stdout.Reset()
 		code, err := runner.Run(context.Background(), []string{"help", name})
 		if err != nil || code != ExitSuccess {
@@ -70,6 +69,8 @@ func TestHelpCoversBuiltInCustomAndErrors(t *testing.T) {
 	// 内置命令自己的 --help 同样不得初始化配置目录或 PID 资源。
 	for _, args := range [][]string{
 		{"start", "--help"},
+		{"retire", "--help"},
+		{"resume", "--help"},
 		{"stop", "--help"},
 	} {
 		code, err := runner.Run(context.Background(), args)
@@ -404,7 +405,6 @@ func TestWaitForPIDUnlockHonorsParentCancellation(t *testing.T) {
 	timedOut, waitErr := waitForPIDUnlock(
 		ctx,
 		pidFilePath(pidDir, "cancel-wait"),
-		time.Second,
 	)
 	if timedOut || !errs.IsCode(waitErr, errs.CodeCanceled) {
 		t.Fatalf("waitForPIDUnlock() = (%v, %v), want canceled", timedOut, waitErr)

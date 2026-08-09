@@ -47,6 +47,8 @@ func (runner *Runner) writeGeneralHelp() error {
 	}
 	builder.WriteString("Commands:\n")
 	fmt.Fprintf(&builder, "  %-14s %s\n", "start", "启动 Application")
+	fmt.Fprintf(&builder, "  %-14s %s\n", "retire", "退休 Application 的全部 Node")
+	fmt.Fprintf(&builder, "  %-14s %s\n", "resume", "恢复 Application 的全部 Node")
 	fmt.Fprintf(&builder, "  %-14s %s\n", "stop", "请求 Application 优雅停止")
 	fmt.Fprintf(&builder, "  %-14s %s\n", "help", "显示命令帮助")
 	fmt.Fprintf(&builder, "  %-14s %s\n", "version", "显示构建版本")
@@ -81,6 +83,12 @@ func (runner *Runner) builtInHelp(name string) (string, bool) {
 		return fmt.Sprintf(
 			"Usage:\n  %s stop --app-name <name> [--pid-dir ./run] [--timeout 30s]\n",
 			runner.programName,
+		), true
+	case "retire", "resume":
+		return fmt.Sprintf(
+			"Usage:\n  %s %s --app-name <name> [--pid-dir ./run] [--timeout 30s]\n",
+			runner.programName,
+			name,
 		), true
 	case "help":
 		return fmt.Sprintf("Usage:\n  %s help [command]\n", runner.programName), true

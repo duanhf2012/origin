@@ -131,6 +131,10 @@ func (runner *Runner) Run(
 		return runner.runVersion(commandArgs)
 	case "start":
 		return runner.runStart(ctx, commandArgs)
+	case "retire":
+		return runner.runRetire(ctx, commandArgs)
+	case "resume":
+		return runner.runResume(ctx, commandArgs)
 	case "stop":
 		return runner.runStop(ctx, commandArgs)
 	default:
@@ -169,7 +173,7 @@ func (runner *Runner) runCustom(
 // isBuiltInCommand 报告名称是否属于不能被自定义命令覆盖的内置命令。
 func isBuiltInCommand(name string) bool {
 	switch name {
-	case "start", "stop", "help", "version":
+	case "start", "retire", "resume", "stop", "help", "version":
 		return true
 	default:
 		return false

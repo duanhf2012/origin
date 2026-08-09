@@ -21,8 +21,8 @@ const (
 	ExitUsage
 	// ExitProcessControl 表示重复启动或本地进程控制失败。
 	ExitProcessControl
-	// ExitStopTimeout 表示 stop 已发出请求，但等待目标释放运行权超时。
-	ExitStopTimeout
+	// ExitControlTimeout 表示在线控制命令超过调用方指定的总体等待时间。
+	ExitControlTimeout
 )
 
 // StartRequest 是 command 包校验并交给 Start Handler 的启动参数快照。

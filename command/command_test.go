@@ -87,6 +87,21 @@ func TestHelpAndVersion(t *testing.T) {
 	if !strings.Contains(help, "game-server <command>") {
 		t.Fatalf("help does not contain program usage:\n%s", help)
 	}
+	for _, commandName := range []string{"retire", "resume"} {
+		if !strings.Contains(help, commandName) {
+			t.Fatalf("help does not contain %q:\n%s", commandName, help)
+		}
+		stdout.Reset()
+		code, err = runner.Run(context.Background(), []string{"help", commandName})
+		if err != nil || code != ExitSuccess {
+			t.Fatalf("help %s = (%d, %v), want success", commandName, code, err)
+		}
+		for _, option := range []string{"--app-name", "--pid-dir", "--timeout 30s"} {
+			if !strings.Contains(stdout.String(), option) {
+				t.Fatalf("help %s missing %q:\n%s", commandName, option, stdout.String())
+			}
+		}
+	}
 
 	// 清空输出后验证未注入构建字段仍保持固定 version 外观。
 	stdout.Reset()
@@ -104,6 +119,100 @@ func TestHelpAndVersion(t *testing.T) {
 		if !strings.Contains(version, field) {
 			t.Fatalf("version output missing %q:\n%s", field, version)
 		}
+	}
+}
+
+func TestRetireResumeArguments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "retire missing app", args: []string{"retire"}},
+		{name: "resume invalid app", args: []string{"resume", "--app-name", "Game"}},
+		{name: "retire zero timeout", args: []string{"retire", "--app-name", "game", "--timeout", "0s"}},
+		{name: "resume invalid timeout", args: []string{"resume", "--app-name", "game", "--timeout", "soon"}},
+		{name: "retire positional", args: []string{"retire", "--app-name", "game", "extra"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			runner, _, _ := newTestRunner(t, noOpStart)
+			code, err := runner.Run(t.Context(), test.args)
+			if code != ExitUsage || !errs.IsCode(err, errs.CodeInvalidArgument) {
+				t.Fatalf("Run(%v) = (%d, %v), want usage error", test.args, code, err)
+			}
+		})
+	}
+}
+
+func TestRetireResumeCommandsRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, "config")
+	pidDir := filepath.Join(root, "run")
+	if err := os.Mkdir(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	actions := make(chan ControlAction, 2)
+	target, _, _ := newTestRunner(t, func(ctx context.Context, request StartRequest) error {
+		close(started)
+		for {
+			select {
+			case control := <-request.Controls:
+				actions <- control.Action()
+				control.Complete(nil)
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	})
+	targetCtx, cancelTarget := context.WithCancel(t.Context())
+	targetResult := make(chan error, 1)
+	go func() {
+		_, err := target.Run(targetCtx, []string{
+			"start", "--app-name", "game", "--config", configDir, "--pid-dir", pidDir,
+		})
+		targetResult <- err
+	}()
+	<-started
+
+	client, _, _ := newTestRunner(t, noOpStart)
+	for _, test := range []struct {
+		name   string
+		action ControlAction
+	}{
+		{name: "retire", action: ControlActionRetire},
+		{name: "resume", action: ControlActionResume},
+	} {
+		code, err := client.Run(t.Context(), []string{
+			test.name, "--app-name", "game", "--pid-dir", pidDir,
+		})
+		if err != nil || code != ExitSuccess {
+			t.Fatalf("%s = (%d, %v), want success", test.name, code, err)
+		}
+		if action := <-actions; action != test.action {
+			t.Fatalf("%s action = %v, want %v", test.name, action, test.action)
+		}
+	}
+
+	cancelTarget()
+	if err := receiveControlResult(t, targetResult); err != nil {
+		t.Fatalf("target error = %v", err)
+	}
+}
+
+func TestRetireNotRunningIsProcessControlError(t *testing.T) {
+	t.Parallel()
+
+	runner, _, _ := newTestRunner(t, noOpStart)
+	code, err := runner.Run(t.Context(), []string{
+		"retire", "--app-name", "game", "--pid-dir", filepath.Join(t.TempDir(), "missing"),
+	})
+	if code != ExitProcessControl || !errs.IsCode(err, errs.CodeProcessControlFailed) {
+		t.Fatalf("retire not running = (%d, %v), want process control error", code, err)
 	}
 }
 
@@ -558,7 +667,7 @@ func TestStopTimeoutDoesNotTakeOwnership(t *testing.T) {
 		"--pid-dir", pidDir,
 		"--timeout", "75ms",
 	})
-	if code != ExitStopTimeout || !errs.IsCode(err, errs.CodeDeadlineExceeded) {
+	if code != ExitControlTimeout || !errs.IsCode(err, errs.CodeDeadlineExceeded) {
 		t.Fatalf("stop timeout = (%d, %v), want timeout", code, err)
 	}
 	locked, inspectErr := isPIDLocked(filepath.Join(pidDir, "slow-stop.pid"))
