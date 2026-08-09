@@ -38,3 +38,4 @@
 - [日志易用性、输出格式与运行时控制验收报告](./reports/日志易用性、输出格式与运行时控制验收报告.md)
 - [同步本地事件 Await 语义变更摘要](./changes/同步本地事件Await语义变更摘要.md)
 - [Admin 管理 HTTP、Diagnostics 与 pprof 变更摘要](./changes/Admin管理HTTP、Diagnostics与pprof变更摘要.md)
+- [Admin 管理 HTTP、Diagnostics 与 pprof 验收报告](./reports/Admin管理HTTP、Diagnostics与pprof验收报告.md)

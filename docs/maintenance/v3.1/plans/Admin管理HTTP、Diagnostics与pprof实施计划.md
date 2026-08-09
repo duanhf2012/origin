@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> - 状态：已确认，待实施
+> - 状态：已完成，验收通过（2026-08-09）
 > - 目标版本：v3.1.0
 > - 兼容性：删除 v3.0 的 `--diagnostics` 与独立 Diagnostics HTTP API，保留进程内快照 API并迁移到 `--admin` 内置路由
 > - 基线：v3.0
@@ -1022,7 +1022,7 @@ git commit -m "docs: 重写第10章Admin与诊断教程"
 - Consumes: Tasks 1–9 的全部实现、测试、examples 和文档。
 - Produces: 可复验门禁记录、覆盖率/Benchmark 结论、已知风险和最终完成提交。
 
-- [ ] **Step 1: 运行格式、静态检查和全仓单元测试**
+- [x] **Step 1: 运行格式、静态检查和全仓单元测试**
 
 Run: `gofmt -w admin application node service command diagnostics examples/10-admin-diagnostics-and-pprof`
 Expected: 无未格式化文件。
@@ -1033,12 +1033,12 @@ Expected: PASS。
 Run: `go test ./... -count=1`
 Expected: PASS。
 
-- [ ] **Step 2: 运行相关包 Race**
+- [x] **Step 2: 运行相关包 Race**
 
 Run: `go test -race ./admin ./service ./node ./application ./command ./diagnostics -count=1`
 Expected: PASS，无 data race。
 
-- [ ] **Step 3: 生成逐函数覆盖率并检查低覆盖路径**
+- [x] **Step 3: 生成逐函数覆盖率并检查低覆盖路径**
 
 Run: `go test ./admin ./application ./node ./diagnostics -coverprofile=admin-diagnostics-cover.out -count=1`
 
@@ -1047,17 +1047,17 @@ Run: `go tool cover -func=admin-diagnostics-cover.out`
 检查所有 Admin 注册、Guard、方法/大小/并发/取消/错误映射、Service 调度、Summary 聚合函数；
 任何可稳定触发但未覆盖的分支必须补专门断言测试。完成后删除临时 coverage 文件，不提交。
 
-- [ ] **Step 4: 运行重复并发和生命周期压力测试**
+- [x] **Step 4: 运行重复并发和生命周期压力测试**
 
 Run: `go test ./admin ./application -run 'Admin|InvokeService' -count=100 -timeout=10m`
 Expected: PASS，无偶发超时、端口泄漏或严格一次失败。
 
-- [ ] **Step 5: 运行 Diagnostics Benchmark**
+- [x] **Step 5: 运行 Diagnostics Benchmark**
 
 Run: `go test ./application -run '^$' -bench 'Diagnostics(Summary|Full)' -benchmem -count=5`
 Expected: 保存各规模中位数、allocs/op、B/op、response-bytes；Summary 64×64 不建立逐 Service DTO。
 
-- [ ] **Step 6: 跨平台构建**
+- [x] **Step 6: 跨平台构建**
 
 Run: `$env:GOOS='linux'; go build ./...`
 Expected: PASS。
@@ -1068,12 +1068,12 @@ Expected: PASS。
 Run: `Remove-Item Env:GOOS; go build ./...`
 Expected: Windows 当前平台 PASS。
 
-- [ ] **Step 7: 写验收报告并回填计划复选框**
+- [x] **Step 7: 写验收报告并回填计划复选框**
 
 报告记录精确命令、日期、Go/OS/CPU、测试结果、覆盖率、Benchmark 表格、非环回安全边界、无法
 稳定注入的 OS 故障和剩余风险。计划只把实际完成步骤改为 `[x]`，不伪造结果。
 
-- [ ] **Step 8: 最终差异和敏感信息检查**
+- [x] **Step 8: 最终差异和敏感信息检查**
 
 Run: `git diff --check`
 Expected: PASS。
@@ -1084,7 +1084,7 @@ Expected: 只出现安全说明、测试虚拟值或明确脱敏逻辑，不含�
 Run: `git status --short`
 Expected: 当前功能文件范围清楚；用户原有无关改动仍保持未暂存。
 
-- [ ] **Step 9: 提交验收材料**
+- [x] **Step 9: 提交验收材料**
 
 ```powershell
 git add docs/maintenance/v3.1/reports/Admin管理HTTP、Diagnostics与pprof验收报告.md docs/maintenance/v3.1/README.md docs/maintenance/v3.1/plans/Admin管理HTTP、Diagnostics与pprof实施计划.md
