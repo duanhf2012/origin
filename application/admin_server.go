@@ -17,6 +17,7 @@ import (
 	"github.com/duanhf2012/origin/v3/admin"
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/node"
 )
 
 const adminHTTPMaxHeaderBytes = 1 << 20
@@ -155,6 +156,10 @@ func (app *Application) adminHTTPBoundary(next http.Handler) http.Handler {
 				// Panic values and error chains are deliberately ignored: neither the
 				// response nor audit fields may expose authentication or business data.
 				response.resetError(http.StatusInternalServerError)
+			} else if response.status == http.StatusNotFound {
+				// ServeMux 自身的未匹配文本不是 StatusText。404 在唯一外层提交点统一收敛，
+				// 既不暴露动态路径，也不要求每个 wildcard Handler 重复兜底。
+				response.resetError(http.StatusNotFound)
 			}
 			app.auditAdminRequest(state, response)
 			response.commit(target)
@@ -241,13 +246,18 @@ func (app *Application) StartAdminServer(address string) error {
 		return errs.ErrAdminStateConflict
 	}
 	guardConfigured := app.adminGuard != nil
+	// adminRoutes 由冻结阶段一次发布后只读。每个 Server 固定持有启动时的当前实例快照，
+	// Restart 不重新收集 Provider，也不会误用其他 Application 的路由。
+	routes := app.adminRoutes
+	// Node/Service 生命周期目标同样只在 Server 启动冷路径建立索引，请求期不扫描实例。
+	nodes := append([]*node.Node(nil), app.nodes...)
 	app.mu.Unlock()
 	if !guardConfigured && !isLoopbackAddress(address) {
 		// 未配置 Guard 时在 Listen 前拒绝 wildcard 和非环回主机，避免短暂暴露写控制面。
 		return errs.ErrAdminUnavailable
 	}
 
-	privateMux := http.NewServeMux()
+	privateMux := app.newAdminServeMux(routes, nodes)
 	server := &http.Server{
 		Handler:           app.adminHTTPBoundary(privateMux),
 		ErrorLog:          stdlog.New(io.Discard, "", 0),
@@ -377,8 +387,27 @@ func (app *Application) serveAdminEndpoint(
 
 // adminInvokeErrorStatus 把请求取消、Endpoint Deadline 和其他内部失败映射为安全 HTTP 状态。
 func adminInvokeErrorStatus(err error) int {
+	if errors.Is(err, admin.ErrUnauthenticated) {
+		return http.StatusUnauthorized
+	}
+	if errors.Is(err, admin.ErrForbidden) {
+		return http.StatusForbidden
+	}
 	status := http.StatusInternalServerError
 	switch errs.CodeOf(err) {
+	case errs.CodeInvalidArgument:
+		status = http.StatusBadRequest
+	case errs.CodeConfigNotFound:
+		status = http.StatusNotFound
+	case errs.CodeAdminStateConflict, errs.CodeServiceRetired:
+		status = http.StatusConflict
+	case errs.CodeServiceQueueFull:
+		status = http.StatusTooManyRequests
+	case errs.CodeServiceNotReady,
+		errs.CodeServiceStopping,
+		errs.CodeServiceStopped,
+		errs.CodeServiceFailed:
+		status = http.StatusServiceUnavailable
 	case errs.CodeCanceled:
 		status = http.StatusRequestTimeout
 	case errs.CodeDeadlineExceeded:
