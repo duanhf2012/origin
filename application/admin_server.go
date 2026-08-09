@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	stdlog "log"
 	"mime"
 	"net"
 	"net/http"
@@ -21,6 +22,155 @@ import (
 const adminHTTPMaxHeaderBytes = 1 << 20
 
 const adminHTTPMaxActiveRequests = 64
+
+type adminHTTPBoundaryKey struct{}
+
+// adminHTTPAuditState is request-local metadata owned by the outer HTTP
+// boundary. Known endpoint handlers may only replace it with validated,
+// low-cardinality operation and authenticated principal data.
+type adminHTTPAuditState struct {
+	startedAt       time.Time
+	requestID       string
+	principal       admin.Principal
+	operation       admin.Operation
+	bodyLimitWriter http.ResponseWriter
+}
+
+type adminBufferedResponse struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func newAdminBufferedResponse() *adminBufferedResponse {
+	return &adminBufferedResponse{header: make(http.Header)}
+}
+
+func (response *adminBufferedResponse) Header() http.Header { return response.header }
+
+func (response *adminBufferedResponse) WriteHeader(status int) {
+	if response.status == 0 {
+		response.status = status
+	}
+}
+
+func (response *adminBufferedResponse) Write(body []byte) (int, error) {
+	if response.status == 0 {
+		response.status = http.StatusOK
+	}
+	return response.body.Write(body)
+}
+
+func (response *adminBufferedResponse) resetError(status int) {
+	response.header = http.Header{
+		"Content-Type":           {"text/plain; charset=utf-8"},
+		"X-Content-Type-Options": {"nosniff"},
+	}
+	response.status = status
+	response.body.Reset()
+	_, _ = response.body.WriteString(http.StatusText(status) + "\n")
+}
+
+func (response *adminBufferedResponse) commit(target http.ResponseWriter) {
+	for key, values := range response.header {
+		for _, value := range values {
+			target.Header().Add(key, value)
+		}
+	}
+	status := response.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	target.WriteHeader(status)
+	if response.body.Len() != 0 {
+		_, _ = target.Write(response.body.Bytes())
+	}
+}
+
+// adminHTTPBoundary owns admission, panic recovery, response commit, request ID,
+// and exactly one sanitized audit record for every private ServeMux outcome.
+func (app *Application) adminHTTPBoundary(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(target http.ResponseWriter, request *http.Request) {
+		state := &adminHTTPAuditState{
+			startedAt:       time.Now(),
+			requestID:       rand.Text(),
+			bodyLimitWriter: target,
+			operation: admin.Operation{
+				Method:   safeAdminHTTPMethod(request.Method),
+				Endpoint: "unknown",
+			},
+		}
+		response := newAdminBufferedResponse()
+		acquired := app.adminHTTP.tryAcquireRequestSlot(adminHTTPMaxActiveRequests)
+		if !acquired {
+			response.resetError(http.StatusTooManyRequests)
+			app.auditAdminRequest(state, response)
+			response.commit(target)
+			return
+		}
+		defer app.adminHTTP.releaseRequestSlot()
+		defer func() {
+			if recover() != nil {
+				// Panic values and error chains are deliberately ignored: neither the
+				// response nor audit fields may expose authentication or business data.
+				response.resetError(http.StatusInternalServerError)
+			}
+			app.auditAdminRequest(state, response)
+			response.commit(target)
+		}()
+
+		contextRequest := request.WithContext(
+			context.WithValue(request.Context(), adminHTTPBoundaryKey{}, state),
+		)
+		next.ServeHTTP(response, contextRequest)
+	})
+}
+
+func safeAdminHTTPMethod(method string) string {
+	if method == http.MethodGet || method == http.MethodPost {
+		return method
+	}
+	return ""
+}
+
+func (app *Application) auditAdminRequest(
+	state *adminHTTPAuditState,
+	response *adminBufferedResponse,
+) {
+	status := response.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	app.logger.Info(
+		"admin request audit",
+		originlog.String("request_id", state.requestID),
+		originlog.String("subject", state.principal.Subject),
+		originlog.Any("roles", state.principal.Roles),
+		originlog.Any("attributes", state.principal.Attributes),
+		originlog.String("method", state.operation.Method),
+		originlog.String("endpoint", state.operation.Endpoint),
+		originlog.String("target_node_id", state.operation.NodeID),
+		originlog.String("target_service_name", state.operation.ServiceName),
+		originlog.Int("status", status),
+		originlog.Duration("duration", time.Since(state.startedAt)),
+		originlog.Int("response_bytes", response.body.Len()),
+		originlog.String("outcome", adminAuditOutcome(status)),
+	)
+}
+
+func cloneAdminPrincipal(principal admin.Principal) admin.Principal {
+	clone := admin.Principal{
+		Subject: principal.Subject,
+		Roles:   append([]string(nil), principal.Roles...),
+	}
+	if principal.Attributes != nil {
+		clone.Attributes = make(map[string]string, len(principal.Attributes))
+		for key, value := range principal.Attributes {
+			clone.Attributes[key] = value
+		}
+	}
+	return clone
+}
 
 // adminHTTPRuntimeErrors 返回 Admin Server 独立的 Listener 生命周期错误族。
 func adminHTTPRuntimeErrors() httpRuntimeErrors {
@@ -40,7 +190,8 @@ func (app *Application) StartAdminServer(address string) error {
 		return errs.Wrap(errs.CodeInvalidArgument, err)
 	}
 
-	// 生命周期锁同时固定 Guard 与资源关闭状态，防止安全校验后绑定条件发生变化。
+	// Snapshot lifecycle and Guard state only. Listener/runtime operations may
+	// block and must never run while app.mu excludes request handlers such as Node.
 	app.mu.Lock()
 	state := app.State()
 	if !app.resourcesReady || app.resourcesClosing ||
@@ -48,22 +199,23 @@ func (app *Application) StartAdminServer(address string) error {
 		app.mu.Unlock()
 		return errs.ErrAdminStateConflict
 	}
-	if app.adminGuard == nil && !isLoopbackAddress(address) {
+	guardConfigured := app.adminGuard != nil
+	app.mu.Unlock()
+	if !guardConfigured && !isLoopbackAddress(address) {
 		// 未配置 Guard 时在 Listen 前拒绝 wildcard 和非环回主机，避免短暂暴露写控制面。
-		app.mu.Unlock()
 		return errs.ErrAdminUnavailable
 	}
 
+	privateMux := http.NewServeMux()
 	server := &http.Server{
-		Handler:           http.NewServeMux(),
+		Handler:           app.adminHTTPBoundary(privateMux),
+		ErrorLog:          stdlog.New(io.Discard, "", 0),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      20 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    adminHTTPMaxHeaderBytes,
 	}
-	err := app.adminHTTP.startWithErrors(address, server, adminHTTPRuntimeErrors())
-	app.mu.Unlock()
-	return err
+	return app.adminHTTP.startWithErrors(address, server, adminHTTPRuntimeErrors())
 }
 
 // StopAdminServer 停止接受新的管理请求，并在 ctx 内等待已有请求和 Serve goroutine 退出。
@@ -90,24 +242,22 @@ func (app *Application) serveAdminEndpoint(
 	endpoint admin.Endpoint,
 	invoke func(context.Context, admin.Request) (admin.Response, error),
 ) {
-	startedAt := time.Now()
-	// 固定容量 Channel 只属于当前 Application 的 adminHTTP；额度耗尽时不建立等待队列。
-	if !app.adminHTTP.tryAcquireRequestSlot(adminHTTPMaxActiveRequests) {
-		app.finishAdminError(
-			w,
-			startedAt,
-			rand.Text(),
-			admin.Principal{},
-			operation,
-			http.StatusTooManyRequests,
-			nil,
-		)
+	state, bounded := r.Context().Value(adminHTTPBoundaryKey{}).(*adminHTTPAuditState)
+	if !bounded {
+		// Direct package-level boundary tests and future private routes receive the
+		// exact same outer admission/recovery/audit semantics as the live Server.
+		app.adminHTTPBoundary(http.HandlerFunc(func(inner http.ResponseWriter, request *http.Request) {
+			app.serveAdminEndpoint(inner, request, operation, endpoint, invoke)
+		})).ServeHTTP(w, r)
 		return
 	}
-	defer app.adminHTTP.releaseRequestSlot()
-
-	// RequestID 只使用系统随机源，不混入 URL、身份、Body 或其他业务数据。
-	requestID := rand.Text()
+	// Method/Endpoint come from the frozen Endpoint definition, never the request
+	// path or an unsupported action vocabulary. Target identifiers are supplied by
+	// the frozen route match in Task 5.
+	operation.Method = endpoint.Method()
+	operation.Endpoint = endpoint.Name()
+	state.operation = operation
+	requestID := state.requestID
 	principal := admin.Principal{}
 	if app.adminGuard != nil {
 		authorized, err := app.adminGuard.Authorize(r.Context(), r, operation)
@@ -118,39 +268,35 @@ func (app *Application) serveAdminEndpoint(
 				status = http.StatusUnauthorized
 			case errors.Is(err, admin.ErrForbidden):
 				status = http.StatusForbidden
+				// ErrForbidden may accompany an authenticated Principal. The Guard
+				// contract permits that identity to be audited, but ownership remains
+				// with the Guard, so copy every collection before returning from here.
+				principal = cloneAdminPrincipal(authorized)
+				state.principal = principal
 			}
-			app.finishAdminError(w, startedAt, requestID, principal, operation, status, nil)
+			finishAdminError(w, status, nil)
 			return
 		}
-		principal = authorized
+		principal = cloneAdminPrincipal(authorized)
 	} else {
 		principal = admin.Principal{Subject: "local"}
 	}
+	state.principal = principal
 
 	// Guard 已完成后再检查方法和读取 Body，避免未授权请求消耗解析资源或触发读取副作用。
 	if r.Method != endpoint.Method() {
-		app.finishAdminError(
+		finishAdminError(
 			w,
-			startedAt,
-			requestID,
-			principal,
-			operation,
 			http.StatusMethodNotAllowed,
 			http.Header{"Allow": {endpoint.Method()}},
 		)
 		return
 	}
-	body, requestStatus := readAdminRequestBody(w, r, endpoint)
+	// Preserve net/http's private requestTooLarge notification by giving
+	// MaxBytesReader the underlying Server writer, not the buffering wrapper.
+	body, requestStatus := readAdminRequestBody(state.bodyLimitWriter, r, endpoint)
 	if requestStatus != 0 {
-		app.finishAdminError(
-			w,
-			startedAt,
-			requestID,
-			principal,
-			operation,
-			requestStatus,
-			nil,
-		)
+		finishAdminError(w, requestStatus, nil)
 		return
 	}
 
@@ -159,32 +305,18 @@ func (app *Application) serveAdminEndpoint(
 	invokeContext, cancel := context.WithTimeout(r.Context(), endpoint.Timeout())
 	defer cancel()
 	if err := invokeContext.Err(); err != nil {
-		app.finishAdminError(
-			w,
-			startedAt,
-			requestID,
-			principal,
-			operation,
-			adminInvokeErrorStatus(err),
-			nil,
-		)
+		finishAdminError(w, adminInvokeErrorStatus(err), nil)
 		return
 	}
 	response, err := invoke(invokeContext, request)
-	if err == nil {
-		// Handler 可能在 Context 结束后返回 nil；一旦边界超时，结果仍按取消/Deadline 处理。
-		err = invokeContext.Err()
+	// Endpoint timeout is cooperative: the boundary never starts a fire-and-forget
+	// goroutine, and the request slot remains held until invoke actually returns.
+	// Once it returns, the Context terminal state takes precedence over business errors.
+	if contextErr := invokeContext.Err(); contextErr != nil {
+		err = contextErr
 	}
 	if err != nil {
-		app.finishAdminError(
-			w,
-			startedAt,
-			requestID,
-			principal,
-			operation,
-			adminInvokeErrorStatus(err),
-			nil,
-		)
+		finishAdminError(w, adminInvokeErrorStatus(err), nil)
 		return
 	}
 	status := response.Status()
@@ -196,27 +328,10 @@ func (app *Application) serveAdminEndpoint(
 	if status < http.StatusOK || status >= http.StatusMultipleChoices ||
 		int64(len(responseBody)) > endpoint.MaxResponseBytes() {
 		// 在任何业务 Header 或状态写入前完成全部响应校验，错误只返回固定安全文本。
-		app.finishAdminError(
-			w,
-			startedAt,
-			requestID,
-			principal,
-			operation,
-			http.StatusInternalServerError,
-			nil,
-		)
+		finishAdminError(w, http.StatusInternalServerError, nil)
 		return
 	}
-	app.finishAdminRequest(
-		w,
-		startedAt,
-		requestID,
-		principal,
-		operation,
-		status,
-		responseHeader,
-		responseBody,
-	)
+	finishAdminResponse(w, status, responseHeader, responseBody)
 }
 
 // adminInvokeErrorStatus 把请求取消、Endpoint Deadline 和其他内部失败映射为安全 HTTP 状态。
@@ -232,12 +347,8 @@ func adminInvokeErrorStatus(err error) int {
 }
 
 // finishAdminError 构建只含稳定状态文本的错误响应，并保留调用方提供的 Allow 等安全 Header。
-func (app *Application) finishAdminError(
+func finishAdminError(
 	w http.ResponseWriter,
-	startedAt time.Time,
-	requestID string,
-	principal admin.Principal,
-	operation admin.Operation,
 	status int,
 	extraHeader http.Header,
 ) {
@@ -248,43 +359,17 @@ func (app *Application) finishAdminError(
 	for key, values := range extraHeader {
 		header[key] = append([]string(nil), values...)
 	}
-	app.finishAdminRequest(
-		w,
-		startedAt,
-		requestID,
-		principal,
-		operation,
-		status,
-		header,
-		[]byte(http.StatusText(status)+"\n"),
-	)
+	finishAdminResponse(w, status, header, []byte(http.StatusText(status)+"\n"))
 }
 
-// finishAdminRequest 先记录脱敏审计，再一次性提交已经完成全部校验的 Header、状态和 Body。
-func (app *Application) finishAdminRequest(
+// finishAdminResponse writes only a fully validated response into the outer
+// buffer; the boundary owns the eventual audit and network commit.
+func finishAdminResponse(
 	w http.ResponseWriter,
-	startedAt time.Time,
-	requestID string,
-	principal admin.Principal,
-	operation admin.Operation,
 	status int,
 	header http.Header,
 	body []byte,
 ) {
-	app.logger.Info(
-		"admin request audit",
-		originlog.String("request_id", requestID),
-		originlog.String("subject", principal.Subject),
-		originlog.String("method", operation.Method),
-		originlog.String("endpoint", operation.Endpoint),
-		// 根 Logger 会过滤保留归属键 node_id/service_name；target_* 明确表示被管理目标并保留空值。
-		originlog.String("target_node_id", operation.NodeID),
-		originlog.String("target_service_name", operation.ServiceName),
-		originlog.Int("status", status),
-		originlog.Duration("duration", time.Since(startedAt)),
-		originlog.Int("response_bytes", len(body)),
-		originlog.String("outcome", adminAuditOutcome(status)),
-	)
 	for key, values := range header {
 		for _, value := range values {
 			w.Header().Add(key, value)

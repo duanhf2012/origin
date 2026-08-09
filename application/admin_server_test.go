@@ -3,9 +3,11 @@ package application
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -199,6 +201,7 @@ func TestAdminServerHTTPConfiguration(t *testing.T) {
 	server := app.adminHTTP.server
 	app.adminHTTP.mu.Unlock()
 	if server == nil || server.Handler == nil ||
+		server.ErrorLog == nil || server.ErrorLog.Writer() != io.Discard ||
 		server.ReadHeaderTimeout != 5*time.Second ||
 		server.WriteTimeout != 20*time.Second ||
 		server.IdleTimeout != 60*time.Second ||
@@ -253,6 +256,82 @@ func TestAdminServerConcurrentLifecycle(t *testing.T) {
 		t.Fatalf("concurrent Stop did not release address: %v", err)
 	}
 	_ = listener.Close()
+}
+
+// TestAdminServerStartRuntimeLockOrder deterministically parks Start after it
+// owns operationMu but before runtime.mu, then proves a request handler may still
+// call app.Node while a concurrent Stop queues behind Start.
+func TestAdminServerStartRuntimeLockOrder(t *testing.T) {
+	app := newAdminHTTPTestApplication(t)
+	app.adminHTTP.mu.Lock()
+	runtimeLocked := true
+	startDone := make(chan error, 1)
+	go func() {
+		startDone <- app.StartAdminServer("127.0.0.1:0")
+	}()
+	stopDone := make(chan error, 1)
+	stopStarted := false
+
+	defer func() {
+		if runtimeLocked {
+			app.adminHTTP.mu.Unlock()
+		}
+		startErr := <-startDone
+		if startErr != nil {
+			t.Errorf("StartAdminServer() error = %v", startErr)
+		}
+		if stopStarted {
+			if stopErr := <-stopDone; stopErr != nil {
+				t.Errorf("StopAdminServer() error = %v", stopErr)
+			}
+		}
+	}()
+
+	observeDeadline := time.NewTimer(time.Second)
+	defer observeDeadline.Stop()
+	for {
+		if !app.adminHTTP.operationMu.TryLock() {
+			break
+		}
+		app.adminHTTP.operationMu.Unlock()
+		select {
+		case <-observeDeadline.C:
+			t.Fatal("StartAdminServer did not reach the runtime lock barrier")
+		default:
+			runtime.Gosched()
+		}
+	}
+	go func() {
+		stopDone <- app.StopAdminServer(context.Background())
+	}()
+	stopStarted = true
+
+	nodeReturned := make(chan struct{})
+	handlerDone := make(chan struct{})
+	handler := app.adminHTTPBoundary(http.HandlerFunc(func(
+		w http.ResponseWriter,
+		_ *http.Request,
+	) {
+		_, _ = app.Node("missing")
+		w.WriteHeader(http.StatusNoContent)
+		close(nodeReturned)
+	}))
+	go func() {
+		handler.ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodGet, "/node", nil),
+		)
+		close(handlerDone)
+	}()
+	select {
+	case <-nodeReturned:
+	case <-time.After(time.Second):
+		t.Error("Handler app.Node blocked while StartAdminServer waited on runtime.mu")
+	}
+
+	app.adminHTTP.mu.Unlock()
+	runtimeLocked = false
+	<-handlerDone
 }
 
 // TestAdminRequestBoundaries 防止 GET 只看 ContentLength、POST 接受非 JSON、Body 上限失效，
@@ -552,6 +631,73 @@ func TestAdminLimitConcurrentRequests(t *testing.T) {
 	}
 }
 
+// TestAdminTimeoutRetainsAdmissionUntilInvokeReturns documents cooperative
+// timeout semantics: cancellation is signaled through Context, while the slot is
+// held until the Handler acknowledges it and actually returns.
+func TestAdminTimeoutRetainsAdmissionUntilInvokeReturns(t *testing.T) {
+	app := New()
+	entered := make(chan struct{}, adminHTTPMaxActiveRequests)
+	canceled := make(chan struct{}, adminHTTPMaxActiveRequests)
+	release := make(chan struct{})
+	endpoint := admin.Get(
+		"cooperative-timeout",
+		func(ctx context.Context, _ admin.Request) (admin.Response, error) {
+			entered <- struct{}{}
+			<-ctx.Done()
+			canceled <- struct{}{}
+			<-release
+			return admin.Response{}, ctx.Err()
+		},
+		admin.WithTimeout(10*time.Millisecond),
+	)
+
+	responses := make([]*httptest.ResponseRecorder, adminHTTPMaxActiveRequests)
+	var requests sync.WaitGroup
+	for index := range adminHTTPMaxActiveRequests {
+		responses[index] = httptest.NewRecorder()
+		requests.Add(1)
+		go func(response *httptest.ResponseRecorder) {
+			defer requests.Done()
+			app.serveAdminEndpoint(
+				response,
+				httptest.NewRequest(http.MethodGet, "/cooperative-timeout", nil),
+				admin.Operation{Method: http.MethodGet, Endpoint: "cooperative-timeout"},
+				endpoint,
+				endpoint.Invoke,
+			)
+		}(responses[index])
+	}
+	for range adminHTTPMaxActiveRequests {
+		<-entered
+	}
+	for range adminHTTPMaxActiveRequests {
+		<-canceled
+	}
+
+	overloaded := httptest.NewRecorder()
+	app.serveAdminEndpoint(
+		overloaded,
+		httptest.NewRequest(http.MethodGet, "/cooperative-timeout", nil),
+		admin.Operation{Method: http.MethodGet, Endpoint: "cooperative-timeout"},
+		endpoint,
+		endpoint.Invoke,
+	)
+	if overloaded.Code != http.StatusTooManyRequests {
+		t.Fatalf("request after 64 canceled-but-running Handlers = %d, want 429", overloaded.Code)
+	}
+
+	close(release)
+	requests.Wait()
+	for index, response := range responses {
+		if response.Code != http.StatusGatewayTimeout {
+			t.Errorf("response %d status = %d, want 504", index, response.Code)
+		}
+	}
+	if active := len(app.adminHTTP.requestSlots); active != 0 {
+		t.Fatalf("active request slots after cooperative returns = %d, want 0", active)
+	}
+}
+
 // TestAdminTimeoutAndCancellation 固定调用前取消不执行 Handler，执行中取消传播到 Handler，
 // Endpoint Deadline 由同一 Context 触发且分别映射为 408/504。
 func TestAdminTimeoutAndCancellation(t *testing.T) {
@@ -638,4 +784,35 @@ func TestAdminTimeoutAndCancellation(t *testing.T) {
 			t.Fatalf("status = %d, want 504", response.Code)
 		}
 	})
+
+	for _, test := range []struct {
+		name      string
+		invokeErr error
+	}{
+		{name: "deadline overrides business error", invokeErr: errors.New("late business failure")},
+		{name: "deadline overrides returned cancellation", invokeErr: context.Canceled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app := New()
+			endpoint := admin.Get(
+				"timeout-precedence",
+				func(ctx context.Context, _ admin.Request) (admin.Response, error) {
+					<-ctx.Done()
+					return admin.Response{}, test.invokeErr
+				},
+				admin.WithTimeout(10*time.Millisecond),
+			)
+			response := httptest.NewRecorder()
+			app.serveAdminEndpoint(
+				response,
+				httptest.NewRequest(http.MethodGet, "/admin/v1/timeout-precedence", nil),
+				admin.Operation{Method: http.MethodGet, Endpoint: "timeout-precedence"},
+				endpoint,
+				endpoint.Invoke,
+			)
+			if response.Code != http.StatusGatewayTimeout {
+				t.Fatalf("status = %d, want 504", response.Code)
+			}
+		})
+	}
 }

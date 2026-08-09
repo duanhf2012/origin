@@ -275,9 +275,11 @@ func TestAdminSecurityPrincipalOperationAndRequestID(t *testing.T) {
 
 // adminAuditCapture 保存测试 Handler 收到的不可变消息、字段名和字符串/字节字段内容。
 type adminAuditCapture struct {
-	message string
-	keys    map[string]struct{}
-	text    string
+	message  string
+	keys     map[string]struct{}
+	text     string
+	status   int
+	endpoint string
 }
 
 // adminAuditHandler 捕获真实 Logger Runtime 串行写出的审计记录。
@@ -301,12 +303,271 @@ func (handler *adminAuditHandler) Write(record originlog.Record, fields []origin
 		captured.keys[field.Key()] = struct{}{}
 		content.WriteString(field.StringValue())
 		content.Write(field.BytesValue())
+		switch field.Key() {
+		case "status":
+			captured.status = int(field.Int64Value())
+		case "endpoint":
+			captured.endpoint = field.StringValue()
+		}
 	}
 	captured.text = content.String()
 	handler.mu.Lock()
 	handler.records = append(handler.records, captured)
 	handler.mu.Unlock()
 	return nil
+}
+
+// TestAdminSecurityOuterBoundary proves that every ServeMux outcome, including
+// unknown routes, passes through the per-Application admission and audit boundary.
+func TestAdminSecurityOuterBoundary(t *testing.T) {
+	handler := &adminAuditHandler{}
+	logRuntime, err := originlog.NewRuntime(originlog.Config{Mode: originlog.SyncMode}, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = logRuntime.Close(context.Background()) })
+
+	app := New()
+	app.logger = logRuntime.Logger()
+	entered := make(chan struct{}, adminHTTPMaxActiveRequests)
+	release := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/block", func(w http.ResponseWriter, _ *http.Request) {
+		entered <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/tree/", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	boundary := app.adminHTTPBoundary(mux)
+
+	var wait sync.WaitGroup
+	for range adminHTTPMaxActiveRequests {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			boundary.ServeHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodGet, "/block", nil),
+			)
+		}()
+	}
+	for range adminHTTPMaxActiveRequests {
+		<-entered
+	}
+
+	overloaded := httptest.NewRecorder()
+	boundary.ServeHTTP(
+		overloaded,
+		httptest.NewRequest(http.MethodGet, "/dynamic-secret?token=query-secret", nil),
+	)
+	if overloaded.Code != http.StatusTooManyRequests {
+		t.Fatalf("overloaded unknown route status = %d, want 429", overloaded.Code)
+	}
+	records := handler.snapshot()
+	if len(records) != 1 || records[0].status != http.StatusTooManyRequests ||
+		records[0].endpoint != "unknown" {
+		t.Fatalf("overload audit records = %+v, want one stable unknown/429 record", records)
+	}
+
+	close(release)
+	wait.Wait()
+	if active := len(app.adminHTTP.requestSlots); active != 0 {
+		t.Fatalf("active request slots after release = %d, want 0", active)
+	}
+	notFound := httptest.NewRecorder()
+	boundary.ServeHTTP(
+		notFound,
+		httptest.NewRequest(http.MethodGet, "/another-dynamic-secret?token=query-secret", nil),
+	)
+	if notFound.Code != http.StatusNotFound {
+		t.Fatalf("unknown route status = %d, want 404", notFound.Code)
+	}
+	records = handler.snapshot()
+	if len(records) != adminHTTPMaxActiveRequests+2 {
+		t.Fatalf("audit records = %d, want %d", len(records), adminHTTPMaxActiveRequests+2)
+	}
+	last := records[len(records)-1]
+	if last.status != http.StatusNotFound || last.endpoint != "unknown" {
+		t.Fatalf("unknown route audit = %+v, want stable unknown/404", last)
+	}
+	redirect := httptest.NewRecorder()
+	boundary.ServeHTTP(
+		redirect,
+		httptest.NewRequest(http.MethodGet, "/tree?token=query-secret", nil),
+	)
+	if redirect.Code < http.StatusMultipleChoices || redirect.Code >= http.StatusBadRequest {
+		t.Fatalf("ServeMux redirect status = %d, want 3xx", redirect.Code)
+	}
+	records = handler.snapshot()
+	if len(records) != adminHTTPMaxActiveRequests+3 {
+		t.Fatalf("audit records after redirect = %d, want %d", len(records), adminHTTPMaxActiveRequests+3)
+	}
+	last = records[len(records)-1]
+	if last.status != redirect.Code || last.endpoint != "unknown" {
+		t.Fatalf("redirect audit = %+v, want stable unknown/%d", last, redirect.Code)
+	}
+	for _, record := range records {
+		for _, secret := range []string{"dynamic-secret", "another-dynamic-secret", "query-secret"} {
+			if strings.Contains(record.text, secret) {
+				t.Fatalf("audit leaked dynamic route data %q: %q", secret, record.text)
+			}
+		}
+	}
+}
+
+// TestAdminSecurityPanicRecovery fixes the outermost recovery contract for both
+// authentication and custom invocation code, without exposing panic values.
+func TestAdminSecurityPanicRecovery(t *testing.T) {
+	handler := &adminAuditHandler{}
+	logRuntime, err := originlog.NewRuntime(originlog.Config{Mode: originlog.SyncMode}, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = logRuntime.Close(context.Background()) })
+
+	for _, test := range []struct {
+		name   string
+		guard  admin.Guard
+		invoke func(context.Context, admin.Request) (admin.Response, error)
+		secret string
+	}{
+		{
+			name: "guard",
+			guard: adminGuardFunc(func(context.Context, *http.Request, admin.Operation) (admin.Principal, error) {
+				panic("guard-panic-secret")
+			}),
+			invoke: func(context.Context, admin.Request) (admin.Response, error) {
+				t.Fatal("invoke ran after Guard panic")
+				return admin.Response{}, nil
+			},
+			secret: "guard-panic-secret",
+		},
+		{
+			name: "custom invoke",
+			guard: adminGuardFunc(func(context.Context, *http.Request, admin.Operation) (admin.Principal, error) {
+				return admin.Principal{Subject: "operator"}, nil
+			}),
+			invoke: func(context.Context, admin.Request) (admin.Response, error) {
+				panic("invoke-panic-secret")
+			},
+			secret: "invoke-panic-secret",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app := New()
+			app.logger = logRuntime.Logger()
+			app.adminGuard = test.guard
+			endpoint := admin.Get("panic", func(context.Context, admin.Request) (admin.Response, error) {
+				return admin.Response{}, nil
+			})
+			mux := http.NewServeMux()
+			mux.HandleFunc("/panic", func(w http.ResponseWriter, request *http.Request) {
+				app.serveAdminEndpoint(
+					w,
+					request,
+					admin.Operation{Method: http.MethodGet, Endpoint: "panic"},
+					endpoint,
+					test.invoke,
+				)
+			})
+			response := httptest.NewRecorder()
+			app.adminHTTPBoundary(mux).ServeHTTP(
+				response,
+				httptest.NewRequest(http.MethodGet, "/panic", nil),
+			)
+			if response.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500", response.Code)
+			}
+			if strings.Contains(response.Body.String(), test.secret) {
+				t.Fatalf("response leaked panic value: %q", response.Body.String())
+			}
+			if active := len(app.adminHTTP.requestSlots); active != 0 {
+				t.Fatalf("active request slots after panic = %d, want 0", active)
+			}
+		})
+	}
+
+	records := handler.snapshot()
+	if len(records) != 2 {
+		t.Fatalf("audit records = %d, want exactly 2", len(records))
+	}
+	for _, record := range records {
+		if record.status != http.StatusInternalServerError || record.endpoint != "panic" {
+			t.Fatalf("panic audit = %+v, want panic/500", record)
+		}
+		for _, secret := range []string{"guard-panic-secret", "invoke-panic-secret"} {
+			if strings.Contains(record.text, secret) {
+				t.Fatalf("panic audit leaked %q: %q", secret, record.text)
+			}
+		}
+	}
+}
+
+// TestAdminSecurityForbiddenPrincipalSnapshot proves that an authenticated
+// forbidden caller remains attributable without sharing Guard-owned collections.
+func TestAdminSecurityForbiddenPrincipalSnapshot(t *testing.T) {
+	handler := &adminAuditHandler{}
+	logRuntime, err := originlog.NewRuntime(originlog.Config{Mode: originlog.SyncMode}, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = logRuntime.Close(context.Background()) })
+
+	original := admin.Principal{
+		Subject:    "operator",
+		Roles:      []string{"ops"},
+		Attributes: map[string]string{"tenant": "blue"},
+	}
+	app := New()
+	app.logger = logRuntime.Logger()
+	app.adminGuard = adminGuardFunc(func(
+		context.Context,
+		*http.Request,
+		admin.Operation,
+	) (admin.Principal, error) {
+		return original, admin.ErrForbidden
+	})
+	endpoint := admin.Get("forbidden", func(context.Context, admin.Request) (admin.Response, error) {
+		t.Fatal("forbidden endpoint invoked")
+		return admin.Response{}, nil
+	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/forbidden", func(w http.ResponseWriter, request *http.Request) {
+		app.serveAdminEndpoint(
+			w,
+			request,
+			admin.Operation{Method: http.MethodGet, Endpoint: "forbidden"},
+			endpoint,
+			endpoint.Invoke,
+		)
+		// The known endpoint has returned, but the outer boundary has not audited
+		// yet. Mutating Guard-owned collections here deterministically detects aliasing.
+		original.Roles[0] = "mutated-role"
+		original.Attributes["tenant"] = "mutated-tenant"
+	})
+	response := httptest.NewRecorder()
+	app.adminHTTPBoundary(mux).ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/forbidden", nil),
+	)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", response.Code)
+	}
+	records := handler.snapshot()
+	if len(records) != 1 {
+		t.Fatalf("audit records = %d, want 1", len(records))
+	}
+	if !strings.Contains(records[0].text, `"ops"`) ||
+		!strings.Contains(records[0].text, `"tenant":"blue"`) {
+		t.Fatalf("forbidden audit lost Principal snapshot: %q", records[0].text)
+	}
+	for _, mutation := range []string{"mutated-role", "mutated-tenant"} {
+		if strings.Contains(records[0].text, mutation) {
+			t.Fatalf("forbidden audit observed later mutation %q: %q", mutation, records[0].text)
+		}
+	}
 }
 
 // Sync/Close 没有外部资源；Runtime 仍会真实执行自己的 Flush/Close 生命周期。
