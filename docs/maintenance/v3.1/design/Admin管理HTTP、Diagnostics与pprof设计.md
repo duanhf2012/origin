@@ -95,8 +95,8 @@ GET 和 POST 是唯一公开方法：
 
 | 方法 | 语义 | 默认成功响应 | 框架策略 |
 | --- | --- | --- | --- |
-| GET | 只读且无副作用 | `200` | read 权限、普通访问审计、拒绝 Body |
-| POST | 修改状态或触发工作 | `204` | write 权限、完整操作审计、限制 JSON Body |
+| GET | 只读且无副作用 | `200` | 普通访问审计、拒绝 Body |
+| POST | 修改状态或触发工作 | `204` | 完整操作审计、限制 JSON Body |
 
 POST 可以用 Response 显式返回 `200`、`202` 或 `204`。不提供 PUT、PATCH、DELETE；退休、
 恢复、重载、刷新和删除缓存等管理动作统一使用命名清晰的 POST 端点。
@@ -377,8 +377,9 @@ type Guard interface {
 func (app *Application) SetAdminGuard(guard admin.Guard) error
 ```
 
-Operation 包含 Method、固定 Endpoint 名称、read/write 权限和 Application/Node/Service 目标，
-不包含 Body。Guard 可以完成认证与授权，失败分别映射 401 或 403。无 Guard 的环回模式使用
+Operation 只包含 Method、固定 Endpoint 名称和 Application/Node/Service 目标，不再额外暴露
+Read/Write/Action 分类；Guard 直接按 GET/POST 授权。Operation 不包含 Body。Guard 可以完成认证与
+授权，失败分别映射 401 或 403。无 Guard 的环回模式使用
 固定 `local` Principal。业务需要 TLS、mTLS、OIDC 或统一网关时可在环回地址前部署受认证代理，
 或实现 Guard；Origin 首版不复制完整身份系统。
 

@@ -19,6 +19,10 @@
 - [同步本地事件 Await 语义设计](./design/同步本地事件Await语义设计.md)
 - [Admin 管理 HTTP、Diagnostics 与 pprof 设计](./design/Admin管理HTTP、Diagnostics与pprof设计.md)
 
+## 实施计划
+
+- [Admin 管理 HTTP、Diagnostics 与 pprof 实施计划](./plans/Admin管理HTTP、Diagnostics与pprof实施计划.md)
+
 ## 使用者变更
 
 - [v3.1 使用变更索引](./guides/README.md)
