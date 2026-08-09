@@ -28,6 +28,7 @@
 - [v3.1 使用变更索引](./guides/README.md)
 - [Node 游戏逻辑时间教程](./guides/node-game-time.md)
 - [日志：调用、格式、滚动与运行时控制](./guides/03.logging.md)
+- [Admin 管理 HTTP、Diagnostics 与 pprof](./guides/10.admin-diagnostics-and-pprof.md)
 
 ## 已完成变更与报告
 
@@ -36,3 +37,4 @@
 - [日志易用性、输出格式与运行时控制变更摘要](./changes/日志易用性、输出格式与运行时控制变更摘要.md)
 - [日志易用性、输出格式与运行时控制验收报告](./reports/日志易用性、输出格式与运行时控制验收报告.md)
 - [同步本地事件 Await 语义变更摘要](./changes/同步本地事件Await语义变更摘要.md)
+- [Admin 管理 HTTP、Diagnostics 与 pprof 变更摘要](./changes/Admin管理HTTP、Diagnostics与pprof变更摘要.md)

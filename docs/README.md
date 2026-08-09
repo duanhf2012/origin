@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | v3.0 基线 | [baseline/v3.0/](./baseline/v3.0/README.md) | 已发布、冻结 | v3.0 架构、实现过程、验收和迁移事实；仅允许勘误或修复失效链接。 |
 | v3.0 维护 | [maintenance/v3.0/](./maintenance/v3.0/README.md) | 预留 | 已发布 v3.0 的补丁、兼容性和运维维护记录。 |
-| v3.1 维护 | [maintenance/v3.1/](./maintenance/v3.1/README.md) | 预留 | v3.1 的设计、计划、变更记录、报告和使用指南。 |
+| v3.1 维护 | [maintenance/v3.1/](./maintenance/v3.1/README.md) | 进行中 | v3.1 的设计、计划、变更记录、报告和使用指南。 |
 | v3.2 维护 | [maintenance/v3.2/](./maintenance/v3.2/README.md) | 预留 | v3.2 的独立维护空间。 |
 
 ## 维护规则

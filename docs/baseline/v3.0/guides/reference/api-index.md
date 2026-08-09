@@ -2,8 +2,8 @@
 
 | 包 | 首选入口 |
 | --- | --- |
-| `application` | `application.New`、`Setup`、`RegisterCommand`、`RegisterDiscoveryProvider`、`Start`、`Stop`、`State`、`Node`、`Nodes`、`Logger`、`Diagnostics`、`Start/StopDiagnosticsServer`、`Start/StopPprof`、`Retire`、`Resume`；使用位置与 Options 见[第 01 章](../01.first-application.md) |
-| `command` | `start`、`retire`、`resume`、`stop`、`help`、`version` 的 `Runner`；`Command`、`StartRequest`、`ControlRequest`、`ControlActionRetire/Resume`；`--diagnostics`、`--pprof` |
+| `application` | v3.0 基线入口：`application.New`、`Setup`、`RegisterCommand`、`RegisterDiscoveryProvider`、`Start`、`Stop`、`State`、`Node`、`Nodes`、`Logger`、`Diagnostics`、`Start/StopDiagnosticsServer`、`Start/StopPprof`、`Retire`、`Resume`；当前 v3.1 请改用 `RegisterAdminEndpoint`、`SetAdminGuard`、`Start/StopAdminServer`、`AdminAddress`、`DiagnosticsSummary` 与 `Start/StopPprof`，见[第 10 章维护教程](../../../../maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md)。 |
+| `command` | v3.0 基线入口：`start`、`retire`、`resume`、`stop`、`help`、`version` 的 `Runner`；`Command`、`StartRequest`、`ControlRequest`、`ControlActionRetire/Resume`；`--diagnostics`、`--pprof`。当前 v3.1 用 `--admin` 取代 `--diagnostics`，迁移见[第 10 章维护教程](../../../../maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md)。 |
 | `buildinfo` | `Version`、`Commit`、`BuildTime`；编译期注入方式见[第 01 章](../01.first-application.md) |
 | `config` | `LoadDir`、`LoadSnapshot`、`View`、`Duration`、`ByteSize` |
 | `log` | `Logger`、`Field`、`Runtime`、`Flush`、`Stats`；默认 Zap Handler 位于 `log/zaplog` |

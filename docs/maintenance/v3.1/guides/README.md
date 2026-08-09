@@ -107,3 +107,11 @@ v3.1 为每个 Node 新增独立的游戏逻辑时间。Service 和 Module 通�
 v3.1 新增包级 `log.Xxx`、Module Logger、Console/File 独立归属字段、可读文本格式、
 Application 文件名前缀，以及运行时独立调整级别和暂停/恢复输出。完整配置、输出样例、
 错误边界、自定义 Handler 与可运行程序见 [日志：调用、格式、滚动与运行时控制](./03.logging.md)。
+
+## 10 Admin 管理 HTTP、Diagnostics 与 pprof
+
+v3.1 用唯一的 `--admin` 入口承载 Diagnostics、固定生命周期控制，以及 Application/Service
+自定义 GET/POST Endpoint；Service 回调会进入目标 Service 的串行执行槽。Diagnostics 默认返回
+低基数 Summary schema v2，`detail=full` 返回兼容的 Full Snapshot v2；pprof 继续使用独立、
+可运行期启停的 Listener。完整教程与六组示例见
+[Admin 管理 HTTP、Diagnostics 与 pprof](./10.admin-diagnostics-and-pprof.md)。

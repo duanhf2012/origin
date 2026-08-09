@@ -43,7 +43,7 @@ go run ./examples/00-quickstart/01-hello-service
 | 07 | 跨节点 RPC | 使用 TCP、NATS 与多实例远程 RPC | [跨节点 RPC](./docs/baseline/v3.0/guides/07.remote-rpc.md) | [07-remote-rpc](./examples/07-remote-rpc/) |
 | 08 | 服务发现 | 使用 Origin、etcd 或自定义服务发现 | [服务发现](./docs/baseline/v3.0/guides/08.discovery.md) | [08-discovery](./examples/08-discovery/) |
 | 09 | Retire、Resume 与优雅停止 | 用命令在运行期退休/恢复整个 Application，并监听 Service 状态事件 | [Retire、Resume 与优雅停止](./docs/baseline/v3.0/guides/09.retire-and-resume.md) | [09-retire-and-resume](./examples/09-retire-and-resume/) |
-| 10 | Diagnostics 与 pprof | 读取诊断、启停 pprof、适配监控 | [Diagnostics 与 pprof](./docs/baseline/v3.0/guides/10.diagnostics-and-pprof.md) | [10-diagnostics-and-pprof](./examples/10-diagnostics-and-pprof/) |
+| 10 | Admin 管理 HTTP、Diagnostics 与 pprof | 管理端点、诊断、动态 pprof 与监控适配 | [Admin 管理 HTTP、Diagnostics 与 pprof](./docs/maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md) | [10-admin-diagnostics-and-pprof](./examples/10-admin-diagnostics-and-pprof/) |
 | 11 | 性能测试与容量理解 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/11.performance.md) | [11-performance](./examples/11-performance/) |
 | 12 | 故障排查 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/12.troubleshooting.md) | [12-troubleshooting](./examples/12-troubleshooting/) |
 
@@ -64,6 +64,11 @@ v3.1 还新增 Node 级游戏逻辑时间：Service/Module 通过 `GetNode()` �
 文件滚动和运行时调整级别/启停输出。新使用者建议在第 02 章配置之后阅读
 [日志输出与管理](./docs/maintenance/v3.1/guides/03.logging.md)，并直接运行
 [`examples/03-logging`](./examples/03-logging/README.md)。
+
+第 10 章从 v3.1 起改为通用 Admin 控制面：`--admin` 是唯一管理 HTTP 入口，Diagnostics 默认
+提供 Summary schema v2，`detail=full` 用于按需排障；pprof 仍使用独立 Listener。见
+[Admin 管理 HTTP、Diagnostics 与 pprof](./docs/maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md)
+和 [`examples/10-admin-diagnostics-and-pprof`](./examples/10-admin-diagnostics-and-pprof/README.md)。
 
 ## 学习方式
 
