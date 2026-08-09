@@ -528,6 +528,96 @@ func TestAdminRequestBoundaries(t *testing.T) {
 	}
 }
 
+// TestAdminRequestQueryParsing 固定统一 Endpoint 边界使用 url.ParseQuery 的完整成功或失败
+// 语义：Guard 先执行，malformed query 返回固定 400 且 partial values 不得进入 Handler；合法
+// 加号、百分号和多值仍按标准库结果交付。
+func TestAdminRequestQueryParsing(t *testing.T) {
+	malformed := []string{
+		"detail=full;unknown=x",
+		"detail=full&unknown=x;bad",
+		"bad=%zz",
+		"bad=%",
+		"good=value&bad=%GG",
+	}
+	for _, rawQuery := range malformed {
+		t.Run("malformed "+rawQuery, func(t *testing.T) {
+			app := New()
+			var guardCalls atomic.Int64
+			var handlerCalls atomic.Int64
+			app.adminGuard = adminGuardFunc(func(
+				context.Context,
+				*http.Request,
+				admin.Operation,
+			) (admin.Principal, error) {
+				guardCalls.Add(1)
+				return admin.Principal{Subject: "operator"}, nil
+			})
+			endpoint := admin.Get("query", func(
+				context.Context,
+				admin.Request,
+			) (admin.Response, error) {
+				handlerCalls.Add(1)
+				return admin.Empty(http.StatusNoContent), nil
+			})
+			request := httptest.NewRequest(http.MethodGet, "/admin/v1/query", nil)
+			request.URL.RawQuery = rawQuery
+			response := httptest.NewRecorder()
+			app.serveAdminEndpoint(
+				response,
+				request,
+				admin.Operation{},
+				endpoint,
+				endpoint.Invoke,
+			)
+			if response.Code != http.StatusBadRequest ||
+				response.Body.String() != http.StatusText(http.StatusBadRequest)+"\n" ||
+				guardCalls.Load() != 1 || handlerCalls.Load() != 0 {
+				t.Fatalf("rawQuery=%q status=%d Body=%q guard=%d handler=%d",
+					rawQuery, response.Code, response.Body.String(),
+					guardCalls.Load(), handlerCalls.Load())
+			}
+		})
+	}
+
+	legal := []struct {
+		name        string
+		rawQuery    string
+		wantEncoded string
+	}{
+		{name: "empty"},
+		{name: "plus as space", rawQuery: "term=a+b", wantEncoded: "term=a+b"},
+		{name: "escaped plus", rawQuery: "term=%2B", wantEncoded: "term=%2B"},
+		{name: "multi value", rawQuery: "tag=one&tag=two", wantEncoded: "tag=one&tag=two"},
+	}
+	for _, test := range legal {
+		t.Run(test.name, func(t *testing.T) {
+			app := New()
+			var gotEncoded string
+			endpoint := admin.Get("query", func(
+				_ context.Context,
+				request admin.Request,
+			) (admin.Response, error) {
+				gotEncoded = request.Query().Encode()
+				return admin.Empty(http.StatusNoContent), nil
+			})
+			request := httptest.NewRequest(http.MethodGet, "/admin/v1/query", nil)
+			request.URL.RawQuery = test.rawQuery
+			response := httptest.NewRecorder()
+			app.serveAdminEndpoint(
+				response,
+				request,
+				admin.Operation{},
+				endpoint,
+				endpoint.Invoke,
+			)
+			if response.Code != http.StatusNoContent || gotEncoded != test.wantEncoded {
+				t.Fatalf("rawQuery=%q status=%d query=%q, want %q",
+					test.rawQuery, response.Code, gotEncoded, test.wantEncoded)
+			}
+		})
+	}
+}
+
 // TestAdminRouteMethodBoundary 固定未知路径为 404，已知路径的错误方法为 405 且 Allow 只列出
 // Endpoint 的 GET/POST，不把授权操作扩展为另一套 Action 分类。
 func TestAdminRouteMethodBoundary(t *testing.T) {

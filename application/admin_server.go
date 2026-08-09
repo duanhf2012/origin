@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -372,6 +373,14 @@ func (app *Application) serveAdminEndpoint(
 		)
 		return
 	}
+	// URL.Query 会静默丢弃 ParseQuery 报错的 pair，并可能把 partial values 交给业务。
+	// Guard 和方法检查完成后统一严格解析；任何错误都在读取 Body 和调用 Handler 前返回，
+	// 且 partial values 不进入不可变 Admin Request。
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		finishAdminError(w, http.StatusBadRequest, nil)
+		return
+	}
 	// Preserve net/http's private requestTooLarge notification by giving
 	// MaxBytesReader the underlying Server writer, not the buffering wrapper.
 	body, requestStatus := readAdminRequestBody(state.bodyLimitWriter, r, endpoint)
@@ -381,7 +390,7 @@ func (app *Application) serveAdminEndpoint(
 	}
 
 	// NewRequest 在调用业务前复制 Guard 身份和 HTTP 集合，解除网络对象的可变所有权。
-	request := admin.NewRequest(requestID, principal, r.URL.Query(), r.Header, body)
+	request := admin.NewRequest(requestID, principal, query, r.Header, body)
 	invokeContext, cancel := context.WithTimeout(r.Context(), endpoint.Timeout())
 	defer cancel()
 	if err := invokeContext.Err(); err != nil {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"runtime"
 	runtimemetrics "runtime/metrics"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -348,6 +349,12 @@ func (target *countingDiagnosticsService) ExecutionStats() service.ExecutionStat
 // TestAdminDiagnosticsSamplesExactlyOnceForValidQuery 使用真实 Node 叶子调用计数固定采样边界：
 // 两种合法查询各采集一次，所有非法 query 在采样前返回 400。
 func TestAdminDiagnosticsSamplesExactlyOnceForValidQuery(t *testing.T) {
+	audit := &adminAuditHandler{}
+	logRuntime, err := originlog.NewRuntime(originlog.Config{Mode: originlog.SyncMode}, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = logRuntime.Close(context.Background()) })
 	target := &countingDiagnosticsService{}
 	current, err := node.New(
 		node.Config{ID: "sample-count", Services: []string{"worker"}},
@@ -360,14 +367,16 @@ func TestAdminDiagnosticsSamplesExactlyOnceForValidQuery(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = current.Rollback(context.Background()) })
 	app := New()
+	app.logger = logRuntime.Logger()
 	app.nodes = []*node.Node{current}
 	if err := app.freezeAdminRoutes(nil); err != nil {
 		t.Fatal(err)
 	}
 	baseURL := startAdminRouteTestServer(t, app)
 
-	request := func(query string, wantStatus int, wantReads int64) {
+	request := func(query string, wantStatus int, wantReads int64, forbidden string) {
 		t.Helper()
+		beforeAudit := len(audit.snapshot())
 		response, requestErr := http.Get(baseURL + "/admin/v1/diagnostics" + query)
 		if requestErr != nil {
 			t.Fatal(requestErr)
@@ -377,12 +386,32 @@ func TestAdminDiagnosticsSamplesExactlyOnceForValidQuery(t *testing.T) {
 			t.Fatalf("GET %q status=%d reads=%d Body=%q, want status=%d reads=%d",
 				query, response.StatusCode, target.executionReads.Load(), body, wantStatus, wantReads)
 		}
+		if wantStatus == http.StatusBadRequest && body != http.StatusText(http.StatusBadRequest)+"\n" {
+			t.Fatalf("GET %q Body = %q, want stable 400", query, body)
+		}
+		records := audit.snapshot()
+		if len(records) != beforeAudit+1 || records[len(records)-1].status != wantStatus {
+			t.Fatalf("GET %q audit delta=%d tail=%+v", query, len(records)-beforeAudit, records)
+		}
+		if forbidden != "" && strings.Contains(records[len(records)-1].text, forbidden) {
+			t.Fatalf("GET %q audit leaked raw query fragment %q: %q",
+				query, forbidden, records[len(records)-1].text)
+		}
+		if forbidden != "" && strings.Contains(
+			records[len(records)-1].text,
+			strings.TrimPrefix(query, "?"),
+		) {
+			t.Fatalf("GET %q audit leaked complete raw query: %q",
+				query, records[len(records)-1].text)
+		}
 	}
-	request("?unknown=query-secret", http.StatusBadRequest, 0)
-	request("?detail=full&unknown=query-secret", http.StatusBadRequest, 0)
-	request("?detail=full&detail=full", http.StatusBadRequest, 0)
-	request("", http.StatusOK, 1)
-	request("?detail=full", http.StatusOK, 2)
+	request("?detail=full;unknown=semicolon-summary-secret", http.StatusBadRequest, 0, "semicolon-summary-secret")
+	request("?detail=full&unknown=semicolon-full-secret;bad", http.StatusBadRequest, 0, "semicolon-full-secret")
+	request("?unknown=query-secret", http.StatusBadRequest, 0, "query-secret")
+	request("?detail=full&unknown=query-secret", http.StatusBadRequest, 0, "query-secret")
+	request("?detail=full&detail=full", http.StatusBadRequest, 0, "")
+	request("", http.StatusOK, 1, "")
+	request("?detail=full", http.StatusOK, 2, "")
 }
 
 // TestApplicationInjectsRestrictedFacadeIntoRealService 防止 Application.buildNodes 遗漏
