@@ -390,7 +390,7 @@ func (app *Application) run(
 	if err := validateSelectedDiscoveryOrder(configured.discovery, selected); err != nil {
 		return app.report(err)
 	}
-	nodes, err := app.buildNodes(selected, configured.discovery, request.InitialRetired)
+	nodes, err := app.buildNodes(selected, configured.discovery)
 	if err != nil {
 		return app.report(err)
 	}
@@ -434,7 +434,25 @@ func (app *Application) run(
 
 	app.state.Store(uint32(StateRunning))
 	app.logger.Info("application running")
-	<-lifecycleCtx.Done()
+	controls := request.Controls
+	for lifecycleCtx.Err() == nil {
+		select {
+		case <-lifecycleCtx.Done():
+		case control, open := <-controls:
+			if !open {
+				controls = nil
+				continue
+			}
+			if control == nil {
+				continue
+			}
+			if lifecycleCtx.Err() != nil {
+				control.Complete(errs.ErrServiceStopping)
+				continue
+			}
+			control.Complete(app.handleControlRequest(lifecycleCtx, control))
+		}
+	}
 	stopErr := app.stopStartedNodes(ensureCleanupContext())
 	serviceFailures := app.serviceFailureResult()
 	finalResult := stopErr
@@ -596,7 +614,6 @@ func applicationLogPath(appName, configuredPath string) string {
 func (app *Application) buildNodes(
 	configs []node.Config,
 	discovery *discoverySelection,
-	initialRetired bool,
 ) ([]*node.Node, error) {
 	var factory publicprovider.Factory
 	var originConfig origindiscovery.Config
@@ -689,7 +706,6 @@ func (app *Application) buildNodes(
 			app.logger,
 			node.Options{
 				Application:      app,
-				InitialRetired:   initialRetired,
 				Config:           app.config,
 				MaxTimersPerNode: app.options.Timer.MaxTimersPerNode,
 				TimerLocation:    app.options.Timer.Location,

@@ -28,6 +28,6 @@ func ExampleRunner_Run() {
 
 	// Output:
 	// Usage:
-	//   game-server start --app-name <name> [--config ./config] [--pid-dir ./run] [--node id1,id2] [--retired] [--diagnostics 127.0.0.1:6061] [--pprof 127.0.0.1:6060]
+	//   game-server start --app-name <name> [--config ./config] [--pid-dir ./run] [--node id1,id2] [--diagnostics 127.0.0.1:6061] [--pprof 127.0.0.1:6060]
 	// code=0 error=<nil>
 }

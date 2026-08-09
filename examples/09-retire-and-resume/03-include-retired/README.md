@@ -13,6 +13,8 @@ value, err := s.players.IncludeRetired().AwaitGetPlayer(ctx, playerID)
 
 精确 `OnNode` 与自动选择的语义不同；本例强调的是扩展自动候选范围。
 
+当前示例为便于单进程演示而直接调用 Retire；在真实运行程序中，也可以先用正式 `retire` 命令把目标 Application 的全部 Node 切换为 Retired，再验证跨 Node 的 `IncludeRetired()` 路由。
+
 ## 契约与业务实现
 
 - [`../../_support/tutorialrpc/player_service.go`](../../_support/tutorialrpc/player_service.go)：共享 RPC 契约。

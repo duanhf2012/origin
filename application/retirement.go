@@ -4,10 +4,43 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 
+	"github.com/duanhf2012/origin/v3/command"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/node"
 )
+
+func (app *Application) handleControlRequest(
+	lifecycleCtx context.Context,
+	request command.ControlRequest,
+) (result error) {
+	if request == nil || request.Context() == nil {
+		return errs.ErrInvalidArgument
+	}
+	defer func() {
+		if value := recover(); value != nil {
+			result = errs.Wrap(
+				errs.CodeInternal,
+				fmt.Errorf("Application 控制请求 panic: %v\n%s", value, debug.Stack()),
+			)
+		}
+	}()
+	controlCtx, cancel := context.WithCancel(request.Context())
+	stopCancel := context.AfterFunc(lifecycleCtx, cancel)
+	defer func() {
+		stopCancel()
+		cancel()
+	}()
+	switch request.Action() {
+	case command.ControlActionRetire:
+		return app.Retire(controlCtx)
+	case command.ControlActionResume:
+		return app.Resume(controlCtx)
+	default:
+		return errs.ErrInvalidArgument
+	}
+}
 
 // Retire 按 Node 启动顺序的严格逆序退休全部 Service。
 //

@@ -21,8 +21,8 @@ const (
 	ExitUsage
 	// ExitProcessControl 表示重复启动或本地进程控制失败。
 	ExitProcessControl
-	// ExitStopTimeout 表示 stop 已发出请求，但等待目标释放运行权超时。
-	ExitStopTimeout
+	// ExitControlTimeout 表示在线控制命令超过调用方指定的总体等待时间。
+	ExitControlTimeout
 )
 
 // StartRequest 是 command 包校验并交给 Start Handler 的启动参数快照。
@@ -35,9 +35,8 @@ type StartRequest struct {
 	PIDDir string
 	// NodeIDs 按命令行声明顺序保存要启动的 Node；空切片表示由 Application 使用配置顺序。
 	NodeIDs []string
-	// InitialRetired 要求全部选中 Service 完成 OnStart 后直接进入 Retired，首次发现发布
-	// 不经过 Running。它只决定初始状态，运行期仍由 Retire/Resume 显式控制。
-	InitialRetired bool
+	// Controls 由当前 start 持有的本地控制邮箱提供；nil 表示没有在线控制入口。
+	Controls <-chan ControlRequest
 	// DiagnosticsAddress 非空时要求 Application 在 Node 启动前监听诊断 JSON 地址。
 	DiagnosticsAddress string
 	// PprofAddress 非空时要求 Application 在 Node 启动前监听 Go pprof 地址。

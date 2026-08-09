@@ -87,6 +87,21 @@ func TestHelpAndVersion(t *testing.T) {
 	if !strings.Contains(help, "game-server <command>") {
 		t.Fatalf("help does not contain program usage:\n%s", help)
 	}
+	for _, commandName := range []string{"retire", "resume"} {
+		if !strings.Contains(help, commandName) {
+			t.Fatalf("help does not contain %q:\n%s", commandName, help)
+		}
+		stdout.Reset()
+		code, err = runner.Run(context.Background(), []string{"help", commandName})
+		if err != nil || code != ExitSuccess {
+			t.Fatalf("help %s = (%d, %v), want success", commandName, code, err)
+		}
+		for _, option := range []string{"--app-name", "--pid-dir", "--timeout 30s"} {
+			if !strings.Contains(stdout.String(), option) {
+				t.Fatalf("help %s missing %q:\n%s", commandName, option, stdout.String())
+			}
+		}
+	}
 
 	// 清空输出后验证未注入构建字段仍保持固定 version 外观。
 	stdout.Reset()
@@ -107,7 +122,101 @@ func TestHelpAndVersion(t *testing.T) {
 	}
 }
 
-func TestRunUsageErrorsAndAliases(t *testing.T) {
+func TestRetireResumeArguments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "retire missing app", args: []string{"retire"}},
+		{name: "resume invalid app", args: []string{"resume", "--app-name", "Game"}},
+		{name: "retire zero timeout", args: []string{"retire", "--app-name", "game", "--timeout", "0s"}},
+		{name: "resume invalid timeout", args: []string{"resume", "--app-name", "game", "--timeout", "soon"}},
+		{name: "retire positional", args: []string{"retire", "--app-name", "game", "extra"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			runner, _, _ := newTestRunner(t, noOpStart)
+			code, err := runner.Run(t.Context(), test.args)
+			if code != ExitUsage || !errs.IsCode(err, errs.CodeInvalidArgument) {
+				t.Fatalf("Run(%v) = (%d, %v), want usage error", test.args, code, err)
+			}
+		})
+	}
+}
+
+func TestRetireResumeCommandsRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, "config")
+	pidDir := filepath.Join(root, "run")
+	if err := os.Mkdir(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	actions := make(chan ControlAction, 2)
+	target, _, _ := newTestRunner(t, func(ctx context.Context, request StartRequest) error {
+		close(started)
+		for {
+			select {
+			case control := <-request.Controls:
+				actions <- control.Action()
+				control.Complete(nil)
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	})
+	targetCtx, cancelTarget := context.WithCancel(t.Context())
+	targetResult := make(chan error, 1)
+	go func() {
+		_, err := target.Run(targetCtx, []string{
+			"start", "--app-name", "game", "--config", configDir, "--pid-dir", pidDir,
+		})
+		targetResult <- err
+	}()
+	<-started
+
+	client, _, _ := newTestRunner(t, noOpStart)
+	for _, test := range []struct {
+		name   string
+		action ControlAction
+	}{
+		{name: "retire", action: ControlActionRetire},
+		{name: "resume", action: ControlActionResume},
+	} {
+		code, err := client.Run(t.Context(), []string{
+			test.name, "--app-name", "game", "--pid-dir", pidDir,
+		})
+		if err != nil || code != ExitSuccess {
+			t.Fatalf("%s = (%d, %v), want success", test.name, code, err)
+		}
+		if action := <-actions; action != test.action {
+			t.Fatalf("%s action = %v, want %v", test.name, action, test.action)
+		}
+	}
+
+	cancelTarget()
+	if err := receiveControlResult(t, targetResult); err != nil {
+		t.Fatalf("target error = %v", err)
+	}
+}
+
+func TestRetireNotRunningIsProcessControlError(t *testing.T) {
+	t.Parallel()
+
+	runner, _, _ := newTestRunner(t, noOpStart)
+	code, err := runner.Run(t.Context(), []string{
+		"retire", "--app-name", "game", "--pid-dir", filepath.Join(t.TempDir(), "missing"),
+	})
+	if code != ExitProcessControl || !errs.IsCode(err, errs.CodeProcessControlFailed) {
+		t.Fatalf("retire not running = (%d, %v), want process control error", code, err)
+	}
+}
+
+func TestRunUsageErrorsAndRejectsLegacyCommands(t *testing.T) {
 	t.Parallel()
 
 	// 每个样本创建独立 Runner，确保首次 Run 冻结行为不会掩盖参数结果。
@@ -119,24 +228,11 @@ func TestRunUsageErrorsAndAliases(t *testing.T) {
 	}{
 		{name: "no command", args: nil, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
 		{name: "unknown", args: []string{"missing"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
-		{
-			name:     "help alias",
-			args:     []string{"-help"},
-			wantCode: ExitSuccess,
-			wantErr:  errs.CodeOK,
-		},
-		{
-			name:     "help short alias",
-			args:     []string{"-h"},
-			wantCode: ExitSuccess,
-			wantErr:  errs.CodeOK,
-		},
-		{
-			name:     "help long alias",
-			args:     []string{"--help"},
-			wantCode: ExitSuccess,
-			wantErr:  errs.CodeOK,
-		},
+		{name: "legacy start", args: []string{"-start"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
+		{name: "legacy stop", args: []string{"-stop"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
+		{name: "legacy help", args: []string{"-help"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
+		{name: "legacy short help", args: []string{"-h"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
+		{name: "legacy long help", args: []string{"--help"}, wantCode: ExitUsage, wantErr: errs.CodeInvalidArgument},
 		{
 			name:     "version extra argument",
 			args:     []string{"version", "extra"},
@@ -248,12 +344,11 @@ func TestStartBuildsRequestAndPIDRecord(t *testing.T) {
 		return nil
 	})
 	code, err := runner.Run(context.Background(), []string{
-		"-start",
+		"start",
 		"--app-name", "game-dev",
 		"--config", configDir,
 		"--pid-dir", pidDir,
 		"--node", " gateway-1,game-1 ",
-		"--retired",
 		"--diagnostics", "127.0.0.1:6061",
 		"--pprof", "127.0.0.1:6060",
 	})
@@ -268,9 +363,6 @@ func TestStartBuildsRequestAndPIDRecord(t *testing.T) {
 	}
 	if want := []string{"gateway-1", "game-1"}; !reflect.DeepEqual(received.NodeIDs, want) {
 		t.Fatalf("NodeIDs = %#v, want %#v", received.NodeIDs, want)
-	}
-	if !received.InitialRetired {
-		t.Fatal("InitialRetired = false, want true")
 	}
 	if received.DiagnosticsAddress != "127.0.0.1:6061" ||
 		received.PprofAddress != "127.0.0.1:6060" {
@@ -319,6 +411,11 @@ func TestStartRejectsInvalidArgumentsBeforeHandler(t *testing.T) {
 		{
 			name: "duplicate node",
 			args: []string{"start", "--app-name", "game", "--config", configDir, "--node", "a,a"},
+			code: errs.CodeInvalidArgument,
+		},
+		{
+			name: "removed retired option",
+			args: []string{"start", "--app-name", "game", "--config", configDir, "--retired"},
 			code: errs.CodeInvalidArgument,
 		},
 		{
@@ -495,7 +592,7 @@ func TestDuplicateStartAndStopRoundTrip(t *testing.T) {
 	// stop 使用平台入口取消目标 Context，并等待目标返回后释放锁。
 	stopper, _, _ := newTestRunner(t, noOpStart)
 	code, err = stopper.Run(context.Background(), []string{
-		"-stop",
+		"stop",
 		"--app-name", "round-trip",
 		"--pid-dir", pidDir,
 		"--timeout", "3s",
@@ -570,7 +667,7 @@ func TestStopTimeoutDoesNotTakeOwnership(t *testing.T) {
 		"--pid-dir", pidDir,
 		"--timeout", "75ms",
 	})
-	if code != ExitStopTimeout || !errs.IsCode(err, errs.CodeDeadlineExceeded) {
+	if code != ExitControlTimeout || !errs.IsCode(err, errs.CodeDeadlineExceeded) {
 		t.Fatalf("stop timeout = (%d, %v), want timeout", code, err)
 	}
 	locked, inspectErr := isPIDLocked(filepath.Join(pidDir, "slow-stop.pid"))

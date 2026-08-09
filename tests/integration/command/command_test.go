@@ -32,6 +32,12 @@ type targetProcess struct {
 	waitErr error
 }
 
+type helperResult struct {
+	code   int
+	stdout string
+	stderr string
+}
+
 // TestMain 只构建一次当前平台辅助程序，所有测试共享二进制但使用独立控制目录。
 func TestMain(m *testing.M) {
 	// Linux 远程机没有 Go 工具链时，允许测试驱动使用已经交叉编译并同目录上传的辅助程序。
@@ -209,6 +215,142 @@ func TestStopMissingTargetIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRetireResumeAcrossProcesses(t *testing.T) {
+	root, configDir, pidDir := makeControlDirs(t)
+	target := startTarget(t, root, configDir, pidDir, "runtime-control", "normal")
+	defer target.cleanup()
+
+	for _, action := range []string{"retire", "resume"} {
+		code, stdout, stderr := runHelper(
+			t,
+			nil,
+			action,
+			"--app-name", "runtime-control",
+			"--pid-dir", pidDir,
+			"--timeout", "3s",
+		)
+		if code != 0 {
+			t.Fatalf("%s exit = %d\nstdout:\n%s\nstderr:\n%s", action, code, stdout, stderr)
+		}
+	}
+	data, err := os.ReadFile(controlStatePath(root, "runtime-control"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "retired\nrunning\n" {
+		t.Fatalf("control states = %q", got)
+	}
+	stopTarget(t, target, pidDir, "runtime-control")
+}
+
+func TestRetireTimeoutLeavesTargetRunning(t *testing.T) {
+	root, configDir, pidDir := makeControlDirs(t)
+	target := startTarget(t, root, configDir, pidDir, "retire-timeout", "control-timeout")
+	defer target.cleanup()
+
+	code, stdout, stderr := runHelper(
+		t,
+		nil,
+		"retire",
+		"--app-name", "retire-timeout",
+		"--pid-dir", pidDir,
+		"--timeout", "100ms",
+	)
+	if code != 4 || !strings.Contains(stderr, "deadline") {
+		t.Fatalf("retire timeout exit = %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	select {
+	case err := <-target.done:
+		target.waited = true
+		target.waitErr = err
+		t.Fatalf("target exited after retire timeout: %v", err)
+	default:
+	}
+	stopTarget(t, target, pidDir, "retire-timeout")
+}
+
+func TestConcurrentRetireResumeAreSerializedAcrossProcesses(t *testing.T) {
+	root, configDir, pidDir := makeControlDirs(t)
+	target := startTarget(t, root, configDir, pidDir, "serialized", "control-delay")
+	defer target.cleanup()
+
+	retire := runHelperAsync(
+		[]string{"ORIGIN_COMMAND_TEST_CONTROL_DELAY=150ms"},
+		"retire", "--app-name", "serialized", "--pid-dir", pidDir, "--timeout", "3s",
+	)
+	waitForFile(t, filepath.Join(pidDir, "serialized.control.processing"))
+	resume := runHelperAsync(
+		[]string{"ORIGIN_COMMAND_TEST_CONTROL_DELAY=150ms"},
+		"resume", "--app-name", "serialized", "--pid-dir", pidDir, "--timeout", "3s",
+	)
+	for name, result := range map[string]<-chan helperResult{"retire": retire, "resume": resume} {
+		select {
+		case current := <-result:
+			if current.code != 0 {
+				t.Fatalf("%s exit = %d\nstdout:\n%s\nstderr:\n%s", name, current.code, current.stdout, current.stderr)
+			}
+		case <-time.After(processWaitTimeout):
+			t.Fatalf("%s helper timed out", name)
+		}
+	}
+	data, err := os.ReadFile(controlStatePath(root, "serialized"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "retired\nrunning\n" {
+		t.Fatalf("serialized control states = %q", got)
+	}
+	stopTarget(t, target, pidDir, "serialized")
+}
+
+func TestRetireMissingTargetFails(t *testing.T) {
+	missingPIDDir := filepath.Join(t.TempDir(), "missing")
+	code, stdout, stderr := runHelper(
+		t,
+		nil,
+		"retire", "--app-name", "missing-target", "--pid-dir", missingPIDDir,
+	)
+	if code != 3 || !strings.Contains(stderr, "not running") {
+		t.Fatalf("missing retire exit = %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if _, err := os.Stat(missingPIDDir); !os.IsNotExist(err) {
+		t.Fatalf("retire created missing pid directory: %v", err)
+	}
+}
+
+func TestTargetCrashReleasesControlLockAndLeavesRestartableState(t *testing.T) {
+	root, configDir, pidDir := makeControlDirs(t)
+	target := startTarget(t, root, configDir, pidDir, "control-crash", "control-timeout")
+	retire := runHelperAsync(
+		nil,
+		"retire", "--app-name", "control-crash", "--pid-dir", pidDir, "--timeout", "3s",
+	)
+	waitForFile(t, filepath.Join(pidDir, "control-crash.control.processing"))
+	if err := target.command.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.wait(processWaitTimeout); err == nil {
+		t.Fatal("killed target unexpectedly exited without error")
+	}
+	select {
+	case result := <-retire:
+		if result.code != 3 {
+			t.Fatalf("retire after crash exit = %d\nstdout:\n%s\nstderr:\n%s", result.code, result.stdout, result.stderr)
+		}
+	case <-time.After(processWaitTimeout):
+		t.Fatal("retire command kept control lock after target crash")
+	}
+
+	code, stdout, stderr := runHelper(
+		t,
+		[]string{"ORIGIN_COMMAND_TEST_MODE=immediate"},
+		"start", "--app-name", "control-crash", "--config", configDir, "--pid-dir", pidDir,
+	)
+	if code != 0 {
+		t.Fatalf("restart exit = %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+}
+
 // makeControlDirs 为每个测试建立独立配置目录和 PID 目录。
 func makeControlDirs(t *testing.T) (root string, configDir string, pidDir string) {
 	t.Helper()
@@ -245,6 +387,8 @@ func startTarget(
 		os.Environ(),
 		"ORIGIN_COMMAND_TEST_READY_FILE="+readyFile,
 		"ORIGIN_COMMAND_TEST_MODE="+mode,
+		"ORIGIN_COMMAND_TEST_CONTROL_FILE="+controlStatePath(root, appName),
+		"ORIGIN_COMMAND_TEST_CONTROL_DELAY=150ms",
 	)
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -287,6 +431,62 @@ func startTarget(
 	target.cleanup()
 	t.Fatalf("target did not become ready\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	return nil
+}
+
+func stopTarget(t *testing.T, target *targetProcess, pidDir string, appName string) {
+	t.Helper()
+	code, stdout, stderr := runHelper(
+		t,
+		nil,
+		"stop", "--app-name", appName, "--pid-dir", pidDir, "--timeout", "3s",
+	)
+	if code != 0 {
+		t.Fatalf("stop exit = %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if err := target.wait(processWaitTimeout); err != nil {
+		t.Fatalf("target exit error = %v", err)
+	}
+}
+
+func controlStatePath(root string, appName string) string {
+	return filepath.Join(root, appName+".controls")
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(processWaitTimeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("file %q did not appear", path)
+}
+
+func runHelperAsync(extraEnv []string, args ...string) <-chan helperResult {
+	result := make(chan helperResult, 1)
+	go func() {
+		command := exec.Command(helperBinary, args...)
+		command.Env = append(os.Environ(), extraEnv...)
+		stdout := &bytes.Buffer{}
+		stderr := &bytes.Buffer{}
+		command.Stdout = stdout
+		command.Stderr = stderr
+		err := command.Run()
+		code := 0
+		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				code = exitErr.ExitCode()
+			} else {
+				code = -1
+				fmt.Fprintln(stderr, err)
+			}
+		}
+		result <- helperResult{code: code, stdout: stdout.String(), stderr: stderr.String()}
+	}()
+	return result
 }
 
 // wait 等待目标退出一次，并缓存结果供 cleanup 幂等复用。

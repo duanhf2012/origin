@@ -3,7 +3,7 @@
 | 包 | 首选入口 |
 | --- | --- |
 | `application` | `application.New`、`Setup`、`RegisterCommand`、`RegisterDiscoveryProvider`、`Start`、`Stop`、`State`、`Node`、`Nodes`、`Logger`、`Diagnostics`、`Start/StopDiagnosticsServer`、`Start/StopPprof`、`Retire`、`Resume`；使用位置与 Options 见[第 01 章](../01.first-application.md) |
-| `command` | `start`、`stop`、`help`、`version` 的 `Runner`、`Command` 和 `StartRequest`；`start --retired`、`--diagnostics`、`--pprof` |
+| `command` | `start`、`retire`、`resume`、`stop`、`help`、`version` 的 `Runner`；`Command`、`StartRequest`、`ControlRequest`、`ControlActionRetire/Resume`；`--diagnostics`、`--pprof` |
 | `buildinfo` | `Version`、`Commit`、`BuildTime`；编译期注入方式见[第 01 章](../01.first-application.md) |
 | `config` | `LoadDir`、`LoadSnapshot`、`View`、`Duration`、`ByteSize` |
 | `log` | `Logger`、`Field`、`Runtime`、`Flush`、`Stats`；默认 Zap Handler 位于 `log/zaplog` |

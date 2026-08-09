@@ -19,9 +19,6 @@ type Options struct {
 	//
 	// 独立 Node 测试可以省略；业务 Service 只通过 Service.Application 读取该接口。
 	Application service.ApplicationRuntime
-	// InitialRetired 使当前 Node 的全部 Service 在 OnStart 成功后直接进入 Retired。
-	// 首次入站开放和服务发现发布均发生在该状态提交之后，不会短暂暴露 Running。
-	InitialRetired bool
 	// Config 是 Application 一次加载后冻结的完整配置快照。
 	//
 	// 省略时 Node 及其 Service 获得空业务配置，便于独立使用和单元测试。
