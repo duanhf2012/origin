@@ -69,6 +69,20 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 	defer func() {
 		_ = closeControl()
 	}()
+	mailbox, err := startControlMailbox(runCtx, absolutePIDDir, *appName)
+	if err != nil {
+		controlErr := closeControl()
+		releaseErr := lease.close()
+		return ExitProcessControl, joinExecutionErrors(
+			err,
+			wrapControlCleanup(*appName, controlErr),
+			wrapLeaseCleanup(lease.path, releaseErr),
+		)
+	}
+	closeMailbox := onceCleanup(mailbox.close)
+	defer func() {
+		_ = closeMailbox()
+	}()
 
 	// 复制 NodeIDs 形成 Handler 独占的参数快照，防止修改解析期切片。
 	request := StartRequest{
@@ -76,6 +90,7 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 		ConfigDir:          absoluteConfigDir,
 		PIDDir:             absolutePIDDir,
 		NodeIDs:            append([]string(nil), nodeIDs...),
+		Controls:           mailbox.requests,
 		DiagnosticsAddress: strings.TrimSpace(*diagnosticsAddress),
 		PprofAddress:       strings.TrimSpace(*pprofAddress),
 	}
@@ -83,10 +98,12 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 		return runner.start(runCtx, request)
 	})
 
-	// 固定按控制监听、PID 锁的逆序清理；两个步骤即使失败也都必须执行。
+	// 固定按控制邮箱、平台控制、PID 锁的逆序清理；全部步骤即使失败也都必须执行。
+	mailboxErr := closeMailbox()
 	controlErr := closeControl()
 	releaseErr := lease.close()
 	cleanupErr := joinExecutionErrors(
+		wrapMailboxCleanup(*appName, mailboxErr),
 		wrapControlCleanup(*appName, controlErr),
 		wrapLeaseCleanup(lease.path, releaseErr),
 	)
@@ -97,6 +114,13 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 		return ExitProcessControl, cleanupErr
 	}
 	return ExitSuccess, nil
+}
+
+func wrapMailboxCleanup(appName string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return processControlf("close control mailbox for app %q: %v", appName, err)
 }
 
 // containsHelpFlag 报告内置参数中是否显式请求了命令帮助。
