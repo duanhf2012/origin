@@ -17,6 +17,7 @@
 - [Node 游戏逻辑时间设计](./design/Node游戏逻辑时间设计.md)
 - [日志易用性、输出格式与运行时控制设计](./design/日志易用性、输出格式与运行时控制设计.md)
 - [同步本地事件 Await 语义设计](./design/同步本地事件Await语义设计.md)
+- [Admin 管理 HTTP、Diagnostics 与 pprof 设计](./design/Admin管理HTTP、Diagnostics与pprof设计.md)
 
 ## 使用者变更
 
