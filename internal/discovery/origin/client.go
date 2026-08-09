@@ -7,9 +7,8 @@ import (
 
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
-	"github.com/duanhf2012/origin/v3/internal/bufferpool"
-	"github.com/duanhf2012/origin/v3/internal/tcpnet"
 	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/rpc"
 )
 
 const clientEventCapacity = 256
@@ -29,7 +28,7 @@ type clientCommand struct {
 }
 
 type clientEvent struct {
-	conn    *tcpnet.Conn
+	peer    rpc.SystemPeer
 	payload []byte
 }
 
@@ -37,7 +36,8 @@ type clientEvent struct {
 type clientProvider struct {
 	context publicprovider.Context
 	config  Config
-	pool    *bufferpool.Pool
+	runtime *rpc.Runtime
+	target  rpc.SystemTarget
 	logger  originlog.Logger
 
 	mu      sync.Mutex
@@ -48,17 +48,20 @@ type clientProvider struct {
 
 	commands chan clientCommand
 	events   chan clientEvent
-	// closedConnections 保存不会因消息队列已满而丢失的关闭事实；closeWake 只负责唤醒。
-	closedConnections sync.Map
-	closeWake         chan struct{}
-	startedC          chan error
+	// closedPeers 保存不会因消息队列已满而丢失的关闭事实；closeWake 只负责唤醒。
+	closedPeers sync.Map
+	closeWake   chan struct{}
+	startedC    chan error
 }
 
-// NewFactory 返回捕获 Application BufferPool 的 Origin Provider Factory。
-func NewFactory(pool *bufferpool.Pool) publicprovider.Factory {
+// NewFactory 返回绑定当前 Node RPC Runtime 和静态 Discovery Server 目标的 Factory。
+func NewFactory(
+	runtime *rpc.Runtime,
+	target rpc.SystemTarget,
+) publicprovider.Factory {
 	return func(context publicprovider.Context) (publicprovider.Provider, error) {
-		if pool == nil {
-			return nil, invalidConfig("Origin Provider BufferPool 不能为空")
+		if runtime == nil || target.NodeID == "" {
+			return nil, invalidConfig("Origin Provider RPC Runtime 与 Discovery Server 目标不能为空")
 		}
 		config, err := DecodeConfig(context.Config)
 		if err != nil {
@@ -67,7 +70,8 @@ func NewFactory(pool *bufferpool.Pool) publicprovider.Factory {
 		return &clientProvider{
 			context:   context,
 			config:    config,
-			pool:      pool,
+			runtime:   runtime,
+			target:    target,
 			logger:    context.Logger,
 			commands:  make(chan clientCommand),
 			events:    make(chan clientEvent, clientEventCapacity),
@@ -213,11 +217,10 @@ func (provider *clientProvider) Close(ctx context.Context) error {
 
 func (provider *clientProvider) ownerLoop(ctx context.Context) {
 	defer close(provider.done)
-	var conn *tcpnet.Conn
+	var peer rpc.SystemPeer
 	defer func() {
-		if conn != nil {
-			conn.Close()
-			_ = conn.Wait(context.Background())
+		if peer != nil {
+			peer.Close()
 		}
 		provider.context.Host.Report(publicprovider.Report{
 			State: publicprovider.StateStopped,
@@ -233,7 +236,11 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 	var connected bool
 	var synchronized bool
 	var heartbeatAck bool
-	var awaitingAutoPublish bool
+	// automatic 串行化重连后的期望状态对账；Warming 时必须在首个 FullSnapshot 前重注册。
+	var automatic clientCommandKind
+	var automaticNode publicprovider.Node
+	// confirmedOnConnection 只记录当前控制连接已确认的状态，重连时不能复用旧 Ack。
+	var confirmedOnConnection *publicprovider.Node
 	var reconnects uint64
 	var failures uint32
 	var startComplete bool
@@ -270,9 +277,60 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 			pending = nil
 		}
 	}
+	sameNode := func(left, right *publicprovider.Node) bool {
+		if left == nil || right == nil {
+			return left == nil && right == nil
+		}
+		return nodeEqual(*left, *right)
+	}
+	reconcileDesired := func() error {
+		if !connected || peer == nil || automatic != 0 {
+			return nil
+		}
+		if desired != nil {
+			if sameNode(desired, confirmedOnConnection) {
+				if synchronized {
+					reportReady()
+					if !startComplete {
+						startComplete = true
+						provider.finishStart(nil)
+					}
+				}
+				return nil
+			}
+			payload, err := encodePublish(*desired)
+			if err != nil {
+				return err
+			}
+			automatic = clientPublish
+			automaticNode = *desired
+			if err := provider.send(peer, payload); err != nil {
+				automatic = 0
+				return err
+			}
+			return nil
+		}
+		if confirmedOnConnection != nil {
+			automatic = clientWithdraw
+			if err := provider.send(peer, encodeEmpty(frameWithdraw)); err != nil {
+				automatic = 0
+				return err
+			}
+			return nil
+		}
+		if synchronized {
+			confirmed = nil
+			reportReady()
+			if !startComplete {
+				startComplete = true
+				provider.finishStart(nil)
+			}
+		}
+		return nil
+	}
 
 	for {
-		if conn == nil {
+		if peer == nil {
 			if wait := time.Until(nextDial); wait > 0 {
 				retry := time.NewTimer(wait)
 				select {
@@ -296,10 +354,9 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 				}
 			}
 			dialCtx, cancel := context.WithTimeout(ctx, derivedTimeout(provider.config.TTL))
-			next, err := tcpnet.Dial(
+			next, err := provider.runtime.DialSystem(
 				dialCtx,
-				provider.config.Server.Address,
-				provider.connectionOptions(),
+				provider.target,
 				&clientHandler{provider: provider},
 			)
 			cancel()
@@ -318,9 +375,11 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 				}
 				continue
 			}
-			conn = next
+			peer = next
 			connected = true
 			synchronized = false
+			automatic = 0
+			confirmedOnConnection = nil
 			heartbeatAck = true
 			nextDial = time.Time{}
 			stopTimer(heartbeat)
@@ -328,11 +387,11 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 			if reconnects > 0 || startComplete {
 				reconnects++
 			}
-			if err := provider.send(conn, encodeHello(
+			if err := provider.send(peer, encodeHello(
 				provider.context.NodeID,
 				provider.context.SessionID,
 			)); err != nil {
-				conn.Close()
+				peer.Close()
 			}
 		}
 
@@ -349,7 +408,7 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 			case clientPublish:
 				copyNode := command.node
 				desired = &copyNode
-				if !connected || !synchronized {
+				if !connected || !synchronized || automatic != 0 {
 					command.result <- errs.ErrDiscoveryUnavailable
 					continue
 				}
@@ -359,35 +418,37 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 					continue
 				}
 				pending = &command
-				if err := provider.send(conn, payload); err != nil {
+				if err := provider.send(peer, payload); err != nil {
 					failPending(err)
-					conn.Close()
+					peer.Close()
 				}
 			case clientWithdraw:
 				desired = nil
-				if !connected || !synchronized {
+				if !connected || !synchronized || automatic != 0 {
 					command.result <- errs.ErrDiscoveryUnavailable
 					continue
 				}
 				pending = &command
-				if err := provider.send(conn, encodeEmpty(frameWithdraw)); err != nil {
+				if err := provider.send(peer, encodeEmpty(frameWithdraw)); err != nil {
 					failPending(err)
-					conn.Close()
+					peer.Close()
 				}
 			}
 		case <-provider.closeWake:
 			currentClosed := false
-			provider.closedConnections.Range(func(key, _ any) bool {
-				provider.closedConnections.Delete(key)
-				if key == conn {
+			provider.closedPeers.Range(func(key, _ any) bool {
+				provider.closedPeers.Delete(key)
+				if key == peer {
 					currentClosed = true
 				}
 				return true
 			})
 			if currentClosed {
-				conn = nil
+				peer = nil
 				connected = false
 				synchronized = false
+				automatic = 0
+				confirmedOnConnection = nil
 				stableSince = time.Time{}
 				failPending(errs.ErrDiscoveryUnavailable)
 				reportRecovering(errs.CodeDiscoveryUnavailable)
@@ -398,20 +459,20 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 				}
 			}
 		case event := <-provider.events:
-			if event.conn != conn {
+			if event.peer != peer {
 				continue
 			}
 			if len(event.payload) == 0 {
-				conn.Close()
+				peer.Close()
 				continue
 			}
 			frame := event.payload[0]
 			body := event.payload[1:]
 			switch frame {
 			case frameHelloAck:
-				nextEpoch, _, _, err := decodeHelloAck(body)
+				nextEpoch, _, state, err := decodeHelloAck(body)
 				if err != nil {
-					conn.Close()
+					peer.Close()
 					continue
 				}
 				if epoch != 0 && epoch != nextEpoch {
@@ -419,10 +480,15 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 					revision = 0
 				}
 				epoch = nextEpoch
+				if state == syncWarming {
+					if err := reconcileDesired(); err != nil {
+						peer.Close()
+					}
+				}
 			case frameFullSnapshot:
 				nextEpoch, nextRevision, nodes, err := decodeFull(body)
 				if err != nil || nextEpoch != epoch {
-					conn.Close()
+					peer.Close()
 					continue
 				}
 				nextRecords := make(map[string]publicprovider.Node, len(nodes))
@@ -441,41 +507,28 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 				revision = nextRevision
 				synchronized = true
 				stableSince = time.Now()
-				if desired != nil {
-					payload, encodeErr := encodePublish(*desired)
-					if encodeErr == nil {
-						awaitingAutoPublish = true
-						if sendErr := provider.send(conn, payload); sendErr != nil {
-							conn.Close()
-						}
-					}
-				} else {
-					confirmed = nil
-					reportReady()
-					if !startComplete {
-						startComplete = true
-						provider.finishStart(nil)
-					}
+				if err := reconcileDesired(); err != nil {
+					peer.Close()
 				}
 			case frameUpsertNode:
 				nextRevision, node, err := decodeUpsert(body)
 				if err != nil || !synchronized || nextRevision != revision+1 {
 					synchronized = false
 					reportRecovering(errs.CodeDiscoveryUnavailable)
-					_ = provider.send(conn, encodeEmpty(frameResync))
+					_ = provider.send(peer, encodeEmpty(frameResync))
 					continue
 				}
 				records[node.NodeID] = node
 				revision = nextRevision
 				if err := provider.replaceRecords(records); err != nil {
-					conn.Close()
+					peer.Close()
 				}
 			case frameDeleteNode:
 				nextRevision, nodeID, sessionID, err := decodeDelete(body)
 				if err != nil || !synchronized || nextRevision != revision+1 {
 					synchronized = false
 					reportRecovering(errs.CodeDiscoveryUnavailable)
-					_ = provider.send(conn, encodeEmpty(frameResync))
+					_ = provider.send(peer, encodeEmpty(frameResync))
 					continue
 				}
 				if current, exists := records[nodeID]; exists &&
@@ -484,42 +537,53 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 				}
 				revision = nextRevision
 				if err := provider.replaceRecords(records); err != nil {
-					conn.Close()
+					peer.Close()
 				}
 			case framePublishAck:
 				_, err := decodeAck(body)
 				if err != nil {
-					conn.Close()
+					peer.Close()
 					continue
 				}
 				if pending != nil && pending.kind == clientPublish {
 					copyNode := pending.node
 					confirmed = &copyNode
+					confirmedOnConnection = &copyNode
 					pending.result <- nil
 					pending = nil
 				}
-				if awaitingAutoPublish {
-					awaitingAutoPublish = false
-					if desired != nil {
-						copyNode := *desired
-						confirmed = &copyNode
+				if automatic == clientPublish {
+					copyNode := automaticNode
+					confirmed = &copyNode
+					confirmedOnConnection = &copyNode
+					automatic = 0
+					if err := reconcileDesired(); err != nil {
+						peer.Close()
 					}
-					reportReady()
 				}
 			case frameWithdrawAck:
 				_, err := decodeAck(body)
 				if err != nil {
-					conn.Close()
+					peer.Close()
 					continue
 				}
 				if pending != nil && pending.kind == clientWithdraw {
 					confirmed = nil
+					confirmedOnConnection = nil
 					pending.result <- nil
 					pending = nil
 				}
+				if automatic == clientWithdraw {
+					confirmed = nil
+					confirmedOnConnection = nil
+					automatic = 0
+					if err := reconcileDesired(); err != nil {
+						peer.Close()
+					}
+				}
 			case frameHeartbeatAck:
 				if len(body) != 0 {
-					conn.Close()
+					peer.Close()
 					continue
 				}
 				heartbeatAck = true
@@ -529,13 +593,14 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 					backoff = 100 * time.Millisecond
 					stableSince = time.Time{}
 				}
-				if synchronized && !awaitingAutoPublish {
+				if synchronized && automatic == 0 &&
+					sameNode(desired, confirmedOnConnection) {
 					reportReady()
 				}
 			case frameError:
 				code, err := decodeError(body)
 				if err != nil {
-					conn.Close()
+					peer.Close()
 					continue
 				}
 				mapped := errs.New(code)
@@ -548,6 +613,10 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 					}
 				}
 				failPending(mapped)
+				if automatic != 0 {
+					automatic = 0
+					peer.Close()
+				}
 				if code == errs.CodeDiscoveryDuplicateNode ||
 					code == errs.CodeDiscoverySnapshotInvalid ||
 					code == errs.CodeDiscoveryCapacity {
@@ -557,7 +626,7 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 					}
 				}
 			default:
-				conn.Close()
+				peer.Close()
 			}
 		case <-heartbeat.C:
 			heartbeat.Reset(jitterDelay(heartbeatInterval, 10, &randomState))
@@ -565,12 +634,12 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 				continue
 			}
 			if !heartbeatAck {
-				conn.Close()
+				peer.Close()
 				continue
 			}
 			heartbeatAck = false
-			if err := provider.send(conn, encodeEmpty(frameHeartbeat)); err != nil {
-				conn.Close()
+			if err := provider.send(peer, encodeEmpty(frameHeartbeat)); err != nil {
+				peer.Close()
 			}
 		}
 	}
@@ -619,51 +688,35 @@ func (provider *clientProvider) replaceRecords(
 	})
 }
 
-func (provider *clientProvider) send(conn *tcpnet.Conn, payload []byte) error {
-	buffer := provider.pool.Acquire(len(payload))
-	copy(buffer.Bytes(), payload)
-	if err := conn.Send(buffer); err != nil {
-		buffer.Release()
-		return err
+func (provider *clientProvider) send(peer rpc.SystemPeer, payload []byte) error {
+	if peer == nil {
+		return errs.ErrDiscoveryUnavailable
 	}
-	return nil
-}
-
-func (provider *clientProvider) connectionOptions() tcpnet.ConnectionOptions {
-	options := tcpnet.DefaultConnectionOptions(provider.pool)
-	options.Logger = provider.logger
-	options.MaxMessageSize = publicprovider.MaxSnapshotSize
-	options.SendQueueFrames = clientSendMessages
-	options.ReadTimeout = provider.config.TTL
-	options.WriteTimeout = derivedTimeout(provider.config.TTL)
-	options.KeepAlive = provider.config.TTL
-	return options
+	return peer.Send(payload)
 }
 
 type clientHandler struct {
 	provider *clientProvider
 }
 
-func (*clientHandler) OnOpen(*tcpnet.Conn) {}
+func (*clientHandler) OnSystemOpen(rpc.SystemPeer) {}
 
-func (handler *clientHandler) OnMessage(
-	conn *tcpnet.Conn,
-	packet *bufferpool.Buffer,
-) error {
-	payload := append([]byte(nil), packet.Bytes()...)
-	packet.Release()
+func (handler *clientHandler) OnSystemMessage(
+	peer rpc.SystemPeer,
+	payload []byte,
+) {
+	payload = append([]byte(nil), payload...)
 	select {
 	case handler.provider.events <- clientEvent{
-		conn: conn, payload: payload,
+		peer: peer, payload: payload,
 	}:
-		return nil
 	default:
-		return errs.ErrTransportOverloaded
+		peer.Close()
 	}
 }
 
-func (handler *clientHandler) OnClose(conn *tcpnet.Conn, _ error) {
-	handler.provider.closedConnections.Store(conn, struct{}{})
+func (handler *clientHandler) OnSystemClose(peer rpc.SystemPeer, _ error) {
+	handler.provider.closedPeers.Store(peer, struct{}{})
 	select {
 	case handler.provider.closeWake <- struct{}{}:
 	default:

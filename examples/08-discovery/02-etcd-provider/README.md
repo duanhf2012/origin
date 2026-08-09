@@ -4,27 +4,53 @@
 
 ## 前置条件与配置
 
-先运行 `deps-up.bat` 或 `./deps-up.sh`，再用 `check-deps` 验证本机 `2379` 端口。`endpoints` 指向 etcd，`local_network` 选择发现数据所属和监听的网络分区，`ttl` 控制租约；未配置 `namespace` 时使用 `origin`。
+先运行 `deps-up.bat` 或 `./deps-up.sh`，再用 `check-deps` 验证本机 `2379` 端口。未配置 `namespace` 时使用 `origin`。
+
+本示例配置为：
+
+```yaml
+discovery:
+  type: etcd
+  etcd:
+    endpoints: [http://127.0.0.1:2379]
+    # 当前配置下启动的所有 Node 都注册到该网络，
+    # 并自动能发现该网络中的所有服务。
+    local_network: game-partition-1
+
+nodes:
+  - id: battle-room-1
+    # 给当前 Node 发布的服务记录添加游戏类型标签。
+    labels: {game_type: battle}
+    services: [Service]
+
+  - id: card-room-1
+    labels: {game_type: card}
+    services: [Service]
+```
 
 如需读取其他网络，可以在 `discovery.etcd` 中增加：
 
 ```yaml
 watch_networks:
-  - cn-north
+  # 额外读取游戏分区二中的服务。
+  - game-partition-2
 ```
 
-它只增加读取范围，不改变当前 Node 的发布网络；当前示例没有启动 `cn-north` Node，因此默认配置不包含该字段。跨网络演示和配置边界见[服务发现教程的“读取其他网络”](../../../docs/baseline/v3.0/guides/08.discovery.md#深入一点读取其他网络)。
-
-配置中的 `labels: {region: cn-east}` 表示 Node 向服务发现发布自己的区域，等价于：
+它只增加读取范围，不改变当前 Node 的注册网络。筛选远端服务时，在当前 Node 下配置 `allow_discovery`：
 
 ```yaml
-labels:
-  region: cn-east
+nodes:
+  - id: gateway-1
+    # 指定当前 Node 允许发现哪些远端服务。
+    allow_discovery:
+      - services: [Service]
+        node_labels:
+          # 根据远端 Node 的 nodes.labels 筛选服务。
+          game_type: battle
+    services: [Service]
 ```
 
-本示例只演示最常用的区域标签。其他 Node 可以使用 `allow_discovery.node_labels.region` 筛选它；当前示例没有配置 `allow_discovery`，因此仍按默认规则发现 Provider 范围内的全部公开 Service。`region` 是业务约定的标签名，不是框架强制字段，也不会与 `discovery.etcd.local_network` 自动关联。
-
-自定义标签、多个候选值和多条筛选规则的完整说明见[服务发现教程](../../../docs/baseline/v3.0/guides/08.discovery.md#深入一点自定义标签键)。
+完整说明见[服务发现教程](../../../docs/baseline/v3.0/guides/08.discovery.md)。
 
 ## 运行与观察
 

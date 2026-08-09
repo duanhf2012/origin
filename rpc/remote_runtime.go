@@ -41,6 +41,7 @@ type remoteRuntime struct {
 	stopping   bool
 	listener   *tcpnet.Listener
 	inbound    *inboundHandler
+	mux        *tcpMuxHandler
 	targets    map[string]*remoteTarget
 	targetView atomic.Pointer[remoteTargetTable]
 	// retired 只保存已经取消但 goroutine 尚未退出的旧发现目标，退出回调会立即删除。
@@ -246,15 +247,17 @@ func (remote *remoteRuntime) start(
 	}
 	remote.deadlines = deadlines
 	remote.inbound = newInboundHandler(remote)
+	remote.mux = newTCPMuxHandler(remote.inbound, remote.owner.system)
 	options := remote.listenOptions()
 	listener, err := tcpnet.Listen(
 		remote.config.TCP.Listen,
 		options,
-		remote.inbound,
+		remote.mux,
 	)
 	if err != nil {
 		remote.deadlines = nil
 		remote.inbound = nil
+		remote.mux = nil
 		remote.mu.Unlock()
 		deadlines.close(errs.ErrServiceStopped)
 		return err
@@ -351,7 +354,7 @@ func (remote *remoteRuntime) maintainListener(
 			next, err := tcpnet.Listen(
 				remote.config.TCP.Listen,
 				remote.listenOptions(),
-				remote.inbound,
+				remote.mux,
 			)
 			if err != nil {
 				remote.mu.Lock()
@@ -744,6 +747,11 @@ func (remote *remoteRuntime) connectionOptions() tcpnet.ConnectionOptions {
 	options := tcpnet.DefaultConnectionOptions(remote.owner.pool)
 	options.Logger = remote.owner.logger
 	options.MaxMessageSize = remote.config.frameLimit()
+	if remote.owner.system != nil && remote.owner.system.inboundHandler() != nil &&
+		options.MaxMessageSize < MaxSystemMessageSize+1 {
+		// Discovery 控制帧与业务 RPC 共用监听器，但各自仍在握手后执行自己的上限校验。
+		options.MaxMessageSize = MaxSystemMessageSize + 1
+	}
 	options.SendQueueFrames = remote.config.TCP.SendQueueMessages
 	options.ReadTimeout = remote.config.TCP.ReadIdleTimeout
 	options.WriteTimeout = remote.config.TCP.WriteTimeout

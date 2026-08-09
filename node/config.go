@@ -43,6 +43,9 @@ type Options struct {
 	DiscoveryKind    string
 	DiscoveryConfig  publicprovider.Config
 	DiscoveryFactory publicprovider.Factory
+	// DiscoverySystemTarget 只供 Origin 内置 Provider 使用，描述它通过当前 Application
+	// RPC Transport 应连接的 DiscoveryService Node；自定义 Provider 不读取该字段。
+	DiscoverySystemTarget rpc.SystemTarget
 	// ServiceFailure 接收当前 Node 中真正无法恢复并被隔离的 Service。
 	//
 	// 正式 Application 只记录稳定失败摘要；回调必须快速返回，不能直接执行 Stop。

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net"
 	"path/filepath"
 	"strings"
 	"time"
@@ -49,7 +48,7 @@ type nodeConfig struct {
 	Labels         map[string]string      `json:"labels"`
 	AllowDiscovery json.RawMessage        `json:"allow_discovery"`
 	Scheduler      *schedulerConfigMirror `json:"scheduler"`
-	RPC            *rpcConfigMirror       `json:"rpc"`
+	RPC            *nodeRPCConfigMirror   `json:"rpc"`
 	Services       []string               `json:"services"`
 }
 
@@ -80,7 +79,7 @@ func (values *discoveryLabelValues) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// rpcConfigMirror 只负责把配置文本转换成 rpc.Config 的冻结值。
+// rpcConfigMirror 保存 Application 级共享 RPC 配置。连接参数只在这里声明一次。
 type rpcConfigMirror struct {
 	Transport        string                 `json:"transport"`
 	MaxPayloadSize   *originconfig.ByteSize `json:"max_payload_size"`
@@ -91,11 +90,21 @@ type rpcConfigMirror struct {
 
 // rpcTCPConfigMirror 使用指针保留“省略字段沿用默认值”的明确语义。
 type rpcTCPConfigMirror struct {
-	Listen            string                 `json:"listen"`
-	Advertise         string                 `json:"advertise"`
 	SendQueueMessages *int                   `json:"send_queue_messages"`
 	ReadIdleTimeout   *originconfig.Duration `json:"read_idle_timeout"`
 	WriteTimeout      *originconfig.Duration `json:"write_timeout"`
+}
+
+// nodeRPCConfigMirror 只允许 TCP Node 声明自身的监听和对外地址。
+//
+// NATS 使用共享 Application 连接配置；因此 nodes[].rpc 在 NATS 模式下必须省略。
+type nodeRPCConfigMirror struct {
+	TCP *nodeRPCTCPConfigMirror `json:"tcp"`
+}
+
+type nodeRPCTCPConfigMirror struct {
+	Listen    string `json:"listen"`
+	Advertise string `json:"advertise"`
 }
 
 // rpcNATSConfigMirror 只暴露项目确实需要选择的 Namespace、Server、接收队列、认证和 TLS。
@@ -188,8 +197,8 @@ func loadConfig(directory string) (loadedConfig, error) {
 		return loadedConfig{}, err
 	}
 
-	// 已经保留给后续里程碑的框架字段不能在 M7 被静默忽略。
-	for _, name := range []string{"rpc", "timer"} {
+	// 已经保留给后续里程碑的框架字段不能被静默忽略。
+	for _, name := range []string{"timer"} {
 		if _, exists := root[name]; exists {
 			return loadedConfig{}, invalidConfigf(
 				"配置字段 %q 尚未在 M7 实现",
@@ -201,6 +210,14 @@ func loadConfig(directory string) (loadedConfig, error) {
 	result := loadedConfig{
 		root: snapshot,
 		log:  originlog.DefaultConfig(),
+	}
+	var applicationRPC *rpc.Config
+	if raw, exists := root["rpc"]; exists {
+		configured, err := decodeApplicationRPCConfig(raw)
+		if err != nil {
+			return loadedConfig{}, err
+		}
+		applicationRPC = &configured
 	}
 	if raw, exists := root["discovery"]; exists {
 		selection, err := decodeDiscoverySelection(raw)
@@ -300,7 +317,11 @@ func loadConfig(directory string) (loadedConfig, error) {
 				err,
 			)
 		}
-		rpcConfig, err := decodeNodeRPCConfig(configured.ID, configured.RPC)
+		rpcConfig, err := resolveNodeRPCConfig(
+			configured.ID,
+			configured.RPC,
+			applicationRPC,
+		)
 		if err != nil {
 			return loadedConfig{}, err
 		}
@@ -380,17 +401,11 @@ func validateOriginDiscovery(
 		if selection != nil && selection.kind == "origin" &&
 			configured.ID == originConfig.Server.Node {
 			foundServer = true
-			if decoded[index].RPC != nil &&
-				decoded[index].RPC.Transport == rpc.TransportTCP &&
-				listenAddressesConflict(
-					decoded[index].RPC.TCP.Listen,
-					originConfig.Server.Listen,
-				) {
-				return invalidConfigf(
-					"Node %q 的 rpc.tcp.listen 不能与 discovery.origin.server.listen 相同",
-					configured.ID,
-				)
-			}
+		}
+		if selection != nil && selection.kind == "origin" && decoded[index].RPC == nil {
+			return invalidConfigf(
+				"使用 discovery.origin 时必须配置顶层 rpc",
+			)
 		}
 		for _, declaration := range configured.Services {
 			name, template, private, err := parseServiceDeclaration(declaration)
@@ -417,21 +432,6 @@ func validateOriginDiscovery(
 		)
 	}
 	return nil
-}
-
-func listenAddressesConflict(left, right string) bool {
-	leftHost, leftPort, leftErr := net.SplitHostPort(strings.TrimSpace(left))
-	rightHost, rightPort, rightErr := net.SplitHostPort(strings.TrimSpace(right))
-	if leftErr != nil || rightErr != nil || leftPort != rightPort {
-		return false
-	}
-	leftHost = strings.TrimSpace(leftHost)
-	rightHost = strings.TrimSpace(rightHost)
-	wildcard := func(host string) bool {
-		return host == "" || host == "0.0.0.0" || host == "::"
-	}
-	return wildcard(leftHost) || wildcard(rightHost) ||
-		strings.EqualFold(leftHost, rightHost)
 }
 
 func validProviderName(value string) bool {
@@ -517,44 +517,25 @@ func cloneStringMap(source map[string]string) map[string]string {
 	return result
 }
 
-// decodeNodeRPCConfig 从 RPC 默认值开始覆盖单个 Node 的显式字段。
-func decodeNodeRPCConfig(
-	nodeID string,
-	mirror *rpcConfigMirror,
-) (*rpc.Config, error) {
-	if mirror == nil {
-		return nil, nil
+// decodeApplicationRPCConfig 冻结一次 Application 级传输参数。TCP 的地址属于具体 Node，
+// 在 resolveNodeRPCConfig 中再合成完整运行时配置。
+func decodeApplicationRPCConfig(raw any) (rpc.Config, error) {
+	var mirror rpcConfigMirror
+	if err := decodeSection("rpc", raw, &mirror); err != nil {
+		return rpc.Config{}, err
 	}
 	transport := strings.ToLower(strings.TrimSpace(mirror.Transport))
 	if transport == "" {
 		transport = rpc.TransportTCP
 	}
-
-	// 两种传输共享业务 payload 上限，但传输配置块必须严格互斥。
-	maxPayloadSize := rpc.DefaultMaxPayloadSize
-	if mirror.MaxPayloadSize != nil {
-		size := mirror.MaxPayloadSize.Bytes()
-		if size <= 0 || uint64(size) > uint64(^uint(0)>>1) {
-			return nil, invalidConfigf(
-				"Node %q 的 rpc.max_payload_size 无法由当前平台 int 表达",
-				nodeID,
-			)
-		}
-		maxPayloadSize = int(size)
+	maxPayloadSize, err := decodeRPCPayloadSize(mirror.MaxPayloadSize)
+	if err != nil {
+		return rpc.Config{}, err
 	}
-	maxBroadcastSize := rpc.DefaultMaxBroadcastSize
-	if mirror.MaxBroadcastSize != nil {
-		size := mirror.MaxBroadcastSize.Bytes()
-		if size <= 0 || size > int64(rpc.MaxBroadcastSize) ||
-			uint64(size) > uint64(^uint(0)>>1) {
-			return nil, invalidConfigf(
-				"Node %q 的 rpc.max_broadcast_size 必须位于 1B～1G 且能由当前平台 int 表达",
-				nodeID,
-			)
-		}
-		maxBroadcastSize = int(size)
+	maxBroadcastSize, err := decodeRPCBroadcastSize(mirror.MaxBroadcastSize)
+	if err != nil {
+		return rpc.Config{}, err
 	}
-
 	result := rpc.Config{
 		Transport:        transport,
 		MaxPayloadSize:   maxPayloadSize,
@@ -563,17 +544,12 @@ func decodeNodeRPCConfig(
 	switch transport {
 	case rpc.TransportTCP:
 		if mirror.TCP == nil {
-			return nil, invalidConfigf("Node %q 的 rpc.tcp 不能为空", nodeID)
+			return rpc.Config{}, invalidConfigf("rpc.transport 为 tcp 时 rpc.tcp 不能为空")
 		}
 		if mirror.NATS != nil {
-			return nil, invalidConfigf(
-				"Node %q 的 rpc.transport 为 tcp 时不能配置 rpc.nats",
-				nodeID,
-			)
+			return rpc.Config{}, invalidConfigf("rpc.transport 为 tcp 时不能配置 rpc.nats")
 		}
 		result.TCP = rpc.DefaultTCPConfig()
-		result.TCP.Listen = strings.TrimSpace(mirror.TCP.Listen)
-		result.TCP.Advertise = strings.TrimSpace(mirror.TCP.Advertise)
 		if mirror.TCP.SendQueueMessages != nil {
 			result.TCP.SendQueueMessages = *mirror.TCP.SendQueueMessages
 		}
@@ -583,47 +559,119 @@ func decodeNodeRPCConfig(
 		if mirror.TCP.WriteTimeout != nil {
 			result.TCP.WriteTimeout = mirror.TCP.WriteTimeout.Duration()
 		}
+		// Validate 共享 TCP 参数时提供临时合法地址；每个 Node 的实际地址会在随后验证。
+		result.TCP.Listen = "127.0.0.1:1"
+		result.TCP.Advertise = "127.0.0.1:1"
 	case rpc.TransportNATS:
 		if mirror.NATS == nil {
-			return nil, invalidConfigf("Node %q 的 rpc.nats 不能为空", nodeID)
+			return rpc.Config{}, invalidConfigf("rpc.transport 为 nats 时 rpc.nats 不能为空")
 		}
 		if mirror.TCP != nil {
-			return nil, invalidConfigf(
-				"Node %q 的 rpc.transport 为 nats 时不能配置 rpc.tcp",
-				nodeID,
-			)
+			return rpc.Config{}, invalidConfigf("rpc.transport 为 nats 时不能配置 rpc.tcp")
 		}
-		result.NATS = rpc.DefaultNATSConfig()
-		result.NATS.Namespace = strings.TrimSpace(mirror.NATS.Namespace)
-		result.NATS.URLs = append([]string(nil), mirror.NATS.URLs...)
-		if mirror.NATS.ReceiveQueueMessages != nil {
-			result.NATS.ReceiveQueueMessages = *mirror.NATS.ReceiveQueueMessages
+		result.NATS = decodeRPCNATSConfig(*mirror.NATS)
+	default:
+		return rpc.Config{}, invalidConfigf("rpc.transport 必须是 tcp 或 nats")
+	}
+	if err := result.Validate(); err != nil {
+		return rpc.Config{}, invalidConfigf("rpc 配置无效: %v", err)
+	}
+	return result, nil
+}
+
+func decodeRPCPayloadSize(value *originconfig.ByteSize) (int, error) {
+	if value == nil {
+		return rpc.DefaultMaxPayloadSize, nil
+	}
+	size := value.Bytes()
+	if size <= 0 || uint64(size) > uint64(^uint(0)>>1) {
+		return 0, invalidConfigf("rpc.max_payload_size 无法由当前平台 int 表达")
+	}
+	return int(size), nil
+}
+
+func decodeRPCBroadcastSize(value *originconfig.ByteSize) (int, error) {
+	if value == nil {
+		return rpc.DefaultMaxBroadcastSize, nil
+	}
+	size := value.Bytes()
+	if size <= 0 || size > int64(rpc.MaxBroadcastSize) ||
+		uint64(size) > uint64(^uint(0)>>1) {
+		return 0, invalidConfigf("rpc.max_broadcast_size 必须位于 1B～1G 且能由当前平台 int 表达")
+	}
+	return int(size), nil
+}
+
+func decodeRPCNATSConfig(mirror rpcNATSConfigMirror) *rpc.NATSConfig {
+	result := rpc.DefaultNATSConfig()
+	result.Namespace = strings.TrimSpace(mirror.Namespace)
+	result.URLs = append([]string(nil), mirror.URLs...)
+	if mirror.ReceiveQueueMessages != nil {
+		result.ReceiveQueueMessages = *mirror.ReceiveQueueMessages
+	}
+	result.Auth = rpc.NATSAuthConfig{
+		Username:        mirror.Auth.Username,
+		Password:        mirror.Auth.Password,
+		Token:           mirror.Auth.Token,
+		CredentialsFile: mirror.Auth.CredentialsFile,
+		NKeySeedFile:    mirror.Auth.NKeySeedFile,
+	}
+	result.TLS = rpc.NATSTLSConfig{
+		Enabled:            mirror.TLS.Enabled,
+		CAFile:             mirror.TLS.CAFile,
+		CertFile:           mirror.TLS.CertFile,
+		KeyFile:            mirror.TLS.KeyFile,
+		ServerName:         mirror.TLS.ServerName,
+		InsecureSkipVerify: mirror.TLS.InsecureSkipVerify,
+	}
+	return result
+}
+
+// resolveNodeRPCConfig 合成 Node 的独立完整 RPC 快照，避免各 Node 共享可变指针。
+func resolveNodeRPCConfig(
+	nodeID string,
+	mirror *nodeRPCConfigMirror,
+	applicationRPC *rpc.Config,
+) (*rpc.Config, error) {
+	if applicationRPC == nil {
+		if mirror != nil {
+			return nil, invalidConfigf("Node %q 配置 rpc 前必须先配置顶层 rpc", nodeID)
 		}
-		result.NATS.Auth = rpc.NATSAuthConfig{
-			Username:        mirror.NATS.Auth.Username,
-			Password:        mirror.NATS.Auth.Password,
-			Token:           mirror.NATS.Auth.Token,
-			CredentialsFile: mirror.NATS.Auth.CredentialsFile,
-			NKeySeedFile:    mirror.NATS.Auth.NKeySeedFile,
+		return nil, nil
+	}
+	result := cloneRPCConfig(*applicationRPC)
+	switch result.Transport {
+	case rpc.TransportTCP:
+		if mirror == nil || mirror.TCP == nil {
+			return nil, invalidConfigf("Node %q 在 TCP 模式下必须配置 rpc.tcp.listen 和 rpc.tcp.advertise", nodeID)
 		}
-		result.NATS.TLS = rpc.NATSTLSConfig{
-			Enabled:            mirror.NATS.TLS.Enabled,
-			CAFile:             mirror.NATS.TLS.CAFile,
-			CertFile:           mirror.NATS.TLS.CertFile,
-			KeyFile:            mirror.NATS.TLS.KeyFile,
-			ServerName:         mirror.NATS.TLS.ServerName,
-			InsecureSkipVerify: mirror.NATS.TLS.InsecureSkipVerify,
+		result.TCP.Listen = strings.TrimSpace(mirror.TCP.Listen)
+		result.TCP.Advertise = strings.TrimSpace(mirror.TCP.Advertise)
+	case rpc.TransportNATS:
+		if mirror != nil {
+			return nil, invalidConfigf("Node %q 在 NATS 模式下不能配置 rpc；请使用顶层 rpc.nats", nodeID)
 		}
 	default:
-		return nil, invalidConfigf(
-			"Node %q 的 rpc.transport 必须是 tcp 或 nats",
-			nodeID,
-		)
+		return nil, invalidConfigf("rpc.transport 必须是 tcp 或 nats")
 	}
 	if err := result.Validate(); err != nil {
 		return nil, invalidConfigf("Node %q 的 rpc 配置无效: %v", nodeID, err)
 	}
 	return &result, nil
+}
+
+func cloneRPCConfig(source rpc.Config) rpc.Config {
+	result := source
+	if source.TCP != nil {
+		copied := *source.TCP
+		result.TCP = &copied
+	}
+	if source.NATS != nil {
+		copied := *source.NATS
+		copied.URLs = append([]string(nil), source.NATS.URLs...)
+		result.NATS = &copied
+	}
+	return result
 }
 
 // decodeLogConfig 从公开默认值开始覆盖字段，未声明项自然沿用稳定默认。

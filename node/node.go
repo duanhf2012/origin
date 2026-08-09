@@ -18,6 +18,7 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
+	origindiscovery "github.com/duanhf2012/origin/v3/internal/discovery/origin"
 	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/rpc"
@@ -243,6 +244,15 @@ func New(
 	if err := rpcRuntime.Configure(config.RPC); err != nil {
 		return nil, fmt.Errorf("配置 Node %q RPC Runtime: %w", config.ID, err)
 	}
+	if options.DiscoveryKind == "origin" {
+		if err := rpcRuntime.EnableSystem(); err != nil {
+			return nil, fmt.Errorf("启用 Node %q Discovery 系统 RPC: %w", config.ID, err)
+		}
+		options.DiscoveryFactory = origindiscovery.NewFactory(
+			rpcRuntime,
+			options.DiscoverySystemTarget,
+		)
+	}
 
 	// 按已知数量一次分配有序表和查询表，避免装配时重复扩容。
 	instance := &Node{
@@ -359,6 +369,11 @@ func New(
 		instance.byName[binding.Name] = entry
 		if !config.Private && !binding.Private {
 			instance.publicServices++
+		}
+	}
+	if binder, ok := instance.discoveryServer.(discoverySystemBinder); ok {
+		if err := binder.BindSystemRPC(instance.rpcRuntime); err != nil {
+			return nil, fmt.Errorf("绑定 Node %q Discovery 系统 RPC: %w", config.ID, err)
 		}
 	}
 	if err := instance.rpcRuntime.Freeze(); err != nil {

@@ -119,6 +119,19 @@ func Connect(
 // nil 和零长度 payload 都合法。nats.go 在返回前接管或复制发送数据，因此返回后调用方可以
 // 立即复用原切片；natsnet 不为了包装层所有权再复制一次 payload。
 func (conn *Conn) Publish(subject string, payload []byte) error {
+	return conn.publish(subject, "", payload)
+}
+
+// PublishRequest 发布带固定回复 Subject 的 Core NATS 消息。该能力供框架保留控制
+// 平面使用；业务 RPC 仍通过自身的 Request/Response Subject 关联响应。
+func (conn *Conn) PublishRequest(subject, reply string, payload []byte) error {
+	if strings.TrimSpace(reply) == "" {
+		return invalidArgument("natsnet: PublishRequest Reply 不能为空")
+	}
+	return conn.publish(subject, reply, payload)
+}
+
+func (conn *Conn) publish(subject, reply string, payload []byte) error {
 	// 空 Subject 没有可路由语义，直接按调用参数错误返回。
 	if strings.TrimSpace(subject) == "" {
 		return invalidArgument("natsnet: Publish Subject 不能为空")
@@ -131,7 +144,12 @@ func (conn *Conn) Publish(subject string, payload []byte) error {
 	}
 
 	// 官方 Publish 负责连接锁、协议写缓冲和有界重连缓冲；包装层不增加第二套队列。
-	err := conn.raw.Publish(subject, payload)
+	var err error
+	if reply == "" {
+		err = conn.raw.Publish(subject, payload)
+	} else {
+		err = conn.raw.PublishRequest(subject, reply, payload)
+	}
 	return mapError(redactCause(err, conn.options))
 }
 

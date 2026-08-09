@@ -11,8 +11,8 @@ import (
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
-	"github.com/duanhf2012/origin/v3/internal/tcpnet"
 	originlog "github.com/duanhf2012/origin/v3/log"
+	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -35,7 +35,6 @@ type Service struct {
 	logger originlog.Logger
 
 	mu       sync.Mutex
-	listener *tcpnet.Listener
 	cancel   context.CancelFunc
 	commands chan serverCommand
 	done     chan struct{}
@@ -53,12 +52,12 @@ const (
 
 type serverCommand struct {
 	kind    commandKind
-	conn    *tcpnet.Conn
+	conn    rpc.SystemPeer
 	payload []byte
 }
 
 type serverClient struct {
-	conn      *tcpnet.Conn
+	conn      rpc.SystemPeer
 	nodeID    string
 	sessionID uint64
 	hello     bool
@@ -67,7 +66,7 @@ type serverClient struct {
 
 type serverRecord struct {
 	node       publicprovider.Node
-	owner      *tcpnet.Conn
+	owner      rpc.SystemPeer
 	expiresAt  time.Time
 	generation uint64
 	wireSize   int
@@ -123,7 +122,8 @@ func (*Service) OnStart(context.Context) error { return nil }
 // OnStop 不提前关闭发现端；Node 会在自己的 Provider 退出后调用 CloseDiscovery。
 func (*Service) OnStop(context.Context) error { return nil }
 
-// PrepareDiscovery 启动单 Actor 和 M5 TCP Listener。
+// PrepareDiscovery 启动单 Actor。控制连接由已经启动的 RPC Transport 承载，因而不再
+// 创建第二个 TCP Listener 或重复声明端口。
 func (service *Service) PrepareDiscovery(ctx context.Context) error {
 	if service == nil || ctx == nil {
 		return errs.ErrInvalidArgument
@@ -149,32 +149,10 @@ func (service *Service) PrepareDiscovery(ctx context.Context) error {
 		return err
 	}
 	go service.actorLoop(actorCtx, epoch)
-
-	options := tcpnet.DefaultListenOptions(service.pool)
-	options.MaxConnections = maxControlConnections
-	options.Connection.Logger = service.logger
-	options.Connection.MaxMessageSize = publicprovider.MaxSnapshotSize
-	options.Connection.SendQueueFrames = clientSendMessages
-	options.Connection.ReadTimeout = service.config.TTL
-	options.Connection.WriteTimeout = derivedTimeout(service.config.TTL)
-	options.Connection.KeepAlive = service.config.TTL
-	listener, err := tcpnet.Listen(
-		service.config.Server.Listen,
-		options,
-		&serverHandler{service: service},
-	)
-	if err != nil {
-		cancel()
-		<-service.done
-		return err
-	}
-	service.mu.Lock()
-	service.listener = listener
-	service.mu.Unlock()
 	return nil
 }
 
-// CloseDiscovery 先关闭 Listener 与全部连接，再停止 Actor 并等待唯一 goroutine。
+// CloseDiscovery 停止 Actor；RPC Runtime 随后统一关闭底层系统连接。
 func (service *Service) CloseDiscovery(ctx context.Context) error {
 	if service == nil || ctx == nil {
 		return errs.ErrInvalidArgument
@@ -187,15 +165,10 @@ func (service *Service) CloseDiscovery(ctx context.Context) error {
 		return nil
 	}
 	service.closed = true
-	listener := service.listener
 	cancel := service.cancel
 	prepared := service.prepared
 	service.mu.Unlock()
 
-	var result error
-	if listener != nil {
-		result = listener.Close(ctx)
-	}
 	if cancel != nil {
 		cancel()
 	}
@@ -204,7 +177,7 @@ func (service *Service) CloseDiscovery(ctx context.Context) error {
 	} else {
 		service.finishActorWithoutStart()
 	}
-	return result
+	return nil
 }
 
 func (service *Service) finishActorWithoutStart() {
@@ -219,31 +192,39 @@ type serverHandler struct {
 	service *Service
 }
 
-func (handler *serverHandler) OnOpen(conn *tcpnet.Conn) {
-	handler.service.enqueue(serverCommand{kind: commandOpen, conn: conn})
+// BindSystemRPC 在 RPC Freeze 前把 DiscoveryService 注册到保留控制平面。它不会进入
+// 业务 Service 目录，也不会让项目代码借此获得额外调用入口。
+func (service *Service) BindSystemRPC(runtime *rpc.Runtime) error {
+	if service == nil || runtime == nil {
+		return errs.ErrInvalidArgument
+	}
+	return runtime.BindSystemHandler(&serverHandler{service: service})
 }
 
-func (handler *serverHandler) OnMessage(
-	conn *tcpnet.Conn,
-	packet *bufferpool.Buffer,
-) error {
-	payload := append([]byte(nil), packet.Bytes()...)
-	packet.Release()
+func (handler *serverHandler) OnSystemOpen(peer rpc.SystemPeer) {
+	handler.service.enqueue(serverCommand{kind: commandOpen, conn: peer})
+}
+
+func (handler *serverHandler) OnSystemMessage(
+	peer rpc.SystemPeer,
+	payload []byte,
+) {
+	payload = append([]byte(nil), payload...)
 	if len(payload) == 0 {
-		return errProtocol
+		peer.Close()
+		return
 	}
 	if !handler.service.enqueue(serverCommand{
 		kind:    commandMessage,
-		conn:    conn,
+		conn:    peer,
 		payload: payload,
 	}) {
-		return errs.ErrDiscoveryCapacity
+		peer.Close()
 	}
-	return nil
 }
 
-func (handler *serverHandler) OnClose(conn *tcpnet.Conn, _ error) {
-	handler.service.enqueue(serverCommand{kind: commandClose, conn: conn})
+func (handler *serverHandler) OnSystemClose(peer rpc.SystemPeer, _ error) {
+	handler.service.enqueue(serverCommand{kind: commandClose, conn: peer})
 }
 
 func (service *Service) enqueue(command serverCommand) bool {
@@ -260,7 +241,7 @@ func (service *Service) enqueue(command serverCommand) bool {
 
 func (service *Service) actorLoop(ctx context.Context, epoch uint64) {
 	defer close(service.done)
-	clients := make(map[*tcpnet.Conn]*serverClient)
+	clients := make(map[rpc.SystemPeer]*serverClient)
 	records := make(map[string]serverRecord)
 	expiries := make(expiryHeap, 0)
 	heap.Init(&expiries)
@@ -388,7 +369,7 @@ func (service *Service) actorLoop(ctx context.Context, epoch uint64) {
 
 func (service *Service) handleMessage(
 	client *serverClient,
-	clients map[*tcpnet.Conn]*serverClient,
+	clients map[rpc.SystemPeer]*serverClient,
 	records map[string]serverRecord,
 	expiries *expiryHeap,
 	totalServices *int,
@@ -436,12 +417,22 @@ func (service *Service) handleMessage(
 			service.sendError(client.conn, errs.CodeDiscoverySnapshotInvalid)
 			return revision
 		}
-		if current, exists := records[node.NodeID]; exists &&
-			(current.owner != client.conn ||
-				current.node.SessionID != node.SessionID) {
+		current, exists := records[node.NodeID]
+		if exists && current.node.SessionID != node.SessionID {
 			service.sendError(client.conn, errs.CodeDiscoveryDuplicateNode)
 			return revision
-		} else if exists && nodeEqual(current.node, node) {
+		}
+		if exists && current.owner != client.conn {
+			oldOwner := current.owner
+			if oldClient := clients[oldOwner]; oldClient != nil {
+				oldClient.published = false
+			}
+			current.owner = client.conn
+			records[node.NodeID] = current
+			client.published = true
+			oldOwner.Close()
+		}
+		if exists && nodeEqual(current.node, node) {
 			current.expiresAt = time.Now().Add(service.config.TTL)
 			current.generation++
 			records[node.NodeID] = current
@@ -549,7 +540,7 @@ func (service *Service) handleMessage(
 }
 
 func (service *Service) sendFull(
-	conn *tcpnet.Conn,
+	conn rpc.SystemPeer,
 	epoch uint64,
 	revision uint64,
 	records map[string]serverRecord,
@@ -567,7 +558,7 @@ func (service *Service) sendFull(
 }
 
 func (service *Service) broadcast(
-	clients map[*tcpnet.Conn]*serverClient,
+	clients map[rpc.SystemPeer]*serverClient,
 	payload []byte,
 ) {
 	for _, client := range clients {
@@ -577,18 +568,15 @@ func (service *Service) broadcast(
 	}
 }
 
-func (service *Service) sendError(conn *tcpnet.Conn, code errs.Code) {
+func (service *Service) sendError(conn rpc.SystemPeer, code errs.Code) {
 	if code == 0 {
 		code = errs.CodeInternal
 	}
 	service.send(conn, encodeError(code))
 }
 
-func (service *Service) send(conn *tcpnet.Conn, payload []byte) {
-	buffer := service.pool.Acquire(len(payload))
-	copy(buffer.Bytes(), payload)
-	if err := conn.Send(buffer); err != nil {
-		buffer.Release()
+func (service *Service) send(conn rpc.SystemPeer, payload []byte) {
+	if err := conn.Send(payload); err != nil {
 		conn.Close()
 	}
 }

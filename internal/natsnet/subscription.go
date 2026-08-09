@@ -195,6 +195,7 @@ func (subscription *Subscription) deliver(raw *nats.Msg) {
 	}()
 	subscription.handler(Message{
 		Subject: raw.Subject,
+		Reply:   raw.Reply,
 		Data:    raw.Data,
 	})
 }

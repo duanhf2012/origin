@@ -8,6 +8,10 @@
 >
 > 前置里程碑：M5 TCP 网络基础库、M8 Node 时间轮内核、M9 Service 调度与协作式等待、
 > M11 RPC 契约与代码生成、M12 Origin 自定义静态编解码扩展
+>
+> 配置与 Discovery 更新：TCP 共享参数现位于顶层 `rpc.tcp`，各 Node 只声明自己的
+> `listen/advertise`。Origin Discovery 在同一 RPC Listener 上使用独立保留控制连接，
+> 不再拥有 `server.listen/address`。
 
 ## 1. 目标
 
@@ -176,9 +180,18 @@ M13 只增加以下通用缓冲区能力：
 
 ## 6. 配置外观
 
-M13 延续已经确认的 Node 级 Transport 配置：
+TCP Transport 在 Application 顶层选择一次；全局限制与调优参数只配置一次，每个 Node 仅声明
+自己的监听和对外地址：
 
 ```yaml
+rpc:
+  transport: tcp
+  max_payload_size: 4M
+  tcp:
+    send_queue_messages: 16384
+    read_idle_timeout: 15s
+    write_timeout: 15s
+
 nodes:
   - id: gateway-1
 
@@ -188,15 +201,9 @@ nodes:
       default_await_timeout: 15s
 
     rpc:
-      transport: tcp
-      max_payload_size: 4M
-
       tcp:
         listen: 0.0.0.0:7101
         advertise: 10.0.1.20:7101
-        send_queue_messages: 16384
-        read_idle_timeout: 15s
-        write_timeout: 15s
 
     services:
       - GatewayService
@@ -204,15 +211,15 @@ nodes:
 
 规则如下：
 
-1. `rpc` 省略时当前 Node 只支持同 Node RPC，不创建网络资源；
-2. M13 只接受 `transport: tcp`；`nats` 到 M15 才有运行语义；
-3. `listen` 是当前 Node 绑定地址；
-4. `advertise` 是后续 Discovery 和 M13 内部测试目标源对外提供的可达地址；
+1. 顶层 `rpc` 省略时所有 Node 都只支持同 Node RPC，不创建网络资源；
+2. `rpc.transport` 选择 `tcp`，`nats` 到 M15 才有运行语义；
+3. `nodes[].rpc.tcp.listen` 是当前 Node 绑定地址；
+4. `nodes[].rpc.tcp.advertise` 是 Discovery 与远程调用对外使用的可达地址；
 5. `advertise` 不允许通配地址或零端口；
-6. `max_payload_size` 表示业务 payload 上限，默认 `4M`；
+6. 顶层 `rpc.max_payload_size` 表示业务 payload 上限，默认 `4M`；
 7. TCP 实际长度帧上限为业务上限加固定 `512B` RPC 包络余量；
 8. 接收端先用“业务上限 + 512B”限制完整帧分配，再在解析固定头后校验真实业务 payload；
-9. `send_queue_messages` 表示每条连接最多等待发送的完整 RPC 包数量，默认 `16384`，最大
+9. 顶层 `rpc.tcp.send_queue_messages` 表示每条连接最多等待发送的完整 RPC 包数量，默认 `16384`，最大
    `65536`；
 10. TCP RPC 队列只按 `send_queue_messages` 限制消息数量，不再配置或内部维护
     `send_queue_bytes`；

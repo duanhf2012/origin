@@ -8,6 +8,8 @@ package natsnet
 type Message struct {
 	// Subject 是收到消息的实际 NATS Subject。
 	Subject string
+	// Reply 是发布方可选声明的响应 Subject；为空表示该消息不期待定向回复。
+	Reply string
 	// Data 是可转移、不可修改的只读 payload。
 	Data []byte
 }

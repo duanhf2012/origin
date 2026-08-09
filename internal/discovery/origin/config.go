@@ -2,8 +2,6 @@
 package origin
 
 import (
-	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,11 +22,10 @@ type Config struct {
 	Server ServerConfig
 }
 
-// ServerConfig 同时描述 DiscoveryService 监听地址和客户端引导地址。
+// ServerConfig 只标识承载 DiscoveryService 的 Node。实际 TCP 地址或 NATS 连接参数
+// 从 Application 的 rpc 和 nodes 配置推导，避免在 Discovery 中重复声明第二份端口。
 type ServerConfig struct {
-	Node    string
-	Listen  string
-	Address string
+	Node string
 }
 
 type configMirror struct {
@@ -37,9 +34,7 @@ type configMirror struct {
 }
 
 type serverConfigMirror struct {
-	Node    string `json:"node"`
-	Listen  string `json:"listen"`
-	Address string `json:"address"`
+	Node string `json:"node"`
 }
 
 // DecodeConfig 严格解码并验证 Origin Provider 配置。
@@ -51,9 +46,7 @@ func DecodeConfig(config publicprovider.Config) (Config, error) {
 	result := Config{
 		TTL: defaultTTL,
 		Server: ServerConfig{
-			Node:    strings.TrimSpace(mirror.Server.Node),
-			Listen:  strings.TrimSpace(mirror.Server.Listen),
-			Address: strings.TrimSpace(mirror.Server.Address),
+			Node: strings.TrimSpace(mirror.Server.Node),
 		},
 	}
 	if mirror.TTL != nil {
@@ -67,41 +60,7 @@ func DecodeConfig(config publicprovider.Config) (Config, error) {
 			"discovery.origin.server.node 必须是 63 字节以内的小写 kebab-case",
 		)
 	}
-	if err := validateListenAddress(result.Server.Listen); err != nil {
-		return Config{}, err
-	}
-	if err := validateDialAddress(result.Server.Address); err != nil {
-		return Config{}, err
-	}
 	return result, nil
-}
-
-func validateListenAddress(address string) error {
-	_, portText, err := net.SplitHostPort(address)
-	if err != nil {
-		return invalidConfig("discovery.origin.server.listen 必须是 host:port")
-	}
-	port, err := strconv.Atoi(portText)
-	if err != nil || port <= 0 || port > 65535 {
-		return invalidConfig("discovery.origin.server.listen 端口必须位于 1～65535")
-	}
-	return nil
-}
-
-func validateDialAddress(address string) error {
-	host, portText, err := net.SplitHostPort(address)
-	if err != nil {
-		return invalidConfig("discovery.origin.server.address 必须是 host:port")
-	}
-	host = strings.TrimSpace(host)
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		return invalidConfig("discovery.origin.server.address 不能使用空主机或通配地址")
-	}
-	port, err := strconv.Atoi(portText)
-	if err != nil || port <= 0 || port > 65535 {
-		return invalidConfig("discovery.origin.server.address 端口必须位于 1～65535")
-	}
-	return nil
 }
 
 func validKebab(value string) bool {

@@ -4,6 +4,7 @@ package providertest
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ type recorder struct {
 	changed  chan struct{}
 }
 
-// Run 验证首次空快照、发布、幂等发布、撤销、幂等撤销、状态和关闭边界。
+// Run 验证首次空快照、完整记录传播、更新、幂等操作、身份边界和关闭失效。
 func Run(t *testing.T, harness Harness) {
 	t.Helper()
 	if harness.Factory == nil {
@@ -52,11 +53,13 @@ func Run(t *testing.T, harness Harness) {
 	node := publicprovider.Node{
 		NodeID:    "publisher-1",
 		SessionID: 101,
-		Labels:    map[string]string{"region": "test"},
+		Labels:    map[string]string{"game_type": "battle"},
 		Transport: publicprovider.TransportNATS,
 		Services: []publicprovider.Service{{
-			ServiceName: "ProviderContractService",
-			State:       publicprovider.ServiceStateRunning,
+			ServiceName:         "ProviderContractService",
+			State:               publicprovider.ServiceStateRunning,
+			ContractID:          101,
+			ContractFingerprint: [32]byte{1},
 		}},
 	}
 	operationCtx, cancel := context.WithTimeout(context.Background(), harness.Timeout)
@@ -65,7 +68,17 @@ func Run(t *testing.T, harness Harness) {
 		t.Fatalf("providertest: Publish() error = %v", err)
 	}
 	cancel()
-	observerRecorder.await(t, harness.Timeout, "publisher-1", true)
+	observerRecorder.awaitNode(t, harness.Timeout, node)
+
+	// Provider 不能允许调用者冒充其他 Context 身份发布记录。
+	wrongIdentity := node
+	wrongIdentity.NodeID = "intruder-1"
+	operationCtx, cancel = context.WithTimeout(context.Background(), harness.Timeout)
+	err := publisher.Publish(operationCtx, wrongIdentity)
+	cancel()
+	if !errs.IsCode(err, errs.CodeDiscoverySnapshotInvalid) {
+		t.Fatalf("providertest: 身份不一致 Publish() error = %v", err)
+	}
 
 	operationCtx, cancel = context.WithTimeout(context.Background(), harness.Timeout)
 	if err := publisher.Publish(operationCtx, node); err != nil {
@@ -73,6 +86,22 @@ func Run(t *testing.T, harness Harness) {
 		t.Fatalf("providertest: 重复 Publish() error = %v", err)
 	}
 	cancel()
+
+	// 同一 Session 的完整更新必须同时传播标签和 Service 状态，不能只更新存在性。
+	updated := node
+	updated.Labels = map[string]string{
+		"game_type": "battle",
+		"game_mode": "ranked",
+	}
+	updated.Services = append([]publicprovider.Service(nil), node.Services...)
+	updated.Services[0].State = publicprovider.ServiceStateRetired
+	operationCtx, cancel = context.WithTimeout(context.Background(), harness.Timeout)
+	if err := publisher.Publish(operationCtx, updated); err != nil {
+		cancel()
+		t.Fatalf("providertest: 更新 Publish() error = %v", err)
+	}
+	cancel()
+	observerRecorder.awaitNode(t, harness.Timeout, updated)
 
 	operationCtx, cancel = context.WithTimeout(context.Background(), harness.Timeout)
 	if err := publisher.Withdraw(operationCtx); err != nil {
@@ -89,11 +118,58 @@ func Run(t *testing.T, harness Harness) {
 	}
 	cancel()
 
+	// 未显式 Withdraw 的异常关闭也必须最终让其他观察者移除该 Session。
+	operationCtx, cancel = context.WithTimeout(context.Background(), harness.Timeout)
+	if err := publisher.Publish(operationCtx, updated); err != nil {
+		cancel()
+		t.Fatalf("providertest: Close 前 Publish() error = %v", err)
+	}
+	cancel()
+	observerRecorder.awaitNode(t, harness.Timeout, updated)
+	if err := publisher.Close(context.Background()); err != nil {
+		t.Fatalf("providertest: publisher Close() error = %v", err)
+	}
+	observerRecorder.await(t, harness.Timeout, "publisher-1", false)
+
 	if err := observer.Close(context.Background()); err != nil {
 		t.Fatalf("providertest: observer Close() error = %v", err)
 	}
 	observerRecorder.markClosed()
 	time.Sleep(20 * time.Millisecond)
+}
+
+func (recorder *recorder) awaitNode(
+	t *testing.T,
+	timeout time.Duration,
+	expected publicprovider.Node,
+) {
+	t.Helper()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		recorder.mu.Lock()
+		var current *publicprovider.Node
+		for index := range recorder.snapshot.Nodes {
+			if recorder.snapshot.Nodes[index].NodeID == expected.NodeID {
+				copyNode := recorder.snapshot.Nodes[index]
+				current = &copyNode
+				break
+			}
+		}
+		recorder.mu.Unlock()
+		if current != nil && reflect.DeepEqual(*current, expected) {
+			return
+		}
+		select {
+		case <-recorder.changed:
+		case <-timer.C:
+			t.Fatalf(
+				"providertest: 等待完整 Node 超时，got=%+v want=%+v",
+				current,
+				expected,
+			)
+		}
+	}
 }
 
 func newProvider(

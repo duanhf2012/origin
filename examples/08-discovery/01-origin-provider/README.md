@@ -4,7 +4,9 @@
 
 ## 配置重点
 
-顶层 `discovery.type: origin` 选择内置 Provider；`origin.server.node` 指出承载 `DiscoveryService` 的 Node，`listen/address` 是客户端连接地址。示例使用端口 `18090`，运行前确保未被占用。
+顶层 `discovery.type: origin` 选择内置 Provider；`origin.server.node` 指出承载
+`DiscoveryService` 的 Node。它复用该 Node 在 `rpc.tcp.advertise` 中发布的 RPC 地址，不再有
+单独的 `listen/address`。示例使用端口 `18090`，运行前确保未被占用。
 
 ## 运行与观察
 
@@ -12,6 +14,7 @@
 
 ## 可修改实验
 
-可在 `discovery-1` 的 `services` 增加自己的普通 Service，验证它仍能共存；生产环境应将地址设为受限内网地址，并用网络策略保护发现端口。
+可在 `discovery-1` 的 `services` 增加自己的普通 Service，验证它仍能共存；生产环境应将
+`rpc.tcp.advertise` 设为受限内网可达地址，并用网络策略保护该 RPC 端口。
 
 对应教程：[服务发现](../../../docs/baseline/v3.0/guides/08.discovery.md)。

@@ -34,6 +34,7 @@ type natsRuntime struct {
 	conn        *natsnet.Conn
 	requestSub  *natsnet.Subscription
 	responseSub *natsnet.Subscription
+	systemSubs  []*natsnet.Subscription
 	deadlines   *inboundDeadlines
 	engine      *timerwheel.Engine
 
@@ -186,9 +187,10 @@ func (runtime *natsRuntime) connectGeneration(
 	}
 
 	// Broker 必须能够承载业务上限加最坏 Origin 包络；否则启动后大包必然随机失败。
-	requiredPayload := int64(
-		runtime.config.MaxPayloadSize + natsMaximumEnvelopeSize,
-	)
+	requiredPayload := int64(runtime.config.MaxPayloadSize + natsMaximumEnvelopeSize)
+	if runtime.owner.system != nil && requiredPayload < MaxSystemMessageSize {
+		requiredPayload = MaxSystemMessageSize
+	}
 	if conn.MaxPayload() < requiredPayload {
 		conn.Close()
 		_ = conn.Wait(context.Background())
@@ -256,6 +258,28 @@ func (runtime *natsRuntime) connectGeneration(
 	}
 	runtime.mu.Lock()
 	runtime.requestSub = requestSub
+	runtime.mu.Unlock()
+	var systemSubs []*natsnet.Subscription
+	if runtime.owner.system != nil {
+		systemSubs, err = runtime.owner.system.setupNATS(
+			ctx,
+			conn,
+			runtime.config.NATS.Namespace,
+			runtime.config.NATS.ReceiveQueueMessages,
+		)
+		if err != nil {
+			runtime.discardGeneration(
+				generation,
+				conn,
+				requestSub,
+				responseSub,
+				deadlines,
+			)
+			return err
+		}
+	}
+	runtime.mu.Lock()
+	runtime.systemSubs = systemSubs
 	// Closed 与发布使用同一代次线性化：已经终止的连接不能被宣布为当前 Ready。
 	if runtime.stopping || runtime.closed ||
 		runtime.generation != generation ||
@@ -298,6 +322,7 @@ func (runtime *natsRuntime) discardGeneration(
 		runtime.owner.NotifyRoutesChanged()
 	}
 	runtime.mu.Lock()
+	var systemSubs []*natsnet.Subscription
 	if runtime.generation == generation {
 		if runtime.conn == conn {
 			runtime.conn = nil
@@ -311,6 +336,10 @@ func (runtime *natsRuntime) discardGeneration(
 		if runtime.deadlines == deadlines {
 			runtime.deadlines = nil
 		}
+		if runtime.conn == nil {
+			systemSubs = runtime.systemSubs
+			runtime.systemSubs = nil
+		}
 	}
 	runtime.mu.Unlock()
 	if requestSub != nil {
@@ -319,12 +348,18 @@ func (runtime *natsRuntime) discardGeneration(
 	if responseSub != nil {
 		responseSub.Close()
 	}
+	for _, subscription := range systemSubs {
+		subscription.Close()
+	}
 	if conn != nil {
 		conn.Close()
 		_ = conn.Wait(context.Background())
 	}
 	if deadlines != nil {
 		deadlines.close(errs.ErrTransportUnavailable)
+	}
+	if runtime.owner.system != nil {
+		runtime.owner.system.notifyNATSDisconnected(errs.ErrTransportUnavailable)
 	}
 }
 
@@ -436,8 +471,10 @@ func (runtime *natsRuntime) connectionOptions() natsnet.Options {
 	)
 	options.NoEcho = true
 	options.IgnoreAuthErrorAbort = true
-	options.MaxMessageSize =
-		runtime.config.MaxPayloadSize + natsMaximumEnvelopeSize
+	options.MaxMessageSize = runtime.config.MaxPayloadSize + natsMaximumEnvelopeSize
+	if runtime.owner.system != nil && options.MaxMessageSize < MaxSystemMessageSize {
+		options.MaxMessageSize = MaxSystemMessageSize
+	}
 	options.Reconnect.MaxAttempts = -1
 	options.Reconnect.BufferSize = -1
 	options.Subscription.PendingMessages = config.ReceiveQueueMessages
@@ -505,10 +542,12 @@ func (runtime *natsRuntime) close(ctx context.Context) error {
 	recoveryStarted := runtime.started
 	requestSub := runtime.requestSub
 	responseSub := runtime.responseSub
+	systemSubs := runtime.systemSubs
 	conn := runtime.conn
 	deadlines := runtime.deadlines
 	runtime.requestSub = nil
 	runtime.responseSub = nil
+	runtime.systemSubs = nil
 	runtime.conn = nil
 	runtime.deadlines = nil
 	runtime.mu.Unlock()
@@ -524,6 +563,9 @@ func (runtime *natsRuntime) close(ctx context.Context) error {
 	}
 	if responseSub != nil {
 		responseSub.Close()
+	}
+	for _, subscription := range systemSubs {
+		subscription.Close()
 	}
 	runtime.pending.failAll(errs.ErrTransportUnavailable)
 	var result error
@@ -1048,6 +1090,9 @@ func (runtime *natsRuntime) handleGenerationEvent(
 			runtime.owner.NotifyRoutesChanged()
 		}
 		runtime.pending.failCurrent(errs.ErrTransportUnavailable)
+		if runtime.owner.system != nil {
+			runtime.owner.system.notifyNATSDisconnected(errs.ErrTransportUnavailable)
+		}
 		runtime.mu.Lock()
 		runtime.consecutiveFailures++
 		failures = runtime.consecutiveFailures
@@ -1088,6 +1133,9 @@ func (runtime *natsRuntime) handleGenerationEvent(
 			runtime.owner.NotifyRoutesChanged()
 		}
 		runtime.pending.failCurrent(errs.ErrTransportUnavailable)
+		if runtime.owner.system != nil {
+			runtime.owner.system.notifyNATSDisconnected(errs.ErrTransportUnavailable)
+		}
 		if !started {
 			return
 		}

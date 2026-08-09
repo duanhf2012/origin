@@ -1,15 +1,42 @@
+# 应用日志配置；本示例只把日志输出到控制台。
 log:
-  console: {enabled: true, level: info, format: text}
+  console:
+    enabled: true             # 启用控制台日志输出。
+    level: info               # 最低输出级别；info 会显示常规运行信息。
+    format: text              # 日志格式；text 便于直接阅读示例输出。
+
+# 服务发现配置；所有 Node 通过这里找到彼此和各自公开的 Service。
 discovery:
-  type: origin
+  type: origin                # 使用 Origin 内置 Provider，不依赖外部发现中间件。
   origin:
-    ttl: 5s
+    ttl: 5s                   # 发现租约保留时间；超过后未续租的实例会被判定为过期。
     server:
-      node: discovery-1
-      listen: 127.0.0.1:18090
-      address: 127.0.0.1:18090
+      node: discovery-1       # 承载 DiscoveryService 的 Node ID。
+
+# RPC 传输为整个 Application 统一选择；DiscoveryService 复用 discovery-1 的 RPC 地址。
+rpc:
+  transport: tcp              # 使用 Origin TCP 传输；也可改为 nats 并在此处填写连接参数。
+  tcp:
+    send_queue_messages: 16384 # 每条 TCP 连接最多等待发送的完整消息数。
+    read_idle_timeout: 15s     # 空闲读超时；设为 0s 可关闭应用层心跳。
+    write_timeout: 15s         # 写出一个完整 TCP 帧允许的最长时间。
+
+# 当前 Application 中要启动的 Node 列表。
 nodes:
   - id: discovery-1
-    services: [DiscoveryService, Service]
+    rpc:
+      tcp:
+        listen: 127.0.0.1:18090    # discovery-1 本机绑定的 RPC（及 Discovery 控制）地址。
+        advertise: 127.0.0.1:18090 # 其他 Node 用来连接 discovery-1 的可达地址。
+    # 该 Node 同时提供发现服务和一个普通业务 Service；DiscoveryService 不要求独占 Node。
+    services:
+      - DiscoveryService      # Origin Provider 的发现服务，负责维护服务目录。
+      - Service               # 示例中的普通业务 Service，用于观察 Node 间发现事件。
   - id: game-1
-    services: [Service]
+    rpc:
+      tcp:
+        listen: 127.0.0.1:18091    # game-1 本机绑定的业务 RPC 地址。
+        advertise: 127.0.0.1:18091 # 发布给其他 Node 的可达地址。
+    # 第二个 Node 只运行普通业务 Service，用于被 discovery-1 发现。
+    services:
+      - Service               # 被发现的业务 Service 模板。

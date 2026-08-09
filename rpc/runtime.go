@@ -62,6 +62,9 @@ type Runtime struct {
 	// nats 在配置启用 NATS 时保存 Node 共享 Connection、两个 Subscription 和 pending。
 	// TCP 与 NATS 直接使用不同字段，不在逐调用热路径引入接口分派。
 	nats *natsRuntime
+	// system 在 Application 选择 Origin Discovery 时才初始化。它复用上面的 TCP Listener
+	// 或 NATS Connection，但完全绕过业务 RPC 的 Route、Session 和 Service Dispatcher。
+	system *systemRuntime
 
 	// rpcStats 是 Local/TCP/NATS 三个固定原子计数块；放在结构体末尾，避免诊断冷字段
 	// 改变 M21 已建立基线的路由和 Transport 热字段布局。零值即可并发使用。
@@ -374,6 +377,25 @@ func (runtime *Runtime) Configure(config *Config) error {
 	return nil
 }
 
+// EnableSystem 在 Freeze 前为 Origin Discovery 启用保留控制平面。未选择 Origin
+// Discovery 的 Application 不会增加 NATS Subscription、Broker max_payload 要求或 TCP
+// Listener 帧上限。
+func (runtime *Runtime) EnableSystem() error {
+	if runtime == nil {
+		return errs.ErrInvalidArgument
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.frozen.Load() || runtime.closed.Load() ||
+		(runtime.remote == nil && runtime.nats == nil) {
+		return errs.ErrServiceNotReady
+	}
+	if runtime.system == nil {
+		runtime.system = newSystemRuntime(runtime)
+	}
+	return nil
+}
+
 // Freeze 结束 Node RPC 目录装配并允许生成客户端执行调用。
 func (runtime *Runtime) Freeze() error {
 	if runtime == nil {
@@ -404,6 +426,9 @@ func (runtime *Runtime) Close(ctx context.Context) error {
 	}
 	if runtime.nats != nil {
 		result = errors.Join(result, runtime.nats.close(ctx))
+	}
+	if runtime.system != nil {
+		runtime.system.close(errs.ErrServiceStopped)
 	}
 	runtime.reportTransportEvent(TransportEvent{
 		Kind:  runtime.transportKind(),

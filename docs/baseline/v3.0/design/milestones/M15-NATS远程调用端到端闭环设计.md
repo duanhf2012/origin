@@ -633,35 +633,37 @@ Namespace 与 NodeID 统一使用以下 63 字符以内的小写 kebab-case：
 NodeID 示例为 `gateway-1`、`game-12`、`db-cn-east-1`。点号、下划线、通配符、空白和大写
 字母都在配置冷路径拒绝，使 NodeID 可以安全作为一个 NATS Subject Token。
 
-NATS 配置继续属于每个 Node；Application 不拥有默认 Transport：
+实现更新：NATS Transport 现在在顶层 `rpc` 选择一次；`namespace`、`urls`、认证与 TLS
+也只在顶层声明。每个 Node 仍创建并拥有自己的 NATS Connection、请求/响应订阅以及
+保留的 Discovery 系统 Subject，不能在同一 Application 与 TCP 混用：
 
 ```yaml
+rpc:
+  transport: nats
+  max_payload_size: 4M
+  nats:
+    namespace: game-prod
+    urls:
+      - nats://nats-1:4222
+      - nats://nats-2:4222
+      - nats://nats-3:4222
+    receive_queue_messages: 16384
+    auth:
+      username: ${NATS_USERNAME}
+      password: ${NATS_PASSWORD}
+    tls:
+      enabled: false
+      ca_file: ""
+      cert_file: ""
+      key_file: ""
+      server_name: ""
+      insecure_skip_verify: false
 nodes:
   - id: game-1
     scheduler:
       max_tasks: 20000
       max_await_tasks: 10000
       default_await_timeout: 15s
-    rpc:
-      transport: nats
-      max_payload_size: 4M
-      nats:
-        namespace: game-prod
-        urls:
-          - nats://nats-1:4222
-          - nats://nats-2:4222
-          - nats://nats-3:4222
-        receive_queue_messages: 16384
-        auth:
-          username: ${NATS_USERNAME}
-          password: ${NATS_PASSWORD}
-        tls:
-          enabled: false
-          ca_file: ""
-          cert_file: ""
-          key_file: ""
-          server_name: ""
-          insecure_skip_verify: false
     services:
       - PlayerService
 ```

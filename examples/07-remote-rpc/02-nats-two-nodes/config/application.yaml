@@ -7,23 +7,18 @@ discovery:
     ttl: 5s
     server:
       node: discovery-1
-      listen: 127.0.0.1:18081
-      address: 127.0.0.1:18081
+
+# NATS 连接参数只配置一次；每个 Node 会创建并拥有自己的连接。
+rpc:
+  transport: nats
+  nats:
+    namespace: origin-tutorial
+    urls: [nats://127.0.0.1:4222]
 
 nodes:
   - id: discovery-1
     services: [DiscoveryService]
   - id: player-1
-    rpc:
-      transport: nats
-      nats:
-        namespace: origin-tutorial
-        urls: [nats://127.0.0.1:4222]
     services: [PlayerService]
   - id: gateway-1
-    rpc:
-      transport: nats
-      nats:
-        namespace: origin-tutorial
-        urls: [nats://127.0.0.1:4222]
     services: [GatewayService]

@@ -4,6 +4,10 @@
 > 创建日期：2026-07-30
 > 最后更新：2026-07-30
 > 当前状态：已实现并通过验收
+>
+> 后续覆盖：Origin Discovery 已改为复用 Application RPC Transport；`server.node` 是唯一
+> 引导信息，TCP 地址从该 Node 的 `rpc.tcp.advertise` 推导，NATS 使用保留系统 Subject。
+> 本文有关独立 Discovery `listen/address` 或独立 Listener 的旧描述不再适用。
 
 ## 1. 里程碑目标
 
@@ -174,13 +178,13 @@ discovery:
     ttl: 15s
     server:
       node: discovery-1
-      listen: 0.0.0.0:7100
-      address: 10.0.1.10:7100
 ```
 
 TTL 默认 `15s`、范围 `3s～5m`；心跳、Dial/Hello/写超时、重连退避和收敛窗口全部派生，
-不增加配置字段。M17 限定可信内网，必须由防火墙、安全组或 NetworkPolicy 限制端口；需要
-认证、TLS 或高可用时使用 M18 etcd Provider。
+不增加配置字段。TCP 拨号地址由 `server.node` 指向的 `nodes[].rpc.tcp.advertise` 推导，
+NATS 使用顶层 `rpc.nats` 的保留 Subject；不再允许 `server.listen/address`。M17 限定可信
+内网，必须由防火墙、安全组或 NetworkPolicy 限制 RPC 端口；需要认证、TLS 或高可用时使用
+M18 etcd Provider。
 
 ## 9. 固定容量和错误码
 

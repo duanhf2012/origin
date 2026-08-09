@@ -4,15 +4,16 @@ discovery:
   type: etcd
   etcd:
     endpoints: [http://127.0.0.1:2379]
-    # etcd 发现数据所属和监听的网络分区，不是 Node 的 region 标签。
-    local_network: cn-east
+    # 当前配置下启动的所有 Node 都注册到该网络，
+    # 并自动能发现该网络中的所有服务。
+    local_network: game-partition-1
     ttl: 5s
     request_timeout: 3s
 nodes:
-  - id: game-1
-    # Node 对外发布的键值标签；等价于分行写法 region: cn-east。
-    labels: {region: cn-east}
+  - id: battle-room-1
+    # 给当前 Node 发布的服务记录添加游戏类型标签。
+    labels: {game_type: battle}
     services: [Service]
-  - id: game-2
-    labels: {region: cn-east}
+  - id: card-room-1
+    labels: {game_type: card}
     services: [Service]

@@ -8,6 +8,9 @@
 
 > 后续覆盖：M16 保留 M6 通用低层默认值，但允许 `MaxAttempts=-1`，并由 RPC Adapter
 > 固定使用无限重连；下文“有限重连”只描述 M6 当时已经实现的通用默认。
+>
+> 配置更新：Application 级 `rpc.nats` 统一提供连接参数；每个 Node 仍独占一个 NATS
+> Connection。Origin Discovery 在该连接上使用保留系统 Subject，具体见当前配置设计。
 
 ## 1. 目标
 
@@ -238,21 +241,22 @@ M6 通用 Go Options 的 `Name` 和 `URLs` 必填。M15 Node 配置不要求业�
 用户配置继续遵守 v3 规则：
 
 ```yaml
+rpc:
+  transport: nats
+  max_payload_size: 4M
+  nats:
+    namespace: game-prod
+    urls:
+      - nats://127.0.0.1:4222
+    receive_queue_messages: 16384
+
 nodes:
   - id: chat-1
     scheduler:
       default_await_timeout: 15s
-    rpc:
-      transport: nats
-      max_payload_size: 4M
-      nats:
-        namespace: game-prod
-        urls:
-          - nats://127.0.0.1:4222
-        receive_queue_messages: 16384
 ```
 
-M6 只实现 Options 和校验，不在本里程碑把该结构接入完整 Node 配置；M15 接入时把对应
+M6 只实现 Options 和校验，不在本里程碑把该结构接入完整 Application 配置；M15 接入时把对应
 配置片段解析为 `natsnet.Options`，并固定 `NoEcho=true`、`Reconnect.BufferSize=-1`。
 `receive_queue_messages` 映射为 Request/Response Subscription 各自的
 `PendingMessages`。M6 通用调用方仍可直接使用其他合法 Options；连接超时、基础操作

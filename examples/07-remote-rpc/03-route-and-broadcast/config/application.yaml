@@ -6,23 +6,23 @@ discovery:
     ttl: 5s
     server:
       node: discovery-1
-      listen: 127.0.0.1:18082
-      address: 127.0.0.1:18082
+rpc:
+  transport: tcp
+  tcp: {}
 nodes:
   - id: discovery-1
+    rpc:
+      tcp: {listen: 127.0.0.1:18082, advertise: 127.0.0.1:18082}
     services: [DiscoveryService]
   - id: player-1
     rpc:
-      transport: tcp
       tcp: {listen: 127.0.0.1:18111, advertise: 127.0.0.1:18111}
     services: [PlayerService]
   - id: player-2
     rpc:
-      transport: tcp
       tcp: {listen: 127.0.0.1:18112, advertise: 127.0.0.1:18112}
     services: [PlayerService]
   - id: gateway-1
     rpc:
-      transport: tcp
       tcp: {listen: 127.0.0.1:18113, advertise: 127.0.0.1:18113}
     services: [GatewayService]

@@ -8,6 +8,7 @@ import (
 
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
+	internaldiscovery "github.com/duanhf2012/origin/v3/internal/discovery"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/service"
 )
@@ -37,14 +38,15 @@ func TestDiscoveryProviderFactoryPanicIsIsolated(t *testing.T) {
 }
 
 type providerRuntimeFixture struct {
-	context publicprovider.Context
+	context  publicprovider.Context
+	snapshot *publicprovider.Snapshot
 }
 
 func (fixture *providerRuntimeFixture) Start(context.Context) error {
 	if err := fixture.context.Host.SetTTL(3 * time.Second); err != nil {
 		return err
 	}
-	if err := fixture.context.Host.ReplaceSnapshot(publicprovider.Snapshot{
+	snapshot := publicprovider.Snapshot{
 		Nodes: []publicprovider.Node{{
 			NodeID:    "remote-1",
 			SessionID: 77,
@@ -54,7 +56,11 @@ func (fixture *providerRuntimeFixture) Start(context.Context) error {
 				State:       publicprovider.ServiceStateRunning,
 			}},
 		}},
-	}); err != nil {
+	}
+	if fixture.snapshot != nil {
+		snapshot = *fixture.snapshot
+	}
+	if err := fixture.context.Host.ReplaceSnapshot(snapshot); err != nil {
 		return err
 	}
 	fixture.context.Host.Report(publicprovider.Report{State: publicprovider.StateReady})
@@ -142,3 +148,93 @@ func TestProviderRuntimeReportsRecoveryImmediatelyAndExpiresSnapshotAtTTL(
 }
 
 var _ publicprovider.Provider = (*providerRuntimeFixture)(nil)
+
+// TestProviderRuntimeAppliesCommonDiscoveryFilter 验证 Provider 只负责传入标签和完整快照，
+// allow_discovery 在公共 Node Directory 层生效，因而不依赖 Origin 或 etcd 后端。
+func TestProviderRuntimeAppliesCommonDiscoveryFilter(t *testing.T) {
+	services := []string{"RoomService"}
+	labels := map[string][]string{"game_type": {"battle"}}
+	filter, err := internaldiscovery.CompileFilter(true, []internaldiscovery.Rule{{
+		Services:   &services,
+		NodeLabels: &labels,
+	}})
+	if err != nil {
+		t.Fatalf("CompileFilter() error = %v", err)
+	}
+
+	snapshot := publicprovider.Snapshot{Nodes: []publicprovider.Node{
+		{
+			NodeID:    "battle-room-1",
+			SessionID: 11,
+			Labels:    map[string]string{"game_type": "battle"},
+			Transport: publicprovider.TransportNATS,
+			Services: []publicprovider.Service{{
+				ServiceName: "RoomService",
+				State:       publicprovider.ServiceStateRunning,
+			}},
+		},
+		{
+			NodeID:    "card-room-1",
+			SessionID: 12,
+			Labels:    map[string]string{"game_type": "card"},
+			Transport: publicprovider.TransportNATS,
+			Services: []publicprovider.Service{{
+				ServiceName: "RoomService",
+				State:       publicprovider.ServiceStateRunning,
+			}},
+		},
+	}}
+
+	local := &lifecycleService{label: "LocalService", events: &[]string{}}
+	current, err := New(
+		Config{
+			ID:              "gateway-1",
+			DiscoveryFilter: filter,
+			Scheduler:       service.DefaultSchedulerConfig(),
+			Services:        []string{"LocalService"},
+		},
+		[]ServiceBinding{{
+			Name:     "LocalService",
+			Template: "lifecycleService",
+			Service:  local,
+		}},
+		originlog.NewNop(),
+		Options{
+			MaxTimersPerNode: 64,
+			TimerLocation:    time.UTC,
+			DiscoveryKind:    "fixture",
+			DiscoveryFactory: func(
+				context publicprovider.Context,
+			) (publicprovider.Provider, error) {
+				return &providerRuntimeFixture{
+					context:  context,
+					snapshot: &snapshot,
+				}, nil
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if current.State() == StateReady {
+			_ = current.Stop(context.Background())
+		}
+	})
+
+	if _, exists := local.FindDiscoveredService(
+		"battle-room-1",
+		"RoomService",
+	); !exists {
+		t.Fatal("game_type=battle 的 RoomService 没有通过公共筛选")
+	}
+	if _, exists := local.FindDiscoveredService(
+		"card-room-1",
+		"RoomService",
+	); exists {
+		t.Fatal("game_type=card 的 RoomService 错误通过公共筛选")
+	}
+}

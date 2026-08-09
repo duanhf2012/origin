@@ -22,6 +22,7 @@ import (
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/log/zaplog"
 	"github.com/duanhf2012/origin/v3/node"
+	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -619,6 +620,7 @@ func (app *Application) buildNodes(
 ) ([]*node.Node, error) {
 	var factory publicprovider.Factory
 	var originConfig origindiscovery.Config
+	var originSystemTarget rpc.SystemTarget
 	var discoveryKind string
 	var discoveryConfig publicprovider.Config
 	if discovery != nil {
@@ -626,11 +628,28 @@ func (app *Application) buildNodes(
 		discoveryConfig = discovery.config
 		switch discovery.kind {
 		case "origin":
-			factory = origindiscovery.NewFactory(app.bufferPool)
 			var err error
 			originConfig, err = origindiscovery.DecodeConfig(discovery.config)
 			if err != nil {
 				return nil, err
+			}
+			for _, configured := range configs {
+				if configured.ID != originConfig.Server.Node {
+					continue
+				}
+				if configured.RPC == nil {
+					return nil, invalidConfigf("使用 discovery.origin 时必须配置顶层 rpc")
+				}
+				originSystemTarget.NodeID = configured.ID
+				if configured.RPC.Transport == rpc.TransportTCP {
+					originSystemTarget.Address = configured.RPC.TCP.Advertise
+				}
+				break
+			}
+			if originSystemTarget.NodeID == "" {
+				return nil, invalidConfigf(
+					"discovery.origin.server.node 必须存在并包含唯一 DiscoveryService",
+				)
 			}
 		case "etcd":
 			factory = etcddiscovery.NewFactory(discovery.configRoot)
@@ -707,15 +726,16 @@ func (app *Application) buildNodes(
 			bindings,
 			app.logger,
 			node.Options{
-				Application:      app,
-				Config:           app.config,
-				MaxTimersPerNode: app.options.Timer.MaxTimersPerNode,
-				TimerLocation:    app.options.Timer.Location,
-				BufferPool:       app.bufferPool,
-				DiscoveryKind:    discoveryKind,
-				DiscoveryConfig:  discoveryConfig,
-				DiscoveryFactory: factory,
-				ServiceFailure:   app.handleServiceFailure,
+				Application:           app,
+				Config:                app.config,
+				MaxTimersPerNode:      app.options.Timer.MaxTimersPerNode,
+				TimerLocation:         app.options.Timer.Location,
+				BufferPool:            app.bufferPool,
+				DiscoveryKind:         discoveryKind,
+				DiscoveryConfig:       discoveryConfig,
+				DiscoveryFactory:      factory,
+				DiscoverySystemTarget: originSystemTarget,
+				ServiceFailure:        app.handleServiceFailure,
 			},
 		)
 		if err != nil {

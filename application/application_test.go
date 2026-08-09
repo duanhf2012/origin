@@ -20,6 +20,7 @@ import (
 	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
+	"github.com/nats-io/nats-server/v2/server"
 )
 
 // lifecycleTestService 允许测试通过 NodeID 制造确定的启动失败。
@@ -302,19 +303,36 @@ func TestApplicationOriginDiscoveryLifecycle(t *testing.T) {
 	if err := listener.Close(); err != nil {
 		t.Fatalf("close reserved listener: %v", err)
 	}
+	gameListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve game RPC address: %v", err)
+	}
+	gameAddress := gameListener.Addr().String()
+	if err := gameListener.Close(); err != nil {
+		t.Fatalf("close reserved game listener: %v", err)
+	}
 	directory := writeApplicationConfig(t, `
+rpc:
+  transport: tcp
+  tcp: {}
 discovery:
   type: origin
   origin:
     ttl: 3s
     server:
       node: discovery-1
-      listen: `+address+`
-      address: `+address+`
 nodes:
   - id: discovery-1
+    rpc:
+      tcp:
+        listen: `+address+`
+        advertise: `+address+`
     services: [DiscoveryService]
   - id: game-1
+    rpc:
+      tcp:
+        listen: `+gameAddress+`
+        advertise: `+gameAddress+`
     services: [lifecycleTestService]
 `)
 	app := newSilentApplication()
@@ -352,6 +370,145 @@ nodes:
 	if stats := app.bufferPool.Stats(); stats.Enabled && stats.InUseBuffers != 0 {
 		t.Fatalf("Origin Discovery 遗留 Buffer = %+v", stats)
 	}
+}
+
+// TestApplicationOriginDiscoveryNATSLifecycle verifies that Origin discovery uses the
+// application-level NATS configuration, including the discovery server's NoEcho-safe local path.
+func TestApplicationOriginDiscoveryNATSLifecycle(t *testing.T) {
+	broker := startApplicationNATSServer(t)
+	directory := writeApplicationConfig(t, `
+rpc:
+  transport: nats
+  nats:
+    namespace: origin-application-test
+    urls: [`+broker.ClientURL()+`]
+discovery:
+  type: origin
+  origin:
+    ttl: 3s
+    server:
+      node: discovery-1
+nodes:
+  - id: discovery-1
+    services: [DiscoveryService]
+  - id: game-1
+    services: [lifecycleTestService]
+`)
+	app := newSilentApplication()
+	app.Setup(&lifecycleTestService{})
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- app.run(runCtx, command.StartRequest{
+			AppName:   "origin-discovery-nats-test",
+			ConfigDir: directory,
+		})
+	}()
+	waitForState(t, app, StateRunning)
+	for _, nodeID := range []string{"discovery-1", "game-1"} {
+		current, exists := app.Node(nodeID)
+		if !exists {
+			t.Fatalf("Node %q 不存在", nodeID)
+		}
+		status := current.DiscoveryStatus()
+		if status.Kind != "origin" || status.State != node.DiscoveryReady ||
+			!status.Synchronized {
+			t.Fatalf("Node %q DiscoveryStatus = %+v", nodeID, status)
+		}
+	}
+	cancelRun()
+	if err := <-result; err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+}
+
+// TestApplicationOriginDiscoveryAppliesNodeFilters proves that labels and
+// allow_discovery are applied to snapshots delivered by the built-in Origin Provider.
+func TestApplicationOriginDiscoveryAppliesNodeFilters(t *testing.T) {
+	broker := startApplicationNATSServer(t)
+	directory := writeApplicationConfig(t, `
+rpc:
+  transport: nats
+  nats:
+    namespace: origin-filter-test
+    urls: [`+broker.ClientURL()+`]
+discovery:
+  type: origin
+  origin:
+    ttl: 3s
+    server:
+      node: discovery-1
+nodes:
+  - id: discovery-1
+    services: [DiscoveryService]
+  - id: observer-1
+    allow_discovery:
+      - services: [lifecycleTestService]
+        node_labels:
+          game_type: battle
+    services: [lifecycleTestService]
+  - id: battle-1
+    labels:
+      game_type: battle
+    services: [lifecycleTestService]
+  - id: card-1
+    labels:
+      game_type: card
+    services: [lifecycleTestService]
+`)
+	app := newSilentApplication()
+	app.Setup(&lifecycleTestService{})
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- app.run(runCtx, command.StartRequest{
+			AppName:   "origin-filter-test",
+			ConfigDir: directory,
+		})
+	}()
+	waitForState(t, app, StateRunning)
+
+	observerNode, exists := app.Node("observer-1")
+	if !exists {
+		t.Fatal("Node observer-1 does not exist")
+	}
+	instance, exists := observerNode.Service("lifecycleTestService")
+	if !exists {
+		t.Fatal("observer lifecycleTestService does not exist")
+	}
+	visible := instance.(*lifecycleTestService).ListDiscoveredServices(
+		"lifecycleTestService",
+	)
+	if len(visible) != 1 || visible[0].NodeID != "battle-1" ||
+		visible[0].Labels["game_type"] != "battle" {
+		t.Fatalf("Origin filtered services = %+v, want only battle-1", visible)
+	}
+
+	cancelRun()
+	if err := <-result; err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+}
+
+func startApplicationNATSServer(t *testing.T) *server.Server {
+	t.Helper()
+	running, err := server.NewServer(&server.Options{
+		Host:       "127.0.0.1",
+		Port:       -1,
+		MaxPayload: rpc.MaxSystemMessageSize,
+		NoLog:      true,
+		NoSigs:     true,
+	})
+	if err != nil {
+		t.Fatalf("server.NewServer() error = %v", err)
+	}
+	go running.Start()
+	if !running.ReadyForConnections(time.Second) {
+		running.Shutdown()
+		t.Fatal("NATS server did not become ready")
+	}
+	t.Cleanup(running.Shutdown)
+	return running
 }
 
 func TestApplicationCustomDiscoveryProviderUsesOnlyPublicSPI(t *testing.T) {
@@ -402,32 +559,6 @@ nodes:
 	cancelRun()
 	if err := <-result; err != nil {
 		t.Fatalf("run() error = %v", err)
-	}
-}
-
-func TestOriginAndRPCListenConflictIncludesWildcardAliases(t *testing.T) {
-	tests := []struct {
-		left  string
-		right string
-		want  bool
-	}{
-		{left: ":7100", right: "127.0.0.1:7100", want: true},
-		{left: "0.0.0.0:7100", right: "10.0.0.1:7100", want: true},
-		{left: "[::]:7100", right: "[::1]:7100", want: true},
-		{left: "127.0.0.1:7100", right: "127.0.0.1:7100", want: true},
-		{left: "127.0.0.1:7100", right: "127.0.0.1:7200", want: false},
-		{left: "127.0.0.1:7100", right: "127.0.0.2:7100", want: false},
-	}
-	for _, test := range tests {
-		if got := listenAddressesConflict(test.left, test.right); got != test.want {
-			t.Errorf(
-				"listenAddressesConflict(%q, %q) = %v, want %v",
-				test.left,
-				test.right,
-				got,
-				test.want,
-			)
-		}
 	}
 }
 
@@ -587,8 +718,7 @@ nodes:
 
 func TestLoadConfigRejectsFutureFrameworkSection(t *testing.T) {
 	directory := writeApplicationConfig(t, `
-rpc:
-  transport: tcp
+timer: {}
 nodes:
   - id: game-1
     services: [lifecycleTestService]
@@ -596,6 +726,63 @@ nodes:
 	_, err := loadConfig(directory)
 	if !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("loadConfig() error = %v", err)
+	}
+}
+
+// TestLoadConfigApplicationNATSRPC verifies that connection-level NATS settings
+// are configured once for the application and copied into every Node runtime.
+func TestLoadConfigApplicationNATSRPC(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+rpc:
+  transport: nats
+  max_payload_size: 2M
+  max_broadcast_size: 128M
+  nats:
+    namespace: game-prod
+    urls: [nats://127.0.0.1:4222]
+    receive_queue_messages: 2048
+nodes:
+  - id: game-1
+    services: [lifecycleTestService]
+  - id: game-2
+    services: [lifecycleTestService]
+`)
+
+	loaded, err := loadConfig(directory)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	for _, configured := range loaded.nodes {
+		if configured.RPC == nil ||
+			configured.RPC.Transport != rpc.TransportNATS ||
+			configured.RPC.MaxPayloadSize != 2*1024*1024 ||
+			configured.RPC.MaxBroadcastSize != 128*1024*1024 ||
+			configured.RPC.NATS == nil ||
+			configured.RPC.NATS.Namespace != "game-prod" ||
+			len(configured.RPC.NATS.URLs) != 1 ||
+			configured.RPC.NATS.ReceiveQueueMessages != 2048 {
+			t.Fatalf("Node %q 的应用级 NATS RPC 配置 = %+v", configured.ID, configured.RPC)
+		}
+	}
+}
+
+// TestTutorialRPCAndOriginDiscoveryConfigurationsLoad keeps the executable tutorials aligned
+// with the strict application-level RPC grammar. It intentionally only loads configuration:
+// NATS and TCP endpoints are documentation examples and need not be available during unit tests.
+func TestTutorialRPCAndOriginDiscoveryConfigurationsLoad(t *testing.T) {
+	for _, relative := range []string{
+		"../examples/07-remote-rpc/01-tcp-two-nodes/config",
+		"../examples/07-remote-rpc/02-nats-two-nodes/config",
+		"../examples/07-remote-rpc/03-route-and-broadcast/config",
+		"../examples/08-discovery/01-origin-provider/config",
+	} {
+		directory, err := filepath.Abs(relative)
+		if err != nil {
+			t.Fatalf("filepath.Abs(%q) error = %v", relative, err)
+		}
+		if _, err := loadConfig(directory); err != nil {
+			t.Fatalf("loadConfig(%q) error = %v", relative, err)
+		}
 	}
 }
 
@@ -675,32 +862,35 @@ nodes:
 	}
 }
 
-func TestLoadConfigNodeRPCDefaultsAndOverrides(t *testing.T) {
+func TestLoadConfigApplicationTCPRPCDefaultsAndOverrides(t *testing.T) {
 	directory := writeApplicationConfig(t, `
+rpc:
+  transport: tcp
+  max_payload_size: 2M
+  max_broadcast_size: 128M
+  tcp:
+    send_queue_messages: 2048
+    read_idle_timeout: 0s
+    write_timeout: 3s
 nodes:
-  - id: local-1
-    services: [lifecycleTestService]
   - id: tcp-1
     rpc:
-      transport: tcp
-      max_payload_size: 2M
-      max_broadcast_size: 128M
       tcp:
         listen: 127.0.0.1:17001
         advertise: 127.0.0.1:17001
-        send_queue_messages: 2048
-        read_idle_timeout: 0s
-        write_timeout: 3s
+    services: [lifecycleTestService]
+  - id: tcp-2
+    rpc:
+      tcp:
+        listen: 127.0.0.1:17002
+        advertise: 127.0.0.1:17002
     services: [lifecycleTestService]
 `)
 	loaded, err := loadConfig(directory)
 	if err != nil {
 		t.Fatalf("loadConfig() error = %v", err)
 	}
-	if loaded.nodes[0].RPC != nil {
-		t.Fatalf("省略 rpc 的 Node 错误创建了配置: %+v", loaded.nodes[0].RPC)
-	}
-	configured := loaded.nodes[1].RPC
+	configured := loaded.nodes[0].RPC
 	if configured == nil ||
 		configured.Transport != rpc.TransportTCP ||
 		configured.MaxPayloadSize != 2*1024*1024 ||
@@ -712,26 +902,31 @@ nodes:
 		configured.TCP.WriteTimeout != 3*time.Second {
 		t.Fatalf("Node RPC 配置 = %+v", configured)
 	}
+	if loaded.nodes[1].RPC == configured ||
+		loaded.nodes[1].RPC.TCP == configured.TCP ||
+		loaded.nodes[1].RPC.TCP.Listen != "127.0.0.1:17002" {
+		t.Fatalf("Node RPC 没有得到独立地址快照: %+v", loaded.nodes[1].RPC)
+	}
 }
 
-// TestLoadConfigNodeNATSDefaultsAndOverrides 验证 NATS 最小公开配置能完整冻结到运行时配置。
-func TestLoadConfigNodeNATSDefaultsAndOverrides(t *testing.T) {
+// TestLoadConfigApplicationNATSDefaultsAndOverrides 验证 NATS 最小公开配置能完整冻结到所有 Node。
+func TestLoadConfigApplicationNATSDefaultsAndOverrides(t *testing.T) {
 	directory := writeApplicationConfig(t, `
+rpc:
+  transport: nats
+  max_payload_size: 2M
+  max_broadcast_size: 128M
+  nats:
+    namespace: game-prod
+    urls: [nats://127.0.0.1:4222]
+    receive_queue_messages: 2048
+    auth:
+      username: game
+      password: secret
+    tls:
+      enabled: false
 nodes:
   - id: game-1
-    rpc:
-      transport: nats
-      max_payload_size: 2M
-      max_broadcast_size: 128M
-      nats:
-        namespace: game-prod
-        urls: [nats://127.0.0.1:4222]
-        receive_queue_messages: 2048
-        auth:
-          username: game
-          password: secret
-        tls:
-          enabled: false
     services: [lifecycleTestService]
 `)
 	loaded, err := loadConfig(directory)
@@ -756,6 +951,40 @@ nodes:
 
 func TestLoadConfigRejectsInvalidNodeRPC(t *testing.T) {
 	for _, content := range []string{
+		`nodes:
+  - id: game-1
+    rpc:
+      tcp: {listen: "127.0.0.1:17001", advertise: "127.0.0.1:17001"}
+    services: [lifecycleTestService]
+`,
+		`rpc:
+  transport: nats
+  nats:
+    namespace: game-prod
+    urls: [nats://127.0.0.1:4222]
+nodes:
+  - id: game-1
+    rpc:
+      tcp: {listen: "127.0.0.1:17001", advertise: "127.0.0.1:17001"}
+    services: [lifecycleTestService]
+`,
+		`rpc:
+  transport: tcp
+  tcp: {}
+nodes:
+  - id: game-1
+    services: [lifecycleTestService]
+`,
+		`rpc:
+  transport: tcp
+  tcp:
+    listen: "127.0.0.1:17001"
+nodes:
+  - id: game-1
+    rpc:
+      tcp: {listen: "127.0.0.1:17001", advertise: "127.0.0.1:17001"}
+    services: [lifecycleTestService]
+`,
 		`nodes:
   - id: game-1
     rpc:
