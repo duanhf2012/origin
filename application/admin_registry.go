@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/duanhf2012/origin/v3/admin"
 	"github.com/duanhf2012/origin/v3/errs"
@@ -81,7 +82,7 @@ func (app *Application) RegisterAdminEndpoint(endpoint admin.Endpoint) error {
 
 // SetAdminGuard 在首次执行命令前设置当前 Application 唯一的管理授权策略。
 func (app *Application) SetAdminGuard(guard admin.Guard) error {
-	if app == nil || guard == nil {
+	if app == nil || isNilAdminGuard(guard) {
 		return errs.NewMessage(errs.CodeInvalidArgument, "Application 和 Admin Guard 不能为空")
 	}
 
@@ -98,6 +99,28 @@ func (app *Application) SetAdminGuard(guard admin.Guard) error {
 	}
 	app.adminGuard = guard
 	return nil
+}
+
+// isNilAdminGuard 同时识别 nil 接口和装箱后底层值为 nil 的 Guard。
+//
+// Guard 是启动冷注册路径，这里使用一次反射换取完整的 interface nil
+// 语义。IsNil 只能对 nilable kind 调用，因此必须先显式分类，不使用 panic 探测。
+func isNilAdminGuard(guard admin.Guard) bool {
+	if guard == nil {
+		return true
+	}
+	value := reflect.ValueOf(guard)
+	switch value.Kind() {
+	case reflect.Chan,
+		reflect.Func,
+		reflect.Interface,
+		reflect.Map,
+		reflect.Pointer,
+		reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // freezeAdminRoutes 在任何 Service OnInit 前一次收集真实实例的 Endpoint 并发布只读路由表。

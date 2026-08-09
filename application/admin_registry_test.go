@@ -23,6 +23,17 @@ func (adminRegistryAllowGuard) Authorize(
 	return admin.Principal{Subject: "test"}, nil
 }
 
+// adminRegistryTypedNilGuard 用指针方法集构造“接口非 nil、底层指针 nil”的 Guard。
+type adminRegistryTypedNilGuard struct{}
+
+func (*adminRegistryTypedNilGuard) Authorize(
+	context.Context,
+	*http.Request,
+	admin.Operation,
+) (admin.Principal, error) {
+	return admin.Principal{Subject: "typed-nil"}, nil
+}
+
 // TestRegisterAdminEndpointAndGuardBeforeCommandOnly 防止管理路由在命令执行后
 // 继续变化，并确保同一方法与名称不能重复、Guard 不能替换。
 func TestRegisterAdminEndpointAndGuardBeforeCommandOnly(t *testing.T) {
@@ -76,6 +87,19 @@ func TestRegisterAdminEndpointAndGuardBeforeCommandOnly(t *testing.T) {
 func TestRegisterAdminEndpointRejectsInvalidEndpoint(t *testing.T) {
 	if err := New().RegisterAdminEndpoint(admin.Get("invalid_name", nil)); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("RegisterAdminEndpoint(invalid) error = %v", err)
+	}
+}
+
+// TestSetAdminGuardRejectsTypedNilWithoutOccupyingSlot 防止 typed-nil Guard 永久占据
+// Application 唯一 Guard 槽，并把后续 HTTP 授权留给一个可能 panic 的值。
+func TestSetAdminGuardRejectsTypedNilWithoutOccupyingSlot(t *testing.T) {
+	app := New()
+	var typedNil *adminRegistryTypedNilGuard
+	if err := app.SetAdminGuard(typedNil); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Errorf("SetAdminGuard(typed nil) error = %v", err)
+	}
+	if err := app.SetAdminGuard(adminRegistryAllowGuard{}); err != nil {
+		t.Errorf("SetAdminGuard(valid after typed nil) error = %v", err)
 	}
 }
 
