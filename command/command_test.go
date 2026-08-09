@@ -390,8 +390,9 @@ func TestStartAdminFlagValidation(t *testing.T) {
 
 	configDir := t.TempDir()
 	tests := []struct {
-		name string
-		args []string
+		name      string
+		args      []string
+		forbidden string
 	}{
 		{
 			name: "empty admin",
@@ -401,8 +402,24 @@ func TestStartAdminFlagValidation(t *testing.T) {
 			name: "duplicate admin",
 			args: []string{
 				"start", "--app-name", "game", "--config", configDir,
-				"--admin", "127.0.0.1:6061", "--admin", "127.0.0.1:6062",
+				"--admin", "127.0.0.1:6061",
+				"--admin", "unique-secret-marker:6062",
 			},
+			forbidden: "unique-secret-marker",
+		},
+		{
+			name: "duplicate admin equals forms",
+			args: []string{
+				"start", "--admin=127.0.0.1:6061", "--admin=unique-secret-marker:6062",
+			},
+			forbidden: "unique-secret-marker",
+		},
+		{
+			name: "duplicate admin single dash",
+			args: []string{
+				"start", "-admin", "127.0.0.1:6061", "-admin=unique-secret-marker:6062",
+			},
+			forbidden: "unique-secret-marker",
 		},
 		{
 			name: "removed diagnostics",
@@ -425,6 +442,9 @@ func TestStartAdminFlagValidation(t *testing.T) {
 			code, err := runner.Run(context.Background(), test.args)
 			if code != ExitUsage || !errs.IsCode(err, errs.CodeInvalidArgument) {
 				t.Fatalf("Run() = (%d, %v), want (%d, invalid argument)", code, err, ExitUsage)
+			}
+			if test.forbidden != "" && strings.Contains(err.Error(), test.forbidden) {
+				t.Fatalf("Run() error leaked Admin address marker: %v", err)
 			}
 			if called {
 				t.Fatal("invalid Admin flag called Start Handler")

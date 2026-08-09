@@ -859,8 +859,8 @@ func TestAdminBuiltinControlDeadlineKeepsCommittedState(t *testing.T) {
 	}
 }
 
-// TestAdminBuiltinRoutesUnavailableStaySafe 固定未冻结和冻结失败都不发布半成品自定义路由；动态
-// 名称不进入响应或审计，Provider/Handler 也不会在请求期被调用。
+// TestAdminBuiltinRoutesUnavailableStaySafe 固定未冻结和冻结失败时拒绝启动 Listener；
+// 半成品路由、Provider/Handler 和请求审计都不得进入运行期。
 func TestAdminBuiltinRoutesUnavailableStaySafe(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -893,36 +893,22 @@ func TestAdminBuiltinRoutesUnavailableStaySafe(t *testing.T) {
 					t.Fatalf("freezeAdminRoutes() error = %v", err)
 				}
 			}
-			baseURL := startAdminRouteTestServer(t, app)
-			for _, path := range []string{
-				"/admin/v1/application/endpoints/hidden",
-				"/admin/v1/nodes/hidden-node/services/hidden-service/endpoints/hidden",
-			} {
-				response, requestErr := http.Get(baseURL + path)
-				if requestErr != nil {
-					t.Fatal(requestErr)
-				}
-				body := readAdminRouteResponse(t, response)
-				if response.StatusCode != http.StatusNotFound ||
-					body != http.StatusText(http.StatusNotFound)+"\n" {
-					t.Fatalf("unavailable route %s status=%d Body=%q", path, response.StatusCode, body)
-				}
+			app.mu.Lock()
+			app.resourcesReady = true
+			app.state.Store(uint32(StateRunning))
+			app.mu.Unlock()
+			if err := app.StartAdminServer("127.0.0.1:0"); !errors.Is(err, errs.ErrAdminStateConflict) {
+				t.Fatalf("StartAdminServer() error = %v", err)
+			}
+			if _, ok := app.AdminAddress(); ok {
+				t.Fatal("unavailable routes published Admin Listener")
 			}
 			if invoked.Load() {
 				t.Fatal("unavailable route invoked Application Handler")
 			}
 			records := audit.snapshot()
-			if len(records) != 2 {
-				t.Fatalf("unavailable route audit records = %d, want 2", len(records))
-			}
-			for _, record := range records {
-				if record.endpoint != "unknown" || strings.Contains(record.text, "hidden") {
-					t.Fatalf("unavailable route audit = %+v", records)
-				}
-			}
-			if strings.Contains(records[0].text+records[1].text, "hidden-node") ||
-				strings.Contains(records[0].text+records[1].text, "hidden-service") {
-				t.Fatalf("unavailable route audit = %+v", records)
+			if len(records) != 0 {
+				t.Fatalf("unavailable route audit records = %+v, want none", records)
 			}
 		})
 	}

@@ -82,6 +82,9 @@ func TestAdminSecurityBindingPolicy(t *testing.T) {
 	guarded.resourcesReady = true
 	guarded.state.Store(uint32(StateRunning))
 	guarded.mu.Unlock()
+	if err := guarded.freezeAdminRoutes(nil); err != nil {
+		t.Fatalf("freezeAdminRoutes() error = %v", err)
+	}
 	t.Cleanup(func() {
 		if err := guarded.StopAdminServer(context.Background()); err != nil {
 			t.Errorf("guarded StopAdminServer() error = %v", err)

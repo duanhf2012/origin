@@ -253,6 +253,7 @@ func adminHTTPRuntimeErrors() httpRuntimeErrors {
 	return httpRuntimeErrors{
 		unavailableCode: errs.CodeAdminUnavailable,
 		stateConflict:   errs.ErrAdminStateConflict,
+		redactAddress:   true,
 	}
 }
 
@@ -262,16 +263,14 @@ func (app *Application) StartAdminServer(address string) error {
 		return errs.ErrInvalidArgument
 	}
 	address = strings.TrimSpace(address)
-	if _, _, err := net.SplitHostPort(address); err != nil {
-		return errs.Wrap(errs.CodeInvalidArgument, err)
-	}
 
 	// Snapshot lifecycle and Guard state only. Listener/runtime operations may
 	// block and must never run while app.mu excludes request handlers such as Node.
 	app.mu.Lock()
 	state := app.State()
 	if !app.resourcesReady || app.resourcesClosing ||
-		(state != StateStarting && state != StateRunning) {
+		(state != StateStarting && state != StateRunning) ||
+		app.adminFreezeDone == nil || app.adminRoutes == nil || app.adminFreezeErr != nil {
 		app.mu.Unlock()
 		return errs.ErrAdminStateConflict
 	}
@@ -282,6 +281,9 @@ func (app *Application) StartAdminServer(address string) error {
 	// Node/Service 生命周期目标同样只在 Server 启动冷路径建立索引，请求期不扫描实例。
 	nodes := append([]*node.Node(nil), app.nodes...)
 	app.mu.Unlock()
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		return errs.ErrInvalidArgument
+	}
 	if !guardConfigured && !isLoopbackAddress(address) {
 		// 未配置 Guard 时在 Listen 前拒绝 wildcard 和非环回主机，避免短暂暴露写控制面。
 		return errs.ErrAdminUnavailable

@@ -15,6 +15,9 @@ func (runner *Runner) runStart(ctx context.Context, args []string) (ExitCode, er
 		text, _ := runner.builtInHelp("start")
 		return runner.writeHelpText(text)
 	}
+	if hasDuplicateFlag(args, "admin") {
+		return ExitUsage, invalidArgumentf("admin option is duplicated")
+	}
 
 	flags := flag.NewFlagSet("start", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)

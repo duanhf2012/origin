@@ -50,6 +50,29 @@ func registerSingleStringOption(
 	return option
 }
 
+// hasDuplicateFlag 在交给 flag 包前识别重复单值选项，避免 flag.Value.Set 的错误文本
+// 自动拼接第二个原始值。扫描只判断选项 token，不保存或回显地址内容。
+func hasDuplicateFlag(args []string, name string) bool {
+	longName := "--" + name
+	shortName := "-" + name
+	seen := false
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		matched := arg == longName || arg == shortName ||
+			strings.HasPrefix(arg, longName+"=") || strings.HasPrefix(arg, shortName+"=")
+		if !matched {
+			continue
+		}
+		if seen {
+			return true
+		}
+		seen = true
+	}
+	return false
+}
+
 // registerStringOption 把带默认值和显式出现状态的字符串选项注册到 FlagSet。
 func registerStringOption(
 	flags *flag.FlagSet,

@@ -67,10 +67,12 @@ type Snapshot struct {
 
 // ApplicationSnapshot 保存进程身份、生命周期、Admin 和 pprof Listener 的当前状态。
 type ApplicationSnapshot struct {
-	Name        string         `json:"name"`
-	State       string         `json:"state"`
-	AdminServer ServerSnapshot `json:"admin_server"`
-	Pprof       ServerSnapshot `json:"pprof"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+	// Deprecated: 独立 Diagnostics HTTP 已删除；Schema v2 为旧消费者恒保留 stopped 占位。
+	DiagnosticsServer ServerSnapshot `json:"diagnostics_server"`
+	AdminServer       ServerSnapshot `json:"admin_server"`
+	Pprof             ServerSnapshot `json:"pprof"`
 }
 
 // ServerSnapshot 是 Admin 或 pprof Server 的有界状态摘要。

@@ -65,6 +65,8 @@ func (runtime *httpRuntime) releaseRequestSlot() {
 type httpRuntimeErrors struct {
 	unavailableCode errs.Code
 	stateConflict   error
+	// redactAddress 禁止把 Resolve/Listen 的原始地址及系统错误带入返回值和生命周期日志。
+	redactAddress bool
 }
 
 // pprofHTTPRuntimeErrors 保留 pprof 已发布的 Diagnostics 错误族语义。
@@ -93,6 +95,9 @@ func (runtime *httpRuntime) startWithErrors(
 		return errs.ErrInvalidArgument
 	}
 	if _, err := net.ResolveTCPAddr("tcp", address); err != nil {
+		if runtimeErrors.redactAddress {
+			return errs.ErrInvalidArgument
+		}
 		return errs.Wrap(errs.CodeInvalidArgument, err)
 	}
 
@@ -115,6 +120,9 @@ func (runtime *httpRuntime) startWithErrors(
 
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
+		if runtimeErrors.redactAddress {
+			return errs.New(runtimeErrors.unavailableCode)
+		}
 		return errs.Wrap(
 			runtimeErrors.unavailableCode,
 			fmt.Errorf("listen %q: %w", address, err),

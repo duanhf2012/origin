@@ -32,6 +32,9 @@ func TestSnapshotJSONSchema(t *testing.T) {
 		Application: diagnostics.ApplicationSnapshot{
 			Name:  "player",
 			State: "running",
+			DiagnosticsServer: diagnostics.ServerSnapshot{
+				State: "stopped",
+			},
 			AdminServer: diagnostics.ServerSnapshot{
 				State:     "serving",
 				Address:   "127.0.0.1:6061",
@@ -79,8 +82,9 @@ func TestSnapshotJSONSchema(t *testing.T) {
 	if _, exists := applicationSnapshot["admin_server"]; !exists {
 		t.Fatalf("application.admin_server missing: %#v", applicationSnapshot)
 	}
-	if _, exists := applicationSnapshot["diagnostics_server"]; exists {
-		t.Fatalf("legacy application.diagnostics_server remains: %#v", applicationSnapshot)
+	legacy, exists := applicationSnapshot["diagnostics_server"].(map[string]any)
+	if !exists || legacy["state"] != "stopped" {
+		t.Fatalf("legacy application.diagnostics_server = %#v, want stopped compatibility field", legacy)
 	}
 
 	runtimeSnapshot := document["runtime"].(map[string]any)

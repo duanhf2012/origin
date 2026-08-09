@@ -17,6 +17,9 @@ func newHTTPTestApplication(t *testing.T) *Application {
 	app.resourcesReady = true
 	app.state.Store(uint32(StateRunning))
 	app.mu.Unlock()
+	if err := app.freezeAdminRoutes(nil); err != nil {
+		t.Fatalf("freezeAdminRoutes() error = %v", err)
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

@@ -40,6 +40,7 @@ func (app *Application) Diagnostics() diagnostics.Snapshot {
 	}
 	if app == nil {
 		result.Application.State = "failed"
+		result.Application.DiagnosticsServer.State = "stopped"
 		result.Application.AdminServer.State = "stopped"
 		result.Application.Pprof.State = "stopped"
 		result.Runtime = collectRuntimeSnapshot()
@@ -50,10 +51,11 @@ func (app *Application) Diagnostics() diagnostics.Snapshot {
 	app.mu.Lock()
 	result.StartedAt = app.startedAt
 	result.Application = diagnostics.ApplicationSnapshot{
-		Name:        app.appName,
-		State:       applicationStateText(app.State()),
-		AdminServer: app.adminHTTP.snapshot(),
-		Pprof:       app.pprofHTTP.snapshot(),
+		Name:              app.appName,
+		State:             applicationStateText(app.State()),
+		DiagnosticsServer: diagnostics.ServerSnapshot{State: "stopped"},
+		AdminServer:       app.adminHTTP.snapshot(),
+		Pprof:             app.pprofHTTP.snapshot(),
 	}
 	nodes := append([]*node.Node(nil), app.nodes...)
 	pool := app.bufferPool

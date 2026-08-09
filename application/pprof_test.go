@@ -83,6 +83,11 @@ func TestPprofAndAdminAreIndependent(t *testing.T) {
 	}
 	adminAddress, _ := app.AdminAddress()
 	pprofAddress, _ := app.PprofAddress()
+	full := app.Diagnostics()
+	if full.SchemaVersion != 2 || full.Application.AdminServer.State != "serving" ||
+		full.Application.DiagnosticsServer.State != "stopped" {
+		t.Fatalf("Full Application compatibility snapshot = %+v", full.Application)
+	}
 	if adminAddress == pprofAddress {
 		t.Fatalf("servers share address %q", adminAddress)
 	}

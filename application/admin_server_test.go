@@ -16,6 +16,7 @@ import (
 
 	"github.com/duanhf2012/origin/v3/admin"
 	"github.com/duanhf2012/origin/v3/errs"
+	"github.com/duanhf2012/origin/v3/node"
 )
 
 // newAdminHTTPTestApplication 建立真实运行期状态，并保证每个测试退出前回收 Admin Listener。
@@ -130,8 +131,9 @@ func TestAdminServerLifecycleErrors(t *testing.T) {
 	if err := app.StartAdminServer(""); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("empty address error = %v", err)
 	}
-	if err := app.StartAdminServer("not-an-address"); !errors.Is(err, errs.ErrInvalidArgument) {
-		t.Fatalf("malformed address error = %v", err)
+	if err := app.StartAdminServer("unique-secret-marker"); !errors.Is(err, errs.ErrInvalidArgument) ||
+		strings.Contains(err.Error(), "unique-secret-marker") {
+		t.Fatalf("malformed address error leaked input = %v", err)
 	}
 	if err := app.StopAdminServer(nil); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("nil Stop context error = %v", err)
@@ -146,11 +148,69 @@ func TestAdminServerLifecycleErrors(t *testing.T) {
 	if err := app.StartAdminServer(occupied.Addr().String()); !errors.Is(
 		err,
 		errs.ErrAdminUnavailable,
-	) {
+	) || strings.Contains(err.Error(), occupied.Addr().String()) {
 		t.Fatalf("occupied address error = %v", err)
 	}
 	if _, ok := app.AdminAddress(); ok {
 		t.Fatal("failed StartAdminServer() published an address")
+	}
+}
+
+// TestAdminServerRejectsStartDuringRouteFreeze 防止 Listener 捕获尚未发布的 nil 路由表，
+// 并证明 Start 不等待正在执行的 Provider，避免 Provider 自调用产生启动死锁。
+func TestAdminServerRejectsStartDuringRouteFreeze(t *testing.T) {
+	app := New()
+	if err := app.RegisterAdminEndpoint(admin.Get("ready", func(
+		context.Context,
+		admin.Request,
+	) (admin.Response, error) {
+		return admin.JSON(http.StatusOK, map[string]bool{"ready": true})
+	})); err != nil {
+		t.Fatalf("RegisterAdminEndpoint() error = %v", err)
+	}
+	providerEntered := make(chan struct{}, 1)
+	providerRelease := make(chan struct{})
+	target := &adminRegistryProviderService{
+		providerEntered: providerEntered,
+		providerRelease: providerRelease,
+	}
+	current := newAdminRegistryNode(t, app, "node-freeze", "actual-service", target)
+	app.mu.Lock()
+	app.nodes = []*node.Node{current}
+	app.resourcesReady = true
+	app.state.Store(uint32(StateRunning))
+	app.mu.Unlock()
+
+	freezeDone := make(chan error, 1)
+	go func() { freezeDone <- app.freezeAdminRoutes([]*node.Node{current}) }()
+	<-providerEntered
+	if err := app.StartAdminServer("127.0.0.1:0"); !errors.Is(err, errs.ErrAdminStateConflict) {
+		close(providerRelease)
+		<-freezeDone
+		t.Fatalf("StartAdminServer(during freeze) error = %v", err)
+	}
+	if _, ok := app.AdminAddress(); ok {
+		close(providerRelease)
+		<-freezeDone
+		t.Fatal("StartAdminServer published Listener during route freeze")
+	}
+	close(providerRelease)
+	if err := <-freezeDone; err != nil {
+		t.Fatalf("freezeAdminRoutes() error = %v", err)
+	}
+	if err := app.StartAdminServer("127.0.0.1:0"); err != nil {
+		t.Fatalf("StartAdminServer(after freeze) error = %v", err)
+	}
+	t.Cleanup(func() { _ = app.StopAdminServer(context.Background()) })
+	address, _ := app.AdminAddress()
+	response, err := http.Get("http://" + address + "/admin/v1/application/endpoints/ready")
+	if err != nil {
+		t.Fatalf("GET frozen Application route error = %v", err)
+	}
+	body, readErr := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if readErr != nil || response.StatusCode != http.StatusOK || string(body) != `{"ready":true}` {
+		t.Fatalf("frozen route status=%d read=%v body=%s", response.StatusCode, readErr, body)
 	}
 }
 

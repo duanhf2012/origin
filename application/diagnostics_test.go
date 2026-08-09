@@ -45,7 +45,8 @@ func TestDiagnosticsBeforeStartHasCompleteZeroSemantics(t *testing.T) {
 	if snapshot.Runtime.Goroutines <= 0 || snapshot.Runtime.GOMAXPROCS <= 0 {
 		t.Fatalf("runtime diagnostics = %+v", snapshot.Runtime)
 	}
-	if snapshot.Application.AdminServer.State != "stopped" ||
+	if snapshot.Application.DiagnosticsServer.State != "stopped" ||
+		snapshot.Application.AdminServer.State != "stopped" ||
 		snapshot.Application.Pprof.State != "stopped" {
 		t.Fatalf("server diagnostics = %+v", snapshot.Application)
 	}
