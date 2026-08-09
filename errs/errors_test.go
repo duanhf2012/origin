@@ -69,6 +69,8 @@ func TestStableCodes(t *testing.T) {
 		{name: "log output unavailable", code: errs.CodeLogOutputUnavailable, want: 7004},
 		{name: "diagnostics unavailable", code: errs.CodeDiagnosticsUnavailable, want: 8001},
 		{name: "diagnostics state conflict", code: errs.CodeDiagnosticsStateConflict, want: 8002},
+		{name: "admin unavailable", code: errs.CodeAdminUnavailable, want: 8003},
+		{name: "admin state conflict", code: errs.CodeAdminStateConflict, want: 8004},
 	}
 
 	// 所有数值在同一测试中集中验证。
@@ -242,6 +244,16 @@ func TestNew(t *testing.T) {
 			code: errs.CodeDiagnosticsStateConflict,
 			want: errs.ErrDiagnosticsStateConflict,
 			text: "diagnostics state conflict",
+		},
+		{
+			code: errs.CodeAdminUnavailable,
+			want: errs.ErrAdminUnavailable,
+			text: "admin unavailable",
+		},
+		{
+			code: errs.CodeAdminStateConflict,
+			want: errs.ErrAdminStateConflict,
+			text: "admin state conflict",
 		},
 	}
 

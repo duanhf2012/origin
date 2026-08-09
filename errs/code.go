@@ -97,6 +97,10 @@ const (
 	CodeDiagnosticsUnavailable Code = 8001
 	// CodeDiagnosticsStateConflict 表示当前 Application 或 Listener 状态不允许该诊断操作。
 	CodeDiagnosticsStateConflict Code = 8002
+	// CodeAdminUnavailable 表示 Admin Listener、HTTP Serve 或受控关闭无法完成。
+	CodeAdminUnavailable Code = 8003
+	// CodeAdminStateConflict 表示当前 Application 或 Listener 状态不允许该 Admin 操作。
+	CodeAdminStateConflict Code = 8004
 )
 
 // codeText 返回已经登记的稳定英文错误文本。
@@ -189,6 +193,10 @@ func codeText(code Code) string {
 		return "diagnostics unavailable"
 	case CodeDiagnosticsStateConflict:
 		return "diagnostics state conflict"
+	case CodeAdminUnavailable:
+		return "admin unavailable"
+	case CodeAdminStateConflict:
+		return "admin state conflict"
 	default:
 		// 空字符串是“未登记”的内部标记，不作为最终错误文本对外返回。
 		return ""

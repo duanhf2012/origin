@@ -96,6 +96,10 @@ var (
 	ErrDiagnosticsUnavailable error = newCodeError(CodeDiagnosticsUnavailable)
 	// ErrDiagnosticsStateConflict 表示当前 Application 或 Listener 状态不允许该诊断操作。
 	ErrDiagnosticsStateConflict error = newCodeError(CodeDiagnosticsStateConflict)
+	// ErrAdminUnavailable 表示 Admin Listener、HTTP Serve 或受控关闭无法完成。
+	ErrAdminUnavailable error = newCodeError(CodeAdminUnavailable)
+	// ErrAdminStateConflict 表示当前 Application 或 Listener 状态不允许该 Admin 操作。
+	ErrAdminStateConflict error = newCodeError(CodeAdminStateConflict)
 )
 
 // codeError 是只有稳定错误码、没有动态消息和底层原因的轻量错误。
@@ -255,6 +259,10 @@ func New(code Code) error {
 		return ErrDiagnosticsUnavailable
 	case CodeDiagnosticsStateConflict:
 		return ErrDiagnosticsStateConflict
+	case CodeAdminUnavailable:
+		return ErrAdminUnavailable
+	case CodeAdminStateConflict:
+		return ErrAdminStateConflict
 	default:
 		// 未登记错误码仍然需要保留原始数值，因此按需创建轻量对象。
 		return newCodeError(code)

@@ -28,17 +28,68 @@ const (
 type httpRuntime struct {
 	operationMu sync.Mutex
 	mu          sync.Mutex
-	state       httpRuntimeState
-	requested   string
-	address     string
-	listener    net.Listener
-	server      *http.Server
-	done        chan struct{}
-	errorCode   errs.Code
+	// requestSlotsOnce/requestSlots 只在使用方显式启用时建立该 Runtime 私有的固定请求额度。
+	requestSlotsOnce sync.Once
+	requestSlots     chan struct{}
+	state            httpRuntimeState
+	requested        string
+	address          string
+	listener         net.Listener
+	server           *http.Server
+	done             chan struct{}
+	errorCode        errs.Code
 }
 
+// tryAcquireRequestSlot 无等待获取当前 Runtime 的一个活动请求额度。
+func (runtime *httpRuntime) tryAcquireRequestSlot(limit int) bool {
+	if runtime == nil || limit <= 0 {
+		return false
+	}
+	runtime.requestSlotsOnce.Do(func() {
+		runtime.requestSlots = make(chan struct{}, limit)
+	})
+	select {
+	case runtime.requestSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// releaseRequestSlot 归还一次成功获取的额度；调用方必须与 tryAcquireRequestSlot 成对使用。
+func (runtime *httpRuntime) releaseRequestSlot() {
+	<-runtime.requestSlots
+}
+
+// httpRuntimeErrors 把同一 Listener 生命周期映射到所属 HTTP 子系统的稳定错误族。
+type httpRuntimeErrors struct {
+	unavailableCode errs.Code
+	stateConflict   error
+}
+
+// diagnosticsHTTPRuntimeErrors 保留 v3.0 Diagnostics/pprof 已发布的错误语义。
+func diagnosticsHTTPRuntimeErrors() httpRuntimeErrors {
+	return httpRuntimeErrors{
+		unavailableCode: errs.CodeDiagnosticsUnavailable,
+		stateConflict:   errs.ErrDiagnosticsStateConflict,
+	}
+}
+
+// start 使用既有 Diagnostics 错误族启动 Listener，保持 pprof 和旧 Diagnostics 调用点兼容。
 func (runtime *httpRuntime) start(address string, server *http.Server) error {
+	return runtime.startWithErrors(address, server, diagnosticsHTTPRuntimeErrors())
+}
+
+// startWithErrors 串行启动 Listener，并由调用方指定当前 HTTP 子系统的稳定错误族。
+func (runtime *httpRuntime) startWithErrors(
+	address string,
+	server *http.Server,
+	runtimeErrors httpRuntimeErrors,
+) error {
 	if runtime == nil || address == "" || server == nil || server.Handler == nil {
+		return errs.ErrInvalidArgument
+	}
+	if runtimeErrors.unavailableCode == errs.CodeOK || runtimeErrors.stateConflict == nil {
 		return errs.ErrInvalidArgument
 	}
 	if _, err := net.ResolveTCPAddr("tcp", address); err != nil {
@@ -54,18 +105,18 @@ func (runtime *httpRuntime) start(address string, server *http.Server) error {
 			return nil
 		}
 		runtime.mu.Unlock()
-		return errs.ErrDiagnosticsStateConflict
+		return runtimeErrors.stateConflict
 	}
 	if runtime.state == httpRuntimeClosing {
 		runtime.mu.Unlock()
-		return errs.ErrDiagnosticsStateConflict
+		return runtimeErrors.stateConflict
 	}
 	runtime.mu.Unlock()
 
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return errs.Wrap(
-			errs.CodeDiagnosticsUnavailable,
+			runtimeErrors.unavailableCode,
 			fmt.Errorf("listen %q: %w", address, err),
 		)
 	}
@@ -83,7 +134,7 @@ func (runtime *httpRuntime) start(address string, server *http.Server) error {
 	runtime.errorCode = errs.CodeOK
 	runtime.mu.Unlock()
 
-	go runtime.serve(server, listener, done)
+	go runtime.serve(server, listener, done, runtimeErrors.unavailableCode)
 	return nil
 }
 
@@ -91,6 +142,7 @@ func (runtime *httpRuntime) serve(
 	server *http.Server,
 	listener net.Listener,
 	done chan struct{},
+	unavailableCode errs.Code,
 ) {
 	serveErr := server.Serve(listener)
 	runtime.mu.Lock()
@@ -98,7 +150,7 @@ func (runtime *httpRuntime) serve(
 		if runtime.state == httpRuntimeServing &&
 			!errors.Is(serveErr, http.ErrServerClosed) {
 			runtime.state = httpRuntimeFailed
-			runtime.errorCode = errs.CodeDiagnosticsUnavailable
+			runtime.errorCode = unavailableCode
 			runtime.address = ""
 			runtime.requested = ""
 			runtime.listener = nil
@@ -109,8 +161,20 @@ func (runtime *httpRuntime) serve(
 	runtime.mu.Unlock()
 }
 
+// stop 使用既有 Diagnostics 错误族停止 Listener，保持 pprof 和旧 Diagnostics 调用点兼容。
 func (runtime *httpRuntime) stop(ctx context.Context) error {
+	return runtime.stopWithErrors(ctx, diagnosticsHTTPRuntimeErrors())
+}
+
+// stopWithErrors 关闭 Listener、等待 Serve 退出，并按所属子系统映射关闭失败。
+func (runtime *httpRuntime) stopWithErrors(
+	ctx context.Context,
+	runtimeErrors httpRuntimeErrors,
+) error {
 	if runtime == nil || ctx == nil {
+		return errs.ErrInvalidArgument
+	}
+	if runtimeErrors.unavailableCode == errs.CodeOK || runtimeErrors.stateConflict == nil {
 		return errs.ErrInvalidArgument
 	}
 	runtime.operationMu.Lock()
@@ -128,7 +192,7 @@ func (runtime *httpRuntime) stop(ctx context.Context) error {
 	case httpRuntimeClosing:
 		// operationMu 保证正常控制路径不会同时进入 Closing；该分支只作为状态防御。
 		runtime.mu.Unlock()
-		return errs.ErrDiagnosticsStateConflict
+		return runtimeErrors.stateConflict
 	}
 	runtime.state = httpRuntimeClosing
 	server := runtime.server
@@ -155,7 +219,7 @@ func (runtime *httpRuntime) stop(ctx context.Context) error {
 	if cause := context.Cause(ctx); cause != nil {
 		return errs.Wrap(errs.CodeOf(cause), cause)
 	}
-	return errs.Wrap(errs.CodeDiagnosticsUnavailable, shutdownErr)
+	return errs.Wrap(runtimeErrors.unavailableCode, shutdownErr)
 }
 
 func (runtime *httpRuntime) resetLocked() {
