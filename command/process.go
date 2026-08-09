@@ -45,6 +45,22 @@ func stopFilePath(pidDir string, appName string) string {
 	return filepath.Join(pidDir, appName+".stop")
 }
 
+func controlLockPath(pidDir string, appName string) string {
+	return filepath.Join(pidDir, appName+".control.lock")
+}
+
+func controlRequestPath(pidDir string, appName string) string {
+	return filepath.Join(pidDir, appName+".control.request")
+}
+
+func controlProcessingPath(pidDir string, appName string) string {
+	return filepath.Join(pidDir, appName+".control.processing")
+}
+
+func controlResponsePath(pidDir string, appName string) string {
+	return filepath.Join(pidDir, appName+".control.response")
+}
+
 // acquirePIDLease 打开固定 PID 文件并尝试立即取得进程运行权。
 func acquirePIDLease(pidDir string, appName string) (*pidLease, error) {
 	path := pidFilePath(pidDir, appName)

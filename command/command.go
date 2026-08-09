@@ -35,6 +35,8 @@ type StartRequest struct {
 	PIDDir string
 	// NodeIDs 按命令行声明顺序保存要启动的 Node；空切片表示由 Application 使用配置顺序。
 	NodeIDs []string
+	// Controls 由当前 start 持有的本地控制邮箱提供；nil 表示没有在线控制入口。
+	Controls <-chan ControlRequest
 	// DiagnosticsAddress 非空时要求 Application 在 Node 启动前监听诊断 JSON 地址。
 	DiagnosticsAddress string
 	// PprofAddress 非空时要求 Application 在 Node 启动前监听 Go pprof 地址。
