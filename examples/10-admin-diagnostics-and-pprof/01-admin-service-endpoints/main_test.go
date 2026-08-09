@@ -90,8 +90,11 @@ func TestLogicServiceAdminEndpoints(t *testing.T) {
 		refresh,
 		admin.NewRequest("refresh", admin.Principal{}, nil, nil, []byte(`{"player_id":"player-7"}`)),
 	)
-	if err != nil || response.Status() != http.StatusAccepted {
-		t.Fatalf("refresh response = %d, %v", response.Status(), err)
+	// InvokeService 是 Service 串行桥，返回的是 Handler 的原始 Response；它不模拟 HTTP
+	// 边界的默认状态解析。refreshPlayer 成功时故意返回零值 Response，HTTP 层会据此采用
+	// Endpoint 配置的 202 Accepted。
+	if err != nil || response.Status() != 0 || refresh.SuccessStatus() != http.StatusAccepted {
+		t.Fatalf("refresh raw response/status default = %d/%d, %v", response.Status(), refresh.SuccessStatus(), err)
 	}
 	select {
 	case playerID := <-refreshed:

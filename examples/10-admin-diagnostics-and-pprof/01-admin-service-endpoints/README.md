@@ -19,6 +19,18 @@ Service 的唯一串行执行槽，因此可以直接访问 Service 普通字段
 完成”；如果 Handler 显式返回 `admin.JSON(...)` 或其他状态，显式响应优先。这里的刷新任务由
 `DispatchAsync` 排队，正好演示为什么异步通知适合返回 202。
 
+这里要同时看两个返回值，不能只看 `admin.Response{}`：
+
+| Handler 返回 | 最终 HTTP 结果 |
+| --- | --- |
+| `admin.Response{}, nil` | 成功；零值没有显式状态，HTTP 边界采用 Endpoint 的默认成功状态。这个端点配置了 `202`。 |
+| `admin.Empty(http.StatusNoContent), nil` 或 `admin.JSON(http.StatusOK, value)` | 成功；显式状态优先于 Endpoint 的默认状态。 |
+| `admin.Response{}, err` | 失败；Response 被忽略，按 `err` 的稳定错误码映射为安全的 4xx/5xx。`DecodeJSON` 与 `player_id` 为空都是 `CodeInvalidArgument`，所以是 `400 Bad Request`，绝不会是 `202`。 |
+
+因此 `refreshPlayer` 只有在输入已通过校验、`DispatchAsync` 成功入队，且返回
+`admin.Response{}, nil` 的那一行才会得到 `202 Accepted`。队列已满时返回的错误会映射为 `429`；
+Service 停止等生命周期错误则会映射为 `503`。
+
 启动后可直接复制执行：
 
 ```bash

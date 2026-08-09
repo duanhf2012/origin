@@ -91,8 +91,10 @@ func (target *LogicService) AdminEndpoints() []admin.Endpoint {
 			"refresh-player",
 			// Handler 返回前只负责“接受”请求，真正刷新在后续 Service 任务中完成。
 			target.refreshPlayer,
-			// POST 默认可以返回 204；这里把“成功完成请求”改成 202 Accepted，
+			// POST 的成功零值响应默认是 204；这里把“成功完成请求”改成 202 Accepted，
 			// 让调用方明确知道：请求已入队，但异步刷新尚未必执行完。
+			// 它只在 Handler 返回 (admin.Response{}, nil) 时生效；返回非 nil error 时，
+			// Response 会被忽略，框架按 error 的稳定错误码生成 4xx/5xx。
 			admin.WithSuccessStatus(http.StatusAccepted),
 		),
 	}
@@ -155,9 +157,12 @@ func (target *LogicService) refreshPlayer(
 ) (admin.Response, error) {
 	var input refreshPlayerRequest
 	if err := request.DecodeJSON(&input); err != nil {
+		// 第二个返回值非 nil 时，Admin HTTP 层不会读取这个零值 Response，也不会返回 202。
+		// DecodeJSON 给输入错误标记 CodeInvalidArgument，所以 HTTP 客户端会收到 400 Bad Request。
 		return admin.Response{}, err
 	}
 	if input.PlayerID == "" {
+		// 同样地：非 nil error 优先于 WithSuccessStatus；这条分支也是 400，不是 202。
 		return admin.Response{}, errs.NewMessage(errs.CodeInvalidArgument, "player_id 不能为空")
 	}
 	observer := target.onPlayerRefreshed
@@ -166,9 +171,12 @@ func (target *LogicService) refreshPlayer(
 		observer(input.PlayerID)
 		target.Logger().Info(fmt.Sprintf("player refreshed: player_id=%s", input.PlayerID))
 	}); err != nil {
+		// 例如队列已满时这里返回 CodeServiceQueueFull，HTTP 层会映射为 429，而不是 202。
 		return admin.Response{}, err
 	}
-	return admin.Empty(http.StatusAccepted), nil
+	// 投递成功且 error 为 nil：零值 Response 没有显式状态，HTTP 层于是采用上面配置的 202。
+	// 202 仅承诺“已接受并入队”；异步回调尚未完成时也可以返回它。
+	return admin.Response{}, nil
 }
 
 // init 只把 Service 类型安装到当前示例 Application；不会创建运行实例或启动 goroutine。
