@@ -3,6 +3,22 @@
 这个示例把管理能力直接声明在 `LogicService.AdminEndpoints` 中。Application 启动时冻结路由，
 HTTP 请求随后按真实 Node 和 Service 定位，并进入该 Service 与业务任务共用的串行执行槽。
 
+`AdminEndpoints` 返回的是端点描述符切片，不是“现在就执行三个函数”：
+
+| 声明 | 含义 |
+| --- | --- |
+| `admin.Get("summary", target.getSummary)` | 注册一个只读 GET 查询；第二个参数是收到请求后才调用的 Handler。 |
+| `admin.Post("reload-logic", target.reloadLogic)` | 注册一个 POST 写操作；请求体会先经过框架边界检查，再进入 Handler。 |
+| `admin.Post("refresh-player", target.refreshPlayer, ...)` | 注册一个异步通知类 POST；额外 Option 改变这个端点的默认成功状态。 |
+
+端点名称是固定的 URL 标识，最终位于 `/endpoints/<name>`。Service 端点 Handler 会进入目标
+Service 的唯一串行执行槽，因此可以直接访问 Service 普通字段；它不是并发 HTTP Handler。
+
+`admin.WithSuccessStatus(http.StatusAccepted)` 的作用是把 Handler 返回零值响应时的默认状态从
+`204 No Content` 改成 `202 Accepted`。`202` 的含义是“请求已经被接受/安排”，不是“后台刷新已经
+完成”；如果 Handler 显式返回 `admin.JSON(...)` 或其他状态，显式响应优先。这里的刷新任务由
+`DispatchAsync` 排队，正好演示为什么异步通知适合返回 202。
+
 启动后可直接复制执行：
 
 ```bash

@@ -23,9 +23,12 @@ func (target *SnapshotService) OnStart(context.Context) error {
 		return fmt.Errorf("application runtime is unavailable")
 	}
 
-	// 每次 Diagnostics 都重新聚合当前状态。返回值不持有可变 Node/Service 对象，调用方可以
-	// 独立编码或传递，但旧快照不会随运行状态自动更新。
+	// 每次 Diagnostics 都重新聚合当前状态，返回的是一次性的 Full Snapshot 值。
+	// 返回值不持有可变 Node/Service 对象，调用方可以独立编码或传递；但旧快照不会
+	// 随运行状态自动更新，需要最新数据时必须重新调用 Diagnostics。
 	snapshot := runtime.Diagnostics()
+	// Snapshot 已经是进程内的完整值模型；这里的 JSON 编码只发生在示例的 OnStart，
+	// 不会启动 Admin Listener，也不会把快照自动发布到网络。
 	encoded, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode diagnostics snapshot: %w", err)
