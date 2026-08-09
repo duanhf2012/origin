@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"errors"
 	"net/http"
 )
 
@@ -26,9 +25,15 @@ type Guard interface {
 	Authorize(context.Context, *http.Request, Operation) (Principal, error)
 }
 
-var (
+// guardError 是没有可变状态和错误链的 Admin 授权哨兵错误。
+type guardError string
+
+// Error 返回 HTTP Runtime 可安全记录的稳定哨兵文本。
+func (err guardError) Error() string { return string(err) }
+
+const (
 	// ErrUnauthenticated 让 HTTP Runtime 稳定映射为 401，且不包含认证材料。
-	ErrUnauthenticated = errors.New("admin unauthenticated")
+	ErrUnauthenticated guardError = "admin unauthenticated"
 	// ErrForbidden 让 HTTP Runtime 稳定映射为 403，且不包含授权内部原因。
-	ErrForbidden = errors.New("admin forbidden")
+	ErrForbidden guardError = "admin forbidden"
 )

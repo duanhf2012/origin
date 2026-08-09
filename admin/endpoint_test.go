@@ -111,7 +111,7 @@ func TestGuardSecurityValueModel(t *testing.T) {
 	if err != nil || principal.Subject != "operator" || principal.Roles[0] != "admin" {
 		t.Fatalf("Authorize() = %+v, %v", principal, err)
 	}
-	if ErrUnauthenticated == nil || ErrForbidden == nil || errors.Is(ErrUnauthenticated, ErrForbidden) {
+	if errors.Is(ErrUnauthenticated, ErrForbidden) {
 		t.Fatalf("guard errors = %v, %v", ErrUnauthenticated, ErrForbidden)
 	}
 }
