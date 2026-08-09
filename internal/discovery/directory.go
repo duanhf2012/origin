@@ -46,6 +46,9 @@ type Snapshot struct {
 	targets      []Target
 	nodeCount    int
 	serviceCount int
+	// 状态计数与全部索引在同一次冷发布中冻结，监控读取不再扫描 instances。
+	runningCount int
+	retiredCount int
 }
 
 // Version 返回该不可变快照的内部单调版本。
@@ -105,9 +108,14 @@ type ChangeSet struct {
 
 // Stats 是目录内部诊断和测试使用的紧凑统计。
 type Stats struct {
-	Version  uint64
+	// Version 是产生下列全部计数的同一不可变快照版本。
+	Version uint64
+	// Nodes 和 Services 是当前筛选后可见的远端数量。
 	Nodes    int
 	Services int
+	// Running 和 Retired 按当前公开生命周期划分全部 Services。
+	Running int
+	Retired int
 }
 
 // Directory 持有一个 Node 的当前可见目录。
@@ -301,6 +309,8 @@ func (directory *Directory) Stats() Stats {
 		Version:  current.version,
 		Nodes:    current.nodeCount,
 		Services: current.serviceCount,
+		Running:  current.runningCount,
+		Retired:  current.retiredCount,
 	}
 }
 
@@ -364,9 +374,19 @@ func buildSnapshot(
 	byService := make(map[string][]*Instance)
 	all := make([]*Instance, 0, len(keys))
 	targetByNode := make(map[string]Target)
+	runningCount := 0
+	retiredCount := 0
 	for _, key := range keys {
 		instance := instances[key]
 		all = append(all, instance)
+		// normalize 已把公开状态限制为 Running 或 Retired；在发布冷路径一次累加，
+		// 让监控读取只需取得当前 Snapshot 指针，不再遍历远端实例。
+		switch instance.State {
+		case ServiceStateRunning:
+			runningCount++
+		case ServiceStateRetired:
+			retiredCount++
+		}
 		byService[instance.ServiceName] = append(
 			byService[instance.ServiceName],
 			instance,
@@ -397,6 +417,8 @@ func buildSnapshot(
 		targets:      targets,
 		nodeCount:    nodeCount,
 		serviceCount: len(instances),
+		runningCount: runningCount,
+		retiredCount: retiredCount,
 	}
 }
 

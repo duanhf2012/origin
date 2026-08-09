@@ -70,9 +70,9 @@ func (app *Application) registerAdminDiagnosticsRoute(mux *http.ServeMux) {
 		query := request.Query()
 		detail, exists := query["detail"]
 		switch {
-		case !exists:
+		case len(query) == 0:
 			return admin.JSON(http.StatusOK, app.DiagnosticsSummary())
-		case len(detail) == 1 && detail[0] == "full":
+		case len(query) == 1 && exists && len(detail) == 1 && detail[0] == "full":
 			return admin.JSON(http.StatusOK, app.Diagnostics())
 		default:
 			return admin.Response{}, errs.ErrInvalidArgument

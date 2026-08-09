@@ -3,6 +3,7 @@ package discovery
 import (
 	"errors"
 	"reflect"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -103,6 +104,74 @@ func TestDirectoryApplyAndQuery(t *testing.T) {
 	}
 	if published || changes.Version != 1 || len(changes.Entries) != 0 {
 		t.Fatalf("等价快照产生了发布: published=%v changes=%+v", published, changes)
+	}
+}
+
+// TestDirectoryStatsCountsServiceStates 固定零快照和一次发布后的 Running/Retired 计数；四个
+// 计数必须来自同一个不可变 Snapshot。
+func TestDirectoryStatsCountsServiceStates(t *testing.T) {
+	t.Parallel()
+
+	filter, _ := CompileFilter(false, nil)
+	directory, _ := NewDirectory("gateway-1", filter)
+	if stats := directory.Stats(); stats.Version != 0 || stats.Nodes != 0 ||
+		stats.Services != 0 || stats.Running != 0 || stats.Retired != 0 {
+		t.Fatalf("empty Stats() = %+v", stats)
+	}
+	if _, _, err := directory.ApplySnapshot(directoryStatsRawSnapshot(1, 3, 2)); err != nil {
+		t.Fatal(err)
+	}
+	stats := directory.Stats()
+	if stats.Version != 1 || stats.Nodes != 1 || stats.Services != 5 ||
+		stats.Running != 3 || stats.Retired != 2 {
+		t.Fatalf("published Stats() = %+v", stats)
+	}
+}
+
+// TestDirectoryStatsConcurrentApplyIsOneSnapshot 交替发布不同总量和状态组成，证明一次 Stats
+// 不会把 Version/Services 与另一版本的状态计数拼接。
+func TestDirectoryStatsConcurrentApplyIsOneSnapshot(t *testing.T) {
+	t.Parallel()
+
+	filter, _ := CompileFilter(false, nil)
+	directory, _ := NewDirectory("gateway-1", filter)
+	first := directoryStatsRawSnapshot(11, 1, 1)
+	second := directoryStatsRawSnapshot(12, 5, 3)
+	if _, _, err := directory.ApplySnapshot(first); err != nil {
+		t.Fatal(err)
+	}
+
+	var readers sync.WaitGroup
+	var stop atomic.Bool
+	var invalid atomic.Bool
+	for range 4 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for !stop.Load() {
+				stats := directory.Stats()
+				if stats.Running+stats.Retired != stats.Services {
+					invalid.Store(true)
+					return
+				}
+			}
+		}()
+	}
+	for index := range 500 {
+		candidate := first
+		if index%2 == 0 {
+			candidate = second
+		}
+		if _, _, err := directory.ApplySnapshot(candidate); err != nil {
+			stop.Store(true)
+			readers.Wait()
+			t.Fatal(err)
+		}
+	}
+	stop.Store(true)
+	readers.Wait()
+	if invalid.Load() {
+		t.Fatal("Stats() observed state counts from different snapshots")
 	}
 }
 
@@ -332,6 +401,29 @@ func rawNodeRetired(
 	node := rawNode(nodeID, sessionID, address, serviceName, contract)
 	node.Services[0].State = ServiceStateRetired
 	return node
+}
+
+// directoryStatsRawSnapshot 构造一个远端 Node 的可辨认状态组成。
+func directoryStatsRawSnapshot(sessionID uint64, running, retired int) RawSnapshot {
+	services := make([]RawService, 0, running+retired)
+	for index := range running {
+		services = append(services, RawService{
+			ServiceName: "running-" + strconv.Itoa(index),
+			State:       ServiceStateRunning,
+		})
+	}
+	for index := range retired {
+		services = append(services, RawService{
+			ServiceName: "retired-" + strconv.Itoa(index),
+			State:       ServiceStateRetired,
+		})
+	}
+	return RawSnapshot{Nodes: []RawNode{{
+		NodeID:    "game-1",
+		SessionID: sessionID,
+		Transport: TransportNone,
+		Services:  services,
+	}}}
 }
 
 // fingerprint 构造非零且容易辨认的稳定测试指纹。

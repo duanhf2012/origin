@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"runtime"
 	runtimemetrics "runtime/metrics"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -292,6 +293,8 @@ func TestAdminDiagnosticsDetailRouting(t *testing.T) {
 		{name: "invalid", method: http.MethodGet, query: "?detail=x", wantStatus: http.StatusBadRequest},
 		{name: "empty", method: http.MethodGet, query: "?detail=", wantStatus: http.StatusBadRequest},
 		{name: "repeated", method: http.MethodGet, query: "?detail=full&detail=full", wantStatus: http.StatusBadRequest},
+		{name: "unknown key", method: http.MethodGet, query: "?token=query-secret", wantStatus: http.StatusBadRequest},
+		{name: "full with extra key", method: http.MethodGet, query: "?detail=full&token=query-secret", wantStatus: http.StatusBadRequest},
 		{name: "post", method: http.MethodPost, wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodGet},
 	}
 	for _, test := range tests {
@@ -309,6 +312,10 @@ func TestAdminDiagnosticsDetailRouting(t *testing.T) {
 				t.Fatalf("status=%d Allow=%q Body=%q", response.StatusCode, response.Header.Get("Allow"), body)
 			}
 			if test.wantSchema == 0 {
+				if test.wantStatus == http.StatusBadRequest &&
+					body != http.StatusText(http.StatusBadRequest)+"\n" {
+					t.Fatalf("400 Body = %q, want stable StatusText", body)
+				}
 				return
 			}
 			if response.Header.Get("Content-Type") != "application/json" {
@@ -326,6 +333,56 @@ func TestAdminDiagnosticsDetailRouting(t *testing.T) {
 			}
 		})
 	}
+}
+
+type countingDiagnosticsService struct {
+	service.Service
+	executionReads atomic.Int64
+}
+
+func (target *countingDiagnosticsService) ExecutionStats() service.ExecutionStats {
+	target.executionReads.Add(1)
+	return service.ExecutionStats{}
+}
+
+// TestAdminDiagnosticsSamplesExactlyOnceForValidQuery 使用真实 Node 叶子调用计数固定采样边界：
+// 两种合法查询各采集一次，所有非法 query 在采样前返回 400。
+func TestAdminDiagnosticsSamplesExactlyOnceForValidQuery(t *testing.T) {
+	target := &countingDiagnosticsService{}
+	current, err := node.New(
+		node.Config{ID: "sample-count", Services: []string{"worker"}},
+		[]node.ServiceBinding{{Name: "worker", Template: "countingDiagnosticsService", Service: target}},
+		originlog.NewNop(),
+		node.Options{MaxTimersPerNode: 8, TimerLocation: time.UTC},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = current.Rollback(context.Background()) })
+	app := New()
+	app.nodes = []*node.Node{current}
+	if err := app.freezeAdminRoutes(nil); err != nil {
+		t.Fatal(err)
+	}
+	baseURL := startAdminRouteTestServer(t, app)
+
+	request := func(query string, wantStatus int, wantReads int64) {
+		t.Helper()
+		response, requestErr := http.Get(baseURL + "/admin/v1/diagnostics" + query)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		body := readAdminRouteResponse(t, response)
+		if response.StatusCode != wantStatus || target.executionReads.Load() != wantReads {
+			t.Fatalf("GET %q status=%d reads=%d Body=%q, want status=%d reads=%d",
+				query, response.StatusCode, target.executionReads.Load(), body, wantStatus, wantReads)
+		}
+	}
+	request("?unknown=query-secret", http.StatusBadRequest, 0)
+	request("?detail=full&unknown=query-secret", http.StatusBadRequest, 0)
+	request("?detail=full&detail=full", http.StatusBadRequest, 0)
+	request("", http.StatusOK, 1)
+	request("?detail=full", http.StatusOK, 2)
 }
 
 // TestApplicationInjectsRestrictedFacadeIntoRealService 防止 Application.buildNodes 遗漏

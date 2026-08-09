@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -319,4 +320,72 @@ func TestDiagnosticsSummaryConcurrentLeaves(t *testing.T) {
 	}
 	close(stop)
 	readers.Wait()
+}
+
+// TestDiagnosticsSummaryDirectoryIsOneSnapshot 交替发布不同 Service 总量的远端目录；一次 Node
+// Summary 的 Services/Running/Retired 必须来自同一个 Snapshot，不能先 Stats 再 All 拼接。
+func TestDiagnosticsSummaryDirectoryIsOneSnapshot(t *testing.T) {
+	current := newTestNode(t, &lifecycleService{label: "local"})
+	directory := current.discovery.directory
+	first := diagnosticsDirectoryRawSnapshot(101, 1, 0)
+	second := diagnosticsDirectoryRawSnapshot(102, 0, 64)
+	if _, _, err := directory.ApplySnapshot(first); err != nil {
+		t.Fatal(err)
+	}
+
+	var readers sync.WaitGroup
+	var stop atomic.Bool
+	var invalid atomic.Bool
+	for range 8 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for !stop.Load() {
+				directorySummary := current.DiagnosticsSummary().Directory
+				if directorySummary.Running+directorySummary.Retired != directorySummary.Services {
+					invalid.Store(true)
+					return
+				}
+			}
+		}()
+	}
+	for index := range 2_000 {
+		candidate := first
+		if index%2 == 0 {
+			candidate = second
+		}
+		if _, _, err := directory.ApplySnapshot(candidate); err != nil {
+			stop.Store(true)
+			readers.Wait()
+			t.Fatal(err)
+		}
+	}
+	stop.Store(true)
+	readers.Wait()
+	if invalid.Load() {
+		t.Fatal("DiagnosticsSummary observed Directory fields from different snapshots")
+	}
+}
+
+// diagnosticsDirectoryRawSnapshot 构造一个具有指定 Running/Retired 组成的远端目录快照。
+func diagnosticsDirectoryRawSnapshot(sessionID uint64, running, retired int) internaldiscovery.RawSnapshot {
+	services := make([]internaldiscovery.RawService, 0, running+retired)
+	for index := range running {
+		services = append(services, internaldiscovery.RawService{
+			ServiceName: "running-" + strconv.Itoa(index),
+			State:       internaldiscovery.ServiceStateRunning,
+		})
+	}
+	for index := range retired {
+		services = append(services, internaldiscovery.RawService{
+			ServiceName: "retired-" + strconv.Itoa(index),
+			State:       internaldiscovery.ServiceStateRetired,
+		})
+	}
+	return internaldiscovery.RawSnapshot{Nodes: []internaldiscovery.RawNode{{
+		NodeID:    "remote-1",
+		SessionID: sessionID,
+		Transport: internaldiscovery.TransportNone,
+		Services:  services,
+	}}}
 }

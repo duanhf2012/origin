@@ -167,21 +167,13 @@ func mapDiscoveryStatus(status DiscoveryStatus) diagnostics.DiscoverySnapshot {
 
 func mapDirectory(directory *internaldiscovery.Directory) diagnostics.DiscoveryDirectorySnapshot {
 	stats := directory.Stats()
-	result := diagnostics.DiscoveryDirectorySnapshot{
+	return diagnostics.DiscoveryDirectorySnapshot{
 		Version:  stats.Version,
 		Nodes:    stats.Nodes,
 		Services: stats.Services,
+		Running:  stats.Running,
+		Retired:  stats.Retired,
 	}
-	// All 返回同一不可变快照的内部只读 Slice；这里只累计状态，不复制地址、标签或实例。
-	for _, instance := range directory.All() {
-		switch instance.State {
-		case internaldiscovery.ServiceStateRunning:
-			result.Running++
-		case internaldiscovery.ServiceStateRetired:
-			result.Retired++
-		}
-	}
-	return result
 }
 
 func mapRPCStats(stats rpc.Stats) diagnostics.RPCSnapshot {
