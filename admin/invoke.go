@@ -14,12 +14,19 @@ type serviceInvokeResult struct {
 }
 
 // InvokeService 把管理 Endpoint 投递到目标 Service 的有界 FIFO，并等待 Handler 终态。
+//
+// callerCtx 不能为空；nil 会返回 ErrInvalidArgument，且不会投递或执行 Handler。
 func InvokeService(
 	callerCtx context.Context,
 	target service.IService,
 	endpoint Endpoint,
 	request Request,
 ) (Response, error) {
+	// Context 是调用取消与结果等待的所有者；nil 不具有可安全推导的生命周期语义。
+	if callerCtx == nil {
+		return Response{}, errs.ErrInvalidArgument
+	}
+
 	// 已经终止的调用不能占用 Service 队列，更不能执行 Handler 副作用。
 	if err := callerCtx.Err(); err != nil {
 		return Response{}, errs.New(errs.CodeOf(err))

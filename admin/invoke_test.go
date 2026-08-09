@@ -227,6 +227,28 @@ func TestInvokeServiceCanceledBeforeDispatch(t *testing.T) {
 	}
 }
 
+// TestInvokeServiceRejectsNilCallerContext 防止公开管理入口在参数校验阶段 panic，
+// 或让缺少调用方生命周期的请求进入 Service 队列并执行 Handler 副作用。
+func TestInvokeServiceRejectsNilCallerContext(t *testing.T) {
+	target := startAdminInvokeService(t)
+	var called atomic.Bool
+	_, err := InvokeService(
+		nil,
+		target,
+		Post("nil-context", func(context.Context, Request) (Response, error) {
+			called.Store(true)
+			return Empty(http.StatusNoContent), nil
+		}),
+		Request{},
+	)
+	if !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("InvokeService(nil) error = %v, want ErrInvalidArgument", err)
+	}
+	if called.Load() {
+		t.Fatal("nil caller Context 仍执行 Handler")
+	}
+}
+
 // TestInvokeServiceCanceledWhileQueuedSkipsHandler 防止调用虽然已经进入 FIFO、但尚未取得
 // 执行槽时发生的取消仍启动 Handler；队列项只负责交付取消终态并归还容量。
 func TestInvokeServiceCanceledWhileQueuedSkipsHandler(t *testing.T) {
