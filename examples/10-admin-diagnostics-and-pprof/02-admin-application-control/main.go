@@ -45,7 +45,8 @@ func newControlState() *controlState {
 // atomic.Uint64，避免多个 HTTP 请求同时读取/修改 routingRevision 时产生数据竞争。
 func applicationEndpoints(state *controlState) []admin.Endpoint {
 	return []admin.Endpoint{
-		// GET 只查询当前路由版本。它应该没有副作用，因此可以被监控或运维页面重复调用。
+		// GET /admin/v1/application/endpoints/routing-status 只查询当前路由版本。
+		// 它是 Application 级 URL，不带 node-id/service-name；没有副作用，可被监控或运维页面重复调用。
 		admin.Get("routing-status", func(
 			_ context.Context,
 			_ admin.Request,
@@ -54,8 +55,8 @@ func applicationEndpoints(state *controlState) []admin.Endpoint {
 				RoutingRevision: state.routingRevision.Load(),
 			})
 		}),
-		// POST 用于修改路由版本。与 GET 不同，框架会把它记录为管理写操作并要求
-		// 调用方使用 POST；请求体必须是 application/json 且只能包含已知字段。
+		// POST /admin/v1/application/endpoints/reload-routing 用于修改路由版本。
+		// 与 GET 不同，框架会把它记录为管理写操作；请求体必须是 application/json 且只能包含已知字段。
 		admin.Post("reload-routing", func(
 			_ context.Context,
 			request admin.Request,
