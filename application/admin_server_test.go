@@ -121,11 +121,30 @@ func TestAdminServerLifecycleErrors(t *testing.T) {
 	if address, ok := nilApplication.AdminAddress(); ok || address != "" {
 		t.Fatalf("nil Application AdminAddress() = %q, %v", address, ok)
 	}
-	if err := New().StartAdminServer("127.0.0.1:0"); !errors.Is(
+	created := New()
+	if err := created.StartAdminServer("127.0.0.1:0"); !errors.Is(
 		err,
 		errs.ErrAdminStateConflict,
 	) {
 		t.Fatalf("created Application StartAdminServer() error = %v", err)
+	}
+	if err := created.StartAdminServer("unique-secret-marker"); !errors.Is(
+		err,
+		errs.ErrInvalidArgument,
+	) || strings.Contains(err.Error(), "unique-secret-marker") {
+		t.Fatalf("created malformed address error leaked input = %v", err)
+	}
+	closing := New()
+	closing.mu.Lock()
+	closing.resourcesReady = true
+	closing.resourcesClosing = true
+	closing.state.Store(uint32(StateRunning))
+	closing.mu.Unlock()
+	if err := closing.StartAdminServer("unique-secret-marker"); !errors.Is(
+		err,
+		errs.ErrInvalidArgument,
+	) || strings.Contains(err.Error(), "unique-secret-marker") {
+		t.Fatalf("closing malformed address error leaked input = %v", err)
 	}
 	app := newAdminHTTPTestApplication(t)
 	if err := app.StartAdminServer(""); !errors.Is(err, errs.ErrInvalidArgument) {
