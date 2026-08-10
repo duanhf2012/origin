@@ -45,3 +45,4 @@
 - [Origin 系统级稳定性、容量与性能验收报告](./reports/Origin系统级稳定性容量与性能验收报告.md)
 - [Origin 覆盖率、Example 与教程最终验收报告](./reports/Origin覆盖率Example与教程最终验收报告.md)
 - [Origin 发布前全面复审验收报告](./reports/Origin发布前全面复审验收报告.md)
+- [Origin 发布候选稳定性复验报告](./reports/Origin发布候选稳定性复验报告.md)
