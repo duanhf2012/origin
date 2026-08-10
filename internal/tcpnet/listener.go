@@ -43,6 +43,7 @@ type Listener struct {
 
 	// limitLogged 对连接上限告警限频，成功接受新连接后允许下一次告警。
 	limitLogged atomic.Bool
+	rejected    atomic.Uint64
 }
 
 // Listen 绑定 TCP 地址并启动 AcceptLoop。
@@ -115,6 +116,14 @@ func (listener *Listener) Cause() error {
 		return nil
 	}
 	return listener.closeCause()
+}
+
+// RejectedConnections 返回因活动连接上限被拒绝的累计 socket 数。
+func (listener *Listener) RejectedConnections() uint64 {
+	if listener == nil {
+		return 0
+	}
+	return listener.rejected.Load()
 }
 
 // StopAccept 幂等地停止新连接准入并等待 AcceptLoop 退出。
@@ -217,8 +226,12 @@ func (listener *Listener) acceptLoop() {
 
 		// 达到上限或 Listener 正在关闭时立即拒绝新 socket，不创建 Conn goroutine。
 		if !listener.hasCapacity() {
+			closing := listener.isClosing()
+			if !closing {
+				listener.rejected.Add(1)
+			}
 			_ = raw.Close()
-			if !listener.isClosing() &&
+			if !closing &&
 				listener.limitLogged.CompareAndSwap(false, true) {
 				listener.logger.Warn(
 					"TCP Listener 连接数达到上限",
@@ -249,6 +262,9 @@ func (listener *Listener) acceptLoop() {
 		)
 		if !listener.registerConn(conn) {
 			// 尚未启动 goroutine，直接关闭队列和 socket 即可回收全部本地资源。
+			if !listener.isClosing() {
+				listener.rejected.Add(1)
+			}
 			conn.Close()
 			continue
 		}

@@ -413,9 +413,10 @@ func TestWriteLoopPanicReleasesActiveBuffer(t *testing.T) {
 		buffer:      packet,
 		payloadSize: len(packet.Bytes()) + 1,
 		headerSize:  4,
+		chargeBytes: int64(packet.Capacity()),
 	}
 	encodeFrameLength(&item.header, item.payloadSize, options.Frame)
-	if err := conn.send.enqueue(item); err != nil {
+	if _, _, err := conn.send.enqueue(item); err != nil {
 		t.Fatalf("注入测试队列项失败：%v", err)
 	}
 	conn.start()

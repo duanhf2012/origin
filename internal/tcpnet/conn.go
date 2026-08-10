@@ -50,6 +50,8 @@ type Conn struct {
 
 	// overloadLogged 保证同一连接最多记录一次队列过载，避免故障时形成日志风暴。
 	overloadLogged atomic.Bool
+	sentMessages   atomic.Uint64
+	sentBytes      atomic.Uint64
 }
 
 // newConn 使用已经建立并完成 TCP 参数配置的 net.Conn 创建内部连接对象。
@@ -67,10 +69,14 @@ func newConn(
 		logger:     options.Logger,
 		localAddr:  raw.LocalAddr(),
 		remoteAddr: raw.RemoteAddr(),
-		send:       newSendQueue(options.SendQueueFrames),
-		writeDone:  make(chan struct{}),
-		done:       make(chan struct{}),
-		onDone:     onDone,
+		send: newSendQueue(
+			options.SendQueueFrames,
+			options.SendQueueBytes,
+			options.SendBudget,
+		),
+		writeDone: make(chan struct{}),
+		done:      make(chan struct{}),
+		onDone:    onDone,
 	}
 }
 
@@ -146,24 +152,69 @@ func (conn *Conn) Send(buffer *bufferpool.Buffer) error {
 	item := sendItem{
 		buffer:      buffer,
 		payloadSize: payloadSize,
+		chargeBytes: int64(buffer.Capacity()),
 	}
 	item.headerSize = uint8(
 		encodeFrameLength(&item.header, payloadSize, conn.options.Frame),
 	)
 
 	// enqueue 是连接关闭状态、消息数额度和所有权转移的唯一原子边界。
-	err := conn.send.enqueue(item)
+	changed, writable, err := conn.send.enqueue(item)
+	if err == nil && changed {
+		conn.notifyWritableChanged(writable)
+	}
 	if err != nil &&
 		errors.Is(err, errs.ErrTransportOverloaded) &&
 		conn.overloadLogged.CompareAndSwap(false, true) {
-		messages, _ := conn.send.snapshot()
+		snapshot := conn.send.snapshot()
 		conn.logger.Warn(
 			"TCP 发送队列过载",
 			originlog.String("remote_addr", addrString(conn.remoteAddr)),
-			originlog.Int("queued_messages", messages),
+			originlog.Int("queued_messages", snapshot.messages),
+			originlog.Int64("queued_bytes", snapshot.bytes),
 		)
 	}
 	return err
+}
+
+// Writable 报告当前发送队列是否仍处于低水位可写状态。
+//
+// 该结果只是瞬时提示；并发发送和 Module 总预算可能在返回后变化，最终必须以 Send 结果为准。
+func (conn *Conn) Writable() bool {
+	if conn == nil {
+		return false
+	}
+	return conn.send.snapshot().writable
+}
+
+// SendQueueStats 是当前连接发送队列的固定诊断快照。
+type SendQueueStats struct {
+	SentMessages uint64
+	SentBytes    uint64
+	Messages     int
+	Bytes        int64
+	HighMessages int
+	HighBytes    int64
+	Writable     bool
+	Closed       bool
+}
+
+// SendStats 返回发送队列消息、容量和可写状态。
+func (conn *Conn) SendStats() SendQueueStats {
+	if conn == nil {
+		return SendQueueStats{Closed: true}
+	}
+	snapshot := conn.send.snapshot()
+	return SendQueueStats{
+		SentMessages: conn.sentMessages.Load(),
+		SentBytes:    conn.sentBytes.Load(),
+		Messages:     snapshot.messages,
+		Bytes:        snapshot.bytes,
+		HighMessages: snapshot.highMessages,
+		HighBytes:    snapshot.highBytes,
+		Writable:     snapshot.writable,
+		Closed:       snapshot.closed,
+	}
 }
 
 // Close 幂等地发起立即传输关闭，不等待当前调用 goroutine。
@@ -336,13 +387,14 @@ func (conn *Conn) runReadLoop() (result error) {
 
 // writeLoop 顺序写出队列帧，并保证活动 Buffer 在所有终态下释放一次。
 func (conn *Conn) writeLoop() {
-	// active 跨越单次写入，最外层 panic 恢复可以回收已经出队但尚未释放的 Buffer。
-	var active *bufferpool.Buffer
+	// active 跨越单次写入，最外层 panic 恢复可以回收 Buffer 和 Module 总预算。
+	var active sendItem
+	hasActive := false
 	defer func() {
 		// writeItem 若在系统调用或内部不变量处 panic，也要清除连接持有的 payload 切片。
 		conn.clearWriteParts()
-		if active != nil {
-			active.Release()
+		if hasActive {
+			conn.send.releaseItem(&active)
 		}
 		if value := recover(); value != nil {
 			cause := panicError("tcpnet WriteLoop", value)
@@ -358,18 +410,28 @@ func (conn *Conn) writeLoop() {
 
 	for {
 		// next 只有在队列关闭且清空后返回 false；普通空队列会等待合并唤醒信号。
-		item, ok := conn.send.next()
+		item, ok, changed, writable := conn.send.next()
 		if !ok {
 			return
 		}
-		active = item.buffer
+		if changed {
+			conn.notifyWritableChanged(writable)
+		}
+		active = item
+		hasActive = true
 
 		// 无论完整写入还是 I/O 失败，活动 Buffer 都在进入下一轮前由唯一 Writer 释放。
 		err := conn.writeItem(item)
-		active.Release()
-		active = nil
+		conn.send.releaseItem(&active)
+		hasActive = false
 		if err != nil {
 			conn.initiateClose(err)
+			return
+		}
+		conn.sentMessages.Add(1)
+		conn.sentBytes.Add(uint64(item.payloadSize))
+		if conn.send.isSlow(conn.options.SlowClientTimeout) {
+			conn.initiateClose(slowClientError{})
 			return
 		}
 	}
@@ -459,6 +521,33 @@ func (conn *Conn) callOnClose(cause error) (err error) {
 		}
 	}()
 	conn.handler.OnClose(conn, cause)
+	return nil
+}
+
+// notifyWritableChanged 在不持有队列锁时调用可选 Handler，并把 panic 转成连接关闭。
+func (conn *Conn) notifyWritableChanged(writable bool) {
+	handler, ok := conn.handler.(WritableHandler)
+	if !ok {
+		return
+	}
+	if err := conn.callOnWritableChanged(handler, writable); err != nil {
+		conn.logger.Error(
+			"TCP Handler OnWritableChanged panic",
+			originlog.String("remote_addr", addrString(conn.remoteAddr)),
+			originlog.Err(err),
+		)
+		conn.initiateClose(err)
+	}
+}
+
+// callOnWritableChanged 隔离可选水位回调 panic，不允许破坏发送方或 Writer goroutine。
+func (conn *Conn) callOnWritableChanged(handler WritableHandler, writable bool) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = panicError("tcpnet Handler.OnWritableChanged", value)
+		}
+	}()
+	handler.OnWritableChanged(conn, writable)
 	return nil
 }
 

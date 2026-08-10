@@ -164,6 +164,60 @@ func TestOversizeAndZeroReleaseDropReferences(t *testing.T) {
 	}
 }
 
+func TestAdoptTransfersSliceWithoutPooling(t *testing.T) {
+	t.Parallel()
+
+	// 构造长度小于容量的独占 Slice，验证 Adopt 保留有效长度和真实内存计费。
+	pool := NewPool(Options{TrackUsage: true})
+	data := make([]byte, 3, 32)
+	copy(data, []byte{1, 2, 3})
+	buffer := pool.Adopt(data)
+	if got := buffer.Bytes(); len(got) != 3 || got[0] != 1 || got[2] != 3 {
+		t.Fatalf("Adopt 后数据错误：%v", got)
+	}
+	if got := buffer.Capacity(); got != 32 {
+		t.Fatalf("Adopt Capacity=%d，期望=32", got)
+	}
+	stats := pool.Stats()
+	if stats.AdoptedInUse != 1 || stats.AdoptedBytes != 32 ||
+		stats.InUseBuffers != 1 || stats.InUseCapacityBytes != 32 {
+		t.Fatalf("Adopt 统计错误：%+v", stats)
+	}
+
+	// 释放只断开外部数组和 Pool 引用，不把它放入固定档位。
+	buffer.Release()
+	if buffer.data != nil || buffer.owner != nil {
+		t.Fatal("Adopt Buffer 释放后仍持有外部引用")
+	}
+	assertTrackingEmpty(t, pool)
+}
+
+func TestBufferResizeWithinCapacity(t *testing.T) {
+	t.Parallel()
+
+	// 17 字节请求进入 32 字节档位；先缩为零，再扩展并写满新增区域。
+	buffer := NewPool(Options{}).Acquire(17)
+	if got := buffer.Capacity(); got != 32 {
+		t.Fatalf("Capacity=%d，期望=32", got)
+	}
+	if !buffer.Resize(0) || len(buffer.Bytes()) != 0 {
+		t.Fatal("Resize(0) 未清空有效视图")
+	}
+	if !buffer.Resize(32) {
+		t.Fatal("容量内 Resize 被拒绝")
+	}
+	for index := range buffer.Bytes() {
+		buffer.Bytes()[index] = byte(index)
+	}
+	if buffer.Resize(33) || buffer.Resize(-1) {
+		t.Fatal("越界 Resize 应失败")
+	}
+	if len(buffer.Bytes()) != 32 || buffer.Bytes()[31] != 31 {
+		t.Fatal("失败的 Resize 修改了有效视图")
+	}
+	buffer.Release()
+}
+
 func TestTrackingDisabledReturnsZeroSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -372,13 +426,35 @@ func assertTrackingEmpty(t *testing.T, pool *Pool) {
 		stats.InUseCapacityBytes != 0 ||
 		stats.ZeroSizeInUse != 0 ||
 		stats.OversizeInUse != 0 ||
-		stats.OversizeBytes != 0 {
+		stats.OversizeBytes != 0 ||
+		stats.AdoptedInUse != 0 ||
+		stats.AdoptedBytes != 0 {
 		t.Fatalf("Pool 仍有未归还 Buffer：%+v", stats)
 	}
 	// 再逐档检查，避免总量计算缺陷掩盖单桶负数或残留。
 	for _, bucket := range stats.Buckets {
 		if bucket.InUseBuffers != 0 {
 			t.Fatalf("档位 %d 仍有 %d 个未归还 Buffer", bucket.Capacity, bucket.InUseBuffers)
+		}
+	}
+}
+
+func TestRetainedCapacity(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		size int
+		want int
+	}{
+		{size: 0, want: 0},
+		{size: 1, want: 16},
+		{size: 16, want: 16},
+		{size: 17, want: 32},
+		{size: 64 * 1024, want: 64 * 1024},
+		{size: 64*1024 + 1, want: 64*1024 + 1},
+	} {
+		if got := RetainedCapacity(test.size); got != test.want {
+			t.Fatalf("RetainedCapacity(%d)=%d want=%d", test.size, got, test.want)
 		}
 	}
 }

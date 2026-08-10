@@ -31,6 +31,33 @@ func (b *Buffer) Bytes() []byte {
 	return b.data[b.start : b.start+b.size]
 }
 
+// Capacity 返回当前有效区域从 start 到底层数组末尾可使用的总容量。
+//
+// 网络容量预算使用该值而不是 len(Bytes())，避免 2 次幂档位和外部 Slice 的保留空间被低估。
+func (b *Buffer) Capacity() int {
+	// 与 Bytes 保持相同所有权检查，释放后的旧句柄不能读取下一任使用者容量。
+	if b == nil || !b.active {
+		panic("bufferpool: 不能查询 nil 或已经释放的 Buffer")
+	}
+	return cap(b.data) - b.start
+}
+
+// Resize 在当前有效区域的可用容量内修改可见长度。
+//
+// Resize 不分配、不移动 start，也不初始化扩展区域；扩展后调用方必须在转移所有权前写满新增字节。
+// 越界或负长度返回 false，且 Buffer 保持不变。
+func (b *Buffer) Resize(size int) bool {
+	// 先验证唯一所有权，再检查完整边界，防止失败时留下部分修改。
+	if b == nil || !b.active {
+		panic("bufferpool: 不能修改 nil 或已经释放的 Buffer")
+	}
+	if size < 0 || size > cap(b.data)-b.start {
+		return false
+	}
+	b.size = size
+	return true
+}
+
 // Headroom 返回当前有效区域之前仍可用于原地前置的字节数。
 func (b *Buffer) Headroom() int {
 	// 与 Bytes 保持相同的有效性检查，避免释放后的旧句柄读取下一任所有者状态。

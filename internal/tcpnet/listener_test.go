@@ -171,6 +171,9 @@ func TestListenerEnforcesConnectionLimit(t *testing.T) {
 	if _, err := second.Read(one[:]); err == nil {
 		t.Fatal("超过上限的第二条连接没有被关闭")
 	}
+	if rejected := listener.RejectedConnections(); rejected != 1 {
+		t.Fatalf("RejectedConnections=%d want=1", rejected)
+	}
 	waitForConnCount(t, listener, 1)
 
 	// 释放第一条连接后应重新允许一条连接进入。

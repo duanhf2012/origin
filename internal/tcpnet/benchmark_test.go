@@ -24,20 +24,20 @@ func BenchmarkFrameLength(b *testing.B) {
 func BenchmarkSendQueue(b *testing.B) {
 	// 使用关闭统计的 Pool 测量固定环形队列本身，不把诊断原子计数混入结果。
 	pool := bufferpool.NewPool(bufferpool.Options{})
-	queue := newSendQueue(4096)
+	queue := newTestSendQueue(b, 4096, 64*1024*1024)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
 		packet := pool.Acquire(64)
-		item := sendItem{buffer: packet, payloadSize: 64}
-		if err := queue.enqueue(item); err != nil {
+		item := sendItem{buffer: packet, payloadSize: 64, chargeBytes: int64(packet.Capacity())}
+		if err := testEnqueue(queue, item); err != nil {
 			b.Fatalf("enqueue 失败：%v", err)
 		}
-		got, ok := queue.next()
+		got, ok := testNext(queue)
 		if !ok {
 			b.Fatal("next 意外结束")
 		}
-		got.buffer.Release()
+		queue.releaseItem(&got)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	"github.com/duanhf2012/origin/v3/internal/bytebudget"
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
 
@@ -19,18 +20,36 @@ const (
 	defaultMaxMessageSize = 4 * 1024 * 1024
 	// 通用 TCP 默认预留 4096 个发送槽位；RPC 会显式覆盖为 16384。
 	defaultSendQueueFrames = 4096
+	// 默认每连接最多保留 64M 等待/正在写出的 Payload 容量。
+	defaultSendQueueBytes = 64 * 1024 * 1024
+	// 默认同一 Options 产生的全部连接共享 256M 发送总容量。
+	defaultSendQueueTotalBytes = 256 * 1024 * 1024
 	// 写入一个完整帧最多等待 15 秒。
 	defaultWriteTimeout = 15 * time.Second
+	// 发送队列持续高水位超过十秒时把对端判定为慢连接。
+	defaultSlowClientTimeout = 10 * time.Second
 	// 系统 TCP KeepAlive 默认使用 30 秒周期。
 	defaultKeepAlive = 30 * time.Second
 	// 单个 Listener 默认最多管理 4096 条活动连接。
 	defaultMaxConnections = 4096
 )
 
-// FrameOptions 配置使用网络字节序编码的长度字段宽度。
+// ByteOrder 是 TCP 长度字段使用的固定端序。
+type ByteOrder uint8
+
+const (
+	// BigEndian 使用网络字节序，是 TCP 帧的默认值。
+	BigEndian ByteOrder = iota + 1
+	// LittleEndian 支持使用小端长度字段的游戏客户端协议。
+	LittleEndian
+)
+
+// FrameOptions 配置长度字段宽度和端序。
 type FrameOptions struct {
 	// LengthFieldSize 只允许一、二或四字节。
 	LengthFieldSize int
+	// ByteOrder 对二、四字节生效；一字节没有端序差异。
+	ByteOrder ByteOrder
 }
 
 // ConnectionOptions 配置一条 TCP 连接的帧、队列、超时和依赖实例。
@@ -45,10 +64,16 @@ type ConnectionOptions struct {
 	MaxMessageSize int
 	// SendQueueFrames 限制每条连接等待发送的帧数量。
 	SendQueueFrames int
+	// SendQueueBytes 限制每条连接排队 Payload 的保留容量。
+	SendQueueBytes int64
+	// SendBudget 限制共享该实例的全部连接排队及正在写出的 Payload 容量。
+	SendBudget *bytebudget.Budget
 	// ReadTimeout 是读一个完整帧的空闲上限；零表示关闭。
 	ReadTimeout time.Duration
 	// WriteTimeout 是写一个完整帧的上限，必须大于零。
 	WriteTimeout time.Duration
+	// SlowClientTimeout 是发送队列连续保持高水位的最长时间，必须大于零。
+	SlowClientTimeout time.Duration
 	// KeepAlive 是系统 TCP 保活周期；零表示关闭系统保活。
 	KeepAlive time.Duration
 }
@@ -83,6 +108,14 @@ type Handler interface {
 	OnClose(conn *Conn, cause error)
 }
 
+// WritableHandler 是 Handler 可选实现的发送高低水位通知。
+//
+// 回调可能由并发 Send 或唯一 WriteLoop 触发，不能直接访问只允许 Service 串行执行的业务状态。
+// 上层网络 Module 只在这里投递 Service Task；RPC 等不需要背压事件的 Handler 无需实现。
+type WritableHandler interface {
+	OnWritableChanged(conn *Conn, writable bool)
+}
+
 // DefaultConnectionOptions 返回通用 TCP 场景的完整默认配置。
 func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions {
 	// 所有默认值集中在一个构造函数中，调用方修改个别字段后仍能保留其他安全边界。
@@ -91,12 +124,16 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions {
 		Logger: originlog.NewNop(),
 		Frame: FrameOptions{
 			LengthFieldSize: defaultLengthFieldSize,
+			ByteOrder:       BigEndian,
 		},
-		MaxMessageSize:  defaultMaxMessageSize,
-		SendQueueFrames: defaultSendQueueFrames,
-		ReadTimeout:     0,
-		WriteTimeout:    defaultWriteTimeout,
-		KeepAlive:       defaultKeepAlive,
+		MaxMessageSize:    defaultMaxMessageSize,
+		SendQueueFrames:   defaultSendQueueFrames,
+		SendQueueBytes:    defaultSendQueueBytes,
+		SendBudget:        mustNewByteBudget(defaultSendQueueTotalBytes),
+		ReadTimeout:       0,
+		WriteTimeout:      defaultWriteTimeout,
+		SlowClientTimeout: defaultSlowClientTimeout,
+		KeepAlive:         defaultKeepAlive,
 	}
 }
 
@@ -122,6 +159,9 @@ func validateConnectionOptions(options ConnectionOptions) error {
 	default:
 		return invalidConfig("tcpnet: LengthFieldSize 只能是 1、2 或 4")
 	}
+	if options.Frame.ByteOrder != BigEndian && options.Frame.ByteOrder != LittleEndian {
+		return invalidConfig("tcpnet: Frame.ByteOrder 只能是 BigEndian 或 LittleEndian")
+	}
 	// 最大消息必须为正数，并且能够由所选长度字段和当前平台 int 表达。
 	if options.MaxMessageSize <= 0 {
 		return invalidConfig("tcpnet: MaxMessageSize 必须大于零")
@@ -134,6 +174,13 @@ func validateConnectionOptions(options ConnectionOptions) error {
 	if options.SendQueueFrames <= 0 {
 		return invalidConfig("tcpnet: SendQueueFrames 必须大于零")
 	}
+	if options.SendQueueBytes <= 0 ||
+		int64(bufferpool.RetainedCapacity(options.MaxMessageSize)) > options.SendQueueBytes {
+		return invalidConfig("tcpnet: SendQueueBytes 必须大于零且不能小于 MaxMessageSize")
+	}
+	if options.SendBudget == nil || options.SendBudget.Snapshot().Limit < options.SendQueueBytes {
+		return invalidConfig("tcpnet: SendBudget 不能为空且上限不能小于 SendQueueBytes")
+	}
 
 	// 读超时允许零值关闭，写超时必须存在以避免 WriteLoop 永久挂起。
 	if options.ReadTimeout < 0 {
@@ -142,10 +189,22 @@ func validateConnectionOptions(options ConnectionOptions) error {
 	if options.WriteTimeout <= 0 {
 		return invalidConfig("tcpnet: WriteTimeout 必须大于零")
 	}
+	if options.SlowClientTimeout <= 0 {
+		return invalidConfig("tcpnet: SlowClientTimeout 必须大于零")
+	}
 	if options.KeepAlive < 0 {
 		return invalidConfig("tcpnet: KeepAlive 不能为负数")
 	}
 	return nil
+}
+
+// mustNewByteBudget 构造只使用编译期正数默认值，失败表示内部常量被破坏。
+func mustNewByteBudget(limit int64) *bytebudget.Budget {
+	budget, err := bytebudget.New(limit)
+	if err != nil {
+		panic("tcpnet: 非法默认发送总容量")
+	}
+	return budget
 }
 
 // validateListenOptions 在绑定端口前验证 Listener 自身和连接配置。

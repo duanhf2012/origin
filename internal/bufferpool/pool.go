@@ -19,6 +19,7 @@ const (
 	// 非池化 Buffer 使用独立标记，避免与固定档位索引混淆。
 	oversizeBucket = ^uint8(0)
 	zeroSizeBucket = oversizeBucket - 1
+	adoptedBucket  = zeroSizeBucket - 1
 )
 
 // Options 配置一个 Buffer Pool。
@@ -55,6 +56,10 @@ type Stats struct {
 	OversizeInUse int64
 	// OversizeBytes 是尚未释放的超大 Buffer 容量之和。
 	OversizeBytes int64
+	// AdoptedInUse 是接管外部独占 Slice 后尚未释放的 Buffer 数量。
+	AdoptedInUse int64
+	// AdoptedBytes 是尚未释放的外部独占 Slice 容量之和。
+	AdoptedBytes int64
 	// Buckets 保存全部固定容量档位的快照。
 	Buckets []BucketStats
 }
@@ -71,6 +76,8 @@ type Pool struct {
 	zeroSizeInUse atomic.Int64
 	oversizeInUse atomic.Int64
 	oversizeBytes atomic.Int64
+	adoptedInUse  atomic.Int64
+	adoptedBytes  atomic.Int64
 }
 
 // bucket 使用独立的 sync.Pool 复用同一容量的 Buffer。
@@ -85,6 +92,19 @@ func NewPool(options Options) *Pool {
 	return &Pool{trackUsage: options.TrackUsage}
 }
 
+// RetainedCapacity 返回 Acquire(size) 实际会计入容量预算的字节数。
+//
+// 网络 Options 在创建资源前使用本函数验证“允许的最大消息必定能够进入队列”。
+func RetainedCapacity(size int) int {
+	if size < 0 {
+		panic("bufferpool: Buffer 长度不能为负数")
+	}
+	if size == 0 || size > maxPooledCapacity() {
+		return size
+	}
+	return bucketCapacity(bucketIndex(size))
+}
+
 // Acquire 取得一个有效长度为 size 的 Buffer。
 //
 // size 为负数表示框架内部违反不变量，因此直接 panic。大于 64 KiB 的
@@ -92,6 +112,32 @@ func NewPool(options Options) *Pool {
 func (p *Pool) Acquire(size int) *Buffer {
 	// 普通取得没有前置空间，复用统一实现避免两条档位和统计路径逐渐分叉。
 	return p.AcquireWithHeadroom(size, 0)
+}
+
+// Adopt 接管一个调用方保证不再访问的独占 Slice，并返回统一 Buffer 所有权。
+//
+// Adopt 不把外部数组放入固定档位池；Release 只断开引用并交给 GC。nil 与非 nil 空 Slice
+// 都是合法的零长度载荷，但仍按其真实容量记账。
+func (p *Pool) Adopt(data []byte) *Buffer {
+	// Pool 是所有权和诊断统计的来源，不能通过 nil 隐式建立全局实例。
+	if p == nil {
+		panic("bufferpool: nil Pool 不能接管 Slice")
+	}
+
+	// 接管后直接以完整 Slice 作为有效视图；即使容量落入固定档位，也不能把来源未知的数组
+	// 放进 sync.Pool，避免污染档位和延长业务大数组生命周期。
+	buf := &Buffer{
+		data:   data,
+		owner:  p,
+		size:   len(data),
+		bucket: adoptedBucket,
+		active: true,
+	}
+	if p.trackUsage {
+		p.adoptedInUse.Add(1)
+		p.adoptedBytes.Add(int64(cap(data)))
+	}
+	return buf
 }
 
 // AcquireWithHeadroom 取得一个有效长度为 size、前方至少保留 headroom 字节的 Buffer。
@@ -201,8 +247,10 @@ func (p *Pool) Stats() Stats {
 	stats.ZeroSizeInUse = p.zeroSizeInUse.Load()
 	stats.OversizeInUse = p.oversizeInUse.Load()
 	stats.OversizeBytes = p.oversizeBytes.Load()
-	stats.InUseBuffers += stats.ZeroSizeInUse + stats.OversizeInUse
-	stats.InUseCapacityBytes += stats.OversizeBytes
+	stats.AdoptedInUse = p.adoptedInUse.Load()
+	stats.AdoptedBytes = p.adoptedBytes.Load()
+	stats.InUseBuffers += stats.ZeroSizeInUse + stats.OversizeInUse + stats.AdoptedInUse
+	stats.InUseCapacityBytes += stats.OversizeBytes + stats.AdoptedBytes
 	return stats
 }
 
@@ -220,6 +268,9 @@ func (p *Pool) releaseUsage(bucketID uint8, capacity int) {
 	case oversizeBucket:
 		p.oversizeInUse.Add(-1)
 		p.oversizeBytes.Add(-int64(capacity))
+	case adoptedBucket:
+		p.adoptedInUse.Add(-1)
+		p.adoptedBytes.Add(-int64(capacity))
 	default:
 		p.buckets[int(bucketID)].inUse.Add(-1)
 	}

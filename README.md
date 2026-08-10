@@ -46,6 +46,7 @@ go run ./examples/00-quickstart/01-hello-service
 | 10 | Admin 管理 HTTP、Diagnostics 与 pprof | 管理端点、诊断、动态 pprof 与监控适配 | [Admin 管理 HTTP、Diagnostics 与 pprof](./docs/maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md) | [10-admin-diagnostics-and-pprof](./examples/10-admin-diagnostics-and-pprof/) |
 | 11 | 性能测试与容量理解 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/11.performance.md) | [11-performance](./examples/11-performance/) |
 | 12 | 故障排查 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/12.troubleshooting.md) | [12-troubleshooting](./examples/12-troubleshooting/) |
+| 13 | TCP 网络模块 | 使用统一 Session、Server、Client、Dialer 与 PB/JSON Router | [TCP 网络模块使用指南](./docs/maintenance/v3.2/guides/TCP网络模块使用指南.md) | [13-network](./examples/13-network/) |
 
 完整教程见 [v3.0 使用指南](./docs/baseline/v3.0/guides/README.md)，全部可运行示例见 [examples](./examples/README.md)。
 
@@ -73,6 +74,13 @@ v3.1 还新增 Node 级游戏逻辑时间：Service/Module 通过 `GetNode()` �
 生产构建、进程管理、优雅停止、管理面保护和依赖边界见
 [部署与运维](./docs/maintenance/v3.1/guides/deployment-and-operations.md)。仓库内 Compose 只用于
 本地开发与集成测试，不是生产部署模板。
+
+### v3.2 网络模块
+
+v3.2 首批提供面向自定义长连接协议的统一 Session/Handler、TCP Server/Client/Dialer，以及 Raw、
+Protobuf、JSON 和自定义 Codec。新使用者从
+[TCP 网络模块使用指南](./docs/maintenance/v3.2/guides/TCP网络模块使用指南.md) 和
+[`TCP Raw 回环示例`](./examples/13-network/01-tcp-raw-self-call/README.md) 开始。
 
 ## 学习方式
 

@@ -29,15 +29,27 @@ func TestFrameLengthRoundTrip(t *testing.T) {
 		},
 		{
 			name:    "two byte network order",
-			options: FrameOptions{LengthFieldSize: 2},
+			options: FrameOptions{LengthFieldSize: 2, ByteOrder: BigEndian},
 			length:  0x1234,
 			want:    []byte{0x12, 0x34},
 		},
 		{
 			name:    "four byte network order",
-			options: FrameOptions{LengthFieldSize: 4},
+			options: FrameOptions{LengthFieldSize: 4, ByteOrder: BigEndian},
 			length:  0x12345678,
 			want:    []byte{0x12, 0x34, 0x56, 0x78},
+		},
+		{
+			name:    "two byte little endian",
+			options: FrameOptions{LengthFieldSize: 2, ByteOrder: LittleEndian},
+			length:  0x1234,
+			want:    []byte{0x34, 0x12},
+		},
+		{
+			name:    "four byte little endian",
+			options: FrameOptions{LengthFieldSize: 4, ByteOrder: LittleEndian},
+			length:  0x12345678,
+			want:    []byte{0x78, 0x56, 0x34, 0x12},
 		},
 	}
 
