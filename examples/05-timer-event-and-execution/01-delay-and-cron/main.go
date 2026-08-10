@@ -24,9 +24,11 @@ type TimerService struct {
 // OnStart 在 Service 已完成初始化后登记全部业务 Timer。
 func (target *TimerService) OnStart(context.Context) error {
 	// AfterFunc 只触发一次；即使延迟为零，也不会在当前调用栈同步执行。
-	target.AfterFunc(300*time.Millisecond, func(context.Context, service.TimerID) {
+	if id := target.AfterFunc(300*time.Millisecond, func(context.Context, service.TimerID) {
 		target.Logger().Info("after timer fired once")
-	})
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create after timer failed")
+	}
 
 	// NewTicker 使用固定节拍重复触发，同一个 Ticker 不会并发执行两个回调。
 	target.tickerID = target.NewTicker(250*time.Millisecond, func(_ context.Context, _ service.TimerID) {
@@ -40,11 +42,13 @@ func (target *TimerService) OnStart(context.Context) error {
 				target.Logger().Info("ticker paused")
 			}
 			// 使用另一个一次性 Timer 恢复刚才暂停的 Ticker。
-			target.AfterFunc(400*time.Millisecond, func(context.Context, service.TimerID) {
+			if id := target.AfterFunc(400*time.Millisecond, func(context.Context, service.TimerID) {
 				if target.ResumeTimer(target.tickerID) {
 					target.Logger().Info("ticker resumed")
 				}
-			})
+			}); id == service.InvalidTimerID {
+				target.Logger().Error("create ticker resume timer failed")
+			}
 		case 4:
 			// CancelTimer 会取消后续触发，并把调用方保存的 TimerID 清零。
 			if target.CancelTimer(&target.tickerID) {
@@ -62,7 +66,7 @@ func (target *TimerService) OnStart(context.Context) error {
 		return fmt.Errorf("create ticker failed")
 	}
 
-	// CronFunc 使用墙上时间表达式；六段表达式的第一段表示秒。
+	// CronFunc 使用当前 Node 逻辑时间的日历表达式；六段表达式的第一段表示秒。
 	if _, err := target.CronFunc("*/1 * * * * *", func(context.Context, service.TimerID) {
 		target.Logger().Info(fmt.Sprintf("cron fired at %s", time.Now().Format(time.RFC3339)))
 	}); err != nil {

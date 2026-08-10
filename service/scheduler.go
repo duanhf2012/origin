@@ -331,7 +331,7 @@ func PrepareScheduler(
 		deadlineQueue.Close()
 		return invalidArgument("ServiceScheduler 不能重复启动")
 	}
-	// OnStart 默认 Await 也使用 M8 DeadlineQueue，因此控制协程必须先于 OnStart 工作。
+	// OnStart 默认 Await 也使用 DeadlineQueue，因此控制协程必须先于 OnStart 工作。
 	// 它只取消 Context，不会执行 Timer、监听器或其他业务回调。
 	go scheduler.watchDeadlines()
 	return nil
@@ -820,7 +820,7 @@ func (scheduler *serviceScheduler) restoreTaskLocked(task *serviceTask) *service
 		panicInvariant("service: Await 恢复时执行槽或计数不一致")
 	}
 
-	// Deadline 覆盖整个外部等待和恢复排队阶段。M8 watcher 尚未来得及发布取消时，
+	// Deadline 覆盖整个外部等待和恢复排队阶段。Deadline watcher 尚未来得及发布取消时，
 	// 交接点仍按已经冻结的绝对时间提交同一超时结果。
 	if !task.awaitDeadlineAt.IsZero() &&
 		!time.Now().Before(task.awaitDeadlineAt) &&
@@ -1349,7 +1349,7 @@ func (scheduler *serviceScheduler) statsSnapshot() ExecutionStats {
 	}
 }
 
-// watchDeadlines 及时消费 M8 到期 ID；它只取消 Context，永远不执行业务函数。
+// watchDeadlines 及时消费到期 ID；它只取消 Context，永远不执行业务函数。
 func (scheduler *serviceScheduler) watchDeadlines() {
 	defer func() {
 		if value := recover(); value != nil {

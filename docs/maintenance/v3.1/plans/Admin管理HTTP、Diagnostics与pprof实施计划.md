@@ -69,7 +69,7 @@
 
 ### 教程与示例
 
-- `examples/10-admin-diagnostics-and-pprof/**`：六组完整可运行示例。
+- `examples/10-admin-diagnostics-and-pprof/**`：七组完整可运行示例。
 - `examples/10-diagnostics-and-pprof/**`：迁移后删除。
 - `docs/maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md`：新的完整第 10 章。
 - `docs/maintenance/v3.1/guides/README.md`、`docs/maintenance/v3.1/README.md`、`examples/README.md`、`README.md`：索引更新。
@@ -860,7 +860,7 @@ git commit -m "feat: 以Admin取代Diagnostics HTTP入口"
 
 ---
 
-### Task 8: 六组完整 Chapter 10 Examples
+### Task 8: 七组完整 Chapter 10 Examples
 
 **Files:**
 - Move/Delete: `examples/10-diagnostics-and-pprof/**`

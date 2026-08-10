@@ -66,7 +66,7 @@ type Node struct {
 	timerResources nodeTimerResources
 	// rpcRuntime 是当前 Node 独占的本地路由目录；BufferPool 仍由 Application 共享。
 	rpcRuntime *rpc.Runtime
-	// discovery 是当前 Node 独占的可见目录；source/subscription 只属于 M14 过渡数据源。
+	// discovery 是当前 Node 独占的可见目录；source/subscription 只属于进程内发现源。
 	discovery             *discoveryRuntime
 	discoverySource       *internaldiscovery.Source
 	discoverySubscription *internaldiscovery.Subscription
@@ -280,7 +280,7 @@ func New(
 	if options.DiscoveryFactory != nil {
 		if options.DiscoverySource != nil {
 			return nil, invalidConfig(fmt.Sprintf(
-				"Node %q 不能同时配置正式 Provider 与过渡 Source",
+				"Node %q 不能同时配置外部 Provider 与进程内 Source",
 				config.ID,
 			))
 		}
@@ -547,8 +547,8 @@ func (node *Node) State() State {
 
 // Logger 返回已经预绑定 NodeID 的 Logger。
 //
-// Deprecated: 业务普通日志使用 log.Xxx，Service 与 Module 使用各自的 Logger。该方法仅为
-// v3.0 源码兼容保留，并将在下一主版本删除。
+// Deprecated: 业务普通日志使用 log.Xxx，Service 与 Module 使用各自的 Logger。该方法仍是
+// 当前已确认外观的一部分；是否删除必须经过单独的外观决策。
 func (node *Node) Logger() originlog.Logger {
 	if node == nil {
 		return originlog.NewNop()
@@ -644,6 +644,18 @@ func (node *Node) Start(ctx context.Context) error {
 		node.refreshHealth()
 		return initializationErrors
 	}
+	// 最后一个 OnInit 可能在执行期间观察到外部停止并取消启动 Context。进入任何
+	// Timer、Transport 或 Discovery 资源阶段前重新裁决，避免为已经取消的启动创建资源。
+	if err := contextFailure(ctx); err != nil {
+		node.state.Store(uint32(StateFailed))
+		node.refreshHealth()
+		return &lifecycleContext{
+			nodeID:      node.id,
+			serviceName: node.services[len(node.services)-1].name,
+			phase:       "on_start",
+			cause:       err,
+		}
+	}
 
 	// 全部 OnInit 成功后启动 Node 唯一时间轮，使每个 OnStart 都能依赖统一 Deadline 能力。
 	if err := node.timerEngine.Start(); err != nil {
@@ -655,7 +667,7 @@ func (node *Node) Start(ctx context.Context) error {
 			cause:  err,
 		}
 	}
-	// TCP Listener 和出站连接依赖已经运行的 M8 DeadlineQueue，并且必须先于 OnStart
+	// TCP Listener 和出站连接依赖已经运行的 DeadlineQueue，并且必须先于 OnStart
 	// 建立，使启动逻辑可以调用已经可达的远端 Service。
 	if err := node.rpcRuntime.StartNetwork(ctx, node.timerEngine); err != nil {
 		node.state.Store(uint32(StateFailed))
@@ -680,7 +692,7 @@ func (node *Node) Start(ctx context.Context) error {
 		}
 	}
 	// 正式 Provider 的首次权威快照必须先于全部业务 OnStart。未配置 Provider 的本地应用
-	// 保持空远端目录；底层测试仍可显式注入 M14 Source。
+	// 保持空远端目录；底层装配仍可显式注入进程内 Source。
 	if node.discoveryProvider != nil {
 		if err := node.discoveryProvider.startProvider(ctx); err != nil {
 			node.state.Store(uint32(StateFailed))
@@ -1038,7 +1050,7 @@ func publicProviderNode(raw internaldiscovery.RawNode) publicprovider.Node {
 	return result
 }
 
-// closeDiscoverySubscription 幂等关闭当前 Node 对过渡完整快照源的订阅。
+// closeDiscoverySubscription 幂等关闭当前 Node 对进程内完整快照源的订阅。
 func (node *Node) closeDiscoverySubscription() {
 	if node == nil {
 		return
@@ -1047,7 +1059,7 @@ func (node *Node) closeDiscoverySubscription() {
 		node.discoverySubscription.Close()
 		node.discoverySubscription = nil
 	}
-	// 即使独立 node.New 没有过渡 Source，也必须使查询、等待和监听外观随 Node 一起失效。
+	// 即使独立 node.New 没有进程内 Source，也必须使查询、等待和监听外观随 Node 一起失效。
 	node.discovery.close()
 }
 

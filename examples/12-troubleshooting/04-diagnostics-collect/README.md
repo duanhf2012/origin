@@ -4,10 +4,13 @@
 
 ## 运行
 
-先在一个终端执行 `run-server.bat` 或 `./run-server.sh`，保持回环地址上的 Admin 服务运行；再在第二个终端执行 `collect.bat` 或 `./collect.sh`。采集脚本请求 `/admin/v1/diagnostics?detail=full`，结果写入 `diagnostics.json`，该文件已被 Git 忽略。
+先在一个终端执行 `run-server.bat` 或 `./run-server.sh`，保持回环地址上的 Admin 服务运行；再在
+第二个终端执行 `collect.bat` 或 `./collect.sh`。采集脚本请求
+`/admin/v1/diagnostics?detail=full`，成功后才用临时文件替换 `diagnostics.json`；连接失败或 HTTP
+4xx/5xx 会返回非零退出码，不会把错误页当成有效快照。两个生成文件都已被 Git 忽略。
 
 ## 如何使用结果
 
 检查 Application 状态、Node 状态、Service 数量和传输/发现信息，结合启动日志与错误码定位问题。快照可能含运行拓扑信息，导出到外部系统前应按组织安全要求脱敏和控制访问。
 
-对应教程：[Diagnostics 与 pprof](../../../docs/baseline/v3.0/guides/10.diagnostics-and-pprof.md) 与 [故障排查](../../../docs/baseline/v3.0/guides/12.troubleshooting.md)。
+对应教程：[Admin、Diagnostics 与 pprof](../../../docs/maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md) 与 [故障排查](../../../docs/baseline/v3.0/guides/12.troubleshooting.md)。

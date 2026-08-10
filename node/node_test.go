@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -76,6 +77,36 @@ func TestDiscoveryRuntimeRPCSnapshotPinsPublishedDirectory(t *testing.T) {
 		oldCandidate.Labels["region"] != "cn-east" ||
 		oldCandidate.Transport != rpc.TransportNATS {
 		t.Fatalf("candidate mapping = %+v", oldCandidate)
+	}
+
+	route, err := runtime.ResolveRemote(
+		"player-1",
+		"PlayerService",
+		rpc.ContractID(11),
+		rpc.ContractFingerprint{11},
+	)
+	if err != nil {
+		t.Fatalf("ResolveRemote() error = %v", err)
+	}
+	if route.NodeID != "player-1" || route.SessionID != 42 ||
+		route.Transport != rpc.TransportNATS || route.Address != "" {
+		t.Fatalf("ResolveRemote() = %+v", route)
+	}
+	if _, err := runtime.ResolveRemote(
+		"missing",
+		"PlayerService",
+		rpc.ContractID(11),
+		rpc.ContractFingerprint{11},
+	); !errors.Is(err, errs.ErrRPCNoRoute) {
+		t.Fatalf("ResolveRemote(missing) error = %v", err)
+	}
+	if _, err := runtime.ResolveRemote(
+		"player-1",
+		"PlayerService",
+		rpc.ContractID(12),
+		rpc.ContractFingerprint{11},
+	); !errors.Is(err, errs.ErrRPCContractMismatch) {
+		t.Fatalf("ResolveRemote(contract mismatch) error = %v", err)
 	}
 }
 
@@ -415,6 +446,129 @@ func TestNodeDiscoveryQueryWaitAndListener(t *testing.T) {
 
 	if err := current.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+// TestRetiredServiceCanRegisterDiscoveryListener 验证 Retired 仍是完整可执行状态：业务可在
+// 维护期间新增监听器，并由同一个 Service Runner 收到当前目录的首次同步。
+func TestRetiredServiceCanRegisterDiscoveryListener(t *testing.T) {
+	source := internaldiscovery.NewSource()
+	target := &lifecycleService{label: "GatewayService", events: &[]string{}}
+	current := newTestNodeWithConfigAndOptions(
+		t,
+		Config{
+			ID:       "gateway-1",
+			Services: []string{"unused"},
+		},
+		Options{
+			MaxTimersPerNode: 3_000_000,
+			TimerLocation:    time.Local,
+			DiscoverySource:  source,
+		},
+		target,
+	)
+	if err := current.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if current.State() == StateReady {
+			_ = current.Stop(context.Background())
+		}
+	})
+
+	if err := source.Publish(internaldiscovery.RawNode{
+		NodeID:    "player-1",
+		SessionID: 1,
+		Transport: internaldiscovery.TransportNone,
+		Services: []internaldiscovery.RawService{{
+			ServiceName: "PlayerService",
+			State:       internaldiscovery.ServiceStateRunning,
+		}},
+	}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if err := target.Retire(context.Background()); err != nil {
+		t.Fatalf("Retire() error = %v", err)
+	}
+
+	listener := &nodeDiscoveryListener{
+		owner:  target,
+		events: make(chan string, 1),
+	}
+	id, err := target.AddDiscoveryListener(listener)
+	if err != nil {
+		t.Fatalf("Retired AddDiscoveryListener() error = %v", err)
+	}
+	if got := receiveNode(t, listener.events); got != "discovered:PlayerService" {
+		t.Fatalf("Retired 首次发现事件 = %q", got)
+	}
+	if !target.RemoveDiscoveryListener(&id) || id != 0 {
+		t.Fatalf("RemoveDiscoveryListener() 未清零 ID: %d", id)
+	}
+}
+
+func TestDiscoveryRuntimeAddListenerStateBoundaries(t *testing.T) {
+	listener := &nodeDiscoveryListener{
+		owner:  &lifecycleService{},
+		events: make(chan string, 1),
+	}
+	owner := &serviceEntry{}
+	owner.setState(service.StateRunning)
+
+	var nilRuntime *discoveryRuntime
+	if _, err := nilRuntime.addListener(owner, listener); !errors.Is(
+		err,
+		errs.ErrInvalidArgument,
+	) {
+		t.Fatalf("nil Runtime addListener() error = %v", err)
+	}
+	runtime, err := newDiscoveryRuntime("gateway-1", internaldiscovery.Filter{})
+	if err != nil {
+		t.Fatalf("newDiscoveryRuntime() error = %v", err)
+	}
+	if _, err := runtime.addListener(nil, listener); !errors.Is(
+		err,
+		errs.ErrInvalidArgument,
+	) {
+		t.Fatalf("nil owner addListener() error = %v", err)
+	}
+	var typedNil *nodeDiscoveryListener
+	if _, err := runtime.addListener(owner, typedNil); !errors.Is(
+		err,
+		errs.ErrInvalidArgument,
+	) {
+		t.Fatalf("typed nil listener addListener() error = %v", err)
+	}
+
+	owner.setState(service.StateStopping)
+	if _, err := runtime.addListener(owner, listener); !errors.Is(
+		err,
+		errs.ErrServiceStopping,
+	) {
+		t.Fatalf("Stopping addListener() error = %v", err)
+	}
+	owner.setState(service.StateStopped)
+	if _, err := runtime.addListener(owner, listener); !errors.Is(
+		err,
+		errs.ErrServiceStopped,
+	) {
+		t.Fatalf("Stopped addListener() error = %v", err)
+	}
+
+	owner.setState(service.StateRunning)
+	runtime.nextID = math.MaxUint64
+	if _, err := runtime.addListener(owner, listener); !errors.Is(
+		err,
+		errs.ErrInternal,
+	) {
+		t.Fatalf("ListenerID overflow addListener() error = %v", err)
+	}
+	runtime.closed.Store(true)
+	if _, err := runtime.addListener(owner, listener); !errors.Is(
+		err,
+		errs.ErrServiceStopped,
+	) {
+		t.Fatalf("closed Runtime addListener() error = %v", err)
 	}
 }
 
@@ -929,6 +1083,33 @@ func TestNodeMetadataAndServiceRuntimeQueries(t *testing.T) {
 	}
 }
 
+// TestServiceRuntimeReportsFailureAndSharesTimerLocation 验证 Node 注入 Service 的运行桥
+// 共享冻结时区，并只保留首个不可恢复故障根因。
+func TestServiceRuntimeReportsFailureAndSharesTimerLocation(t *testing.T) {
+	target := &lifecycleService{label: "player"}
+	current := newTestNodeWithOptions(
+		t,
+		Options{MaxTimersPerNode: 64, TimerLocation: time.UTC},
+		target,
+	)
+	runtime := &serviceRuntime{node: current, entry: current.services[0]}
+	if location := runtime.TimerLocation(); location != time.UTC {
+		t.Fatalf("TimerLocation() = %v", location)
+	}
+	if cause := runtime.Failure(); cause != nil {
+		t.Fatalf("initial Failure() = %v", cause)
+	}
+	first := errors.New("scheduler invariant failed")
+	runtime.ReportFailure(first)
+	runtime.ReportFailure(errors.New("later failure"))
+	if cause := runtime.Failure(); !errors.Is(cause, first) {
+		t.Fatalf("Failure() = %v", cause)
+	}
+	if target.State() != service.StateFailed {
+		t.Fatalf("Service State = %v", target.State())
+	}
+}
+
 func TestNodeTimerSlotsAreBoundedAndIDsNeverRepeat(t *testing.T) {
 	// 使用两个额度建立最小边界，验证额度只限制活跃数量而不复用已经发出的 ID。
 	current := newTestNodeWithOptions(
@@ -1102,6 +1283,27 @@ func TestNodeCancellationAndInvalidCalls(t *testing.T) {
 	}
 	if err := created.Start(nil); err == nil {
 		t.Fatal("nil Context Start() 未返回错误")
+	}
+}
+
+func TestNodeCancellationAfterLastInitDoesNotStartRuntimeResources(t *testing.T) {
+	events := make([]string, 0, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	target := &lifecycleService{label: "a", events: &events, onInit: cancel}
+	current := newTestNode(t, target)
+
+	err := current.Start(ctx)
+	if !errs.IsCode(err, errs.CodeCanceled) {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if !slices.Equal(events, []string{"init:a"}) {
+		t.Fatalf("取消后的生命周期事件 = %v", events)
+	}
+	if stats := current.timerEngine.Stats(); stats.Running || stats.Closed {
+		t.Fatalf("取消后启动了 TimerEngine: %+v", stats)
+	}
+	if err := current.Rollback(context.Background()); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
 	}
 }
 

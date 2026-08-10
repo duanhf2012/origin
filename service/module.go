@@ -346,10 +346,10 @@ func (module *Module) AfterFunc(delay time.Duration, fn TimerFunc) TimerID {
 		return InvalidTimerID
 	}
 	registration := &moduleTimerRegistration{}
-	id := owner.AfterFunc(delay, func(ctx context.Context, timerID TimerID) {
+	id := owner.afterFunc(delay, func(ctx context.Context, timerID TimerID) {
 		module.completeTimer(registration, timerID)
 		fn(ctx, timerID)
-	})
+	}, module, registration)
 	return module.registerTimer(registration, id)
 }
 
@@ -359,8 +359,9 @@ func (module *Module) NewTicker(interval time.Duration, fn TimerFunc) TimerID {
 	if owner == nil {
 		return InvalidTimerID
 	}
-	id := owner.NewTicker(interval, fn)
-	return module.registerTimer(&moduleTimerRegistration{}, id)
+	registration := &moduleTimerRegistration{}
+	id := owner.newTicker(interval, fn, module, registration)
+	return module.registerTimer(registration, id)
 }
 
 // CronFunc 创建归属于当前 Module 的 Cron Timer。
@@ -369,23 +370,24 @@ func (module *Module) CronFunc(expression string, fn TimerFunc) (TimerID, error)
 	if owner == nil {
 		return InvalidTimerID, errs.ErrInvalidArgument
 	}
-	id, err := owner.CronFunc(expression, fn)
+	registration := &moduleTimerRegistration{}
+	id, err := owner.cronFunc(expression, fn, module, registration)
 	if err != nil {
 		return InvalidTimerID, err
 	}
-	return module.registerTimer(&moduleTimerRegistration{}, id), nil
+	return module.registerTimer(registration, id), nil
 }
 
 // PauseTimer 暂停所属 Service 中由 ID 指定的 Timer。
 func (module *Module) PauseTimer(timerID TimerID) bool {
 	owner := module.ownerService()
-	return owner != nil && owner.PauseTimer(timerID)
+	return owner != nil && owner.pauseTimer(timerID, module)
 }
 
 // ResumeTimer 恢复所属 Service 中由 ID 指定的 Timer。
 func (module *Module) ResumeTimer(timerID TimerID) bool {
 	owner := module.ownerService()
-	return owner != nil && owner.ResumeTimer(timerID)
+	return owner != nil && owner.resumeTimer(timerID, module)
 }
 
 // CancelTimer 取消 Timer；只有由当前 Module 创建的 Timer 会从当前 scope 移除。
@@ -399,7 +401,7 @@ func (module *Module) CancelTimer(timerID *TimerID) bool {
 		*timerID = InvalidTimerID
 		return false
 	}
-	result := owner.CancelTimer(timerID)
+	result := owner.cancelTimer(timerID, module)
 	module.scopeMu.Lock()
 	delete(module.timers, id)
 	module.scopeMu.Unlock()
@@ -463,7 +465,7 @@ func (module *Module) cleanupScope() {
 	}
 	for _, timerID := range identifiers {
 		current := timerID
-		owner.CancelTimer(&current)
+		owner.cancelTimer(&current, module)
 	}
 }
 

@@ -30,6 +30,9 @@ func TestServiceApplicationAvailableFromOnInit(t *testing.T) {
 		if got := target.Application(); got != facade {
 			t.Fatalf("OnInit Application() = %T", got)
 		}
+		if got := target.GetNode(); got == nil || got.ID() != "game-1" {
+			t.Fatalf("OnInit GetNode() = %#v", got)
+		}
 	}
 	current := newTestNodeWithOptions(
 		t,

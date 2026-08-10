@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +144,126 @@ func TestProviderRuntimeReportsRecoveryImmediatelyAndExpiresSnapshotAtTTL(
 		case <-deadline.C:
 			t.Fatal("一个 TTL 后旧快照仍未清空")
 		case <-time.After(time.Millisecond):
+		}
+	}
+	if status := current.DiscoveryStatus(); status.Synchronized {
+		t.Fatalf("TTL 到期后仍报告已同步: %+v", status)
+	}
+
+	// 错误顺序的第三方 Provider 不能只靠 Ready 恢复可用性；必须先给出新的权威快照。
+	fixture.context.Host.Report(publicprovider.Report{State: publicprovider.StateReady})
+	if current.HealthStatus().Readiness {
+		t.Fatal("TTL 到期后未提交新快照却恢复了 Readiness")
+	}
+	if status := current.DiscoveryStatus(); status.Synchronized {
+		t.Fatalf("过早 Ready 恢复了同步状态: %+v", status)
+	}
+	if err := fixture.context.Host.ReplaceSnapshot(publicprovider.Snapshot{
+		Nodes: []publicprovider.Node{{
+			NodeID:    "remote-1",
+			SessionID: 78,
+			Transport: publicprovider.TransportNATS,
+			Services: []publicprovider.Service{{
+				ServiceName: "RemoteService",
+				State:       publicprovider.ServiceStateRunning,
+			}},
+		}},
+	}); err != nil {
+		t.Fatalf("ReplaceSnapshot() error = %v", err)
+	}
+	if current.HealthStatus().Readiness {
+		t.Fatal("新快照后未重新报告 Ready 就恢复了 Readiness")
+	}
+	fixture.context.Host.Report(publicprovider.Report{State: publicprovider.StateReady})
+	if !current.HealthStatus().Readiness {
+		t.Fatal("新权威快照和 Ready 后没有恢复 Readiness")
+	}
+	if instance, exists := local.FindDiscoveredService(
+		"remote-1",
+		"RemoteService",
+	); !exists || instance.SessionID != 78 {
+		t.Fatalf("恢复后的权威实例 = (%+v, %v)", instance, exists)
+	}
+}
+
+func TestProviderRuntimeSnapshotAndExpiryCommitAtomically(t *testing.T) {
+	t.Parallel()
+
+	directory, err := newDiscoveryRuntime("local-1", internaldiscovery.Filter{})
+	if err != nil {
+		t.Fatalf("newDiscoveryRuntime() error = %v", err)
+	}
+	current := &Node{
+		id:        "local-1",
+		discovery: directory,
+		logger:    originlog.NewNop(),
+	}
+	directory.bindNode(current)
+	runtime := &providerRuntime{
+		node:          current,
+		kind:          "fixture",
+		ttl:           time.Second,
+		ttlConfigured: true,
+		state:         DiscoveryRecovering,
+		synchronized:  true,
+	}
+	runtime.publishStatusLocked()
+
+	snapshot := publicprovider.Snapshot{Nodes: []publicprovider.Node{{
+		NodeID:    "remote-1",
+		SessionID: 88,
+		Transport: publicprovider.TransportNATS,
+		Services: []publicprovider.Service{{
+			ServiceName: "RemoteService",
+			State:       publicprovider.ServiceStateRunning,
+		}},
+	}}}
+	for iteration := 0; iteration < 100; iteration++ {
+		// 每轮先构造一份已过期的旧权威快照，再让新快照与过期清空并发竞争。
+		runtime.applyMu.Lock()
+		runtime.mu.Lock()
+		runtime.state = DiscoveryRecovering
+		runtime.synchronized = true
+		runtime.expiredSnapshot = false
+		runtime.lastSnapshot = time.Now().Add(-2 * runtime.ttl)
+		runtime.mu.Unlock()
+		if err := directory.apply(internaldiscovery.RawSnapshot{}); err != nil {
+			runtime.applyMu.Unlock()
+			t.Fatalf("reset discovery snapshot error = %v", err)
+		}
+		runtime.applyMu.Unlock()
+
+		now := time.Now()
+		start := make(chan struct{})
+		var wait sync.WaitGroup
+		wait.Add(2)
+		go func() {
+			defer wait.Done()
+			<-start
+			if replaceErr := runtime.replaceSnapshot(snapshot); replaceErr != nil {
+				t.Errorf("replaceSnapshot() error = %v", replaceErr)
+			}
+		}()
+		go func() {
+			defer wait.Done()
+			<-start
+			runtime.expireSnapshot(now)
+		}()
+		close(start)
+		wait.Wait()
+
+		runtime.mu.Lock()
+		synchronized := runtime.synchronized
+		runtime.mu.Unlock()
+		instance, exists := directory.findPublic("remote-1", "RemoteService")
+		if !synchronized || !exists || instance.SessionID != 88 {
+			t.Fatalf(
+				"iteration %d: synchronized=%v, instance=(%+v, %v)",
+				iteration,
+				synchronized,
+				instance,
+				exists,
+			)
 		}
 	}
 }

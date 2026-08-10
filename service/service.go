@@ -108,8 +108,8 @@ func (service *Service) NodeID() string {
 
 // GetNode 返回当前 Service 所属 Node 的最小运行外观。
 //
-// 未绑定的类型模板返回 nil。生产 Runtime 必须实现 NodeRuntime；该方法使用独立小接口保持
-// 既有 Runtime 扩展兼容性，并避免 service 包反向依赖具体 node 包形成循环依赖。
+// 未绑定的类型模板返回 nil。NodeRuntime 独立于基础 Runtime，避免 service 包反向依赖具体
+// node 包，也不强迫只提供基础调度能力的 Runtime 实现 Node 高级外观。
 func (service *Service) GetNode() NodeRuntime {
 	if service == nil || service.runtime == nil {
 		return nil

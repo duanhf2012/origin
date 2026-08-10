@@ -120,6 +120,46 @@ func TestNATSRPCAwaitAsyncNotify(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("NATS RPC 调用超时")
 	}
+
+	// 高级集成层的未 Prepare Notify 仍必须按当前发现快照走真实 NATS；生成客户端
+	// 继续使用上面的 Prepare 路径。本断言防止两条路径的包头或所有权悄然分叉。
+	lowLevel := rpc.NewGeneratedClient(
+		caller,
+		rpc.ToServiceOnNode("player-1", "PlayerService"),
+		playerRPCContractID,
+		playerRPCFingerprint,
+	)
+	request, err := encodePlayerRPCPlayerOnlineRequest(
+		lowLevel,
+		rpc.CallNotify,
+		9002,
+	)
+	if err != nil {
+		t.Fatalf("low-level NATS encode error = %v", err)
+	}
+	if err := lowLevel.Notify(
+		context.Background(),
+		playerRPCPlayerOnlineMethodID,
+		request,
+	); err != nil {
+		t.Fatalf("low-level NATS Notify() error = %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		checked := make(chan bool, 1)
+		if err := player.DispatchAsync(func(context.Context) {
+			checked <- player.OnlineID == 9002
+		}); err != nil {
+			t.Fatalf("Player DispatchAsync() error = %v", err)
+		}
+		if <-checked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("low-level NATS Notify OnlineID = %d", player.OnlineID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestM19NATSRoundRobinAcrossRunningInstances(t *testing.T) {
@@ -917,7 +957,7 @@ func awaitNATSEcho(
 	}
 }
 
-// discoveryNodeRecord 读取过渡发现源中的一条独立 RawNode 副本。
+// discoveryNodeRecord 读取进程内发现源中的一条独立 RawNode 副本。
 func discoveryNodeRecord(
 	t testing.TB,
 	source *internaldiscovery.Source,

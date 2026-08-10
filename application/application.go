@@ -63,7 +63,10 @@ type Application struct {
 	// Transport 恢复不写入本列表，也不取消 Application。正式 Stop 完成后，列表中的稳定
 	// 摘要才参与最终 errors.Join，避免局部 Service 故障被清理成功掩盖。
 	serviceFailures []error
-	// resourcesReady/resourcesClosing 把运行时 HTTP Start 与最终资源清理线性化。
+	// httpLifecycleMu 让 Admin/pprof 从状态检查到 Listener 发布的启动事务，与最终资源关闭
+	// 线性化；网络绑定期间不持有 app.mu，Diagnostics 和请求 Handler 仍可读取 Application。
+	httpLifecycleMu sync.Mutex
+	// resourcesReady/resourcesClosing 在 httpLifecycleMu 与 app.mu 的共同保护下拒绝关闭后的 Start。
 	resourcesReady   bool
 	resourcesClosing bool
 	// Admin 与 pprof 使用独立 Listener、ServeMux、状态锁和 goroutine 所有权。
@@ -181,7 +184,7 @@ func (app *Application) Setup(samples ...service.IService) {
 	app.catalog.setup(samples...)
 }
 
-// RegisterCommand 在首次执行命令前登记一个 M4 离线自定义命令。
+// RegisterCommand 在首次执行命令前登记一个离线自定义命令。
 func (app *Application) RegisterCommand(custom command.Command) error {
 	if app == nil {
 		return errs.NewMessage(errs.CodeInvalidArgument, "Application 不能为空")
@@ -201,7 +204,7 @@ func (app *Application) RegisterCommand(custom command.Command) error {
 		)
 	}
 
-	// 借用 M4 Runner 的单一校验规则，避免 Application 复制命名和保留字逻辑。
+	// 借用 Runner 的单一校验规则，避免 Application 复制命名和保留字逻辑。
 	validator, err := command.New(command.Options{
 		Start: func(context.Context, command.StartRequest) error { return nil },
 	})
@@ -251,8 +254,8 @@ func (app *Application) Nodes() []*node.Node {
 
 // Logger 返回 Application 根 Logger；日志初始化前返回安全的 Nop Logger。
 //
-// Deprecated: 业务普通日志使用 log.Xxx，Service 与 Module 使用各自的 Logger。该方法仅为
-// v3.0 源码兼容保留，并将在下一主版本删除。
+// Deprecated: 业务普通日志使用 log.Xxx，Service 与 Module 使用各自的 Logger。该方法仍是
+// 当前已确认外观的一部分；是否删除必须经过单独的外观决策。
 func (app *Application) Logger() originlog.Logger {
 	if app == nil {
 		return originlog.NewNop()
@@ -282,7 +285,7 @@ func (app *Application) Start() {
 	}
 }
 
-// execute 建立 M4 Runner，并把 start 命令转交给 Application 私有生命周期。
+// execute 建立 Runner，并把 start 命令转交给 Application 私有生命周期。
 func (app *Application) execute(
 	ctx context.Context,
 	args []string,
@@ -460,8 +463,8 @@ func (app *Application) run(
 	serviceFailures := app.serviceFailureResult()
 	finalResult := stopErr
 	if finalResult == nil {
-		// 正常 Scheduler Failed 清理会把同一根因随 Node.Stop 返回。该兜底只覆盖未来某个
-		// 隔离适配器完成清理却没有返回根因的情况，避免同一 Service 在 errors.Join 中重复。
+		// 正常 Scheduler Failed 清理会把同一根因随 Node.Stop 返回。该兜底只覆盖清理完成
+		// 却没有返回根因的隔离路径，避免同一 Service 在 errors.Join 中重复。
 		finalResult = serviceFailures
 	}
 	if finalResult == nil {
@@ -872,6 +875,9 @@ func (app *Application) newStopContext() (context.Context, context.CancelFunc) {
 
 // closeResources 使用总体停止 Context 完成 Admin、pprof、Buffer 诊断、Crash 注销和日志关闭。
 func (app *Application) closeResources(ctx context.Context) error {
+	// 等待已经通过状态检查的 HTTP Start 完成，再发布 resourcesClosing。此后新的 Start
+	// 先取得同一把锁并观察到 resourcesReady=false，不能晚于本次关闭重新发布 Listener。
+	app.httpLifecycleMu.Lock()
 	app.mu.Lock()
 	app.resourcesClosing = true
 	runtime := app.logRuntime
@@ -880,6 +886,7 @@ func (app *Application) closeResources(ctx context.Context) error {
 	logger := app.logger
 	app.resourcesReady = false
 	app.mu.Unlock()
+	app.httpLifecycleMu.Unlock()
 	// Node Stop/Rollback 已在调用方完成；先关闭 Admin，再关闭 pprof，随后检查 Buffer 并关闭
 	// Crash/日志。即使 ctx 已耗尽，httpRuntime.stop 也会强制 Close Listener。
 	adminErr := app.adminHTTP.stopWithErrors(ctx, adminHTTPRuntimeErrors())

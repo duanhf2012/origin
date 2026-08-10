@@ -1,1 +1,6 @@
 .worktrees/
+/run/
+
+# 故障排查示例的本地采集结果。
+examples/12-troubleshooting/04-diagnostics-collect/diagnostics.json
+examples/12-troubleshooting/04-diagnostics-collect/diagnostics.json.tmp

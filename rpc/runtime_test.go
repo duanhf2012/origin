@@ -4,12 +4,43 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/service"
 )
+
+type runtimeContextKey string
+
+// TestRPCContextCombinesExecutionControlAndBusinessValues 验证本地 RPC Dispatcher 看到
+// 目标执行身份、调用控制 Deadline，以及调用方只读业务值的既定优先级。
+func TestRPCContextCombinesExecutionControlAndBusinessValues(t *testing.T) {
+	executionKey := runtimeContextKey("execution")
+	callerKey := runtimeContextKey("caller")
+	execution := context.WithValue(context.Background(), executionKey, "target")
+	execution = context.WithValue(execution, callerKey, "target-wins")
+	deadline := time.Now().Add(time.Second)
+	control, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	values := context.WithValue(context.Background(), callerKey, "caller")
+	values = context.WithValue(values, runtimeContextKey("fallback"), "value")
+	combined := &rpcContext{execution: execution, control: control, values: values}
+
+	if got, exists := combined.Deadline(); !exists || !got.Equal(deadline) {
+		t.Fatalf("Deadline() = %v, %v", got, exists)
+	}
+	if got := combined.Value(executionKey); got != "target" {
+		t.Fatalf("execution Value = %v", got)
+	}
+	if got := combined.Value(callerKey); got != "target-wins" {
+		t.Fatalf("value precedence = %v", got)
+	}
+	if got := combined.Value(runtimeContextKey("fallback")); got != "value" {
+		t.Fatalf("fallback Value = %v", got)
+	}
+}
 
 var runtimeTestFingerprint = ContractFingerprint{1}
 

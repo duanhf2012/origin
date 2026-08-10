@@ -69,6 +69,12 @@ func TestDirectoryApplyAndQuery(t *testing.T) {
 	if !published || changes.Version != 1 || len(changes.Entries) != 2 {
 		t.Fatalf("首次发布结果错误: published=%v changes=%+v", published, changes)
 	}
+	if snapshot := directory.Snapshot(); snapshot.Version() != 1 {
+		t.Fatalf("Snapshot.Version() = %d", snapshot.Version())
+	}
+	if all := directory.All(); len(all) != 2 || all[0].NodeID != "game-1" || all[1].NodeID != "game-2" {
+		t.Fatalf("All() = %+v", all)
+	}
 	if _, exists := directory.Find("gateway-1", "GatewayService"); exists {
 		t.Fatal("目录没有过滤当前 Node 自身")
 	}

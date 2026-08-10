@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/duanhf2012/origin/v3/errs"
 )
 
 const (
@@ -46,6 +48,30 @@ func TestCrashOutputCloseIsIdempotent(t *testing.T) {
 	}
 	if err := output.Close(); err != nil {
 		t.Fatalf("second Close() = %v", err)
+	}
+}
+
+func TestCrashOutputValidatesConfigurationAndPath(t *testing.T) {
+	// nil 表示从未安装资源，关闭应保持幂等成功。
+	var output *CrashOutput
+	if err := output.Close(); err != nil {
+		t.Fatalf("nil Close() error = %v", err)
+	}
+
+	config := DefaultConfig()
+	if _, err := InstallCrashOutput(config.File); !errs.IsCode(err, errs.CodeInvalidConfig) {
+		t.Fatalf("disabled file output error = %v", err)
+	}
+
+	// 用普通文件占据目标父目录，验证文件系统创建失败被分类为稳定输出错误。
+	parent := filepath.Join(t.TempDir(), "occupied")
+	if err := os.WriteFile(parent, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config.File.Enabled = true
+	config.File.Path = filepath.Join(parent, "origin.log")
+	if _, err := InstallCrashOutput(config.File); !errs.IsCode(err, errs.CodeLogOutputFailed) {
+		t.Fatalf("invalid crash path error = %v", err)
 	}
 }
 

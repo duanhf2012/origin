@@ -1,6 +1,8 @@
 # 故意失败：非法 Node ID
 
-这是一个可控的启动失败练习。`config/application.yaml` 中的 `Game-1` 不满足小写 kebab-case 规则，框架必须在启动前拒绝该配置。
+这是一个可控的启动失败练习。脚本不传 `--node`，确保错误来自配置文件本身：
+`config/application.yaml` 中的 `Game-1` 不满足小写 kebab-case 规则，框架必须在创建任何 Node
+或 Service 前拒绝它。
 
 ## 运行与恢复
 
@@ -10,11 +12,11 @@
 nodes:
   # 修正后的合法小写 kebab-case Node ID。
   - id: game-1
-    # 启动时创建已登记的 ConfigService。
-    services: [ConfigService]
+    # 快速开始程序已经登记了 HelloService。
+    services: [HelloService]
 ```
 
-再次运行应正常启动。
+再次运行应正常启动；按 `Ctrl+C` 可走完优雅停止。
 
 ## 排错原则
 

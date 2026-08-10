@@ -8,7 +8,7 @@ import (
 func TestFrameLengthRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	// 表格覆盖全部宽度、大小端、零长度和各宽度的代表性高位值。
+	// 表格覆盖全部宽度、零长度和各宽度的代表性高位值。
 	tests := []struct {
 		name    string
 		options FrameOptions
@@ -17,39 +17,27 @@ func TestFrameLengthRoundTrip(t *testing.T) {
 	}{
 		{
 			name:    "one byte zero",
-			options: FrameOptions{LengthFieldSize: 1, ByteOrder: BigEndian},
+			options: FrameOptions{LengthFieldSize: 1},
 			length:  0,
 			want:    []byte{0},
 		},
 		{
 			name:    "one byte max",
-			options: FrameOptions{LengthFieldSize: 1, ByteOrder: LittleEndian},
+			options: FrameOptions{LengthFieldSize: 1},
 			length:  255,
 			want:    []byte{0xff},
 		},
 		{
-			name:    "two byte big endian",
-			options: FrameOptions{LengthFieldSize: 2, ByteOrder: BigEndian},
+			name:    "two byte network order",
+			options: FrameOptions{LengthFieldSize: 2},
 			length:  0x1234,
 			want:    []byte{0x12, 0x34},
 		},
 		{
-			name:    "two byte little endian",
-			options: FrameOptions{LengthFieldSize: 2, ByteOrder: LittleEndian},
-			length:  0x1234,
-			want:    []byte{0x34, 0x12},
-		},
-		{
-			name:    "four byte big endian",
-			options: FrameOptions{LengthFieldSize: 4, ByteOrder: BigEndian},
+			name:    "four byte network order",
+			options: FrameOptions{LengthFieldSize: 4},
 			length:  0x12345678,
 			want:    []byte{0x12, 0x34, 0x56, 0x78},
-		},
-		{
-			name:    "four byte little endian",
-			options: FrameOptions{LengthFieldSize: 4, ByteOrder: LittleEndian},
-			length:  0x12345678,
-			want:    []byte{0x78, 0x56, 0x34, 0x12},
 		},
 	}
 

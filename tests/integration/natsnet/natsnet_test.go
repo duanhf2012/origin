@@ -148,6 +148,48 @@ func TestPublishSubscribeAndLifecycle(t *testing.T) {
 	}
 }
 
+// TestPublishRequestCarriesReplySubject 验证框架控制面发布请求时，真实 NATS 消息保留
+// 调用方指定的 Reply Subject 和 payload。
+func TestPublishRequestCarriesReplySubject(t *testing.T) {
+	t.Parallel()
+
+	running := startServer(t, defaultServerOptions())
+	conn := connectForTest(
+		t,
+		testOptions("integration.publish-request", running.ClientURL()),
+		nil,
+	)
+	defer closeConn(t, conn)
+
+	received := make(chan natsnet.Message, 1)
+	_, err := conn.Subscribe(
+		context.Background(),
+		"origin.integration.request",
+		natsnet.SubscriptionOptions{},
+		func(message natsnet.Message) { received <- message },
+	)
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	if err := conn.PublishRequest(
+		"origin.integration.request",
+		"origin.integration.reply",
+		[]byte("request"),
+	); err != nil {
+		t.Fatalf("PublishRequest() error = %v", err)
+	}
+	select {
+	case message := <-received:
+		if message.Subject != "origin.integration.request" ||
+			message.Reply != "origin.integration.reply" ||
+			string(message.Data) != "request" {
+			t.Fatalf("request message = %+v", message)
+		}
+	case <-time.After(integrationTimeout):
+		t.Fatal("等待 PublishRequest 消息超时")
+	}
+}
+
 // TestQueueGroupOnlyDeliversOnce 验证同一 Queue Group 中每条消息只交给一个成员。
 func TestQueueGroupOnlyDeliversOnce(t *testing.T) {
 	t.Parallel()

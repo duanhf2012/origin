@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	// 默认长度字段使用四字节，能够直接承载 M10 RPC 的 4M 消息上限。
+	// 默认长度字段使用四字节，能够直接承载 RPC 的 4M 消息上限。
 	defaultLengthFieldSize = 4
 	// 默认单帧上限为 4M，与已经确认的 RPC 配置保持一致。
 	defaultMaxMessageSize = 4 * 1024 * 1024
-	// 通用 TCP 默认预留 4096 个发送槽位；M10 RPC 会显式覆盖为 16384。
+	// 通用 TCP 默认预留 4096 个发送槽位；RPC 会显式覆盖为 16384。
 	defaultSendQueueFrames = 4096
 	// 写入一个完整帧最多等待 15 秒。
 	defaultWriteTimeout = 15 * time.Second
@@ -27,22 +27,10 @@ const (
 	defaultMaxConnections = 4096
 )
 
-// ByteOrder 表示多字节长度字段使用的字节序。
-type ByteOrder uint8
-
-const (
-	// BigEndian 使用网络字节序，是新协议的默认值。
-	BigEndian ByteOrder = iota
-	// LittleEndian 用于兼容已有 TcpModule 客户端协议。
-	LittleEndian
-)
-
-// FrameOptions 配置长度字段的宽度和字节序。
+// FrameOptions 配置使用网络字节序编码的长度字段宽度。
 type FrameOptions struct {
 	// LengthFieldSize 只允许一、二或四字节。
 	LengthFieldSize int
-	// ByteOrder 在二、四字节长度字段中决定编码顺序。
-	ByteOrder ByteOrder
 }
 
 // ConnectionOptions 配置一条 TCP 连接的帧、队列、超时和依赖实例。
@@ -103,7 +91,6 @@ func DefaultConnectionOptions(pool *bufferpool.Pool) ConnectionOptions {
 		Logger: originlog.NewNop(),
 		Frame: FrameOptions{
 			LengthFieldSize: defaultLengthFieldSize,
-			ByteOrder:       BigEndian,
 		},
 		MaxMessageSize:  defaultMaxMessageSize,
 		SendQueueFrames: defaultSendQueueFrames,
@@ -135,11 +122,6 @@ func validateConnectionOptions(options ConnectionOptions) error {
 	default:
 		return invalidConfig("tcpnet: LengthFieldSize 只能是 1、2 或 4")
 	}
-	// 未知字节序会让两端解释出不同包长，必须在启动阶段拒绝。
-	if options.Frame.ByteOrder != BigEndian && options.Frame.ByteOrder != LittleEndian {
-		return invalidConfig("tcpnet: ByteOrder 无效")
-	}
-
 	// 最大消息必须为正数，并且能够由所选长度字段和当前平台 int 表达。
 	if options.MaxMessageSize <= 0 {
 		return invalidConfig("tcpnet: MaxMessageSize 必须大于零")

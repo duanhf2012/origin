@@ -16,7 +16,7 @@
 | 07 | [跨节点 RPC](./07.remote-rpc.md) | 怎样用 TCP 或 NATS 调用其他 Node？ |
 | 08 | [服务发现](./08.discovery.md) | 怎样发现服务、使用 etcd 或替换 Provider？ |
 | 09 | [Retire、Resume 与优雅停止](./09.retire-and-resume.md) | 怎样用命令在运行期退休和恢复整个 Application，并监听状态事件？ |
-| 10 | [Diagnostics 与 pprof](./10.diagnostics-and-pprof.md) | 怎样观察运行状态和按需诊断？ |
+| 10 | [Admin、Diagnostics 与 pprof](../../../maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md) | 怎样管理运行状态和按需诊断？ |
 | 11 | [性能](./11.performance.md) | 怎样运行和理解 RPC 基准测试？ |
 | 12 | [故障排查](./12.troubleshooting.md) | 怎样定位常见配置、RPC 和发现故障？ |
 
@@ -26,6 +26,7 @@
 - [公开 API 索引](./reference/api-index.md)
 - [错误与排错入口](./reference/errors.md)
 - [术语表](./reference/glossary.md)
+- [部署与运维](../../../maintenance/v3.1/guides/deployment-and-operations.md)
 
 ## 示例约定
 

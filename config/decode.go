@@ -515,6 +515,10 @@ func floatValue(node *valueNode, bits int) (float64, error) {
 	default:
 		return 0, fmt.Errorf("类型不匹配")
 	}
+	// YAML 原生支持 .inf 和 .nan，但它们没有稳定的比较或 JSON 序列化语义。
+	if math.IsInf(value, 0) || math.IsNaN(value) {
+		return 0, fmt.Errorf("浮点数必须是有限值")
+	}
 	// float32 目标额外检查有限值范围。
 	if bits == 32 && (value > math.MaxFloat32 || value < -math.MaxFloat32) {
 		return 0, fmt.Errorf("浮点数溢出")

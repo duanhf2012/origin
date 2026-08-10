@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	// maxRemoteTargets 给 M13 的显式 Node 地址表设置固定安全边界。
+	// maxRemoteTargets 给远端 Node 地址表设置固定安全边界。
 	maxRemoteTargets = 8192
 	// remoteTargetShardCount 限制单次连接事件复制的不可变索引规模。
 	remoteTargetShardCount = 64
@@ -263,7 +263,7 @@ func (remote *remoteRuntime) start(
 		return err
 	}
 
-	// started 在目标 goroutine 启动前发布；AddTarget 此后会自行启动新增目标。
+	// started 在目标 goroutine 启动前发布；后续 ReconcileTargets 会自行启动新增目标。
 	remote.listener = listener
 	remote.started = true
 	listenerCtx, listenerCancel := context.WithCancel(context.Background())
@@ -438,83 +438,6 @@ func nextTransportBackoff(current time.Duration) time.Duration {
 		return reconnectMaximumDelay
 	}
 	return next
-}
-
-// AddTarget 保留 M13 的底层单目标兼容入口；M14 的 Node/Application 不再调用它，而统一
-// 使用 ReconcileTargets 让服务发现目录提交完整目标集合。
-//
-// 相同 NodeID 和地址重复登记是幂等操作；同一 NodeID 的不同地址不会替换现有连接，
-// 避免误启动实例抢占正在工作的目标。
-func (runtime *Runtime) AddTarget(
-	nodeID string,
-	sessionID uint64,
-	address string,
-) error {
-	if runtime == nil || runtime.remote == nil ||
-		!validWireName(nodeID) || sessionID == 0 || nodeID == runtime.nodeID {
-		return errs.ErrInvalidArgument
-	}
-	if err := validateAdvertiseAddress(address); err != nil {
-		return err
-	}
-
-	remote := runtime.remote
-	remote.mu.Lock()
-	if remote.stopping || runtime.closed.Load() {
-		remote.mu.Unlock()
-		return errs.ErrServiceStopped
-	}
-	if current, exists := remote.targets[nodeID]; exists {
-		if current.address == address {
-			remote.mu.Unlock()
-			return nil
-		}
-		remote.mu.Unlock()
-		return errs.NewMessage(
-			errs.CodeTransportProtocol,
-			"相同 NodeID 已经绑定到其他 RPC 地址",
-		)
-	}
-	if len(remote.targets) >= maxRemoteTargets {
-		remote.mu.Unlock()
-		return errs.ErrTransportOverloaded
-	}
-	target := newRemoteTarget(remote, nodeID, sessionID, address)
-	remote.targets[nodeID] = target
-	remote.publishTargetsLocked()
-	started := remote.started
-	remote.mu.Unlock()
-
-	if started {
-		target.start()
-	}
-	return nil
-}
-
-// RemoveTarget 删除与地址仍匹配的目标，并等待该目标连接管理 goroutine 退出。
-//
-// 地址条件防止旧服务发现事件误删同 NodeID 的后续地址；M13 不允许地址原地替换，但该
-// 条件为未来 Discovery 保留确定的所有权边界。
-func (runtime *Runtime) RemoveTarget(
-	ctx context.Context,
-	nodeID string,
-	address string,
-) error {
-	if runtime == nil || runtime.remote == nil || ctx == nil {
-		return errs.ErrInvalidArgument
-	}
-	remote := runtime.remote
-	remote.mu.Lock()
-	target, exists := remote.targets[nodeID]
-	if !exists || target.address != address {
-		remote.mu.Unlock()
-		return nil
-	}
-	delete(remote.targets, nodeID)
-	remote.retired[target] = struct{}{}
-	remote.publishTargetsLocked()
-	remote.mu.Unlock()
-	return target.stop(ctx)
 }
 
 // ConnectionTarget 是发现目录交给 TCP Runtime 的 Node 级连接需求。
@@ -742,7 +665,7 @@ func (remote *remoteRuntime) targetDone(target *remoteTarget) {
 	remote.mu.Unlock()
 }
 
-// connectionOptions 把 RPC 冻结配置转换为 M5 TCP 适配参数。
+// connectionOptions 把 RPC 冻结配置转换为 TCP Transport 参数。
 func (remote *remoteRuntime) connectionOptions() tcpnet.ConnectionOptions {
 	options := tcpnet.DefaultConnectionOptions(remote.owner.pool)
 	options.Logger = remote.owner.logger

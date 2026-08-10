@@ -6,9 +6,16 @@
 
 执行 `run.bat` 或 `./run.sh`。测试会临时监听本机端口并在结束后关闭。若端口被安全软件或其他进程占用，请先解决环境问题再比较数据。
 
+```bash
+go test ./tests/integration/rpcfixture -run '^$' \
+  -bench '^BenchmarkGeneratedRemoteLoopback$' -benchmem -benchtime=3s
+```
+
 ## 如何阅读结果
 
-除 `ns/op`、`B/op`、`allocs/op` 外，还应关注不同 `-cpu` 或并发条件下的变化。回环 TCP 只说明框架传输开销，不能等同于真实跨机器延迟、交换机拥塞或 TLS 成本。
+除 `ns/op`、`B/op`、`allocs/op` 外，还应关注不同 `-cpu` 或并发条件下的变化。`MB/s` 只按
+请求业务 Payload 计算，不包含响应和协议头，不能当作链路总字节。回环 TCP 只说明框架传输
+开销，不能等同于真实跨机器延迟、交换机拥塞或 TLS 成本；该命令也不输出 P95/P99。
 
 ## 可修改实验
 

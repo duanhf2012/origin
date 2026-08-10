@@ -454,9 +454,13 @@ func (set *candidateSet) rawAt(index int) (routeCandidate, bool) {
 
 func (set *candidateSet) captureLocalCandidate() routeCandidate {
 	state := publicdiscovery.StateUnknown
-	if bound := service.RuntimeOf(set.local.target); bound != nil &&
-		bound.State() == service.StateRunning {
-		state = publicdiscovery.StateRunning
+	if bound := service.RuntimeOf(set.local.target); bound != nil {
+		switch bound.State() {
+		case service.StateRunning:
+			state = publicdiscovery.StateRunning
+		case service.StateRetired:
+			state = publicdiscovery.StateRetired
+		}
 	}
 	var contractID ContractID
 	var fingerprint ContractFingerprint

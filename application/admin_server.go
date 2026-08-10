@@ -266,6 +266,10 @@ func (app *Application) StartAdminServer(address string) error {
 	if _, _, err := net.SplitHostPort(address); err != nil {
 		return errs.ErrInvalidArgument
 	}
+	// 从状态检查到 Listener 发布是一项启动事务。整体资源关闭先等待该事务结束；网络绑定
+	// 期间只持有专用冷路径锁，不持有 app.mu，也不会阻塞 Diagnostics 或请求 Handler。
+	app.httpLifecycleMu.Lock()
+	defer app.httpLifecycleMu.Unlock()
 
 	// Snapshot lifecycle and Guard state only. Listener/runtime operations may
 	// block and must never run while app.mu excludes request handlers such as Node.

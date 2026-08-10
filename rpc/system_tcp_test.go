@@ -112,6 +112,12 @@ func TestSystemTCPReusesBusinessListener(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("client did not receive system response")
 	}
+	peer.Close()
+	select {
+	case <-clientHandler.closed:
+	case <-time.After(time.Second):
+		t.Fatal("client did not observe SystemPeer.Close()")
+	}
 }
 
 func newSystemTCPRuntime(

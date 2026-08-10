@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"sort"
 )
 
@@ -127,8 +128,15 @@ func newValueNode(value any, source sourcePos, positions map[string]sourcePos, p
 	case uint64:
 		return &valueNode{kind: kindUnsigned, source: source, scalar: typed}, nil
 	case float32:
-		return &valueNode{kind: kindFloat, source: source, scalar: float64(typed)}, nil
+		value := float64(typed)
+		if math.IsInf(value, 0) || math.IsNaN(value) {
+			return nil, invalidConfigAt(source, "配置浮点数必须是有限值")
+		}
+		return &valueNode{kind: kindFloat, source: source, scalar: value}, nil
 	case float64:
+		if math.IsInf(typed, 0) || math.IsNaN(typed) {
+			return nil, invalidConfigAt(source, "配置浮点数必须是有限值")
+		}
 		return &valueNode{kind: kindFloat, source: source, scalar: typed}, nil
 	case string:
 		return &valueNode{kind: kindString, source: source, scalar: typed}, nil

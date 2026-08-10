@@ -10,11 +10,16 @@ import (
 )
 
 const (
+	// maxEndpointNameBytes 限制单段路由标识，避免业务名称扩大 URL、路由表和审计字段。
+	maxEndpointNameBytes = 63
 	// DefaultTimeout 是没有单独设置时每个 Admin Endpoint 的执行上限。
+	// 首版 Option 只允许在这个框架硬上限内缩短预算。
 	DefaultTimeout = 15 * time.Second
 	// DefaultMaxBodyBytes 是 POST Endpoint 默认允许的请求体上限。
+	// 首版 Option 只允许在这个框架硬上限内缩小请求体。
 	DefaultMaxBodyBytes int64 = 1 << 20
 	// DefaultMaxResponseBytes 是 Endpoint 编码结果默认允许的上限。
+	// 首版 Option 只允许在这个框架硬上限内缩小响应体。
 	DefaultMaxResponseBytes int64 = 4 << 20
 )
 
@@ -73,7 +78,9 @@ func newEndpoint(name, method string, handler Handler, options []Option) Endpoin
 	var optionErr error
 	for _, option := range options {
 		if option == nil {
-			optionErr = errs.NewMessage(errs.CodeInvalidArgument, "Admin Endpoint Option 不能为空")
+			if optionErr == nil {
+				optionErr = errs.NewMessage(errs.CodeInvalidArgument, "Admin Endpoint Option 不能为空")
+			}
 			continue
 		}
 		if err := option(&configured); err != nil && optionErr == nil {
@@ -138,11 +145,11 @@ func (endpoint Endpoint) Validate() error {
 	if endpoint.handler == nil {
 		return errs.NewMessage(errs.CodeInvalidArgument, "Admin Endpoint Handler 不能为空")
 	}
-	if endpoint.timeout <= 0 {
-		return errs.NewMessage(errs.CodeInvalidArgument, "Admin Endpoint Timeout 必须大于零")
+	if endpoint.timeout <= 0 || endpoint.timeout > DefaultTimeout {
+		return errs.NewMessage(errs.CodeInvalidArgument, "Admin Endpoint Timeout 超出框架边界")
 	}
-	if endpoint.maxResponseBytes <= 0 {
-		return errs.NewMessage(errs.CodeInvalidArgument, "Admin Endpoint MaxResponseBytes 必须大于零")
+	if endpoint.maxResponseBytes <= 0 || endpoint.maxResponseBytes > DefaultMaxResponseBytes {
+		return errs.NewMessage(errs.CodeInvalidArgument, "Admin Endpoint MaxResponseBytes 超出框架边界")
 	}
 	if endpoint.successStatus < http.StatusOK || endpoint.successStatus >= http.StatusMultipleChoices {
 		return errs.NewMessage(errs.CodeInvalidArgument, "Admin Endpoint SuccessStatus 必须是 2xx")
@@ -151,14 +158,14 @@ func (endpoint Endpoint) Validate() error {
 		if endpoint.maxBodyBytes != 0 {
 			return errs.NewMessage(errs.CodeInvalidArgument, "GET Admin Endpoint 不接受请求体")
 		}
-	} else if endpoint.maxBodyBytes <= 0 {
-		return errs.NewMessage(errs.CodeInvalidArgument, "POST Admin Endpoint MaxBodyBytes 必须大于零")
+	} else if endpoint.maxBodyBytes <= 0 || endpoint.maxBodyBytes > DefaultMaxBodyBytes {
+		return errs.NewMessage(errs.CodeInvalidArgument, "POST Admin Endpoint MaxBodyBytes 超出框架边界")
 	}
 	return nil
 }
 
 func validEndpointName(name string) bool {
-	if len(name) == 0 || name[0] < 'a' || name[0] > 'z' {
+	if len(name) == 0 || len(name) > maxEndpointNameBytes || name[0] < 'a' || name[0] > 'z' {
 		return false
 	}
 	previousHyphen := false

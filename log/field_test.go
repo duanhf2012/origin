@@ -40,6 +40,9 @@ func TestFieldValues(t *testing.T) {
 		}
 	}
 	// 第二阶段分别检查各底层存储槽的读取结果。
+	if !originlog.Bool("value", true).BoolValue() || originlog.Bool("value", false).BoolValue() {
+		t.Error("BoolValue() did not preserve true/false")
+	}
 	if got := originlog.Int64("value", -3).Int64Value(); got != -3 {
 		t.Errorf("Int64Value() = %d", got)
 	}

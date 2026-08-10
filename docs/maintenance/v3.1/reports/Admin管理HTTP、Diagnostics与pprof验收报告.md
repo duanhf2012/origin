@@ -8,7 +8,7 @@
 
 ## 结论
 
-实现、六组示例、第 10 章、迁移说明和线上监控摘要模型均已完成并经过独立复审。Admin 是唯一的管理
+实现、七组示例、第 10 章、迁移说明和线上监控摘要模型均已完成并经过独立复审。Admin 是唯一的管理
 HTTP 入口；`--diagnostics` 与独立 Diagnostics HTTP Listener 已删除；pprof 保持独立且可运行期启停。
 
 默认 `GET /admin/v1/diagnostics` 返回低基数 Summary schema v2，适合秒级采集；
@@ -69,13 +69,14 @@ Windows 文件锁环境抖动，不是可复现的功能回归。
 | 包 | 语句覆盖率 |
 | --- | ---: |
 | `admin` | 96.4% |
-| `application` | 83.9% |
+| `application` | 89.5% |
 | `node` | 76.5% |
 | `diagnostics` | 100.0% |
 
 Admin 注册、Guard、HTTP 方法/Body/响应边界、限流、取消、错误映射、Service 串行调用、Summary
-聚合和 Runtime `KindBad`/无限内存上限均有专门测试。低覆盖的 `emptyAdminControlHandler` 仅为
-注册元数据占位，不经公开路由执行；pprof 的标准 profile 输出分支由标准库行为主导。
+聚合和 Runtime `KindBad`/无限内存上限均有专门测试。pprof 已直接覆盖索引、全部 Runtime Profile
+注册、方法限制、参数、取消、进程级采样互斥、Symbol 协议和 Body 上限；各核心 Handler 为
+`93.8%～100%`。低覆盖的 `emptyAdminControlHandler` 仅为注册元数据占位，不经公开路由执行。
 
 ## Diagnostics 基准
 
@@ -101,6 +102,22 @@ Full 的大小与编码分配则按详细 Service 数据增长。结果只用于
   Timer/Event，不是只查询内存。
 - OS RSS、容器 working set/limit、进程 CPU、宿主机负载和网络吞吐应由外部监控采集；pprof 不是
   常规指标接口，应短时、受保护地使用。
+
+## 2026-08-10 全面复审补充
+
+- Endpoint 现在完整执行设计规定的 63 字节名称，以及 15 秒、1 MiB、4 MiB 硬上限；Option 只
+  能收紧预算，并稳定保留首个配置错误；
+- Admin/pprof 启动与 Application 整体资源关闭已线性化，消除了关闭后迟到 Start 遗留 Listener
+  的竞态；网络绑定不持有 Application 主锁；
+- pprof 拒绝会溢出 `time.Duration` 的 seconds，按当前 Runtime 动态注册 Profile，Symbol 返回
+  标准能力握手并对超过 1 MiB 的 POST 返回 413；
+- 七组 Example 均在 Ubuntu 实际运行；另实际生成非空的 1 秒 CPU Profile 与 1 秒 Trace；全部
+  进程通过 Origin 自身命令停止，相关端口和临时文件已清理；
+- 生产修改后 Windows、Ubuntu 的全仓 Test/Vet/生成检查/Race 全部通过；最终测试集再次完成
+  双平台普通全仓回归和 pprof 定向 Race。
+
+上述修改均由已有设计约束、失败样例或协议事实驱动。未新增认证框架、TLS、Router、常驻采样、
+缓存或无锁结构；系统容量、长稳与性能目标继续由总计划 Task 6 验收。
 
 ## 已知非阻塞项
 

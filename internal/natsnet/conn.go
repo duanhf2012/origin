@@ -101,8 +101,7 @@ func Connect(
 
 	// raw 赋值后 Connection 才能进入 Connected；初始成功事件由包装层明确发布一次。
 	conn.raw = raw
-	if conn.Status() != StatusClosed {
-		conn.status.Store(uint32(StatusConnected))
+	if conn.transitionActiveStatus(StatusConnected) {
 		url := connectedURL(raw)
 		conn.logger.Info(
 			"NATS 初始连接成功",
@@ -428,11 +427,10 @@ func (conn *Conn) subscriptionFor(raw *nats.Subscription) *Subscription {
 
 // handleDisconnected 处理官方客户端断开回调。
 func (conn *Conn) handleDisconnected(raw *nats.Conn, cause error) {
-	// 主动 Drain/Close 期间的中间断开不重复发布误导性的自动重连状态。
-	if conn.Status() == StatusDraining || conn.Status() == StatusClosed {
+	// 与 Drain/Close 共用状态锁提交转换，避免“先检查、后写入”竞态把终态覆盖回 Reconnecting。
+	if !conn.transitionActiveStatus(StatusReconnecting) {
 		return
 	}
-	conn.status.Store(uint32(StatusReconnecting))
 	mapped := mapError(redactCause(cause, conn.options))
 	url := connectedURL(raw)
 	conn.logger.Warn(
@@ -449,11 +447,10 @@ func (conn *Conn) handleDisconnected(raw *nats.Conn, cause error) {
 
 // handleReconnected 处理官方客户端成功重连回调。
 func (conn *Conn) handleReconnected(raw *nats.Conn) {
-	// 与 Drain/Close 竞态的迟到回调不能把终态重新标记为 Connected。
-	if conn.Status() == StatusDraining || conn.Status() == StatusClosed {
+	// 迟到回调不能把已提交的 Drain/Close 终态重新标记为 Connected。
+	if !conn.transitionActiveStatus(StatusConnected) {
 		return
 	}
-	conn.status.Store(uint32(StatusConnected))
 	url := connectedURL(raw)
 	conn.logger.Info(
 		"NATS 连接已恢复",
@@ -613,6 +610,19 @@ func (conn *Conn) setTerminal(cause error) {
 		conn.terminal = cause
 	}
 	conn.stateMu.Unlock()
+}
+
+// transitionActiveStatus 在生命周期锁内提交非终态连接状态。
+func (conn *Conn) transitionActiveStatus(next Status) bool {
+	conn.stateMu.Lock()
+	defer conn.stateMu.Unlock()
+
+	// Drain、Close 和已经收到的 Closed 回调都是单调终态，后续网络回调只能丢弃。
+	if conn.drainRequested || conn.closeRequested || conn.Status() == StatusClosed {
+		return false
+	}
+	conn.status.Store(uint32(next))
+	return true
 }
 
 // terminalResult 返回已经提交的最终结果。

@@ -42,7 +42,7 @@ BroadcastXxx(ctx context.Context, args...) error
 | 场景 | 方法 | 完成位置 |
 | --- | --- | --- |
 | Service Task、Timer、Event、RPC Handler | `AwaitXxx` | 恢复原 Service Task 调用栈 |
-| `OnStart`、`OnStop` | `AwaitXxx` | 原生命周期调用栈 |
+| `OnStart`、`OnStop` 中等待已经可调用的外部目标 | `AwaitXxx` | 原生命周期调用栈 |
 | 用户创建的普通 goroutine | `CallXxx` | 原调用 goroutine |
 | 结果稍后修改 owner Service 状态 | `AsyncXxx` | owner Service 的新串行任务 |
 | 不需要业务响应 | `NotifyXxx` / `BroadcastXxx` | 本地提交完成即返回 |
@@ -50,7 +50,8 @@ BroadcastXxx(ctx context.Context, args...) error
 ## 3. Context 与 Deadline
 
 Context 只控制取消、Deadline 和普通 Value；Await 执行身份由框架内部关联。所有 `nil` 都
-在框架入口规范化，绝不传入下游库。
+在框架入口规范化，绝不传入下游库。同 Node 本地调用保留 Value，TCP/NATS 不序列化任意
+Go Value；跨 Node 业务数据必须进入 RPC 契约参数。
 
 Await、Call 和 Async 每次公开调用先确定候选 Deadline：
 
@@ -99,6 +100,11 @@ Await 从绑定 Client 的 owner Scheduler 捕获当前普通 Task 或生命周�
 工作。Await 期间其他普通任务可能修改 Service 状态，恢复后业务必须按需重新校验版本和
 前置条件。
 
+生命周期执行权不改变 RPC 目标状态。同 Node 的 Service 在全部 `OnStart` 成功后才统一
+进入 Running，停止阶段也会关闭新 RPC 准入；`OnStart`/`OnStop` 不得调用同 Node 业务 RPC。
+启动后的本地工作必须登记为 Timer 或其他后续任务。生命周期 Await 仍可等待已经可调用的
+外部目标或执行不依赖本地业务 Runner 的等待函数。
+
 普通 goroutine 不得调用 Await。owner 没有活动执行帧时返回带明确消息的
 `CodeInvalidArgument`；框架不使用 `runtime.Stack`、goroutine ID 或 unsafe 猜测调用位置。
 纯 Go 无法在 owner 恰好忙于另一个 Task 时百分之百识别错误 goroutine，因此正确代码必须
@@ -114,7 +120,7 @@ Await 从绑定 Client 的 owner Scheduler 捕获当前普通 Task 或生命周�
 - 返回后的代码仍运行在调用它的原 goroutine。
 
 Call 可以从任意普通 goroutine 并发调用。若在 Service Task 中调用，它会占住执行槽并可能
-导致同 Service或环形 RPC 死锁，因此生成注释和教程必须明确要求 Service Task 使用 Await。
+导致同 Service 或环形 RPC 死锁，因此生成注释和教程必须明确要求 Service Task 使用 Await。
 普通 goroutine 取得结果后不得直接修改 Service 非并发安全状态，应通过现有投递接口重新
 进入 owner Service。
 
@@ -128,9 +134,9 @@ owner Service 处于 Running 时，Async 可以由任意 goroutine 提交，不�
 - `AsyncXxx(nil/Background/TODO)` 使用独立默认预算，不读取 owner 碰巧正在执行的 Task；
 - 需要继承当前调用链时必须显式传入当前 `ctx`。
 
-`OnStart` 需要结果时使用生命周期 Await；`OnStop` 已进入停止边界，不接受新的 Async
-工作。Draining 期间仅允许已经接受的当前 Task 使用有效 Task Context 派生完成延续，防止
-外部 goroutine 在停止后继续增加排空工作。
+`OnStart` 等待已可调用的外部目标时使用生命周期 Await；同 Node 工作登记为启动后任务。
+`OnStop` 已进入停止边界，不接受新的 Async 工作。Draining 期间仅允许已经接受的当前 Task
+使用有效 Task Context 派生完成延续，防止外部 goroutine 在停止后继续增加排空工作。
 
 Notify 和 Broadcast 同样允许任意 goroutine 调用。Context 只约束准备和本地提交阶段；目标
 已经接受后不可撤回，不创建响应 Pending。Broadcast 继续保持现有 Retired、部分成功、全部

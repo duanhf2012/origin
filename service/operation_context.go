@@ -18,7 +18,7 @@ type operationContextKey struct{}
 // operationContext 保存一次公开等待或 RPC 调用唯一的控制 Context 和绝对 Deadline。
 //
 // 显式 Deadline 继续由调用方 Context 管理；没有显式 Deadline 时只在所属 Service 的
-// M8 DeadlineQueue 中登记一次。Service 生命周期通过 context.AfterFunc 合并，不为每次
+// DeadlineQueue 中登记一次。Service 生命周期通过 context.AfterFunc 合并，不为每次
 // 调用创建常驻辅助 goroutine。
 type operationContext struct {
 	context.Context
@@ -196,7 +196,7 @@ func prepareOperationContext(
 		operation.cancel(cause)
 	})
 
-	// 默认预算只登记一条 M8 Deadline；显式或硬生命周期 Deadline 已有自己的物理计时器。
+	// 默认预算只登记一条 Deadline；显式或硬生命周期 Deadline 已有自己的物理计时器。
 	if managedDefault {
 		deadlineID, err := scheduler.deadlineQueue.ScheduleAfter(delay)
 		if err != nil {

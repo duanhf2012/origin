@@ -60,7 +60,7 @@ func (TimeCodec) Unmarshal(
 	return nil
 }
 
-// PackedPlayerID 是原本可由 M11 作为 uint64 编码、但在 M12 显式替换表示的具名类型。
+// PackedPlayerID 是可按 uint64 编码、但由自定义 Codec 显式替换线表示的具名类型。
 type PackedPlayerID uint64
 
 //origin:rpc-codec id=origin.test.player-id-u32 version=1

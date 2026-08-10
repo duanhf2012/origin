@@ -70,6 +70,10 @@ v3.1 还新增 Node 级游戏逻辑时间：Service/Module 通过 `GetNode()` �
 [Admin 管理 HTTP、Diagnostics 与 pprof](./docs/maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md)
 和 [`examples/10-admin-diagnostics-and-pprof`](./examples/10-admin-diagnostics-and-pprof/README.md)。
 
+生产构建、进程管理、优雅停止、管理面保护和依赖边界见
+[部署与运维](./docs/maintenance/v3.1/guides/deployment-and-operations.md)。仓库内 Compose 只用于
+本地开发与集成测试，不是生产部署模板。
+
 ## 学习方式
 
 每一章都先从一个实际任务开始：复制命令、运行示例、修改少量代码并观察结果。后续章节才说明原理、限制和排错方式。
@@ -81,7 +85,8 @@ v3.1 还新增 Node 级游戏逻辑时间：Service/Module 通过 `GetNode()` �
 - `run.sh`：Linux 入口；
 - 完整源码和必要配置。
 
-依赖 NATS 或 etcd 的示例会明确提供依赖检查及启动、停止脚本。`00`–`05` 以及 `06` 的 TCP 示例不要求任何外部中间件。
+依赖 NATS 或 etcd 的示例会明确提供依赖检查及启动、停止脚本。`00`～`06` 以及 `07` 的 TCP
+示例不要求外部中间件。
 
 ## 文档边界
 

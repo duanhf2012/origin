@@ -414,6 +414,72 @@ func TestAdminServerConcurrentLifecycle(t *testing.T) {
 	_ = listener.Close()
 }
 
+// TestAdminStartIsLinearizedWithResourceClose 固定 Application 整体关闭必须等待已经通过状态
+// 检查、但尚未发布 Listener 的 Start。关闭不能先观察到 stopped，随后让迟到的 Start 遗留端口。
+func TestAdminStartIsLinearizedWithResourceClose(t *testing.T) {
+	app := newHTTPTestApplication(t)
+	app.adminHTTP.operationMu.Lock()
+	runtimeLocked := true
+	defer func() {
+		if runtimeLocked {
+			app.adminHTTP.operationMu.Unlock()
+		}
+	}()
+	startDone := make(chan error, 1)
+	go func() { startDone <- app.StartAdminServer("127.0.0.1:0") }()
+
+	// Start 取得 Application HTTP 生命周期锁后，会稳定阻塞在测试持有的 Runtime 操作锁。
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for {
+		if !app.httpLifecycleMu.TryLock() {
+			break
+		}
+		app.httpLifecycleMu.Unlock()
+		select {
+		case <-deadline.C:
+			t.Fatal("StartAdminServer did not enter the HTTP lifecycle transaction")
+		default:
+			runtime.Gosched()
+		}
+	}
+
+	closeStarted := make(chan struct{})
+	closeDone := make(chan error, 1)
+	go func() {
+		close(closeStarted)
+		closeDone <- app.closeResources(context.Background())
+	}()
+	<-closeStarted
+
+	// 让关闭 goroutine 充分调度。只要 Start 仍持有事务锁，resourcesClosing 就不能提前发布。
+	checkUntil := time.Now().Add(20 * time.Millisecond)
+	for time.Now().Before(checkUntil) {
+		runtime.Gosched()
+		app.mu.Lock()
+		closing := app.resourcesClosing
+		app.mu.Unlock()
+		if closing {
+			app.adminHTTP.operationMu.Unlock()
+			runtimeLocked = false
+			t.Fatalf("resourcesClosing was published before the in-flight Admin Start completed")
+		}
+	}
+
+	app.adminHTTP.operationMu.Unlock()
+	runtimeLocked = false
+	if err := <-startDone; err != nil {
+		t.Fatalf("StartAdminServer() error = %v", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatalf("closeResources() error = %v", err)
+	}
+	if address, running := app.AdminAddress(); running || address != "" {
+		t.Fatalf("Admin survived resource close: address=%q running=%t", address, running)
+	}
+
+}
+
 // TestAdminServerStartRuntimeLockOrder deterministically parks Start after it
 // owns operationMu but before runtime.mu, then proves a request handler may still
 // call app.Node while a concurrent Stop queues behind Start.

@@ -20,7 +20,7 @@ type Sizer struct {
 	err  error
 }
 
-// NewSizer 创建一个使用 M11 固定消息上限的空大小计算器。
+// NewSizer 创建一个使用当前固定消息上限的空大小计算器。
 func NewSizer() Sizer {
 	return Sizer{}
 }
@@ -322,7 +322,7 @@ func (writer *Writer) WriteProto(message proto.Message) error {
 		return writer.fail()
 	}
 	if size > 0 && &encoded[0] != &target[0] {
-		// proto.Size 与真正写入不一致时 MarshalAppend 可能扩容；M11 禁止隐藏的第二份载荷。
+		// proto.Size 与真正写入不一致时 MarshalAppend 可能扩容；这里禁止隐藏的第二份载荷。
 		return writer.fail()
 	}
 	return nil

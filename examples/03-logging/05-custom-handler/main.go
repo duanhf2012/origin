@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,7 +110,8 @@ func fieldValue(field originlog.Field) any {
 	case originlog.TimeField:
 		return field.TimeValue().UTC().Format(time.RFC3339Nano)
 	case originlog.BytesField:
-		return string(field.BytesValue())
+		// 任意字节不一定是合法 UTF-8；Base64 可避免 JSON 编码时替换无效字节而丢失数据。
+		return base64.StdEncoding.EncodeToString(field.BytesValue())
 	case originlog.AnyField:
 		// AnyField 已在调用点序列化为 JSON 快照；复制后交给 Encoder，避免保留 Runtime 所有切片。
 		return json.RawMessage(append([]byte(nil), field.BytesValue()...))

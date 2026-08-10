@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/application"
@@ -21,25 +22,29 @@ type ControlService struct{ service.Service }
 // OnStart 使用不同延迟把批量操作和单 Node 操作按顺序展示。
 func (target *ControlService) OnStart(context.Context) error {
 	// Application.Retire 按 Node 启动顺序倒序退休全部 Node。
-	target.AfterFunc(200*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(200*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		if err := app.Retire(ctx); err != nil {
 			target.Logger().Error("application retire failed")
 			return
 		}
 		target.Logger().Info("application retired in reverse Node order")
-	})
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create application retire timer failed")
+	}
 
 	// Application.Resume 按启动正序恢复全部 Node。
-	target.AfterFunc(500*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(500*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		if err := app.Resume(ctx); err != nil {
 			target.Logger().Error("application resume failed")
 			return
 		}
 		target.Logger().Info("application resumed in Node start order")
-	})
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create application resume timer failed")
+	}
 
 	// Application.Node 查询具体 Node，再演示 Node.Retire 和 Node.Resume。
-	target.AfterFunc(800*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(800*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		workerNode, ok := app.Node("upstream-1")
 		if !ok {
 			target.Logger().Error("upstream node not found")
@@ -55,7 +60,9 @@ func (target *ControlService) OnStart(context.Context) error {
 			return
 		}
 		target.Logger().Info("upstream-1 resumed explicitly")
-	})
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create node retire and resume timer failed")
+	}
 	return nil
 }
 

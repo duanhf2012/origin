@@ -381,21 +381,23 @@ func (runtime *discoveryRuntime) addListener(
 	if runtime == nil || owner == nil || isNilListener(listener) {
 		return 0, errs.ErrInvalidArgument
 	}
-	state := owner.loadState().State
-	switch state {
-	case service.StateInitializing, service.StateInitialized,
-		service.StateStarting, service.StateRunning:
-		// OnInit、OnStart 和 Running 均允许登记；Runner 未激活时只保留同步意图。
-	default:
-		if state == service.StateStopping {
-			return 0, errs.ErrServiceStopping
-		}
-		return 0, errs.ErrServiceStopped
-	}
-
 	runtime.mu.Lock()
 	if runtime.closed.Load() {
 		runtime.mu.Unlock()
+		return 0, errs.ErrServiceStopped
+	}
+	// 状态检查与登记必须位于和 removeOwner 相同的线性化锁内：若 Stop 已经把
+	// Service 切到 Stopping，不能在自动清理之后又留下一个永远不会交付的监听器。
+	state := owner.loadState().State
+	switch state {
+	case service.StateInitializing, service.StateInitialized,
+		service.StateStarting, service.StateRunning, service.StateRetired:
+		// Retired 仍是可执行状态；Runner 未激活时只保留同步意图。
+	default:
+		runtime.mu.Unlock()
+		if state == service.StateStopping {
+			return 0, errs.ErrServiceStopping
+		}
 		return 0, errs.ErrServiceStopped
 	}
 	runtime.nextID++

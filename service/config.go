@@ -20,7 +20,7 @@ type IServiceConfig interface {
 	ParseServiceConfig(destination any) error
 }
 
-// configRuntime 是 M21 配置能力的可选框架适配面。
+// configRuntime 是业务配置快照能力的可选框架适配面。
 //
 // 它不加入 Runtime，避免扩展独立测试和第三方框架适配器必须实现的基础接口。
 type configRuntime interface {

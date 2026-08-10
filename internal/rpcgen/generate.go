@@ -136,7 +136,7 @@ func generatedOverlay(directory string) (map[string][]byte, error) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(entry.Name(), ".gen.go") {
+		if !strings.HasSuffix(entry.Name(), generatedFileSuffix) {
 			return nil
 		}
 		content, err := os.ReadFile(path)
@@ -237,7 +237,7 @@ func generatedFilePath(sourceFile string) (string, error) {
 	if strings.HasSuffix(sourceFile, ".gen.go") {
 		return "", fmt.Errorf("RPC 声明不能位于生成文件: %s", sourceFile)
 	}
-	return strings.TrimSuffix(sourceFile, ".go") + ".rpc.gen.go", nil
+	return strings.TrimSuffix(sourceFile, ".go") + generatedFileSuffix, nil
 }
 
 // importSet 为单个生成文件分配稳定且无冲突的导入别名。
@@ -381,8 +381,8 @@ func commitGenerated(
 		}
 	}
 
-	// 收集当前扫描范围内由 origingen 拥有的旧文件，供过期比较和安全删除使用。
-	// 这里也会识别旧版 zz_origin_rpc.gen.go，因此升级生成器后可自动迁移文件名。
+	// 收集当前扫描范围内由 origingen 拥有的当前格式文件，供过期比较和安全删除使用。
+	// 本项目尚未对外发布，不再识别历史聚合文件名；精确后缀避免生成器扩大删除所有权。
 	existing := make(map[string][]byte)
 	visitedDirectories := make(map[string]bool)
 	for _, pkg := range scanned {
@@ -399,7 +399,7 @@ func commitGenerated(
 			return err
 		}
 		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".gen.go") {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), generatedFileSuffix) {
 				continue
 			}
 			path := filepath.Join(directory, entry.Name())

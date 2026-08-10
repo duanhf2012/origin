@@ -115,6 +115,9 @@ func TestConnReceivesEmptyAndNonEmptyFrames(t *testing.T) {
 	local, remote := net.Pipe()
 	conn := newConn(local, options, handler, nil)
 	conn.start()
+	if cause := conn.Cause(); cause != nil {
+		t.Fatalf("运行中的 Cause() = %v", cause)
+	}
 
 	// 一次写入连续发送空帧和三字节帧，覆盖粘包情况下的逐帧解析。
 	if _, err := remote.Write([]byte{0, 3, 'a', 'b', 'c'}); err != nil {
@@ -143,11 +146,10 @@ func TestConnReceivesEmptyAndNonEmptyFrames(t *testing.T) {
 func TestConnSendWritesFramesAndOwnsBuffers(t *testing.T) {
 	t.Parallel()
 
-	// 本测试从管道远端读取真实帧，验证头部字节序、空 payload 和发送所有权。
+	// 本测试从管道远端读取真实帧，验证网络字节序、空 payload 和发送所有权。
 	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
 	options := smallConnectionOptions(pool)
 	options.Frame.LengthFieldSize = 2
-	options.Frame.ByteOrder = LittleEndian
 	handler := newRecordingHandler()
 	local, remote := net.Pipe()
 	conn := newConn(local, options, handler, nil)
@@ -164,9 +166,9 @@ func TestConnSendWritesFramesAndOwnsBuffers(t *testing.T) {
 		t.Fatalf("发送 payload 失败：%v", err)
 	}
 
-	// 读取两个完整帧；二字节小端长度分别应为 0 和 4。
-	assertRawFrame(t, remote, LittleEndian, 2, nil)
-	assertRawFrame(t, remote, LittleEndian, 2, []byte("data"))
+	// 读取两个完整帧；二字节网络序长度分别应为 0 和 4。
+	assertRawFrame(t, remote, 2, nil)
+	assertRawFrame(t, remote, 2, []byte("data"))
 
 	// 主动关闭必须打断 ReadLoop，并在 Wait 前释放全部发送对象。
 	conn.Close()
@@ -588,6 +590,9 @@ func TestConnWaitContextAndRepeatedWait(t *testing.T) {
 		!errors.Is(second, errs.ErrTransportClosed) {
 		t.Fatalf("重复 Wait 结果=(%v, %v)", first, second)
 	}
+	if cause := conn.Cause(); !errors.Is(cause, errs.ErrTransportClosed) {
+		t.Fatalf("关闭后的 Cause() = %v", cause)
+	}
 	_ = remote.Close()
 	assertPoolEmpty(t, pool)
 }
@@ -652,7 +657,6 @@ func assertMessage(t *testing.T, messages <-chan []byte, want []byte) {
 func assertRawFrame(
 	t *testing.T,
 	remote net.Conn,
-	order ByteOrder,
 	headerSize int,
 	want []byte,
 ) {
@@ -666,7 +670,7 @@ func assertRawFrame(
 	if _, err := io.ReadFull(remote, header); err != nil {
 		t.Fatalf("读取帧头失败：%v", err)
 	}
-	options := FrameOptions{LengthFieldSize: headerSize, ByteOrder: order}
+	options := FrameOptions{LengthFieldSize: headerSize}
 	if got := decodeFrameLength(header, options); got != uint64(len(want)) {
 		t.Fatalf("帧长=%d，期望=%d", got, len(want))
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -192,6 +193,38 @@ func TestCodecProtobufRoundTrip(t *testing.T) {
 	}
 	if err := reader.Done(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestUnmarshalProtoMapsRequestAndResponseFailures 验证顶层 Protobuf 的 nil 与坏字节
+// 分别映射到请求/响应解码错误，合法请求则完整还原消息。
+func TestUnmarshalProtoMapsRequestAndResponseFailures(t *testing.T) {
+	message := wrapperspb.String("request")
+	payload, err := proto.Marshal(message)
+	if err != nil {
+		t.Fatalf("MarshalProto() error = %v", err)
+	}
+	decoded := &wrapperspb.StringValue{}
+	if err := UnmarshalProto(payload, decoded, false); err != nil || decoded.Value != "request" {
+		t.Fatalf("request UnmarshalProto() = %+v, %v", decoded, err)
+	}
+	if err := UnmarshalProto(nil, nil, false); !errors.Is(err, errs.ErrRPCRequestDecodeFailed) {
+		t.Fatalf("nil request UnmarshalProto() error = %v", err)
+	}
+	if err := UnmarshalProto(nil, nil, true); !errors.Is(err, errs.ErrRPCResponseDecodeFailed) {
+		t.Fatalf("nil response UnmarshalProto() error = %v", err)
+	}
+	if err := UnmarshalProto([]byte{0xff}, decoded, false); !errors.Is(
+		err,
+		errs.ErrRPCRequestDecodeFailed,
+	) {
+		t.Fatalf("malformed request UnmarshalProto() error = %v", err)
+	}
+	if err := UnmarshalProto([]byte{0xff}, decoded, true); !errors.Is(
+		err,
+		errs.ErrRPCResponseDecodeFailed,
+	) {
+		t.Fatalf("malformed response UnmarshalProto() error = %v", err)
 	}
 }
 

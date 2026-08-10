@@ -279,7 +279,7 @@ func validSubjectToken(value string) bool {
 	return true
 }
 
-// frameLimit 返回交给 M5 的“业务 payload + TCP RPC 包络”完整帧上限。
+// frameLimit 返回交给 TCP 层的“业务 payload + RPC 包络”完整帧上限。
 func (config Config) frameLimit() int {
 	return config.MaxPayloadSize + wireEnvelopeSize
 }

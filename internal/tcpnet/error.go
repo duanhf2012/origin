@@ -10,13 +10,13 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 )
 
-// invalidArgument 创建 M5 公共调用参数错误。
+// invalidArgument 创建 TCP 公共调用参数错误。
 func invalidArgument(message string) error {
 	// 参数错误属于调用方立即可修复的问题，保留简短动态说明。
 	return errs.NewMessage(errs.CodeInvalidArgument, message)
 }
 
-// invalidConfig 创建 M5 启动配置错误。
+// invalidConfig 创建 TCP 启动配置错误。
 func invalidConfig(message string) error {
 	// Options 在创建网络资源前统一映射为稳定配置错误码。
 	return errs.NewMessage(errs.CodeInvalidConfig, message)

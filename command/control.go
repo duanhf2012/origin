@@ -196,7 +196,7 @@ func isKnownControlErrorCode(code errs.Code) bool {
 		return true
 	case code >= errs.CodeLogClosed && code <= errs.CodeLogOutputUnavailable:
 		return true
-	case code >= errs.CodeDiagnosticsUnavailable && code <= errs.CodeDiagnosticsStateConflict:
+	case code >= errs.CodeDiagnosticsUnavailable && code <= errs.CodeAdminStateConflict:
 		return true
 	default:
 		return false

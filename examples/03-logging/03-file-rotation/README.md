@@ -1,4 +1,4 @@
-# 文件名、滚动与磁盘上限
+# 文件名、滚动与磁盘占用
 
 本例把同一条结构化日志发送到两个独立输出：控制台使用 `info + text`，文件使用
 `debug + json`。执行 `run.bat` 或 `./run.sh`；文件位于本示例的 `logs/` 目录。
@@ -39,7 +39,8 @@ log-output-tutorial.crash.log
 - `compress: true` 让唯一维护协程把普通归档压缩为 gzip。
 
 默认 Handler 的内置默认值是 14 天、30 个归档和开启压缩。生产配置至少应保留一个有限
-约束，并结合单文件上限预估磁盘占用。
+约束，并结合单文件上限预估磁盘占用。这个估算不是硬配额：活动文件不计入 `max_files`，
+单条超过 `max_size` 的日志也不会被拆分；部署环境仍应设置磁盘监控或配额。
 
 完整代码见 [`main.go`](./main.go)，逐字段配置注释见
 [`config/application.yaml`](./config/application.yaml)。更完整的调用与格式规则见

@@ -3,8 +3,14 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"runtime"
+	"sort"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +28,12 @@ var httpLifecycleStopSeen chan bool
 var httpLifecycleProviderSeen chan struct{}
 
 type httpLifecycleService struct {
+	service.Service
+}
+
+// observabilitySystemService 为可观测性共存测试提供真实串行执行槽和执行统计。
+// 它不增加业务行为，测试只通过公开 DispatchAsync 投递有界任务。
+type observabilitySystemService struct {
 	service.Service
 }
 
@@ -149,6 +161,226 @@ nodes:
 	}
 	assertAddressReleased(t, adminAddress)
 	assertAddressReleased(t, pprofAddress)
+}
+
+// TestObservabilityTrafficKeepsServiceSchedulingResponsive 验证日志、Admin Diagnostics、
+// pprof、执行统计和真实 Service 调度同时工作时不会互相阻塞或遗留资源。延迟上限只防止
+// 数量级异常和死锁，不构成脱离当前测试环境的业务 SLA。
+func TestObservabilityTrafficKeepsServiceSchedulingResponsive(t *testing.T) {
+	const sampleCount = 5_000
+	baselineGoroutines := runtime.NumGoroutine()
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: observability-1
+    services:
+      - observabilitySystemService
+`)
+	app := New(Options{
+		LogHandlerFactory: func(originlog.Config) (originlog.Handler, error) {
+			return &silentHandler{}, nil
+		},
+	})
+	app.Setup(&observabilitySystemService{})
+
+	// 通过正式 run 事务启动 Node、Admin 和 pprof；stopOnce 保证任何断言失败也会回收资源。
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() {
+		runResult <- app.run(runCtx, command.StartRequest{
+			AppName:      "observability-system",
+			ConfigDir:    directory,
+			AdminAddress: "127.0.0.1:0",
+			PprofAddress: "127.0.0.1:0",
+		})
+	}()
+	var stopOnce sync.Once
+	stopApplication := func() {
+		stopOnce.Do(func() {
+			cancelRun()
+			select {
+			case err := <-runResult:
+				if err != nil {
+					t.Errorf("observability Application run() error = %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Error("observability Application run() did not return")
+			}
+		})
+	}
+	defer stopApplication()
+	waitForState(t, app, StateRunning)
+
+	adminAddress, adminOK := app.AdminAddress()
+	pprofAddress, pprofOK := app.PprofAddress()
+	if !adminOK || !pprofOK {
+		t.Fatalf("observability addresses admin=%q/%v pprof=%q/%v", adminAddress, adminOK, pprofAddress, pprofOK)
+	}
+	nodes := app.Nodes()
+	if len(nodes) != 1 {
+		t.Fatalf("observability Nodes() = %d, want 1", len(nodes))
+	}
+	bound, exists := nodes[0].Service("observabilitySystemService")
+	if !exists {
+		t.Fatal("observability Service was not bound")
+	}
+	target, ok := bound.(*observabilitySystemService)
+	if !ok {
+		t.Fatalf("observability Service type = %T", bound)
+	}
+
+	// 两类 HTTP Worker 使用同一个有界 Client；错误 Channel 容量等于 Worker 数，不会阻塞退出。
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	client := &http.Client{Timeout: 2 * time.Second}
+	var adminRequests atomic.Uint64
+	var pprofRequests atomic.Uint64
+	workerErrors := make(chan error, 3)
+	var workers sync.WaitGroup
+	startWorker := func(targetURL string, completed *atomic.Uint64) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for {
+				request, err := http.NewRequestWithContext(workerCtx, http.MethodGet, targetURL, nil)
+				if err != nil {
+					workerErrors <- err
+					return
+				}
+				response, err := client.Do(request)
+				if err != nil {
+					if workerCtx.Err() != nil {
+						return
+					}
+					workerErrors <- err
+					return
+				}
+				_, readErr := io.Copy(io.Discard, response.Body)
+				closeErr := response.Body.Close()
+				if response.StatusCode != http.StatusOK {
+					workerErrors <- fmt.Errorf(
+						"GET %s status=%s read_error=%v close_error=%v",
+						targetURL,
+						response.Status,
+						readErr,
+						closeErr,
+					)
+					return
+				}
+				if readErr != nil || closeErr != nil {
+					// 主流程结束时会取消正在读取的 pprof 响应；这是 Worker 的预期退出路径。
+					if workerCtx.Err() != nil {
+						return
+					}
+					workerErrors <- fmt.Errorf(
+						"GET %s status=%s read_error=%v close_error=%v",
+						targetURL,
+						response.Status,
+						readErr,
+						closeErr,
+					)
+					return
+				}
+				completed.Add(1)
+			}
+		}()
+	}
+	startWorker("http://"+adminAddress+"/admin/v1/diagnostics", &adminRequests)
+	startWorker("http://"+adminAddress+"/admin/v1/diagnostics?detail=full", &adminRequests)
+	startWorker("http://"+pprofAddress+"/debug/pprof/goroutine?debug=0", &pprofRequests)
+
+	// 在开始业务采样前证明 Admin 与 pprof 都已经真实完成请求，避免只验证了启动未验证共存。
+	requestReadyDeadline := time.Now().Add(3 * time.Second)
+	for adminRequests.Load() == 0 || pprofRequests.Load() == 0 {
+		select {
+		case err := <-workerErrors:
+			cancelWorkers()
+			workers.Wait()
+			t.Fatalf("observability request failed before sampling: %v", err)
+		default:
+		}
+		if time.Now().After(requestReadyDeadline) {
+			cancelWorkers()
+			workers.Wait()
+			t.Fatal("observability requests did not become ready")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// 顺序等待每个任务开始，使样本表示单次提交到执行延迟，而不是人为制造的队列积压。
+	latencies := make([]time.Duration, 0, sampleCount)
+	for index := 0; index < sampleCount; index++ {
+		started := time.Now()
+		executed := make(chan time.Duration, 1)
+		if err := target.DispatchAsync(func(context.Context) {
+			executed <- time.Since(started)
+		}); err != nil {
+			cancelWorkers()
+			workers.Wait()
+			t.Fatalf("observability DispatchAsync(%d) error = %v", index, err)
+		}
+		select {
+		case latency := <-executed:
+			latencies = append(latencies, latency)
+		case <-time.After(time.Second):
+			cancelWorkers()
+			workers.Wait()
+			t.Fatalf("observability task %d exceeded one second", index)
+		}
+	}
+	cancelWorkers()
+	workers.Wait()
+	client.CloseIdleConnections()
+	close(workerErrors)
+	for err := range workerErrors {
+		if err != nil {
+			t.Errorf("observability request error = %v", err)
+		}
+	}
+	if adminRequests.Load() == 0 || pprofRequests.Load() == 0 {
+		t.Fatalf("observability request counts admin=%d pprof=%d", adminRequests.Load(), pprofRequests.Load())
+	}
+
+	// 使用 nearest-rank 记录当前环境的尾延迟，同时只用一秒硬上限阻止卡死或数量级退化。
+	sort.Slice(latencies, func(left, right int) bool { return latencies[left] < latencies[right] })
+	percentile := func(percent int) time.Duration {
+		position := (len(latencies)*percent + 99) / 100
+		return latencies[position-1]
+	}
+	p50, p95, p99 := percentile(50), percentile(95), percentile(99)
+	if p99 >= time.Second {
+		t.Fatalf("observability task P99 = %s, want < 1s", p99)
+	}
+	t.Logf(
+		"observability tasks=%d admin_requests=%d pprof_requests=%d P50=%s P95=%s P99=%s",
+		len(latencies),
+		adminRequests.Load(),
+		pprofRequests.Load(),
+		p50,
+		p95,
+		p99,
+	)
+	if stats := target.ExecutionStats(); stats.CompletedTotal < sampleCount {
+		t.Fatalf("observability ExecutionStats() = %+v, want at least %d completed", stats, sampleCount)
+	}
+
+	// 正式停止后两个端口必须可立即重绑，所有测试 Worker 和运行时 goroutine 最终回落。
+	stopApplication()
+	assertAddressReleased(t, adminAddress)
+	assertAddressReleased(t, pprofAddress)
+	resourceDeadline := time.Now().Add(3 * time.Second)
+	for {
+		runtime.GC()
+		if runtime.NumGoroutine() <= baselineGoroutines+12 {
+			break
+		}
+		if time.Now().After(resourceDeadline) {
+			t.Fatalf(
+				"observability goroutines = %d, baseline = %d",
+				runtime.NumGoroutine(),
+				baselineGoroutines,
+			)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // TestInitialAdminBindFailureRollsBackBuiltNodes 防止 Admin Listener 绑定失败后进入任何

@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/application"
@@ -37,23 +39,49 @@ func (target *GatewayService) OnInit() error {
 
 // OnStart 等发现目录和 TCP 连接建立后，依次演示各种候选选择策略。
 func (target *GatewayService) OnStart(context.Context) error {
-	target.AfterFunc(time.Second, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(time.Second, func(ctx context.Context, _ service.TimerID) {
 		// Route 使用稳定业务 Key，同一 Key 在候选不变时映射到同一实例。
 		value, err := target.players.Route(int64(1001)).AwaitGetPlayer(ctx, 1001)
 		if err == nil {
 			target.Logger().Info("key route result: " + value)
+		} else {
+			target.Logger().Error(fmt.Sprintf("key route failed: %v", err))
 		}
 
 		// RoundRobin、Random 和 RouteBy 都返回派生值，不会修改基础客户端。
-		_ = target.players.RouteRoundRobin().NotifyRefresh(ctx, 1)
-		_ = target.players.RouteRandom().NotifyRefresh(ctx, 2)
-		_ = target.players.RouteBy(firstCandidateSelector{}).NotifyRefresh(ctx, 3)
+		if err := target.players.RouteRoundRobin().NotifyRefresh(ctx, 1); err != nil {
+			target.Logger().Error(fmt.Sprintf("round-robin notify failed: %v", err))
+		}
+		if err := target.players.RouteRandom().NotifyRefresh(ctx, 2); err != nil {
+			target.Logger().Error(fmt.Sprintf("random notify failed: %v", err))
+		}
+		if err := target.players.RouteBy(firstCandidateSelector{}).NotifyRefresh(ctx, 3); err != nil {
+			target.Logger().Error(fmt.Sprintf("custom route notify failed: %v", err))
+		}
 
 		// Broadcast 向全部合格实例发送通知；部分失败通过 BroadcastError 聚合返回。
 		if err := target.players.BroadcastRefresh(ctx, 4); err != nil {
-			target.Logger().Error("broadcast has failures")
+			var broadcastErr *rpc.BroadcastError
+			if !errors.As(err, &broadcastErr) {
+				target.Logger().Error(fmt.Sprintf("broadcast failed: %v", err))
+				return
+			}
+			target.Logger().Error(fmt.Sprintf(
+				"broadcast result: total=%d succeeded=%d failed=%d",
+				broadcastErr.Total(), broadcastErr.Succeeded(), broadcastErr.FailureCount(),
+			))
+			for index := 0; index < broadcastErr.FailureCount(); index++ {
+				failure, _ := broadcastErr.Failure(index)
+				target.Logger().Error(fmt.Sprintf(
+					"broadcast target failed: node=%s error=%v", failure.NodeID, failure.Err,
+				))
+			}
+			return
 		}
-	})
+		target.Logger().Info("broadcast submitted to all candidates")
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create route and broadcast demonstration timer failed")
+	}
 	return nil
 }
 

@@ -35,7 +35,8 @@ TCP 的共享队列和超时配置写在顶层 `rpc.tcp`，每个 Node 只在 `r
 
 多文件规则：Mapping 递归合并，Sequence 追加，标量/`null`/类型冲突重复时报错；不会按
 Sequence 元素的 `id` 合并或去重。JSON 使用严格语法，YAML/JSON 根节点都必须是 Mapping。
-字符串值支持 `${ENV_NAME}` 环境变量替换，缺失变量会失败，不支持默认值表达式或字段名替换。
+浮点值必须是有限数，不接受 YAML 的 `.inf`、`-.inf` 或 `.nan`。字符串值支持
+`${ENV_NAME}` 环境变量替换，缺失变量会失败，不支持默认值表达式或字段名替换。
 
 完整字段语义与示例见[配置](../02.configuration.md)、[跨节点 RPC](../07.remote-rpc.md)和
 [服务发现](../08.discovery.md)。

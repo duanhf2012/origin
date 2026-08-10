@@ -1,6 +1,6 @@
 # Node 游戏逻辑时间
 
-v3.1 为每个 Node 提供一套独立游戏逻辑时间。本示例用一个控制 Service 设置时间并快进一天，让另一个 Service 中的 `AfterFunc`、`NewTicker` 和 `CronFunc` 同时响应。
+Origin 为每个 Node 提供一套独立游戏逻辑时间。本示例用一个控制 Service 设置时间并快进一天，让另一个 Service 中的 `AfterFunc`、`NewTicker` 和 `CronFunc` 同时响应。
 
 ## 直接运行
 
@@ -11,7 +11,7 @@ Windows 执行 `run.bat`，Linux 执行 `./run.sh`。程序会：
 3. 观察另一 Service 的 After、Ticker 和每日 Cron 各进入一次串行回调；
 4. 按 `Ctrl+C` 停止。
 
-Ticker 不会补执行快进期间的全部历史周期，日志中的 `coalesced` 会记录合并数。Cron 也只触发一次，然后从新逻辑时间寻找下一个未来匹配点。
+Ticker 不会补执行快进期间的全部历史周期；当前回调返回后，后续 `Ticker coalesced` 日志会输出合并数。Cron 也只触发一次，然后从新逻辑时间寻找下一个未来匹配点。
 
 ## 关键使用方式
 
@@ -34,4 +34,4 @@ _ = err
 
 `SetTime` 和 `AddTime` 影响当前 Node 全部 Service/Module 的业务 Timer，但不修改系统时钟，也不会提前 RPC/Await/Context、发现 TTL、心跳或启停 Deadline。时间偏移不会持久化，进程重启后恢复为真实时间。
 
-完整规则见 [v3.1 Node 游戏逻辑时间教程](../../../docs/maintenance/v3.1/guides/node-game-time.md)。
+完整规则见 [Node 游戏逻辑时间教程](../../../docs/maintenance/v3.1/guides/node-game-time.md)。

@@ -64,9 +64,9 @@ func TestValidateCustomCodecTargetFamilies(t *testing.T) {
 	}
 }
 
-// TestEmptyCodecRegistryKeepsM11Schema 验证没有自定义 Codec 时，M12 接缝不会改变 M11
-// 已冻结的基础类型 Schema 文本和后续契约指纹输入。
-func TestEmptyCodecRegistryKeepsM11Schema(t *testing.T) {
+// TestEmptyCodecRegistryKeepsBaseSchema 验证没有自定义 Codec 时，扩展接缝不会改变已冻结的
+// 基础类型 Schema 文本和后续契约指纹输入。
+func TestEmptyCodecRegistryKeepsBaseSchema(t *testing.T) {
 	t.Parallel()
 
 	item := &contract{
@@ -87,11 +87,11 @@ func TestEmptyCodecRegistryKeepsM11Schema(t *testing.T) {
 		"example.com/game.PlayerRPC\n" +
 		"Echo(int64)->(string)\n"
 	if got := contractSchema(item); got != want {
-		t.Fatalf("M11 schema changed:\n%s\nwant:\n%s", got, want)
+		t.Fatalf("base schema changed:\n%s\nwant:\n%s", got, want)
 	}
 	item.codecs = newCodecRegistry()
 	if got := contractSchema(item); got != want {
-		t.Fatalf("empty registry changed M11 schema:\n%s\nwant:\n%s", got, want)
+		t.Fatalf("empty registry changed base schema:\n%s\nwant:\n%s", got, want)
 	}
 }
 

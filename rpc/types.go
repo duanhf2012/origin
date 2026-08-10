@@ -41,7 +41,7 @@ const (
 // 归还。该别名使生成代码不需要越过 Go internal 包边界。
 type Buffer = bufferpool.Buffer
 
-// targetMode 表示 M11 当前支持的本地 Service 选择方式。
+// targetMode 表示生成客户端支持的 Service 选择方式。
 type targetMode uint8
 
 const (
@@ -70,7 +70,7 @@ func ToService(serviceName string) Target {
 
 // ToServiceOnNode 选择指定 Node 中指定实际名称的 Service。
 //
-// M11 尚未接入远端 Transport，因此只有 nodeID 等于调用方所属 Node 时能够成功。
+// Runtime 根据当前发现快照把目标解析到本地、TCP 或 NATS Transport。
 func ToServiceOnNode(nodeID, serviceName string) Target {
 	return Target{
 		mode:        targetServiceOnNode,

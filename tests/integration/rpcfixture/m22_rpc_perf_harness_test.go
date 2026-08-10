@@ -35,6 +35,7 @@ import (
 const (
 	m22RPCPerfEnabled       = "ORIGIN_M22_RPC_PERF"
 	m22RPCPerfShortEnabled  = "ORIGIN_M22_RPC_PERF_SHORT"
+	m22RPCPerfPreflight     = "ORIGIN_M22_RPC_PERF_PREFLIGHT"
 	m22RPCPerfHelperEnabled = "ORIGIN_M22_RPC_PERF_HELPER"
 	m22RPCPerfReadyLine     = "ORIGIN_M22_RPC_PERF_READY"
 	m22RPCPerfOutputPrefix  = "ORIGIN_M22_RPC_PERF_JSON "
@@ -210,6 +211,29 @@ func TestM22RPCPerformanceMatrix(t *testing.T) {
 			}
 		}
 		fixture.Close(t)
+	}
+}
+
+// TestM22RPCPerfExternalPreflight 在正式长矩阵前快速验证外部 etcd、NATS、TCP 监听、
+// 独立目标进程和跨进程路由能够组成完整 Fixture。它不采集或替代正式性能结果，只避免
+// 基础设施错误在 Local 场景运行八分钟后才暴露。
+func TestM22RPCPerfExternalPreflight(t *testing.T) {
+	if os.Getenv(m22RPCPerfPreflight) != "1" {
+		t.Skip("未设置 M22 RPC 外部性能预检门禁")
+	}
+	endpoints := splitM22RPCPerfList(os.Getenv("ORIGIN_M22_ETCD_ENDPOINTS"))
+	natsURLs := splitM22RPCPerfList(os.Getenv("ORIGIN_M22_NATS_URLS"))
+	if len(endpoints) == 0 {
+		t.Fatal("M22 RPC 外部性能预检必须设置 ORIGIN_M22_ETCD_ENDPOINTS")
+	}
+	if len(natsURLs) == 0 {
+		t.Fatal("M22 RPC 外部性能预检必须设置 ORIGIN_M22_NATS_URLS")
+	}
+	for _, transport := range []m22RPCPerfTransport{m22RPCPerfTCP, m22RPCPerfNATS} {
+		t.Run(string(transport), func(t *testing.T) {
+			fixture := newM22RPCPerfFixture(t, transport, endpoints, natsURLs)
+			fixture.Close(t)
+		})
 	}
 }
 

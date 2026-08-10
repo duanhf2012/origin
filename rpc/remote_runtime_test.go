@@ -61,44 +61,60 @@ func TestRemoteTargetAddressLifecycle(t *testing.T) {
 		t.Fatalf("AdvertiseAddress() = %q, %v", address, enabled)
 	}
 
-	// 相同目标幂等；不同地址不能隐式替换当前目标。
-	if err := runtime.AddTarget("player-1", 1, "127.0.0.1:17002"); err != nil {
+	firstRecord := ConnectionTarget{
+		NodeID:    "player-1",
+		SessionID: 1,
+		Address:   "127.0.0.1:17002",
+	}
+	if err := runtime.ReconcileTargets([]ConnectionTarget{firstRecord}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.AddTarget("player-1", 1, "127.0.0.1:17002"); err != nil {
-		t.Fatalf("same AddTarget() error = %v", err)
-	}
-	if err := runtime.AddTarget("player-1", 1, "127.0.0.1:17003"); !errors.Is(
-		err,
-		errs.ErrTransportProtocol,
-	) {
-		t.Fatalf("replacement AddTarget() error = %v", err)
+	runtime.remote.mu.Lock()
+	first := runtime.remote.targets[firstRecord.NodeID]
+	runtime.remote.mu.Unlock()
+	if first == nil {
+		t.Fatal("first reconciled target is nil")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := runtime.RemoveTarget(
-		ctx,
-		"player-1",
-		"127.0.0.1:17003",
-	); err != nil {
-		t.Fatalf("stale RemoveTarget() error = %v", err)
+	// 相同完整事实保持幂等，不重建连接 owner。
+	if err := runtime.ReconcileTargets([]ConnectionTarget{firstRecord}); err != nil {
+		t.Fatalf("same ReconcileTargets() error = %v", err)
 	}
-	if err := runtime.AddTarget("player-1", 1, "127.0.0.1:17003"); !errors.Is(
-		err,
-		errs.ErrTransportProtocol,
-	) {
-		t.Fatalf("stale RemoveTarget removed current target: %v", err)
+	runtime.remote.mu.Lock()
+	same := runtime.remote.targets[firstRecord.NodeID]
+	runtime.remote.mu.Unlock()
+	if same != first {
+		t.Fatal("same target fact replaced the existing owner")
 	}
-	if err := runtime.RemoveTarget(
-		ctx,
-		"player-1",
-		"127.0.0.1:17002",
-	); err != nil {
-		t.Fatalf("exact RemoveTarget() error = %v", err)
+
+	// 新 Session/地址是服务发现的新完整事实，必须替换旧 owner 并让旧 goroutine 退出。
+	secondRecord := ConnectionTarget{
+		NodeID:    "player-1",
+		SessionID: 2,
+		Address:   "127.0.0.1:17003",
 	}
-	if err := runtime.AddTarget("player-1", 2, "127.0.0.1:17003"); err != nil {
-		t.Fatalf("AddTarget after exact remove error = %v", err)
+	if err := runtime.ReconcileTargets([]ConnectionTarget{secondRecord}); err != nil {
+		t.Fatalf("replacement ReconcileTargets() error = %v", err)
+	}
+	runtime.remote.mu.Lock()
+	second := runtime.remote.targets[secondRecord.NodeID]
+	runtime.remote.mu.Unlock()
+	if second == nil || second == first {
+		t.Fatalf("replacement target = %p, first = %p", second, first)
+	}
+	select {
+	case <-first.done:
+	case <-time.After(time.Second):
+		t.Fatal("replaced target owner did not exit")
+	}
+
+	if err := runtime.ReconcileTargets(nil); err != nil {
+		t.Fatalf("remove all ReconcileTargets() error = %v", err)
+	}
+	select {
+	case <-second.done:
+	case <-time.After(time.Second):
+		t.Fatal("removed target owner did not exit")
 	}
 	if err := runtime.Close(context.Background()); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -125,6 +141,31 @@ func TestReconnectJitterBounds(t *testing.T) {
 		if delay < 800*time.Millisecond || delay > 1200*time.Millisecond {
 			t.Fatalf("jitterDelay() = %v", delay)
 		}
+	}
+	if got := nextTransportBackoff(time.Second); got != 2*time.Second {
+		t.Fatalf("nextTransportBackoff(1s) = %v", got)
+	}
+	if got := nextTransportBackoff(reconnectMaximumDelay - time.Nanosecond); got != reconnectMaximumDelay {
+		t.Fatalf("capped nextTransportBackoff() = %v", got)
+	}
+	if got := nextTransportBackoff(reconnectMaximumDelay); got != reconnectMaximumDelay {
+		t.Fatalf("terminal nextTransportBackoff() = %v", got)
+	}
+}
+
+// TestNormalizeRemoteCloseStabilizesTransportErrors 验证 socket 关闭和其他传输错误不会把
+// 底层实现细节泄漏给 RPC 调用方。
+func TestNormalizeRemoteCloseStabilizesTransportErrors(t *testing.T) {
+	for _, cause := range []error{nil, errs.ErrTransportClosed} {
+		if err := normalizeRemoteClose(cause); !errors.Is(err, errs.ErrTransportUnavailable) {
+			t.Fatalf("normalizeRemoteClose(%v) = %v", cause, err)
+		}
+	}
+	if err := normalizeRemoteClose(errs.ErrDeadlineExceeded); !errors.Is(
+		err,
+		errs.ErrDeadlineExceeded,
+	) {
+		t.Fatalf("normalizeRemoteClose(deadline) = %v", err)
 	}
 }
 

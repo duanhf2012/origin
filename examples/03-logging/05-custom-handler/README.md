@@ -63,6 +63,10 @@ document := map[string]any{
 同样应在 `Write` 内调用目标库的同步写入入口；不要再建立第二条后台日志队列或输出 goroutine，
 否则会增加排队、丢失和停止时序的复杂度。
 
+`BytesField` 可能包含非 UTF-8 数据，本例使用 Base64 保存原始字节；不要直接转换为字符串，
+否则 JSON 编码会替换无效字节。`AnyField` 已是调用点生成的 JSON 快照，交给异步组件前仍需
+复制其字节切片。
+
 ## 运行时控制是否可用
 
 本例故意不实现可选的 `log.Controller`。因此 `log.Info`、`service.Logger().Info` 等写日志正常，

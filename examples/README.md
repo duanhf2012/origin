@@ -1,7 +1,7 @@
 # Origin v3 示例
 
 示例目录与教程章节一一对应。先从 [`00-quickstart`](./00-quickstart/01-hello-service/README.md) 开始；
-前六章不要求 NATS、etcd 或 Docker。
+`00`～`06` 不要求 NATS、etcd 或 Docker；`07` 的 TCP 示例也可独立运行。
 
 | 目录 | 用途 |
 | --- | --- |

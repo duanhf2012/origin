@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,25 @@ type applicationControlRequest struct {
 	action command.ControlAction
 	ctx    context.Context
 	result chan error
+}
+
+// TestApplicationControlStateErrors 固定 Retire/Resume 在非 Running 生命周期的公开错误语义。
+func TestApplicationControlStateErrors(t *testing.T) {
+	tests := []struct {
+		state State
+		want  error
+	}{
+		{state: StateCreated, want: errs.ErrServiceNotReady},
+		{state: StateStarting, want: errs.ErrServiceNotReady},
+		{state: StateStopping, want: errs.ErrServiceStopping},
+		{state: StateStopped, want: errs.ErrServiceStopped},
+		{state: StateFailed, want: errs.ErrServiceFailed},
+	}
+	for _, test := range tests {
+		if err := applicationControlStateError(test.state); !errors.Is(err, test.want) {
+			t.Fatalf("applicationControlStateError(%v) = %v", test.state, err)
+		}
+	}
 }
 
 func (request *applicationControlRequest) Action() command.ControlAction { return request.action }

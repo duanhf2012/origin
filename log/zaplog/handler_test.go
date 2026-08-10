@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
@@ -86,6 +88,83 @@ func TestJSONFieldsAndCaller(t *testing.T) {
 	}
 }
 
+// TestJSONFormatEncodesAllPublicFieldKinds 固定 Zap 适配层对全部公开 FieldKind 的类型映射，
+// 防止只在文本格式正常、JSON 采集时却丢字段或把数值退化为字符串。
+func TestJSONFormatEncodesAllPublicFieldKinds(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	config := originlog.DefaultConfig()
+	config.Console.Format = originlog.JSONFormat
+	runtime := newTestRuntime(t, config, &stdout, &stderr)
+	runtime.Logger().Info(
+		"field kinds",
+		originlog.String("string", "value"),
+		originlog.Bool("bool", true),
+		originlog.Int("int", -1),
+		originlog.Int32("int32", -2),
+		originlog.Int64("int64", -3),
+		originlog.Uint("uint", 1),
+		originlog.Uint32("uint32", 2),
+		originlog.Uint64("uint64", 3),
+		originlog.Float32("float32", 1.25),
+		originlog.Float64("float64", 2.5),
+		originlog.Duration("duration", 1500*time.Millisecond),
+		originlog.Time("event_time", time.Date(2026, 8, 8, 10, 20, 31, 123, time.UTC)),
+		originlog.Bytes("bytes", []byte{0, 1}),
+		originlog.Err(errors.New("disk full")),
+		originlog.Any("object", map[string]int{"x": 10}),
+	)
+	if err := runtime.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var value map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &value); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, stdout.String())
+	}
+	for key, want := range map[string]any{
+		"string": "value", "bool": true,
+		"int": float64(-1), "int32": float64(-2), "int64": float64(-3),
+		"uint": float64(1), "uint32": float64(2), "uint64": float64(3),
+		"float32": float64(1.25), "float64": float64(2.5),
+		"duration": "1.5s", "event_time": "2026-08-08T10:20:31.000Z",
+		"bytes": "AAE=", "error": "disk full",
+	} {
+		if value[key] != want {
+			t.Errorf("JSON field %q = %#v, want %#v", key, value[key], want)
+		}
+	}
+	object, ok := value["object"].(map[string]any)
+	if !ok || object["x"] != float64(10) {
+		t.Errorf("JSON object = %#v", value["object"])
+	}
+	if field := toZapField(originlog.Field{}); field.Type != zapcore.SkipType {
+		t.Errorf("invalid field type = %v, want SkipType", field.Type)
+	}
+}
+
+func TestZapLevelMappingCoversPublicAndInvalidLevels(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input originlog.Level
+		want  zapcore.Level
+	}{
+		{input: originlog.DebugLevel, want: zapcore.DebugLevel},
+		{input: originlog.InfoLevel, want: zapcore.InfoLevel},
+		{input: originlog.WarnLevel, want: zapcore.WarnLevel},
+		{input: originlog.ErrorLevel, want: zapcore.ErrorLevel},
+		{input: originlog.LevelInvalid, want: zapcore.InvalidLevel},
+	}
+	for _, test := range tests {
+		if got := toZapLevel(test.input); got != test.want {
+			t.Errorf("toZapLevel(%v) = %v, want %v", test.input, got, test.want)
+		}
+	}
+}
+
 // TestTextFormatUsesReadableScopeAndKeyValues 防止文本输出回退为 JSON 尾部、显示数值时区，
 // 或把多行字符串拆成多条物理日志。
 func TestTextFormatUsesReadableScopeAndKeyValues(t *testing.T) {
@@ -119,6 +198,54 @@ func TestTextFormatUsesReadableScopeAndKeyValues(t *testing.T) {
 	if strings.Contains(text, "+0800") || strings.Count(text, "\n") != 0 {
 		t.Fatalf("text output contains timezone offset or physical newline: %q", text)
 	}
+}
+
+// TestTextFormatEscapesInvalidUTF8 防止网络或文件输入转为 string 后把非法字节直接写入
+// 文本日志，破坏采集器的 UTF-8 与单行边界。
+func TestTextFormatEscapesInvalidUTF8(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runtime := newTestRuntime(t, originlog.DefaultConfig(), &stdout, &stderr)
+	invalid := string([]byte{'a', 0xff, 'b'})
+	runtime.Logger().Info(invalid, originlog.String(invalid, invalid))
+	if err := runtime.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	content := stdout.Bytes()
+	if !utf8.Valid(content) {
+		t.Fatalf("text output is not valid UTF-8: %q", content)
+	}
+	if bytes.Contains(content, []byte{0xff}) || strings.Count(string(content), `\xff`) != 3 {
+		t.Fatalf("invalid UTF-8 was not escaped in message, key and value: %q", content)
+	}
+	if bytes.Count(content, []byte{'\n'}) != 1 {
+		t.Fatalf("text output contains multiple physical lines: %q", content)
+	}
+}
+
+func FuzzTextEncodingIsValidSingleLine(f *testing.F) {
+	f.Add("message", "key", "value")
+	f.Add("first\nsecond", "display key", "a=b")
+	f.Add(string([]byte{0xff}), string([]byte{0xfe}), string([]byte{0xfd}))
+	f.Fuzz(func(t *testing.T, message, key, value string) {
+		content := encodeText(
+			originlog.Record{
+				Time:    time.Unix(0, 0),
+				Level:   originlog.InfoLevel,
+				Message: message,
+			},
+			[]originlog.Field{originlog.String(key, value)},
+			originlog.ContextFieldsConfig{},
+		)
+		if !utf8.Valid(content) {
+			t.Fatalf("text output is not valid UTF-8: %q", content)
+		}
+		if bytes.Count(content, []byte{'\n'}) != 1 || content[len(content)-1] != '\n' {
+			t.Fatalf("text output is not exactly one physical line: %q", content)
+		}
+	})
 }
 
 // TestTextFormatEncodesAllPublicFieldKinds 固定文本 key=value 对全部公开 Field 类型的编码，
@@ -207,6 +334,52 @@ func TestContextFieldMasksAreIndependent(t *testing.T) {
 				t.Fatalf("JSON time = %#v, want UTC Z", value["time"])
 			}
 		})
+	}
+}
+
+type blockingBuffer struct {
+	bytes.Buffer
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (writer *blockingBuffer) Write(content []byte) (int, error) {
+	writer.once.Do(func() { close(writer.entered) })
+	<-writer.release
+	return writer.Buffer.Write(content)
+}
+
+// TestQueuedAsyncRecordUsesLatestOutputState 固定运行时控制的处理时语义：已经进入 Origin
+// 队列、但尚未交给 Handler 的记录，必须按处理时的最新启停状态过滤。
+func TestQueuedAsyncRecordUsesLatestOutputState(t *testing.T) {
+	output := &blockingBuffer{entered: make(chan struct{}), release: make(chan struct{})}
+	config := originlog.DefaultConfig()
+	config.Mode = originlog.AsyncMode
+	raw, err := NewHandler(config, withConsoleWriters(output, io.Discard))
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	runtime, err := originlog.NewRuntime(config, raw)
+	if err != nil {
+		_ = raw.Close()
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	logger := runtime.Logger()
+	logger.Info("already writing")
+	<-output.entered
+	logger.Info("queued before disable")
+	controller := raw.(originlog.Controller)
+	if err := controller.SetConsoleEnabled(false); err != nil {
+		t.Fatalf("SetConsoleEnabled(false) error = %v", err)
+	}
+	close(output.release)
+	if err := runtime.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if text := output.String(); !strings.Contains(text, "already writing") ||
+		strings.Contains(text, "queued before disable") {
+		t.Fatalf("console output = %q", text)
 	}
 }
 

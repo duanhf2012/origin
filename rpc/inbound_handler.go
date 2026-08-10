@@ -34,7 +34,7 @@ type inboundSession struct {
 	closed       atomic.Bool
 }
 
-// remoteDeadlineContext 为 M8 管理的线上超时补充标准 Context Deadline。
+// remoteDeadlineContext 为时间轮管理的线上超时补充标准 Context Deadline。
 type remoteDeadlineContext struct {
 	context.Context
 	deadline time.Time
@@ -48,7 +48,7 @@ func (ctx *remoteDeadlineContext) Deadline() (time.Time, bool) {
 	return ctx.deadline, true
 }
 
-// Err 保持标准 Deadline Context 语义；M8 到期虽然通过 CancelCause 唤醒，业务仍应看到
+// Err 保持标准 Deadline Context 语义；时间轮到期虽然通过 CancelCause 唤醒，业务仍应看到
 // context.DeadlineExceeded，而不是实现细节产生的 context.Canceled。
 func (ctx *remoteDeadlineContext) Err() error {
 	if ctx == nil {

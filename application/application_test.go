@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -716,7 +718,7 @@ nodes:
 	}
 }
 
-func TestLoadConfigRejectsFutureFrameworkSection(t *testing.T) {
+func TestLoadConfigRejectsUnsupportedFrameworkSection(t *testing.T) {
 	directory := writeApplicationConfig(t, `
 timer: {}
 nodes:
@@ -1466,7 +1468,7 @@ func TestServiceDeclarationFormsAndErrors(t *testing.T) {
 func TestRegisterCommandAndHelp(t *testing.T) {
 	app := New()
 	called := false
-	err := app.RegisterCommand(command.Command{
+	custom := command.Command{
 		Name:    "inspect",
 		Summary: "检查测试数据",
 		Usage:   "test inspect",
@@ -1474,9 +1476,13 @@ func TestRegisterCommandAndHelp(t *testing.T) {
 			called = true
 			return nil
 		},
-	})
+	}
+	err := app.RegisterCommand(custom)
 	if err != nil {
 		t.Fatalf("RegisterCommand() error = %v", err)
+	}
+	if err := app.RegisterCommand(custom); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("重复 RegisterCommand() error = %v", err)
 	}
 	var stdout bytes.Buffer
 	code, err := app.execute(
@@ -1491,6 +1497,112 @@ func TestRegisterCommandAndHelp(t *testing.T) {
 		Name: "later",
 	}); err == nil {
 		t.Fatal("执行命令后 RegisterCommand() 未返回错误")
+	}
+}
+
+func TestApplicationSetupValidatesServiceTemplates(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		sample service.IService
+	}{
+		{name: "typed nil", sample: (*lifecycleTestService)(nil)},
+		{name: "nonzero sample", sample: &lifecycleTestService{started: true}},
+		{name: "anonymous struct", sample: &struct{ service.Service }{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app := New()
+			app.Setup(test.sample)
+			if err := app.catalog.freeze(); !errs.IsCode(err, errs.CodeInvalidArgument) {
+				t.Fatalf("Setup() error = %v", err)
+			}
+		})
+	}
+
+	empty := New()
+	empty.Setup()
+	if err := empty.catalog.freeze(); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("empty Setup() error = %v", err)
+	}
+
+	idempotent := New()
+	idempotent.Setup(&lifecycleTestService{}, &lifecycleTestService{})
+	if err := idempotent.catalog.freeze(); err != nil {
+		t.Fatalf("idempotent Setup() error = %v", err)
+	}
+	if _, err := idempotent.catalog.instantiate("lifecycleTestService"); err != nil {
+		t.Fatalf("instantiate() error = %v", err)
+	}
+}
+
+func TestApplicationDiscoveryProviderRegistrationValidation(t *testing.T) {
+	factory := func(publicprovider.Context) (publicprovider.Provider, error) {
+		return nil, nil
+	}
+	for _, name := range []string{"", "Consul", "origin", "etcd"} {
+		app := New()
+		if err := app.RegisterDiscoveryProvider(name, factory); !errs.IsCode(err, errs.CodeInvalidArgument) {
+			t.Fatalf("RegisterDiscoveryProvider(%q) error = %v", name, err)
+		}
+	}
+	if err := New().RegisterDiscoveryProvider("consul", nil); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("nil factory error = %v", err)
+	}
+
+	app := New()
+	if err := app.RegisterDiscoveryProvider("consul", factory); err != nil {
+		t.Fatalf("RegisterDiscoveryProvider() error = %v", err)
+	}
+	if err := app.RegisterDiscoveryProvider("consul", factory); !errs.IsCode(err, errs.CodeInvalidArgument) {
+		t.Fatalf("duplicate provider error = %v", err)
+	}
+}
+
+func TestApplicationStartUsesProcessArguments(t *testing.T) {
+	previousArgs := os.Args
+	previousStdout := os.Stdout
+	readOutput, writeOutput, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	os.Args = []string{"origin-test", "help"}
+	os.Stdout = writeOutput
+	t.Cleanup(func() {
+		os.Args = previousArgs
+		os.Stdout = previousStdout
+		_ = readOutput.Close()
+		_ = writeOutput.Close()
+	})
+
+	New().Start()
+	if err := writeOutput.Close(); err != nil {
+		t.Fatalf("close stdout pipe: %v", err)
+	}
+	output, err := io.ReadAll(readOutput)
+	if err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
+	if !bytes.Contains(output, []byte("Usage:\n  origin-test <command> [options]")) {
+		t.Fatalf("Start() output = %q", output)
+	}
+}
+
+func TestApplicationStartExitsOnInvalidArguments(t *testing.T) {
+	const helperEnvironment = "ORIGIN_TEST_APPLICATION_START_EXIT"
+	if os.Getenv(helperEnvironment) == "1" {
+		os.Args = []string{"origin-test"}
+		New().Start()
+		t.Fatal("Start() returned after an invalid command")
+	}
+
+	process := exec.Command(os.Args[0], "-test.run=^TestApplicationStartExitsOnInvalidArguments$")
+	process.Env = append(os.Environ(), helperEnvironment+"=1")
+	output, err := process.CombinedOutput()
+	var exitError *exec.ExitError
+	if !errors.As(err, &exitError) || exitError.ExitCode() != int(command.ExitUsage) {
+		t.Fatalf("Start() process error = %v, output = %q", err, output)
+	}
+	if !bytes.Contains(output, []byte("command is required")) {
+		t.Fatalf("Start() process output = %q", output)
 	}
 }
 

@@ -23,6 +23,6 @@ instances := s.ListDiscoveredServices("PlayerService")
 
 ## 运行与练习
 
-执行 `run.bat` 或 `./run.sh`，预期日志为 `discovery target is ready: player-1`。把目标名称改错可观察等待失败；真实 Provider 中再把等待结果与后续 RPC 连接/调用错误分别处理。
+执行 `run.bat` 或 `./run.sh`，预期日志为 `discovery target is ready: node=player-1 candidates=1`。把目标名称改错可观察等待失败；真实 Provider 中再把等待结果与后续 RPC 连接/调用错误分别处理。
 
 对应教程：[服务发现](../../../docs/baseline/v3.0/guides/08.discovery.md)。

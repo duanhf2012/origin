@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/application"
@@ -27,7 +28,7 @@ func (target *CallerService) OnInit() error {
 
 // OnStart 先退休目标，再派生允许 Retired 候选的客户端执行调用。
 func (target *CallerService) OnStart(context.Context) error {
-	target.AfterFunc(200*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(200*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		// LookupLocalService 只从当前 Service 所属 Node 的本地实例中按名称查询；
 		// 不会读取发现目录、查询其他 Node，或替代业务 RPC。
 		player, ok := target.LookupLocalService("PlayerService")
@@ -42,7 +43,9 @@ func (target *CallerService) OnStart(context.Context) error {
 			return
 		}
 		target.Logger().Info("explicit retired call: " + value)
-	})
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create include-retired demonstration timer failed")
+	}
 	return nil
 }
 

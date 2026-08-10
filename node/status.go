@@ -255,7 +255,7 @@ func (node *Node) handleTransportEvent(event rpc.TransportEvent) {
 	node.refreshHealth()
 }
 
-// updateDiscoveryAvailable 提交未来 Provider 和当前过渡发现源共用的健康输入。
+// updateDiscoveryAvailable 提交外部 Provider 和进程内发现源共用的健康输入。
 func (node *Node) updateDiscoveryAvailable(available bool) {
 	if node == nil {
 		return

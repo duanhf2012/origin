@@ -57,7 +57,7 @@ func (render *renderer) emitSize(
 	indent string,
 ) {
 	// 自定义 Codec 对精确具名值具有最高优先级；外层指针和容器会在各自递归分支
-	// 先写入 M11 的 presence 或数量，再到达这里选择元素 Codec。
+	// 先写入当前协议的 presence 或数量，再到达这里选择元素 Codec。
 	if codec := render.codecs.lookup(typ); codec != nil {
 		render.emitCustomSize(expression, codec, indent)
 		return

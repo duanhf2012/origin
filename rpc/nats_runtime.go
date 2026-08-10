@@ -462,7 +462,7 @@ func (runtime *natsRuntime) recoveryLoop(ctx context.Context) {
 	}
 }
 
-// connectionOptions 把稳定 RPC 配置映射到 M6 原生 Options。
+// connectionOptions 把稳定 RPC 配置映射到 NATS Transport Options。
 func (runtime *natsRuntime) connectionOptions() natsnet.Options {
 	config := runtime.config.NATS
 	options := natsnet.DefaultOptions(

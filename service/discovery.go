@@ -32,7 +32,7 @@ func (service *Service) FindDiscoveredService(
 	nodeID string,
 	serviceName string,
 ) (discovery.Instance, bool) {
-	// 空参数不具有通配语义；未绑定或尚未装配 M14 的 Runtime 返回不存在。
+	// 空参数不具有通配语义；未绑定或尚未装配发现目录的 Runtime 返回不存在。
 	runtime, ok := service.discoveryRuntime()
 	if !ok || nodeID == "" || serviceName == "" {
 		return discovery.Instance{}, false

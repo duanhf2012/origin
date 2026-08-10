@@ -11,7 +11,7 @@ import (
 
 // Dial 使用 Context 对一个 TCP 地址执行单次连接尝试。
 //
-// Dial 不重试，返回成功后 Conn 已经启动读写循环；后续重连由 M10 Node 连接管理器组合。
+// Dial 不重试，返回成功后 Conn 已经启动读写循环；后续重连由 Node 连接管理器组合。
 func Dial(
 	ctx context.Context,
 	address string,

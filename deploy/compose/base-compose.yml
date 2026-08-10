@@ -10,6 +10,8 @@
 #   - 所有服务接入共享网络 origin-net，容器间通过服务名互通。
 #   - 宿主机仅暴露必要端口：etcd1 的 2379(client)/2380(peer)、
 #     n1 的 4222(client)/8222(监控)。其余节点仅集群内部通信，避免端口冲突。
+#   - 发布端口默认只绑定 127.0.0.1。受控测试网确需跨主机访问时可显式设置
+#     ORIGIN_BIND_ADDRESS；etcd 与 NATS 均未在本文件配置生产认证，不能暴露到公网。
 #
 # 版本固定：etcd v3.7.1、nats 2.14.3，与 go.mod 中 etcd v3.7.1、nats-server v2.14.3 严格对齐。
 # 说明：nats-server/v2 中的 v2 只是 Go module 主版本后缀，产品真实版本是 2.14.3。
@@ -55,9 +57,9 @@ services:
       - --initial-cluster-state=new
       - --initial-cluster-token=origin-etcd-token
     ports:
-      # 0.0.0.0 显式绑定到所有网卡，确保部署到测试服务器后可从本机远程访问。
-      - "0.0.0.0:2379:2379"
-      - "0.0.0.0:2380:2380"
+      # 安全默认只允许本机访问；跨主机测试必须显式设置 ORIGIN_BIND_ADDRESS 并配置网络访问控制。
+      - "${ORIGIN_BIND_ADDRESS:-127.0.0.1}:2379:2379"
+      - "${ORIGIN_BIND_ADDRESS:-127.0.0.1}:2380:2380"
     volumes:
       - origin-etcd1-data:/etcd-data
     networks:
@@ -125,9 +127,9 @@ services:
     volumes:
       - ./nats.conf:/etc/nats/nats.conf:ro
     ports:
-      # 0.0.0.0 显式绑定到所有网卡，确保部署到测试服务器后可从本机远程访问。
-      - "0.0.0.0:4222:4222"
-      - "0.0.0.0:8222:8222"
+      # NATS 客户端口与无认证监控端口默认只允许本机访问。
+      - "${ORIGIN_BIND_ADDRESS:-127.0.0.1}:4222:4222"
+      - "${ORIGIN_BIND_ADDRESS:-127.0.0.1}:8222:8222"
     networks:
       - origin-net
 
@@ -158,28 +160,6 @@ services:
       - "-m=8222"
     volumes:
       - ./nats.conf:/etc/nats/nats.conf:ro
-    networks:
-      - origin-net
-
-  # ---------------------------------------------------------------------------
-  # etcdkeeper：etcd 的 Web UI 键值浏览器
-  # ---------------------------------------------------------------------------
-  # 访问地址：http://localhost:8080
-  # 在浏览器顶部输入框填 etcd 连接地址 http://etcd1:2379 即可浏览/编辑 key。
-  # 说明：etcdkeeper 默认使用 v3 API；本项目仅使用 v3，无需切换。
-  # 该项目维护不活跃，对 etcd 3.7 的兼容性以实测为准；命令行可直接用容器自带的
-  # etcdctl（见下方注释），无需依赖本服务。
-
-  etcdkeeper:
-    image: evildecay/etcdkeeper
-    container_name: origin-etcdkeeper
-    # etcdkeeper 默认以 -h 0.0.0.0 监听所有网卡，无需额外配置即可供外部访问；
-    # 它不读取环境变量（README 仅支持命令行 -h 标志），故不设置 environment。
-    ports:
-      # 0.0.0.0 显式绑定到所有网卡，确保部署到测试服务器后可从本机远程访问 Web UI。
-      - "0.0.0.0:8080:8080"
-    depends_on:
-      - etcd1
     networks:
       - origin-net
 

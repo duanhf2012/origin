@@ -84,7 +84,7 @@ func (runtime *Runtime) prepareBroadcast(
 		lastSendableRaw = rawIndex
 	}
 
-	// 零意图仍沿用 M19 对无服务、契约不匹配和生命周期不合法的稳定分类。
+	// 零意图仍按无服务、契约不匹配和生命周期不合法返回稳定分类。
 	if intentCount == 0 {
 		return preparedTarget{}, nil, set.routeError()
 	}
@@ -138,7 +138,7 @@ func broadcastSendableAt(
 	return candidate, compatible && set.connected(candidate)
 }
 
-// preparedTargetFromCandidate 把一次固定候选转换为 M19 的精确提交值。
+// preparedTargetFromCandidate 把一次固定候选转换为精确提交值。
 func preparedTargetFromCandidate(
 	candidate routeCandidate,
 	methodID MethodID,

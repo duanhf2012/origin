@@ -135,7 +135,7 @@ func (conn *Conn) Send(buffer *bufferpool.Buffer) error {
 	if buffer == nil {
 		return invalidArgument("tcpnet: Send Buffer 不能为空")
 	}
-	// Bytes 同时验证 Buffer 尚未释放；释放后使用属于内部不变量错误并按 M2 规则 panic。
+	// Bytes 同时验证 Buffer 尚未释放；释放后使用属于内部不变量错误并直接 panic。
 	payload := buffer.Bytes()
 	payloadSize := len(payload)
 	if payloadSize > conn.options.MaxMessageSize {

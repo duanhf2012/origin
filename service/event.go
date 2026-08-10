@@ -139,7 +139,7 @@ func (service *Service) NotifyEventSync(ctx context.Context, event Event) error 
 	return result
 }
 
-// NotifyEventAsync 把一次完整通知作为一个普通 M9 Ready item 提交。
+// NotifyEventAsync 把一次完整通知作为一个普通 Ready item 提交。
 //
 // 方法只保存调用方传入的 Event 接口值，不复制 payload；提交成功后生产者不得再修改它。
 func (service *Service) NotifyEventAsync(event Event) error {

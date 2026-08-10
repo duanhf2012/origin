@@ -19,7 +19,7 @@ func TestDefaultOptions(t *testing.T) {
 	if options.Pool != pool {
 		t.Fatal("DefaultConnectionOptions 没有保留传入 Pool")
 	}
-	if options.Frame.LengthFieldSize != 4 || options.Frame.ByteOrder != BigEndian {
+	if options.Frame.LengthFieldSize != 4 {
 		t.Fatalf("Frame = %+v，期望四字节大端", options.Frame)
 	}
 	if options.MaxMessageSize != 4*1024*1024 {
@@ -57,12 +57,6 @@ func TestValidateConnectionOptions(t *testing.T) {
 			name: "invalid length field",
 			mutate: func(options *ConnectionOptions) {
 				options.Frame.LengthFieldSize = 3
-			},
-		},
-		{
-			name: "invalid byte order",
-			mutate: func(options *ConnectionOptions) {
-				options.Frame.ByteOrder = ByteOrder(9)
 			},
 		},
 		{
@@ -122,7 +116,6 @@ func TestValidateConnectionOptions(t *testing.T) {
 	// 一字节边界 255、关闭 ReadTimeout 和关闭 KeepAlive 都是合法配置。
 	boundary := valid
 	boundary.Frame.LengthFieldSize = 1
-	boundary.Frame.ByteOrder = LittleEndian
 	boundary.MaxMessageSize = 255
 	boundary.ReadTimeout = 0
 	boundary.KeepAlive = 0

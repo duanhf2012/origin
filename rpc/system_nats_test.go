@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -78,6 +79,40 @@ func TestSystemNATSReusesNodeConnection(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("client did not receive NATS system response")
+	}
+}
+
+// TestSystemNATSDisconnectClosesAllPeers 验证共享 NATS 连接断开时，主动和入站控制
+// Peer 都收到唯一关闭通知，并从下一次重拨的状态表中移除。
+func TestSystemNATSDisconnectClosesAllPeers(t *testing.T) {
+	system := newSystemRuntime(nil)
+	outboundHandler := newSystemTestHandler()
+	inboundHandler := newSystemTestHandler()
+	outbound := &natsSystemPeer{system: system, handler: outboundHandler}
+	inbound := &natsSystemPeer{system: system, handler: inboundHandler, server: true}
+	system.natsPeer = outbound
+	system.natsInbound["reply"] = inbound
+	if outbound.isClosed() || inbound.isClosed() {
+		t.Fatal("new NATS system peer is closed")
+	}
+
+	system.notifyNATSDisconnected(errs.ErrTransportUnavailable)
+	for name, closed := range map[string]<-chan error{
+		"outbound": outboundHandler.closed,
+		"inbound":  inboundHandler.closed,
+	} {
+		select {
+		case cause := <-closed:
+			if !errors.Is(cause, errs.ErrTransportUnavailable) {
+				t.Fatalf("%s close cause = %v", name, cause)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("waiting for %s close timed out", name)
+		}
+	}
+	if !outbound.isClosed() || !inbound.isClosed() ||
+		system.natsPeer != nil || len(system.natsInbound) != 0 {
+		t.Fatalf("disconnect state peer=%v inbound=%d", system.natsPeer, len(system.natsInbound))
 	}
 }
 

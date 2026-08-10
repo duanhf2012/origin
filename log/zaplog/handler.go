@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/duanhf2012/origin/v3/errs"
 	originlog "github.com/duanhf2012/origin/v3/log"
@@ -307,11 +308,14 @@ func encodeText(
 
 // appendTextKey 在字段名会破坏 key=value 边界时使用 Go 引号保留原始 Key。
 func appendTextKey(target []byte, key string) []byte {
-	for _, current := range key {
-		if unicode.IsSpace(current) || unicode.IsControl(current) || current == '=' ||
+	for offset := 0; offset < len(key); {
+		current, size := utf8.DecodeRuneInString(key[offset:])
+		if (current == utf8.RuneError && size == 1) ||
+			unicode.IsSpace(current) || unicode.IsControl(current) || current == '=' ||
 			current == '"' || current == '\\' {
 			return strconv.AppendQuote(target, key)
 		}
+		offset += size
 	}
 	return append(target, key...)
 }
@@ -338,10 +342,12 @@ func scopeValues(
 
 // appendMessage 保留普通空格，仅在控制字符会破坏单行边界时使用 Go 字符串转义。
 func appendMessage(target []byte, message string) []byte {
-	for _, value := range message {
-		if unicode.IsControl(value) {
+	for offset := 0; offset < len(message); {
+		value, size := utf8.DecodeRuneInString(message[offset:])
+		if (value == utf8.RuneError && size == 1) || unicode.IsControl(value) {
 			return strconv.AppendQuote(target, message)
 		}
+		offset += size
 	}
 	return append(target, message...)
 }
@@ -379,10 +385,13 @@ func appendTextString(target []byte, value string) []byte {
 	if value == "" {
 		return append(target, `""`...)
 	}
-	for _, current := range value {
-		if unicode.IsSpace(current) || unicode.IsControl(current) || current == '"' || current == '\\' {
+	for offset := 0; offset < len(value); {
+		current, size := utf8.DecodeRuneInString(value[offset:])
+		if (current == utf8.RuneError && size == 1) ||
+			unicode.IsSpace(current) || unicode.IsControl(current) || current == '"' || current == '\\' {
 			return strconv.AppendQuote(target, value)
 		}
+		offset += size
 	}
 	return append(target, value...)
 }

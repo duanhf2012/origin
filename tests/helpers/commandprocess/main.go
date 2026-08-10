@@ -1,4 +1,4 @@
-// commandprocess 是 M4 跨进程集成测试专用辅助程序。
+// commandprocess 是 Command 跨进程集成测试专用辅助程序。
 //
 // 它只通过公开 command API 持有真实 PID 锁并响应平台停止通知，不作为使用者示例发布。
 package main

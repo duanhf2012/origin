@@ -22,11 +22,12 @@ type ITimer interface {
 	NewTicker(interval time.Duration, fn TimerFunc) TimerID
 	CronFunc(expression string, fn TimerFunc) (TimerID, error)
 
-	// PauseTimer 暂停尚未开始的 Timer；周期回调运行中时，在本轮完成后暂停。
+	// PauseTimer 暂停同一 Service 或 Module 作用域创建且尚未开始的 Timer；周期回调运行中时，
+	// 在本轮完成后暂停。
 	PauseTimer(timerID TimerID) bool
-	// ResumeTimer 恢复已经暂停的 Timer；Cron 不补执行暂停期间错过的历史点。
+	// ResumeTimer 恢复同一作用域已经暂停的 Timer；Cron 不补执行暂停期间错过的历史点。
 	ResumeTimer(timerID TimerID) bool
-	// CancelTimer 取消 Timer，并把调用方持有的非零 TimerID 清零。
+	// CancelTimer 取消同一作用域的 Timer，并把调用方持有的非零 TimerID 清零。
 	CancelTimer(timerID *TimerID) bool
 
 	TimerStats() TimerStats
@@ -50,8 +51,8 @@ type TimerStats struct {
 	CanceledTotal  uint64
 	PausedTotal    uint64
 	ResumedTotal   uint64
-	// CoalescedTotal 只统计 NewTicker 按固定节拍跳过的名义触发次数。Cron 从当前墙上
-	// 时间直接计算下一个未来点，不为统计遍历可能很长的历史日历区间。
+	// CoalescedTotal 只统计 NewTicker 按固定节拍跳过的名义触发次数。Cron 从当前 Node
+	// 逻辑时间直接计算下一个未来日历点，不遍历可能很长的历史区间。
 	CoalescedTotal          uint64
 	PanicTotal              uint64
 	PanicLimitCanceledTotal uint64

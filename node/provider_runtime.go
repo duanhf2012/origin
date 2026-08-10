@@ -257,7 +257,7 @@ func (runtime *providerRuntime) setTTL(ttl time.Duration) error {
 	return nil
 }
 
-// replaceSnapshot 校验并复制公开 DTO，然后原子应用到 M14 Directory。
+// replaceSnapshot 校验并复制公开 DTO，然后原子应用到当前 Node Directory。
 func (runtime *providerRuntime) replaceSnapshot(snapshot publicprovider.Snapshot) error {
 	normalized, err := publicprovider.NormalizeSnapshot(snapshot)
 	if err != nil {
@@ -270,6 +270,10 @@ func (runtime *providerRuntime) replaceSnapshot(snapshot publicprovider.Snapshot
 		raw.Nodes[index] = rawProviderNode(node)
 	}
 
+	// 快照应用和 TTL 过期清空共用同一提交边界；目录内容与 synchronized
+	// 元数据不能被过期 goroutine 交叉成不一致组合。
+	runtime.applyMu.Lock()
+	defer runtime.applyMu.Unlock()
 	runtime.mu.Lock()
 	if !runtime.ttlConfigured {
 		runtime.mu.Unlock()
@@ -282,9 +286,7 @@ func (runtime *providerRuntime) replaceSnapshot(snapshot publicprovider.Snapshot
 	runtime.hostUsed = true
 	runtime.mu.Unlock()
 
-	runtime.applyMu.Lock()
 	err = runtime.node.discovery.apply(raw)
-	runtime.applyMu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -373,23 +375,33 @@ func (runtime *providerRuntime) expiryLoop() {
 			}
 		}
 
-		runtime.mu.Lock()
-		expire := runtime.state == DiscoveryRecovering &&
-			runtime.synchronized && !runtime.expiredSnapshot &&
-			!time.Now().Before(runtime.lastSnapshot.Add(runtime.ttl))
-		if expire {
-			runtime.expiredSnapshot = true
-		}
-		runtime.mu.Unlock()
-		if expire {
-			runtime.applyMu.Lock()
-			err := runtime.node.discovery.apply(internaldiscovery.RawSnapshot{})
-			runtime.applyMu.Unlock()
-			if err != nil {
-				runtime.node.logger.Error("清空过期发现快照失败")
-			}
-		}
+		runtime.expireSnapshot(time.Now())
 	}
+}
+
+// expireSnapshot 把 TTL 复核、同步状态失效和空目录应用作为一次原子提交。
+func (runtime *providerRuntime) expireSnapshot(now time.Time) bool {
+	runtime.applyMu.Lock()
+	defer runtime.applyMu.Unlock()
+
+	runtime.mu.Lock()
+	expire := runtime.state == DiscoveryRecovering &&
+		runtime.synchronized && !runtime.expiredSnapshot &&
+		!now.Before(runtime.lastSnapshot.Add(runtime.ttl))
+	if expire {
+		runtime.expiredSnapshot = true
+		// 旧权威快照已经失效，Provider 必须先提交新的完整快照，再报告 Ready。
+		runtime.synchronized = false
+		runtime.publishStatusLocked()
+	}
+	runtime.mu.Unlock()
+	if !expire {
+		return false
+	}
+	if err := runtime.node.discovery.apply(internaldiscovery.RawSnapshot{}); err != nil {
+		runtime.node.logger.Error("清空过期发现快照失败")
+	}
+	return true
 }
 
 func (runtime *providerRuntime) signal() {

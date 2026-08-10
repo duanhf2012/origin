@@ -6,9 +6,16 @@
 
 执行 `run.bat` 或 `./run.sh`。测试自行管理内嵌 Server 生命周期，不需要运行 `deps-up`；输出字段与其他 Go benchmark 相同。
 
+```bash
+go test ./tests/integration/rpcfixture -run '^$' \
+  -bench '^BenchmarkGeneratedNATSLoopback$' -benchmem -benchtime=3s
+```
+
 ## 如何阅读结果
 
-NATS 的请求路径、服务器调度和消息协议与 TCP 直连不同。某个负载下更快不意味着所有业务都应切换传输；还要考虑已有基础设施、故障恢复、运维能力和消息系统容量。
+NATS 的请求路径、服务器调度和消息协议与 TCP 直连不同。`MB/s` 只按请求业务 Payload 计算，
+不包含响应和协议头；该命令也不输出 P95/P99。某个负载下更快不意味着所有业务都应切换传输，
+还要考虑已有基础设施、故障恢复、运维能力和消息系统容量。
 
 ## 可修改实验
 

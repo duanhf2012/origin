@@ -11,7 +11,7 @@ import (
 
 // Runtime 是 Node 为单个 Service 实例提供的最小只读运行环境。
 //
-// Runtime 由框架装配，业务代码不应自行实现或替换。接口只暴露 M7 已经确认的本地查询，
+// Runtime 由框架装配，业务代码不应自行实现或替换。接口只暴露当前确认的本地查询，
 // 后续 RPC、Timer 和配置能力在各自里程碑按真实需求扩展。
 type Runtime interface {
 	NodeID() string

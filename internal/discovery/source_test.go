@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestSourcePublishesFullOwnedSnapshots 验证过渡数据源始终广播完整快照并独占输入容器。
+// TestSourcePublishesFullOwnedSnapshots 验证进程内发现源始终广播完整快照并独占输入容器。
 func TestSourcePublishesFullOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 
@@ -96,7 +96,7 @@ func TestSourceLateSubscriberReceivesCurrentSnapshot(t *testing.T) {
 	}
 }
 
-// TestSourceRejectsInvalidReplacementWithoutPoisoningState 验证过渡 Source 在修改当前记录前完成
+// TestSourceRejectsInvalidReplacementWithoutPoisoningState 验证进程内 Source 在修改当前记录前完成
 // 单 Node 校验，失败发布不能让后续订阅者收到半合法完整快照。
 func TestSourceRejectsInvalidReplacementWithoutPoisoningState(t *testing.T) {
 	t.Parallel()

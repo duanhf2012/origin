@@ -2,6 +2,7 @@ package rotate
 
 import (
 	"compress/gzip"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -31,12 +32,21 @@ func TestWriterRotatesBySize(t *testing.T) {
 	if _, err := writer.Write([]byte("56")); err != nil {
 		t.Fatalf("second Write() = %v", err)
 	}
+	if err := writer.Sync(); err != nil {
+		t.Fatalf("Sync() = %v", err)
+	}
 	// 连续关闭两次验证 Writer 资源释放幂等。
 	if err := writer.Close(); err != nil {
 		t.Fatalf("Close() = %v", err)
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("second Close() = %v", err)
+	}
+	if _, err := writer.Write([]byte("closed")); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("Write() after Close = %v, want os.ErrClosed", err)
+	}
+	if err := writer.Sync(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("Sync() after Close = %v, want os.ErrClosed", err)
 	}
 
 	// 活动文件应只含触发滚动的第二条内容。
@@ -55,6 +65,45 @@ func TestWriterRotatesBySize(t *testing.T) {
 	content, err := os.ReadFile(archives[0])
 	if err != nil {
 		t.Fatalf("ReadFile(archive) = %v", err)
+	}
+	if string(content) != "1234" {
+		t.Fatalf("archive content = %q, want 1234", content)
+	}
+}
+
+// TestWriterUsesExistingFileSizeAfterRestart 防止重启后把已有活动文件当成空文件，导致大小
+// 滚动实际超过配置阈值才触发。
+func TestWriterUsesExistingFileSizeAfterRestart(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "origin.log")
+	if err := os.WriteFile(path, []byte("1234"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := New(Config{Path: path, MaxSizeBytes: 5, MaxFiles: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write([]byte("56")); err != nil {
+		t.Fatalf("Write() = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+	active, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(active) != "56" {
+		t.Fatalf("active content = %q, want 56", active)
+	}
+	archives := archiveNames(t, path)
+	if len(archives) != 1 {
+		t.Fatalf("archive count = %d, want 1", len(archives))
+	}
+	content, err := os.ReadFile(archives[0])
+	if err != nil {
+		t.Fatal(err)
 	}
 	if string(content) != "1234" {
 		t.Fatalf("archive content = %q, want 1234", content)
@@ -231,6 +280,33 @@ func TestMaintainCompressesAndLimitsArchives(t *testing.T) {
 	}
 }
 
+// TestMaintainRecoversDuplicateCompressedArchive 固定压缩已完成、但进程尚未来得及删除普通
+// 归档时的恢复语义：下一次维护应使用仍在的源归档替换 .gz，并完成源文件清理。
+func TestMaintainRecoversDuplicateCompressedArchive(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	active := filepath.Join(directory, "origin.log")
+	archive := filepath.Join(directory, "origin-2026-07-25T00-00-00.000.log")
+	compressed := archive + ".gz"
+	if err := os.WriteFile(archive, []byte("authoritative archive"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 模拟上一次进程在最终 .gz 已出现、普通源归档尚未删除时退出。无效内容可以确认
+	// 本次维护确实替换了旧目标，而不是把重复文件静默保留。
+	if err := os.WriteFile(compressed, []byte("stale gzip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Maintain(Config{Path: active, Compress: true}); err != nil {
+		t.Fatalf("Maintain() = %v", err)
+	}
+	if _, err := os.Stat(archive); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source archive still exists: %v", err)
+	}
+	assertGzipContent(t, compressed, "authoritative archive")
+}
+
 func TestPrepareExistingRotatesCrashFile(t *testing.T) {
 	t.Parallel()
 
@@ -319,6 +395,27 @@ func assertGzipReadable(t *testing.T, path string) {
 	defer reader.Close()
 	if _, err := io.ReadAll(reader); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertGzipContent(t *testing.T, path, want string) {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	reader, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if err != nil || closeErr != nil {
+		t.Fatalf("read gzip = %v, close = %v", err, closeErr)
+	}
+	if string(content) != want {
+		t.Fatalf("gzip content = %q, want %q", content, want)
 	}
 }
 

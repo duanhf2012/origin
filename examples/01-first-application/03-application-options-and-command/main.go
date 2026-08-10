@@ -43,7 +43,7 @@ func init() {
 		Usage:   "application-options print-options [name]",
 		Run: func(ctx command.Context, args []string) error {
 			// 使用注入的输出流，避免直接绑定 os.Stdout，便于测试和嵌入式运行。
-			_, err := fmt.Fprintf(ctx.Stdout, "custom command args=%v\\n", args)
+			_, err := fmt.Fprintf(ctx.Stdout, "custom command args=%v\n", args)
 			return err
 		},
 	}); err != nil {

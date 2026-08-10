@@ -194,7 +194,7 @@ type PlayerRPC = interface {
 type PlayerRPC[T any] interface {
 	Get(context.Context, T) T
 }`,
-			want: "不支持泛型 RPC 契约",
+			want: "RPC 契约不支持泛型接口",
 		},
 	}
 	for _, test := range tests {
@@ -368,11 +368,12 @@ func TestCommitGeneratedCheckReplaceAndDelete(t *testing.T) {
 		}
 	}
 	currentGenerated := filepath.Join(currentDirectory, generatedFileName)
-	currentLegacy := filepath.Join(currentDirectory, "zz_origin_rpc.gen.go")
-	staleGenerated := filepath.Join(staleDirectory, "zz_origin_rpc.gen.go")
+	currentObsolete := filepath.Join(currentDirectory, "obsolete.rpc.gen.go")
+	staleGenerated := filepath.Join(staleDirectory, "obsolete.rpc.gen.go")
+	legacyAggregate := filepath.Join(currentDirectory, "zz_origin_rpc.gen.go")
 	oldContent := []byte(generatedMarker + "\n\npackage contract\n\nconst Old = 1\n")
 	newContent := []byte(generatedMarker + "\n\npackage contract\n\nconst New = 2\n")
-	for _, path := range []string{currentLegacy, staleGenerated} {
+	for _, path := range []string{currentObsolete, staleGenerated, legacyAggregate} {
 		if err := os.WriteFile(path, oldContent, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -383,11 +384,11 @@ func TestCommitGeneratedCheckReplaceAndDelete(t *testing.T) {
 	}
 	rendered := map[string][]byte{currentGenerated: newContent}
 
-	// --check 必须报告替换和删除需求，同时保持两个旧文件逐字节不变。
+	// --check 必须报告当前格式文件的替换和删除需求，同时保持磁盘逐字节不变。
 	if err := commitGenerated(scanned, rendered, true); err == nil {
 		t.Fatal("commitGenerated(Check) unexpectedly succeeded")
 	}
-	for _, path := range []string{currentLegacy, staleGenerated} {
+	for _, path := range []string{currentObsolete, staleGenerated, legacyAggregate} {
 		content, err := os.ReadFile(path)
 		if err != nil || string(content) != string(oldContent) {
 			t.Fatalf("check 修改了 %s: content=%q error=%v", path, content, err)
@@ -405,8 +406,11 @@ func TestCommitGeneratedCheckReplaceAndDelete(t *testing.T) {
 	if _, err := os.Stat(staleGenerated); !os.IsNotExist(err) {
 		t.Fatalf("stale generated still exists: %v", err)
 	}
-	if _, err := os.Stat(currentLegacy); !os.IsNotExist(err) {
-		t.Fatalf("legacy generated still exists: %v", err)
+	if _, err := os.Stat(currentObsolete); !os.IsNotExist(err) {
+		t.Fatalf("obsolete current-format generated file still exists: %v", err)
+	}
+	if content, err := os.ReadFile(legacyAggregate); err != nil || string(content) != string(oldContent) {
+		t.Fatalf("legacy aggregate ownership changed: content=%q error=%v", content, err)
 	}
 }
 

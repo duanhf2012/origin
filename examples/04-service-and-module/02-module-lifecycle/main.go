@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/duanhf2012/origin/v3/application"
 	"github.com/duanhf2012/origin/v3/service"
@@ -17,13 +16,13 @@ type ChildModule struct{ service.Module }
 
 // OnStart 在所属 Service 和父 Module 启动成功后启动当前子 Module。
 func (target *ChildModule) OnStart(context.Context) error {
-	fmt.Println("child module started")
+	target.Logger().Info("child module started")
 	return nil
 }
 
 // OnStop 在父 Module 和所属 Service 停止前释放当前子 Module 的资源。
 func (target *ChildModule) OnStop(context.Context) error {
-	fmt.Println("child module stopped")
+	target.Logger().Info("child module stopped")
 	return nil
 }
 
@@ -37,13 +36,13 @@ func (target *RootModule) OnInit() error {
 
 // OnStart 在 GameService 启动成功后、ChildModule 启动前建立根 Module 资源。
 func (target *RootModule) OnStart(context.Context) error {
-	fmt.Println("root module started")
+	target.Logger().Info("root module started")
 	return nil
 }
 
 // OnStop 在 ChildModule 停止后释放根 Module 资源；此时 GameService 仍可使用。
 func (target *RootModule) OnStop(context.Context) error {
-	fmt.Println("root module stopped")
+	target.Logger().Info("root module stopped")
 	return nil
 }
 
@@ -55,13 +54,13 @@ func (target *GameService) OnInit() error { return target.AddModule(&RootModule{
 
 // OnStart 先建立 Service 级共享资源，然后框架才会依次启动根 Module 和子 Module。
 func (target *GameService) OnStart(context.Context) error {
-	fmt.Println("game service started")
+	target.Logger().Info("game service started")
 	return nil
 }
 
 // OnStop 在全部 Module 停止后最后执行，适合关闭 Service 级共享资源。
 func (target *GameService) OnStop(context.Context) error {
-	fmt.Println("game service stopped")
+	target.Logger().Info("game service stopped")
 	return nil
 }
 

@@ -322,7 +322,7 @@ func (directory *Directory) normalize(
 	nodeIDs := make(map[string]struct{}, len(raw.Nodes))
 	visibleNodes := make(map[string]struct{})
 	for nodeIndex, node := range raw.Nodes {
-		// 每个 Node 必须先通过与过渡 Source 相同的公共校验，筛选规则不能掩盖坏数据。
+		// 每个 Node 必须先通过与进程内 Source 相同的公共校验，筛选规则不能掩盖坏数据。
 		if err := validateRawNode(node); err != nil {
 			return nil, 0, invalidSnapshot(fmt.Sprintf(
 				"nodes[%d]: %v",

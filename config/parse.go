@@ -35,7 +35,7 @@ func parseData(file configFile, data []byte) (*valueNode, error) {
 	if err != nil {
 		return nil, invalidConfig(file.relative + ": " + yaml.FormatError(err, false, false))
 	}
-	// M3 每文件只接受一个非空文档，避免隐式文档合并语义。
+	// 每个配置文件只接受一个非空文档，避免隐式文档合并语义。
 	if len(parsed.Docs) != 1 || parsed.Docs[0] == nil || parsed.Docs[0].Body == nil {
 		if len(parsed.Docs) > 1 {
 			return nil, invalidConfig(file.relative + ": YAML 多文档不受支持")

@@ -113,7 +113,7 @@ func CompileFilter(configured bool, rules []Rule) (Filter, error) {
 
 // Match 报告指定公开 Service 是否通过当前 Node 的关注规则。
 func (filter Filter) Match(node RawNode, service RawService) bool {
-	// 未配置保持兼容默认值；显式空规则列表则自然没有任何匹配项。
+	// 未配置采用关注全部的当前默认值；显式空规则列表则自然没有任何匹配项。
 	if !filter.configured {
 		return true
 	}

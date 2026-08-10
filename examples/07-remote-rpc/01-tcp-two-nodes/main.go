@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/application"
@@ -30,7 +31,7 @@ func (target *GatewayService) OnInit() error {
 // OnStart 等待 Service Running 后发起远端调用。
 func (target *GatewayService) OnStart(context.Context) error {
 	// 延迟首次调用，让教程可以观察发现同步和 TCP 建连日志。
-	target.AfterFunc(300*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(300*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		for attempt := 0; attempt < 20; attempt++ {
 			// OnNode 派生精确目标客户端，基础 target.players 值保持不变。
 			value, err := target.players.OnNode("player-1").AwaitGetPlayer(ctx, 1001)
@@ -59,7 +60,9 @@ func (target *GatewayService) OnStart(context.Context) error {
 			}
 		}
 		target.Logger().Error("remote TCP was not ready in time")
-	})
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create remote TCP demonstration timer failed")
+	}
 	return nil
 }
 

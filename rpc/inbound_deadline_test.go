@@ -1,6 +1,8 @@
 package rpc
 
 import (
+	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -8,6 +10,27 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 )
+
+// TestRemoteDeadlineContextExposesWireDeadlineAndStandardError 验证远端剩余时间转换成
+// 标准 Context Deadline，并把框架超时原因呈现为 context.DeadlineExceeded。
+func TestRemoteDeadlineContextExposesWireDeadlineAndStandardError(t *testing.T) {
+	base, cancel := context.WithCancelCause(context.Background())
+	deadline := time.Now().Add(time.Second)
+	remote := &remoteDeadlineContext{Context: base, deadline: deadline}
+	if got, exists := remote.Deadline(); !exists || !got.Equal(deadline) {
+		t.Fatalf("Deadline() = %v, %v", got, exists)
+	}
+	if err := remote.Err(); err != nil {
+		t.Fatalf("pre-cancel Err() = %v", err)
+	}
+	cancel(errs.ErrDeadlineExceeded)
+	if err := remote.Err(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("post-timeout Err() = %v", err)
+	}
+	if _, exists := (&remoteDeadlineContext{}).Deadline(); exists {
+		t.Fatal("zero remoteDeadlineContext unexpectedly has Deadline")
+	}
+}
 
 // TestInboundDeadlinesExpireCancelAndCloseOnce 验证 TCP/NATS 共用的入站 Deadline 所有权。
 func TestInboundDeadlinesExpireCancelAndCloseOnce(t *testing.T) {

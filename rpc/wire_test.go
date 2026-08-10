@@ -3,6 +3,7 @@ package rpc
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -177,6 +178,28 @@ func TestTCPWireDeadlineMillis(t *testing.T) {
 				test.ok,
 			)
 		}
+	}
+}
+
+// TestTCPWireHeartbeatEncoding 固定 Ping/Pong 单字节帧，并确保无效 Kind 不申请 Buffer。
+func TestTCPWireHeartbeatEncoding(t *testing.T) {
+	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
+	for _, kind := range []byte{wireKindPing, wireKindPong} {
+		packet, err := encodeHeartbeat(pool, kind)
+		if err != nil {
+			t.Fatalf("encodeHeartbeat(%d) error = %v", kind, err)
+		}
+		if data := packet.Bytes(); len(data) != wireHeartbeatSize || data[0] != kind {
+			t.Fatalf("encodeHeartbeat(%d) = %v", kind, data)
+		}
+		packet.Release()
+	}
+	if packet, err := encodeHeartbeat(pool, 0xff); packet != nil ||
+		!errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("encodeHeartbeat(invalid) = %v, %v", packet, err)
+	}
+	if stats := pool.Stats(); stats.InUseBuffers != 0 {
+		t.Fatalf("heartbeat pool stats = %+v", stats)
 	}
 }
 

@@ -19,6 +19,8 @@ import (
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
 
+const pprofSymbolMaxBodyBytes = 1 << 20
+
 // StartPprof 在 Application 私有 Listener 上显式安装 Go Runtime Profile 路由。
 //
 // 实现直接使用 runtime/pprof 和 runtime/trace，避免 net/http/pprof 的 init 把路由注册到
@@ -28,6 +30,11 @@ func (app *Application) StartPprof(address string) error {
 		return errs.ErrInvalidArgument
 	}
 	address = strings.TrimSpace(address)
+	// 与 Admin 使用同一个 Application HTTP 启动事务边界，避免整体关闭先观察到 stopped、
+	// 随后并发 Start 才发布 Listener。网络绑定期间不持有 app.mu。
+	app.httpLifecycleMu.Lock()
+	defer app.httpLifecycleMu.Unlock()
+
 	app.mu.Lock()
 	state := app.State()
 	allowed := app.resourcesReady && !app.resourcesClosing &&
@@ -37,6 +44,7 @@ func (app *Application) StartPprof(address string) error {
 		app.mu.Unlock()
 		return errs.ErrDiagnosticsStateConflict
 	}
+	app.mu.Unlock()
 
 	server := &http.Server{
 		Handler:           newPprofMux(),
@@ -45,7 +53,6 @@ func (app *Application) StartPprof(address string) error {
 		MaxHeaderBytes:    1 << 20,
 	}
 	err := app.pprofHTTP.start(address, server)
-	app.mu.Unlock()
 	if err == nil && !isLoopbackAddress(address) {
 		logger.Warn(
 			"pprof server is listening on a non-loopback address without built-in TLS or authentication",
@@ -78,15 +85,10 @@ func newPprofMux() *http.ServeMux {
 	mux.HandleFunc("/debug/pprof/profile", handlePprofCPU)
 	mux.HandleFunc("/debug/pprof/symbol", handlePprofSymbol)
 	mux.HandleFunc("/debug/pprof/trace", handlePprofTrace)
-	for _, name := range []string{
-		"allocs",
-		"block",
-		"goroutine",
-		"heap",
-		"mutex",
-		"threadcreate",
-	} {
-		profileName := name
+	// 直接从当前 Go Runtime 取得可用 Profile，保证索引展示的每一项都由同一私有 Mux
+	// 提供；运行时新增 Profile 时不需要在 Origin 再维护一份容易遗漏的名称列表。
+	for _, profile := range runtimepprof.Profiles() {
+		profileName := profile.Name()
 		mux.HandleFunc("/debug/pprof/"+profileName, func(
 			response http.ResponseWriter,
 			request *http.Request,
@@ -168,7 +170,7 @@ func handlePprofCPU(response http.ResponseWriter, request *http.Request) {
 	if !requireMethod(response, request, http.MethodGet) {
 		return
 	}
-	seconds, err := parsePositiveInt(request, "seconds", 30)
+	duration, err := parsePositiveDuration(request, "seconds", 30*time.Second)
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
@@ -179,7 +181,7 @@ func handlePprofCPU(response http.ResponseWriter, request *http.Request) {
 		http.Error(response, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	timer := time.NewTimer(time.Duration(seconds) * time.Second)
+	timer := time.NewTimer(duration)
 	select {
 	case <-timer.C:
 	case <-request.Context().Done():
@@ -194,7 +196,7 @@ func handlePprofTrace(response http.ResponseWriter, request *http.Request) {
 	if !requireMethod(response, request, http.MethodGet) {
 		return
 	}
-	seconds, err := parsePositiveInt(request, "seconds", 1)
+	duration, err := parsePositiveDuration(request, "seconds", time.Second)
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
@@ -205,7 +207,7 @@ func handlePprofTrace(response http.ResponseWriter, request *http.Request) {
 		http.Error(response, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	timer := time.NewTimer(time.Duration(seconds) * time.Second)
+	timer := time.NewTimer(duration)
 	select {
 	case <-timer.C:
 	case <-request.Context().Done():
@@ -224,9 +226,13 @@ func handlePprofSymbol(response http.ResponseWriter, request *http.Request) {
 	}
 	var source string
 	if request.Method == http.MethodPost {
-		payload, err := io.ReadAll(io.LimitReader(request.Body, 1<<20))
+		payload, err := io.ReadAll(io.LimitReader(request.Body, pprofSymbolMaxBodyBytes+1))
 		if err != nil {
 			http.Error(response, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(payload) > pprofSymbolMaxBodyBytes {
+			http.Error(response, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
 			return
 		}
 		source = string(payload)
@@ -234,6 +240,8 @@ func handlePprofSymbol(response http.ResponseWriter, request *http.Request) {
 		source = request.URL.RawQuery
 	}
 	response.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// go tool pprof 只区分零和非零；该协议行表示当前进程提供符号查询能力。
+	_, _ = io.WriteString(response, "num_symbols: 1\n")
 	for _, token := range strings.FieldsFunc(source, func(value rune) bool {
 		return value == '+' || value == ' ' || value == '\n' || value == '\r' || value == '\t'
 	}) {
@@ -262,16 +270,21 @@ func requireMethod(
 	return false
 }
 
-func parsePositiveInt(request *http.Request, name string, fallback int) (int, error) {
+// parsePositiveDuration 把整秒参数转换为 time.Duration，并在乘法前拒绝溢出。
+func parsePositiveDuration(
+	request *http.Request,
+	name string,
+	fallback time.Duration,
+) (time.Duration, error) {
 	value := request.URL.Query().Get(name)
 	if value == "" {
 		return fallback, nil
 	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 {
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 || parsed > int64(time.Duration(1<<63-1)/time.Second) {
 		return 0, fmt.Errorf("%s must be a positive integer", name)
 	}
-	return parsed, nil
+	return time.Duration(parsed) * time.Second, nil
 }
 
 func parseNonNegativeInt(request *http.Request, name string, fallback int) (int, error) {

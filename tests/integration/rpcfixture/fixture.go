@@ -1,4 +1,4 @@
-// Package rpcfixture 提供 M11 代码生成和同 Node 调用的真实集成夹具。
+// Package rpcfixture 提供 RPC 代码生成和同 Node 调用的真实集成夹具。
 package rpcfixture
 
 import (

@@ -4,7 +4,9 @@
 
 ## 关键流程
 
-`disappearingProvider.Start` 通过 Host 发布权威快照并报告 Ready；随后替换为空快照并报告 Recovering。监听 Service 会先收到 `OnDiscovered`，随后立即收到 `OnLost`。`Lost` 表示实例从当前权威可见快照消失，不等同于 `Retired`；`Retired` 仍会保留在快照中并触发 `OnStateChanged`。
+`disappearingProvider.Start` 先把 TTL 设置为允许的最小值 3 秒，再通过 Host 发布权威快照并报告 Ready；随后替换为空快照并报告 Recovering。监听 Service 会先收到 `OnDiscovered`，随后立即收到 `OnLost`。`Lost` 表示实例从当前权威可见快照消失，不等同于 `Retired`；`Retired` 仍会保留在快照中并触发 `OnStateChanged`。
+
+Provider 启动的异步任务由 Provider 自己负责关闭。本例保存取消函数和完成信号，并在 `Close(ctx)` 中取消、等待 goroutine 退出；不要启动无法回收的后台 goroutine，也不要忽略 `ReplaceSnapshot` 的错误。
 
 本示例把监听注册代码直接放在 [main.go](./main.go) 的 `DiscoveryWatcherService` 中，便于复制到业务项目：
 

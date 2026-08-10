@@ -2,7 +2,6 @@ package origin
 
 import (
 	"encoding/binary"
-	"errors"
 	"math"
 	"slices"
 	"strings"
@@ -416,13 +415,6 @@ func nodeEqual(left, right publicprovider.Node) bool {
 		}
 	}
 	return slices.Equal(left.Services, right.Services)
-}
-
-func protocolError(cause error) error {
-	if cause == nil || errors.Is(cause, errProtocol) {
-		return errProtocol
-	}
-	return errs.Wrap(errs.CodeTransportProtocol, cause)
 }
 
 func stableNodes(records map[string]publicprovider.Node) []publicprovider.Node {

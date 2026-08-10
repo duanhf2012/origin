@@ -68,13 +68,7 @@ type timerWakeSource struct {
 // newTimerWakeSource 创建并立即停止 Timer，避免 Engine 启动前产生无意义唤醒。
 func newTimerWakeSource() *timerWakeSource {
 	timer := time.NewTimer(time.Hour)
-	if !timer.Stop() {
-		// Timer 刚创建后通常可以直接停止；保留非阻塞 Drain 处理极端调度时序。
-		select {
-		case <-timer.C:
-		default:
-		}
-	}
+	timer.Stop()
 	return &timerWakeSource{timer: timer}
 }
 
@@ -89,25 +83,14 @@ func (source *timerWakeSource) Reset(delay time.Duration) {
 	if delay < 0 {
 		delay = 0
 	}
-	source.stopAndDrain()
+	// Origin 最低 Go 版本为 1.26；Reset 已保证不会接收到重置前的旧值。
 	source.timer.Reset(delay)
 }
 
-// Stop 停止底层 Timer 并清理可能已经到达 Channel 的旧通知。
+// Stop 停止底层 Timer。
 func (source *timerWakeSource) Stop() {
-	source.stopAndDrain()
-}
-
-// stopAndDrain 统一处理 Timer 的 Stop/Drain 顺序。
-func (source *timerWakeSource) stopAndDrain() {
 	if source == nil || source.timer == nil {
 		return
 	}
-	if !source.timer.Stop() {
-		// 非阻塞 Drain 同时兼容新旧 Go Timer Channel 行为。
-		select {
-		case <-source.timer.C:
-		default:
-		}
-	}
+	source.timer.Stop()
 }

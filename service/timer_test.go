@@ -599,6 +599,8 @@ func TestTimerCreationRejectsPublishedStoppingState(t *testing.T) {
 	if id := fixture.service.scheduler.Load().createAfterTimer(
 		time.Second,
 		noopTimerCallback,
+		nil,
+		nil,
 	); id != InvalidTimerID {
 		t.Fatalf("旧状态快照在停止线性化后仍创建 Timer: id=%d", id)
 	}
@@ -618,6 +620,8 @@ func TestTimerCreationRejectsPublishedStoppingState(t *testing.T) {
 	if id := fixture.service.scheduler.Load().createAfterTimer(
 		time.Second,
 		noopTimerCallback,
+		nil,
+		nil,
 	); id != InvalidTimerID {
 		t.Fatalf("Stopped Scheduler 仍创建 Timer: id=%d", id)
 	}

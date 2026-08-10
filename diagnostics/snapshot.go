@@ -69,7 +69,7 @@ type Snapshot struct {
 type ApplicationSnapshot struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
-	// Deprecated: 独立 Diagnostics HTTP 已删除；Schema v2 为旧消费者恒保留 stopped 占位。
+	// Deprecated: 独立 Diagnostics HTTP 已删除；当前 Schema v2 契约固定返回 stopped 占位。
 	DiagnosticsServer ServerSnapshot `json:"diagnostics_server"`
 	AdminServer       ServerSnapshot `json:"admin_server"`
 	Pprof             ServerSnapshot `json:"pprof"`
@@ -179,9 +179,9 @@ type RPCTransportSnapshot struct {
 	InboundRejected      uint64 `json:"inbound_rejected"`
 	PayloadSentBytes     uint64 `json:"payload_sent_bytes"`
 	PayloadReceivedBytes uint64 `json:"payload_received_bytes"`
-	// Deprecated: Summary 只在 Node Transport 保存恢复次数；Full v2 为兼容既有 JSON 保留本字段。
+	// Deprecated: Summary 只在 Node Transport 保存恢复次数；当前 Full v2 契约保留本字段。
 	Reconnects uint64 `json:"reconnects"`
-	// Deprecated: Summary 只在 Node Transport 保存连续失败；Full v2 为兼容既有 JSON 保留本字段。
+	// Deprecated: Summary 只在 Node Transport 保存连续失败；当前 Full v2 契约保留本字段。
 	ConsecutiveFailures uint64 `json:"consecutive_failures"`
 }
 

@@ -12,7 +12,7 @@ const (
 	TransportNone Transport = iota
 	// TransportTCP 表示该 Node 使用 Origin TCP RPC。
 	TransportTCP
-	// TransportNATS 为 M15 预留已经确定的原始发现取值，M14 不建立 NATS RPC 连接。
+	// TransportNATS 表示通过 NATS 建立远端 RPC 连接。
 	TransportNATS
 )
 

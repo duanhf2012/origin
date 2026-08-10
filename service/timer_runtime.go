@@ -57,6 +57,10 @@ type businessTimer struct {
 	kind       businessTimerKind
 	state      businessTimerState
 	generation uint64
+	// module 和 moduleRegistration 固定创建者资源作用域。nil 表示由 Service 本身创建；
+	// Module Timer 终结回池时同时移除其长期资源登记。
+	module             *Module
+	moduleRegistration *moduleTimerRegistration
 
 	deadlineID timerwheel.DeadlineID
 	callback   TimerFunc
@@ -96,6 +100,15 @@ type dueTimerEntry struct {
 // 创建成功只表示 Timer 已被当前 Node 接收。即使 delay 为零，回调也必须经过时间轮和
 // Service Ready 队列，在后续调度轮次执行，不会在当前调用栈同步调用。
 func (service *Service) AfterFunc(delay time.Duration, fn TimerFunc) TimerID {
+	return service.afterFunc(delay, fn, nil, nil)
+}
+
+func (service *Service) afterFunc(
+	delay time.Duration,
+	fn TimerFunc,
+	module *Module,
+	registration *moduleTimerRegistration,
+) TimerID {
 	// 负时长和空回调没有明确业务语义，直接返回统一无效 ID。
 	if service == nil || delay < 0 || fn == nil {
 		return InvalidTimerID
@@ -107,7 +120,7 @@ func (service *Service) AfterFunc(delay time.Duration, fn TimerFunc) TimerID {
 	if scheduler == nil {
 		return InvalidTimerID
 	}
-	return scheduler.createAfterTimer(delay, fn)
+	return scheduler.createAfterTimer(delay, fn, module, registration)
 }
 
 // NewTicker 创建固定节拍的周期业务 Timer。
@@ -115,6 +128,15 @@ func (service *Service) AfterFunc(delay time.Duration, fn TimerFunc) TimerID {
 // 同一 Ticker 的当前回调完整返回前不会安排下一次 Deadline；忙碌期间错过的周期只合并
 // 计数，不并发执行、不补执行历史次数。
 func (service *Service) NewTicker(interval time.Duration, fn TimerFunc) TimerID {
+	return service.newTicker(interval, fn, nil, nil)
+}
+
+func (service *Service) newTicker(
+	interval time.Duration,
+	fn TimerFunc,
+	module *Module,
+	registration *moduleTimerRegistration,
+) TimerID {
 	if service == nil || interval <= 0 || fn == nil {
 		return InvalidTimerID
 	}
@@ -125,7 +147,7 @@ func (service *Service) NewTicker(interval time.Duration, fn TimerFunc) TimerID 
 	if scheduler == nil {
 		return InvalidTimerID
 	}
-	return scheduler.createTicker(interval, fn)
+	return scheduler.createTicker(interval, fn, module, registration)
 }
 
 // timerCreationError 允许 OnStart 的 Starting 阶段预登记 Timer，并在 Node 一旦发布
@@ -147,6 +169,10 @@ func (service *Service) timerCreationError() error {
 
 // PauseTimer 暂停尚未开始的 Timer，并保存 After/Ticker 的剩余延迟。
 func (service *Service) PauseTimer(timerID TimerID) bool {
+	return service.pauseTimer(timerID, nil)
+}
+
+func (service *Service) pauseTimer(timerID TimerID, module *Module) bool {
 	if service == nil || timerID == InvalidTimerID {
 		return false
 	}
@@ -154,11 +180,15 @@ func (service *Service) PauseTimer(timerID TimerID) bool {
 	if scheduler == nil {
 		return false
 	}
-	return scheduler.pauseTimer(timerID)
+	return scheduler.pauseTimer(timerID, module)
 }
 
 // ResumeTimer 恢复已经暂停的 Timer。
 func (service *Service) ResumeTimer(timerID TimerID) bool {
+	return service.resumeTimer(timerID, nil)
+}
+
+func (service *Service) resumeTimer(timerID TimerID, module *Module) bool {
 	if service == nil || timerID == InvalidTimerID {
 		return false
 	}
@@ -166,7 +196,7 @@ func (service *Service) ResumeTimer(timerID TimerID) bool {
 	if scheduler == nil {
 		return false
 	}
-	return scheduler.resumeTimer(timerID)
+	return scheduler.resumeTimer(timerID, module)
 }
 
 // CancelTimer 取消 Timer，并把调用方保存的非零 TimerID 无条件清零。
@@ -174,6 +204,10 @@ func (service *Service) ResumeTimer(timerID TimerID) bool {
 // 清零先于内部状态裁决，因此未知、已完成或属于其他 Service 的旧 ID 也不会残留在业务变量
 // 中。调用方自身仍需保证该变量不被多个 goroutine 无同步读写。
 func (service *Service) CancelTimer(timerID *TimerID) bool {
+	return service.cancelTimer(timerID, nil)
+}
+
+func (service *Service) cancelTimer(timerID *TimerID, module *Module) bool {
 	if timerID == nil {
 		return false
 	}
@@ -190,7 +224,7 @@ func (service *Service) CancelTimer(timerID *TimerID) bool {
 	if scheduler == nil {
 		return false
 	}
-	return scheduler.cancelTimer(id)
+	return scheduler.cancelTimer(id, module)
 }
 
 // TimerStats 返回当前 Service 业务 Timer 的一致统计快照。
@@ -326,7 +360,7 @@ func (scheduler *serviceScheduler) rebaseBusinessTimers() error {
 }
 
 // pauseTimer 在线性化锁内裁决到期、开始执行和暂停之间的先后顺序。
-func (scheduler *serviceScheduler) pauseTimer(timerID TimerID) bool {
+func (scheduler *serviceScheduler) pauseTimer(timerID TimerID, module *Module) bool {
 	if scheduler.failureLockUnsafe.Load() {
 		return false
 	}
@@ -334,7 +368,7 @@ func (scheduler *serviceScheduler) pauseTimer(timerID TimerID) bool {
 	defer scheduler.mu.Unlock()
 
 	timer := scheduler.timers[timerID]
-	if timer == nil {
+	if timer == nil || timer.module != module {
 		return false
 	}
 	switch timer.state {
@@ -385,7 +419,7 @@ func (scheduler *serviceScheduler) pauseTimer(timerID TimerID) bool {
 }
 
 // resumeTimer 为 Paused After/Ticker 重新登记剩余延迟。
-func (scheduler *serviceScheduler) resumeTimer(timerID TimerID) bool {
+func (scheduler *serviceScheduler) resumeTimer(timerID TimerID, module *Module) bool {
 	if scheduler.failureLockUnsafe.Load() {
 		return false
 	}
@@ -393,7 +427,7 @@ func (scheduler *serviceScheduler) resumeTimer(timerID TimerID) bool {
 	defer scheduler.mu.Unlock()
 
 	timer := scheduler.timers[timerID]
-	if timer == nil {
+	if timer == nil || timer.module != module {
 		return false
 	}
 	if timer.state == businessTimerRunning &&
@@ -412,7 +446,7 @@ func (scheduler *serviceScheduler) resumeTimer(timerID TimerID) bool {
 		return false
 	}
 
-	// Cron 暂停期间不补历史触发，恢复时从当前墙上时间重新寻找未来匹配点。
+	// Cron 暂停期间不补历史触发，恢复时从当前 Node 逻辑时间重新寻找未来匹配点。
 	// After/Ticker 则使用暂停时保存的剩余相对延迟。
 	now := scheduler.businessTimerNow()
 	delay := timer.remaining
@@ -448,7 +482,7 @@ func (scheduler *serviceScheduler) resumeTimer(timerID TimerID) bool {
 }
 
 // cancelTimer 取消仍未开始的 AfterFunc。
-func (scheduler *serviceScheduler) cancelTimer(timerID TimerID) bool {
+func (scheduler *serviceScheduler) cancelTimer(timerID TimerID, module *Module) bool {
 	if scheduler.failureLockUnsafe.Load() {
 		return false
 	}
@@ -456,7 +490,7 @@ func (scheduler *serviceScheduler) cancelTimer(timerID TimerID) bool {
 	defer scheduler.mu.Unlock()
 
 	timer := scheduler.timers[timerID]
-	if timer == nil {
+	if timer == nil || timer.module != module {
 		return false
 	}
 	switch timer.state {
@@ -514,12 +548,16 @@ func (scheduler *serviceScheduler) cancelTimer(timerID TimerID) bool {
 func (scheduler *serviceScheduler) createAfterTimer(
 	delay time.Duration,
 	fn TimerFunc,
+	module *Module,
+	registration *moduleTimerRegistration,
 ) TimerID {
 	return scheduler.createRelativeTimer(
 		businessTimerAfter,
 		delay,
 		0,
 		fn,
+		module,
+		registration,
 	)
 }
 
@@ -527,12 +565,16 @@ func (scheduler *serviceScheduler) createAfterTimer(
 func (scheduler *serviceScheduler) createTicker(
 	interval time.Duration,
 	fn TimerFunc,
+	module *Module,
+	registration *moduleTimerRegistration,
 ) TimerID {
 	return scheduler.createRelativeTimer(
 		businessTimerTicker,
 		interval,
 		interval,
 		fn,
+		module,
+		registration,
 	)
 }
 
@@ -542,6 +584,8 @@ func (scheduler *serviceScheduler) createRelativeTimer(
 	delay time.Duration,
 	interval time.Duration,
 	fn TimerFunc,
+	module *Module,
+	registration *moduleTimerRegistration,
 ) TimerID {
 	scheduler.mu.Lock()
 	// 外层 Service 状态只是无锁快速拒绝。停止可能在该快照后完成并释放 timerEngine，
@@ -560,6 +604,8 @@ func (scheduler *serviceScheduler) createRelativeTimer(
 		nil,
 		nil,
 		fn,
+		module,
+		registration,
 	)
 	logQuota, suppressed := false, uint64(0)
 	if quotaRejected {
@@ -586,6 +632,8 @@ func (scheduler *serviceScheduler) createTimerLocked(
 	schedule cronSchedule,
 	location *time.Location,
 	fn TimerFunc,
+	module *Module,
+	registration *moduleTimerRegistration,
 ) (timerID TimerID, quotaRejected bool) {
 	// Prepared 对应 OnStart 阶段，可以登记但不会执行；Running 阶段正常登记。
 	// Draining 以后禁止产生新工作，避免优雅关闭无法收敛。
@@ -608,6 +656,8 @@ func (scheduler *serviceScheduler) createTimerLocked(
 	timer.state = businessTimerScheduled
 	timer.generation = 1
 	timer.callback = fn
+	timer.module = module
+	timer.moduleRegistration = registration
 	timer.interval = interval
 	timer.schedule = schedule
 	timer.location = location
@@ -662,10 +712,16 @@ func (scheduler *serviceScheduler) releaseBusinessTimerLocked(timer *businessTim
 	if timer == nil || timer.id == InvalidTimerID {
 		panicInvariant("service: 非法 Timer 回池")
 	}
+	timerID := timer.id
+	module := timer.module
+	registration := timer.moduleRegistration
 	*timer = businessTimer{}
 	timer.pooled = true
 	scheduler.timerPool.Put(timer)
 	scheduler.runtime.ReleaseTimerSlot()
+	if module != nil && registration != nil {
+		module.completeTimer(registration, timerID)
+	}
 }
 
 // releaseTerminalTimerIfUnreferencedLocked 在终态 Timer 完全脱离内部队列后执行唯一回收。
@@ -692,8 +748,8 @@ func (scheduler *serviceScheduler) releaseTerminalTimerIfUnreferencedLocked(
 
 // businessTimerNow 返回当前 Node 的游戏逻辑时间。
 //
-// 正式 Node Runtime 必须实现 NodeRuntime；兼容自定义测试 Runtime 时回退到 TimerEngine
-// 真实时钟。该函数只在 Scheduler 已持有运行资源的路径调用，不创建对象或 goroutine。
+// NodeRuntime 提供游戏逻辑时间；只实现基础 Runtime 的调度宿主使用 TimerEngine 真实时钟。
+// 该函数只在 Scheduler 已持有运行资源的路径调用，不创建对象或 goroutine。
 func (scheduler *serviceScheduler) businessTimerNow() time.Time {
 	if runtime, ok := scheduler.runtime.(NodeRuntime); ok {
 		if now := runtime.Now(); !now.IsZero() {
@@ -705,8 +761,7 @@ func (scheduler *serviceScheduler) businessTimerNow() time.Time {
 
 // enqueueExpiredTimerLocked 把一个已到期 Timer 转换成普通 Service Task。
 //
-// M10 后续步骤会在此处补充 DuePending 队列；基础 AfterFunc 路径先确保容量充足时与普通
-// DispatchAsync 使用完全相同的执行槽、Await 和 panic 边界。
+// 到期回调通过 DuePending 与普通 DispatchAsync 共享相同的执行槽、Await 和 panic 边界。
 func (scheduler *serviceScheduler) enqueueExpiredTimerLocked(timer *businessTimer) bool {
 	if timer == nil ||
 		timer.state != businessTimerScheduled ||
@@ -926,7 +981,7 @@ func (scheduler *serviceScheduler) finishTimerTaskLocked(
 		return timer
 	}
 
-	// Ticker 按固定节拍计算下一点；Cron 每轮从当前墙上时间寻找下一匹配点。
+	// Ticker 按固定节拍计算下一点；Cron 每轮从当前 Node 逻辑时间寻找下一日历点。
 	now := scheduler.businessTimerNow()
 	var next time.Time
 	var skipped uint64

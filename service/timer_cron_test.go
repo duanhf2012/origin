@@ -397,3 +397,26 @@ func TestCronInvalidExpressionKeepsArgumentErrorWhileStopping(t *testing.T) {
 		t.Fatalf("Stopping CronFunc(@daily) id=%d error=%v", id, err)
 	}
 }
+
+func FuzzParseCronExpressionDoesNotPanic(f *testing.F) {
+	for _, expression := range []string{
+		"* * * * *",
+		"*/1 * * * * *",
+		"0 0 0 1 1 *",
+		"",
+		"@every 1s",
+		"999999999999999999999 * * * *",
+	} {
+		f.Add(expression)
+	}
+	f.Fuzz(func(t *testing.T, expression string) {
+		schedule, err := parseCronExpression(expression)
+		if err != nil {
+			return
+		}
+		// 某些数字组合在解析层合法但没有任何未来日历点，公开 createCron 会把零值
+		// Next 收敛为参数错误；Fuzz 在这里固定的性质只是任意输入都不得 panic。
+		now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+		_ = schedule.Next(now)
+	})
+}

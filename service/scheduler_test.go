@@ -483,6 +483,33 @@ func TestStartContextAwaitUsesDefaultDeadline(t *testing.T) {
 	}
 }
 
+func TestLifecycleAwaitPanicDoesNotAlsoCountTimeout(t *testing.T) {
+	config := DefaultSchedulerConfig()
+	config.DefaultAwaitTimeout = 20 * time.Millisecond
+	fixture := newPreparedSchedulerFixture(t, config)
+	startContext, finish, err := PrepareStartContext(fixture.service, context.Background())
+	if err != nil {
+		t.Fatalf("PrepareStartContext() error = %v", err)
+	}
+	defer finish()
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		_ = fixture.service.Await(startContext, func(waitContext context.Context) error {
+			<-waitContext.Done()
+			panic("lifecycle await panic")
+		})
+	}()
+	if recovered == nil {
+		t.Fatal("生命周期 Await 没有重新抛出等待函数 panic")
+	}
+	stats := fixture.service.ExecutionStats()
+	if stats.AwaitTotal != 1 || stats.AwaitTimeoutTotal != 0 || stats.AwaitCanceledTotal != 0 {
+		t.Fatalf("panic 后 ExecutionStats() = %+v", stats)
+	}
+}
+
 // TestStartContextAcceptsOptionalControlContext 验证生命周期执行帧来自 Service 本身，而
 // nil、Background 和 TODO 都只表示为本次 Await 建立新的默认控制预算。
 func TestStartContextAcceptsOptionalControlContext(t *testing.T) {
@@ -1472,6 +1499,27 @@ func TestSchedulerPublicStateErrorsAndSetDefaultTimeout(t *testing.T) {
 	}
 }
 
+func TestAwaitTimeoutOfReturnsFrozenSchedulerBudget(t *testing.T) {
+	if _, err := AwaitTimeoutOf(nil); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("AwaitTimeoutOf(nil) error = %v", err)
+	}
+	var typedNil *testService
+	if _, err := AwaitTimeoutOf(typedNil); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("AwaitTimeoutOf(typed nil) error = %v", err)
+	}
+	unbound := &testService{}
+	if _, err := AwaitTimeoutOf(unbound); !errors.Is(err, errs.ErrServiceNotReady) {
+		t.Fatalf("AwaitTimeoutOf(unbound) error = %v", err)
+	}
+	config := DefaultSchedulerConfig()
+	config.DefaultAwaitTimeout = 37 * time.Second
+	fixture := newSchedulerFixture(t, config)
+	if timeout, err := AwaitTimeoutOf(fixture.service); err != nil || timeout != 37*time.Second {
+		t.Fatalf("AwaitTimeoutOf(running) = %s, %v", timeout, err)
+	}
+	fixture.stop(t)
+}
+
 func TestSchedulerDispatchStateAndNilErrors(t *testing.T) {
 	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
 	if err := fixture.service.DispatchAsync(nil); !errors.Is(err, errs.ErrInvalidArgument) {
@@ -1567,6 +1615,38 @@ func TestPrepareActivateAndStopSchedulerValidation(t *testing.T) {
 	}
 	if err := StopScheduler(context.Background(), &testService{}); err != nil {
 		t.Fatalf("未启动 Service StopScheduler() error = %v", err)
+	}
+}
+
+func TestFinalizeSchedulerRunsAwaitCapableFinalizer(t *testing.T) {
+	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
+	if err := BeginStopScheduler(fixture.service); err != nil {
+		t.Fatalf("BeginStopScheduler() error = %v", err)
+	}
+	fixture.runtime.state.Store(uint32(StateStopping))
+	awaited := false
+	err := FinalizeScheduler(t.Context(), fixture.service, func(finalizerContext context.Context) error {
+		return fixture.service.Await(finalizerContext, func(context.Context) error {
+			awaited = true
+			return nil
+		})
+	})
+	if err != nil || !awaited {
+		t.Fatalf("FinalizeScheduler() error = %v, awaited = %v", err, awaited)
+	}
+}
+
+func TestFinalizeSchedulerConvertsFinalizerPanicToError(t *testing.T) {
+	fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
+	if err := BeginStopScheduler(fixture.service); err != nil {
+		t.Fatalf("BeginStopScheduler() error = %v", err)
+	}
+	fixture.runtime.state.Store(uint32(StateStopping))
+	err := FinalizeScheduler(t.Context(), fixture.service, func(context.Context) error {
+		panic("finalizer panic")
+	})
+	if !errs.IsCode(err, errs.CodeInternal) || !strings.Contains(err.Error(), "service OnStop panic") {
+		t.Fatalf("FinalizeScheduler(panic) error = %v", err)
 	}
 }
 

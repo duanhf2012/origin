@@ -67,7 +67,7 @@ type Runtime struct {
 	system *systemRuntime
 
 	// rpcStats 是 Local/TCP/NATS 三个固定原子计数块；放在结构体末尾，避免诊断冷字段
-	// 改变 M21 已建立基线的路由和 Transport 热字段布局。零值即可并发使用。
+	// 改变已经建立基线的路由和 Transport 热字段布局。零值即可并发使用。
 	rpcStats struct {
 		local transportCounters
 		tcp   transportCounters
@@ -115,7 +115,7 @@ type RemoteResolver interface {
 
 // RemoteSnapshotResolver 是发现目录为自动实例选择提供的可选只读扩展。
 //
-// 精确远端解析仍只要求 RemoteResolver，保持既有测试和窄实现兼容。
+// 精确 Node 路由只需要 RemoteResolver；仅自动实例选择读取不可变候选快照。
 type RemoteSnapshotResolver interface {
 	RemoteResolver
 	Snapshot() RemoteSnapshot

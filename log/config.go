@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	// eventQueueSize 固定异步日志队列容量；M1 不暴露容易误解的队列配置。
+	// eventQueueSize 固定异步日志队列容量；当前不暴露容易误解的队列配置。
 	eventQueueSize = 10000
 	// reliableWriteTimeout 限制 ErrorStack 等可靠日志最多阻塞调用方一秒。
 	reliableWriteTimeout = time.Second

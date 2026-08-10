@@ -23,7 +23,7 @@ func (target *ExecutionService) OnInit() error {
 
 // OnStart 先登记 Timer，等 Service 进入 Running 后再执行示例逻辑。
 func (target *ExecutionService) OnStart(context.Context) error {
-	target.AfterFunc(100*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(100*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		// Await 等待外部操作时释放 Service 执行权；等待函数不能读写 target 的公共业务字段，
 		// 因为同一个 Service 的其他任务可能在此期间并发执行。
 		if err := target.Await(ctx, func(waitCtx context.Context) error {
@@ -41,9 +41,13 @@ func (target *ExecutionService) OnStart(context.Context) error {
 		}
 
 		// RunSafe 在当前 goroutine 同步执行，并把 panic 隔离在安全边界内。
-		_ = target.RunSafe(func() { target.Logger().Info("safe synchronous job completed") })
+		if err := target.RunSafe(func() {
+			target.Logger().Info("safe synchronous job completed")
+		}); err != nil {
+			target.Logger().Error("safe synchronous job failed")
+		}
 		// GoSafe 创建后台 goroutine，只提供 panic 保底；后台不直接修改 Service 状态。
-		_ = target.GoSafe(func() {
+		if err := target.GoSafe(func() {
 			result := "safe background job completed"
 			// 后台工作完成后，用 DispatchAsync 把结果交回 Service 串行任务处理。
 			if err := target.DispatchAsync(func(context.Context) {
@@ -58,8 +62,12 @@ func (target *ExecutionService) OnStart(context.Context) error {
 			}); err != nil {
 				target.Logger().Error("dispatch background result failed")
 			}
-		})
-	})
+		}); err != nil {
+			target.Logger().Error("start safe background job failed")
+		}
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create execution demonstration timer failed")
+	}
 	return nil
 }
 

@@ -11,7 +11,7 @@ import (
 
 // inboundDeadlines 管理一个 Transport 的全部入站 Request Deadline。
 //
-// TCP 与 NATS 共享相同的 M8 时间轮语义，但该对象仍属于 rpc 包，不把协议专用取消函数
+// TCP 与 NATS 共享相同的时间轮语义，但该对象仍属于 rpc 包，不把协议专用取消函数
 // 下沉到通用容器。每个 DeadlineID 只会被到期、业务完成或最终关闭中的一个路径取得。
 type inboundDeadlines struct {
 	mu       sync.Mutex

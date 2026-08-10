@@ -200,7 +200,7 @@ func (client Client) PrepareNotify(
 
 // PrepareBroadcast 在任何 Sizer、编码和 Buffer 申请前固定一次完整广播目标计划。
 //
-// 唯一可发送目标复用 M19 prepared target；多目标只保存一次不可变视图和常数个计数，
+// 唯一可发送目标复用 prepared target；多目标只保存一次不可变视图和常数个计数，
 // 提交阶段不会重新读取发现快照或改选连接。
 func (client Client) PrepareBroadcast(
 	ctx context.Context,
@@ -243,6 +243,11 @@ func (client Client) beginInvocation(
 	ctx context.Context,
 	await bool,
 ) (Client, error) {
+	// 已经 Prepared 的副本继续复用原绝对 Deadline，不能因重复进入准备阶段泄漏旧预算或
+	// 得到第二段超时。正式生成代码只进入一次；该防御同时固定低层误用的清理语义。
+	if client.invocation != nil {
+		return client, nil
+	}
 	var operationCtx context.Context
 	var finish func()
 	var err error
@@ -251,28 +256,11 @@ func (client Client) beginInvocation(
 	} else {
 		operationCtx, finish, err = service.PrepareOperationContext(client.owner, ctx)
 	}
-	// rpc 包的白盒单元测试会构造无法从业务侧创建的未绑定 Client，以独立验证路由和
-	// Buffer 所有权。真实生成客户端必有绑定 Runtime；仅对白盒对象保留标准 Context
-	// 兼容层，避免测试底座伪造整个 Node/Service 生命周期。
-	if errors.Is(err, errs.ErrServiceNotReady) && service.RuntimeOf(client.owner) == nil {
-		operationCtx, finish = unmanagedInvocationContext(ctx)
-		err = nil
-	}
 	if err != nil {
 		return Client{}, err
 	}
 	client.invocation = &clientInvocation{ctx: operationCtx, finish: finish}
 	return client, nil
-}
-
-// unmanagedInvocationContext 仅服务 rpc 包内部白盒测试；产品路径统一使用 Service M8。
-func unmanagedInvocationContext(ctx context.Context) (context.Context, func()) {
-	ctx = normalizeContext(ctx)
-	if _, exists := ctx.Deadline(); exists {
-		derived, cancel := context.WithCancel(ctx)
-		return derived, cancel
-	}
-	return context.WithTimeout(ctx, service.DefaultAwaitTimeout)
 }
 
 // normalizeContext 让所有生成 RPC 都接受 nil，并在不需要响应预算的同步提交路径中保持
@@ -284,19 +272,16 @@ func normalizeContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-// invocationContext 复用 Prepared 调用预算；低层直接调用时补建一次兼容预算。
-func (client Client) invocationContext(
-	ctx context.Context,
-	await bool,
-) (context.Context, func(), error) {
-	if client.invocation != nil {
-		return client.invocation.ctx, client.invocation.close, nil
+// invocationContext 返回生成方法在编码前已经建立的唯一调用预算。
+//
+// Await、Call 和 Async 是生成代码的提交阶段，必须分别先经过 PrepareAwait、PrepareCall 或
+// PrepareAsync。这里不再为手工构造的低层 Client 补建第二条调用路径，避免测试专用行为进入
+// 生产状态机，也保证目标选择、编码和提交始终共享同一个绝对 Deadline。
+func (client Client) invocationContext() (context.Context, func(), error) {
+	if client.invocation == nil {
+		return nil, nil, errs.ErrInvalidArgument
 	}
-	prepared, err := client.beginInvocation(ctx, await)
-	if err != nil {
-		return nil, nil, err
-	}
-	return prepared.invocation.ctx, prepared.invocation.close, nil
+	return client.invocation.ctx, client.invocation.close, nil
 }
 
 // Await 执行一次有响应本地调用，并在 owner 的原任务调用栈恢复后解码结果。
@@ -318,7 +303,7 @@ func (client Client) Await(
 		client.FinishInvocation()
 		return err
 	}
-	waitCtx, finish, err := client.invocationContext(ctx, true)
+	waitCtx, finish, err := client.invocationContext()
 	if err != nil {
 		request.Release()
 		return err
@@ -373,7 +358,7 @@ func (client Client) Await(
 // Call 在当前 goroutine 中阻塞等待一次有响应调用，不读取或释放 owner Service 执行槽。
 //
 // Service Task 必须使用 Await；在 Service Task 中调用 Call 会占住唯一执行槽，并可能使
-// 同 Service或环形 RPC 只能依赖 Deadline 退出。
+// 同 Service 或环形 RPC 只能依赖 Deadline 退出。
 func (client Client) Call(
 	ctx context.Context,
 	methodID MethodID,
@@ -390,7 +375,7 @@ func (client Client) Call(
 		client.FinishInvocation()
 		return err
 	}
-	callCtx, finish, err := client.invocationContext(ctx, false)
+	callCtx, finish, err := client.invocationContext()
 	if err != nil {
 		request.Release()
 		return err
@@ -454,7 +439,7 @@ func (client Client) Async(
 		client.FinishInvocation()
 		return err
 	}
-	callCtx, finish, err := client.invocationContext(ctx, false)
+	callCtx, finish, err := client.invocationContext()
 	if err != nil {
 		request.Release()
 		return err
@@ -643,7 +628,7 @@ func (client Client) submit(
 	)
 }
 
-// Broadcast 在 M11 当前本地目标范围执行通知投递。
+// Broadcast 向准备阶段冻结的全部可发送目标执行通知投递。
 //
 // 同一 Node 内 ServiceName 唯一，因此本阶段与 Notify 共享一次编码和投递；后续服务发现
 // 只扩展 Runtime 候选集合，不改变生成方法签名。
@@ -692,7 +677,7 @@ func (client Client) validate() error {
 
 // localCall 是一次请求—响应本地调用的最小完成状态。
 //
-// M11 先保留未池化基线：每次调用只分配一个状态和一个完成 Channel，避免复杂的复用代次
+// 当前保留未池化基线：每次调用只分配一个状态和一个完成 Channel，避免复杂的复用代次
 // 与晚到响应 ABA。Benchmark 证明池化有稳定收益后才允许增加对象池。
 type localCall struct {
 	done      chan struct{}

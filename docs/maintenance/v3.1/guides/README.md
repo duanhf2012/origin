@@ -10,7 +10,7 @@
 origingen 对有响应方法生成以下三种外观：
 
 ```go
-// Service Task、Timer、异步 Event、RPC Handler、OnStart 或 OnStop 中使用。
+// Service Task、Timer、异步 Event 或 RPC Handler 中使用。
 value, err := client.AwaitGetPlayer(ctx, playerID)
 
 // 普通 goroutine 中使用；结果返回到当前 goroutine 的同一调用栈。
@@ -34,6 +34,9 @@ err = client.AsyncGetPlayer(ctx, playerID, func(
 `AwaitXxx`、`CallXxx`、`AsyncXxx`、`NotifyXxx` 和 `BroadcastXxx` 都接受 nil、
 `context.Background()`、`context.TODO()` 和普通自定义 Context。框架会在入口规范化 nil，
 不会把 nil 传入标准库或 Transport。
+
+同 Node 本地调用会保留 Context Value；TCP/NATS 只传播契约参数和剩余 Deadline，不会
+序列化任意 Go Value。跨 Node 必需的数据应定义为 RPC 参数。
 
 Await、Call 和 Async 是有响应调用，其 Deadline 规则固定为：
 
@@ -64,7 +67,11 @@ Notify 和 Broadcast 没有响应 Pending。它们的 Context 只约束准备和
 Await 的执行身份来自绑定 owner 当前的 Service Task 或生命周期执行帧，而不是 Context
 私有值。传 nil 或 Background 不会让普通 goroutine 获得执行权；普通 goroutine 使用 Call。
 
-Call 不释放 Service 执行槽。在 Service Task 中调用 Call 可能阻塞同 Service或环形 RPC，
+生命周期执行帧允许调用 Await，但本地 RPC 目标仍受自身状态约束。同 Node 的全部 Service
+在所有 `OnStart` 成功后才统一进入 Running，停止阶段也会关闭新 RPC 准入；因此不要在
+`OnStart`/`OnStop` 调用同 Node 业务 RPC。启动后工作应登记为 Timer 或其他后续任务。
+
+Call 不释放 Service 执行槽。在 Service Task 中调用 Call 可能阻塞同 Service 或环形 RPC，
 所以 Service 执行链必须使用 Await。Origin 不使用 goid、`runtime.Stack` 或 unsafe 猜测
 goroutine 身份。
 
@@ -73,7 +80,8 @@ goroutine 身份。
 - Async 返回非 nil：提交失败，业务 callback 永不执行；
 - Async 返回 nil：响应、超时、取消和停止只产生一个终态，callback 严格执行一次；
 - callback 总在 owner Service 的后续串行任务中，不回来源 goroutine；
-- `OnStart` 需要结果时使用 Await；`OnStop` 不再创建新的 Async 工作；
+- `OnStart` 等待已可调用的外部目标时使用 Await；同 Node 工作登记到启动后任务；
+- `OnStop` 不再创建新的 Async 工作；
 - 普通 goroutine 若需要结果回到自己的同一调用栈，使用 Call；
 - Context 取消表示调用方不再等待，不承诺远端业务回滚。
 
@@ -113,5 +121,5 @@ Application 文件名前缀，以及运行时独立调整级别和暂停/恢复�
 v3.1 用唯一的 `--admin` 入口承载 Diagnostics、固定生命周期控制，以及 Application/Service
 自定义 GET/POST Endpoint；Service 回调会进入目标 Service 的串行执行槽。Diagnostics 默认返回
 低基数 Summary schema v2，`detail=full` 返回兼容的 Full Snapshot v2；pprof 继续使用独立、
-可运行期启停的 Listener。完整教程与六组示例见
+可运行期启停的 Listener。完整教程与七组示例见
 [Admin 管理 HTTP、Diagnostics 与 pprof](./10.admin-diagnostics-and-pprof.md)。

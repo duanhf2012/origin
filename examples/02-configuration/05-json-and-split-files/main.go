@@ -30,7 +30,7 @@ func (target *SplitConfigService) OnInit() error {
 	return target.ParseServiceConfig(&target.config)
 }
 
-// OnStart 输出最终 Node、环境变量标签和业务配置，证明多个文件已经合并。
+// OnStart 输出最终 Node 和公共业务配置，证明多个文件已经合并。
 func (target *SplitConfigService) OnStart(context.Context) error {
 	target.Logger().Info(fmt.Sprintf(
 		"split config loaded: node=%s welcome=%s",

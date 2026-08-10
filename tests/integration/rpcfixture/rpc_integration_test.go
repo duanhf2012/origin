@@ -245,6 +245,124 @@ func TestGeneratedTargetQueueFullIsImmediate(t *testing.T) {
 	close(block)
 }
 
+// TestGeneratedAsyncQueueFullNeverCallsCallback 锁定 Async 已完成目标准备和回调任务预留，
+// 但目标 Service 在实际提交时队列已满的边界：返回错误后业务回调必须永远不执行。
+func TestGeneratedAsyncQueueFullNeverCallsCallback(t *testing.T) {
+	config := service.SchedulerConfig{
+		MaxTasks:            3,
+		MaxAwaitTasks:       3,
+		DefaultAwaitTimeout: time.Second,
+	}
+	fixture := newRPCFixtureWithConfig(t, config)
+	block := make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(block)
+		}
+	})
+	started := make(chan struct{})
+	if err := fixture.player.DispatchAsync(func(context.Context) {
+		close(started)
+		<-block
+	}); err != nil {
+		t.Fatal(err)
+	}
+	awaitSignal(t, started)
+	// 当前阻塞任务加两个排队任务恰好占满目标的 MaxTasks。
+	for index := 0; index < 2; index++ {
+		if err := fixture.player.DispatchAsync(func(context.Context) {}); err != nil {
+			t.Fatalf("fill target queue %d: %v", index, err)
+		}
+	}
+
+	callbackCalled := make(chan struct{}, 1)
+	callerDrained := make(chan struct{})
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		client := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToService("PlayerService"),
+		)
+		err := client.AsyncEchoName(
+			ctx,
+			"queue-full",
+			func(context.Context, string, error) {
+				callbackCalled <- struct{}{}
+			},
+		)
+		if !errors.Is(err, errs.ErrServiceQueueFull) {
+			t.Errorf("Async queue-full error = %v", err)
+		}
+		// Async 内部抑制任务已经排队；本屏障排在它之后，二者连同当前任务不超过 3。
+		if err := fixture.caller.DispatchAsync(func(context.Context) {
+			close(callerDrained)
+		}); err != nil {
+			t.Errorf("caller barrier error = %v", err)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	awaitSignal(t, callerDrained)
+	select {
+	case <-callbackCalled:
+		t.Fatal("Async 返回队列满后仍执行了 callback")
+	default:
+	}
+
+	close(block)
+	released = true
+}
+
+// TestGeneratedCallTimeoutReleasesLateResponse 验证普通 goroutine 放弃 Call 后，目标晚到的
+// 响应仍由 RPC 完成路径归还，不泄漏请求或响应 Buffer。
+func TestGeneratedCallTimeoutReleasesLateResponse(t *testing.T) {
+	fixture := newRPCFixture(t)
+	block := make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(block)
+		}
+	})
+	started := make(chan struct{}, 1)
+	fixture.player.Wait = block
+	fixture.player.WaitStarted = started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	client := NewPlayerRPCClient(
+		fixture.caller,
+		rpc.ToService("PlayerService"),
+	)
+	_, _, err := client.CallGetPlayer(
+		ctx,
+		42,
+		PlayerData{Name: "late-call"},
+		nil,
+	)
+	if !errors.Is(err, errs.ErrDeadlineExceeded) {
+		t.Fatalf("Call timeout error = %v", err)
+	}
+	select {
+	case <-started:
+	default:
+		t.Fatal("Call target did not start before timeout")
+	}
+
+	close(block)
+	released = true
+	barrier := make(chan struct{})
+	if err := fixture.player.DispatchAsync(func(context.Context) {
+		close(barrier)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	awaitSignal(t, barrier)
+	if stats := fixture.pool.Stats(); stats.InUseBuffers != 0 {
+		t.Fatalf("late Call response Buffer not released: %+v", stats)
+	}
+}
+
 func TestGeneratedAwaitRoundTripAndOwnership(t *testing.T) {
 	fixture := newRPCFixture(t)
 	done := make(chan struct{})
@@ -368,7 +486,7 @@ func TestGeneratedCustomCodecAllCallStyles(t *testing.T) {
 	}
 	awaitSignal(t, awaitDone)
 
-	asyncDone := make(chan struct{})
+	asyncDone := make(chan struct{}, 1)
 	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
 		client := NewPlayerRPCClient(
 			fixture.caller,
@@ -871,6 +989,171 @@ func TestGeneratedErrorsPanicAndSelfCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitSignal(t, selfDone)
+}
+
+func TestGeneratedSelfRPCModes(t *testing.T) {
+	fixture := newRPCFixture(t)
+	client := NewPlayerRPCClient(
+		fixture.player,
+		rpc.ToService("PlayerService"),
+	)
+
+	// 普通 goroutine 不持有 Service 执行槽，因此可以用 Call 阻塞等待同一 Service。
+	called, _, err := client.CallGetPlayer(
+		context.Background(),
+		51,
+		PlayerData{Name: "self-call"},
+		nil,
+	)
+	if err != nil || called.ID != 51 {
+		t.Fatalf("self CallGetPlayer() result=%+v error=%v", called, err)
+	}
+
+	submitted := make(chan struct{})
+	asyncDone := make(chan struct{})
+	if err := fixture.player.DispatchAsync(func(ctx context.Context) {
+		defer close(submitted)
+		awaited, _, awaitErr := client.AwaitGetPlayer(
+			ctx,
+			52,
+			PlayerData{Name: "self-await"},
+			nil,
+		)
+		if awaitErr != nil || awaited.ID != 52 {
+			t.Errorf("self AwaitGetPlayer() result=%+v error=%v", awaited, awaitErr)
+		}
+		if asyncErr := client.AsyncGetPlayer(
+			ctx,
+			53,
+			PlayerData{Name: "self-async"},
+			nil,
+			func(_ context.Context, result PlayerData, _ *structpb.Struct, callErr error) {
+				defer func() { asyncDone <- struct{}{} }()
+				if callErr != nil || result.ID != 53 {
+					t.Errorf("self AsyncGetPlayer() result=%+v error=%v", result, callErr)
+				}
+			},
+		); asyncErr != nil {
+			t.Errorf("self AsyncGetPlayer() immediate error=%v", asyncErr)
+			asyncDone <- struct{}{}
+		}
+		if notifyErr := client.NotifyPlayerOnline(ctx, 54); notifyErr != nil {
+			t.Errorf("self NotifyPlayerOnline() error=%v", notifyErr)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	awaitSignal(t, submitted)
+	awaitSignal(t, asyncDone)
+
+	// 后续同 Service 任务是 FIFO 屏障：它开始时，先前提交的自调 Notify 已执行。
+	notifyChecked := make(chan struct{})
+	if err := fixture.player.DispatchAsync(func(context.Context) {
+		defer close(notifyChecked)
+		if fixture.player.OnlineID != 54 {
+			t.Errorf("self NotifyPlayerOnline() OnlineID=%d, want 54", fixture.player.OnlineID)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	awaitSignal(t, notifyChecked)
+
+	// 高级集成层仍允许未 Prepare 的低层 Notify；该路径用于框架控制面，不改变教程
+	// 推荐的生成客户端外观。这里固定其自调用分配、提交和 FIFO 所有权。
+	lowLevel := rpc.NewGeneratedClient(
+		fixture.player,
+		rpc.ToService("PlayerService"),
+		playerRPCContractID,
+		playerRPCFingerprint,
+	)
+	request, err := encodePlayerRPCPlayerOnlineRequest(
+		lowLevel,
+		rpc.CallNotify,
+		56,
+	)
+	if err != nil {
+		t.Fatalf("low-level encodePlayerRPCPlayerOnlineRequest() error=%v", err)
+	}
+	if err := lowLevel.Notify(
+		context.Background(),
+		playerRPCPlayerOnlineMethodID,
+		request,
+	); err != nil {
+		t.Fatalf("low-level self Notify() error=%v", err)
+	}
+	lowLevelChecked := make(chan struct{})
+	if err := fixture.player.DispatchAsync(func(context.Context) {
+		defer close(lowLevelChecked)
+		if fixture.player.OnlineID != 56 {
+			t.Errorf("low-level self Notify() OnlineID=%d, want 56", fixture.player.OnlineID)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	awaitSignal(t, lowLevelChecked)
+
+	// Service Task 内的 Call 不释放唯一执行槽；自调只能依靠 Deadline 退出，
+	// 该边界用测试防止未来误把死锁暴露为“支持”。
+	callBoundaryDone := make(chan struct{})
+	if err := fixture.player.DispatchAsync(func(ctx context.Context) {
+		defer close(callBoundaryDone)
+		callCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+		defer cancel()
+		_, _, callErr := client.CallGetPlayer(
+			callCtx,
+			55,
+			PlayerData{Name: "self-call-in-task"},
+			nil,
+		)
+		if !errors.Is(callErr, errs.ErrDeadlineExceeded) {
+			t.Errorf("self CallGetPlayer() in Service Task error=%v", callErr)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	awaitSignal(t, callBoundaryDone)
+}
+
+func TestGeneratedLocalRetiredRoutingBoundaries(t *testing.T) {
+	fixture := newRPCFixture(t)
+	if err := fixture.player.Retire(context.Background()); err != nil {
+		t.Fatalf("PlayerService.Retire() error = %v", err)
+	}
+
+	type callResult struct {
+		value        string
+		defaultError error
+		includedErr  error
+	}
+	result := make(chan callResult, 1)
+	if err := fixture.caller.DispatchAsync(func(ctx context.Context) {
+		client := BindPlayerRPC(fixture.caller)
+		_, defaultErr := client.AwaitEchoName(ctx, "default")
+		value, includedErr := client.IncludeRetired().AwaitEchoName(ctx, "included")
+		result <- callResult{
+			value:        value,
+			defaultError: defaultErr,
+			includedErr:  includedErr,
+		}
+	}); err != nil {
+		t.Fatalf("CallerService.DispatchAsync() error = %v", err)
+	}
+
+	select {
+	case received := <-result:
+		if !errors.Is(received.defaultError, errs.ErrRPCNoRoute) {
+			t.Fatalf("default Retired call error = %v", received.defaultError)
+		}
+		if received.includedErr != nil || received.value != "included-echo" {
+			t.Fatalf(
+				"IncludeRetired call value=%q error=%v",
+				received.value,
+				received.includedErr,
+			)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("local Retired routing timed out")
+	}
 }
 
 func TestGeneratedTimeoutAndAsyncImmediateFailure(t *testing.T) {

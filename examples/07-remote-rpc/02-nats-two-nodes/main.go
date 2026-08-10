@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/application"
@@ -29,7 +30,7 @@ func (target *GatewayService) OnInit() error {
 
 // OnStart 在 NATS 连接和发现目录就绪后执行远端调用。
 func (target *GatewayService) OnStart(context.Context) error {
-	target.AfterFunc(300*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(300*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		for attempt := 0; attempt < 20; attempt++ {
 			// 业务代码仍使用 OnNode + AwaitGetPlayer，不感知底层 NATS subject。
 			value, err := target.players.OnNode("player-1").AwaitGetPlayer(ctx, 1001)
@@ -56,7 +57,9 @@ func (target *GatewayService) OnStart(context.Context) error {
 			}
 		}
 		target.Logger().Error("remote NATS was not ready in time")
-	})
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create remote NATS demonstration timer failed")
+	}
 	return nil
 }
 

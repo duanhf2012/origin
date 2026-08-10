@@ -58,7 +58,7 @@ func Listen(address string, options ListenOptions, handler Handler) (*Listener, 
 		return nil, err
 	}
 
-	// net.ListenConfig 保留未来受控 socket 参数入口，但 M5 不提前增加 Control 抽象。
+	// 使用零值 net.ListenConfig，当前没有额外 Socket Control 行为。
 	var listenConfig net.ListenConfig
 	raw, err := listenConfig.Listen(context.Background(), "tcp", address)
 	if err != nil {

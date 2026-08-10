@@ -262,16 +262,20 @@ func (scheduler *serviceScheduler) awaitLifecycle(
 	// Deadline 还覆盖等待函数返回前的完整阶段；到期 watcher 尚未调度时也按绝对时间判定。
 	cause := context.Cause(ctx)
 	finalError := waitError
-	if !time.Now().Before(deadlineAt) || errors.Is(cause, context.DeadlineExceeded) {
-		finalError = errs.ErrDeadlineExceeded
-		scheduler.mu.Lock()
-		scheduler.awaitTimeoutTotal++
-		scheduler.mu.Unlock()
-	} else if cause != nil {
-		finalError = awaitContextError(cause)
-		scheduler.mu.Lock()
-		scheduler.awaitCanceledTotal++
-		scheduler.mu.Unlock()
+	if !panicked {
+		// 与普通 Task Await 保持一致：panic 是本次调用的最终控制流，不再把同一时刻
+		// 观察到的取消或超时重复计入 Await 返回错误统计。
+		if !time.Now().Before(deadlineAt) || errors.Is(cause, context.DeadlineExceeded) {
+			finalError = errs.ErrDeadlineExceeded
+			scheduler.mu.Lock()
+			scheduler.awaitTimeoutTotal++
+			scheduler.mu.Unlock()
+		} else if cause != nil {
+			finalError = awaitContextError(cause)
+			scheduler.mu.Lock()
+			scheduler.awaitCanceledTotal++
+			scheduler.mu.Unlock()
+		}
 	}
 
 	// 外层生命周期边界负责统一恢复和日志；这里保持等待函数原 panic 控制流。

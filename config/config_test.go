@@ -119,6 +119,89 @@ actual_field: yaml-tag-is-ignored
 	}
 }
 
+// TestLoadDirNumericBoundaries 验证无符号整数和浮点数的正常位宽、负数、溢出与
+// 非有限值边界；失败必须统一表现为 InvalidConfig。
+func TestLoadDirNumericBoundaries(t *testing.T) {
+	t.Run("valid integer and float kinds", func(t *testing.T) {
+		dir := t.TempDir()
+		writeConfig(t, dir, "config.yaml", `
+small: 255
+large: 9223372036854775808
+ratio: 1.5
+count: 2
+`)
+		var got struct {
+			Small uint8
+			Large uint64
+			Ratio float32
+			Count float64
+		}
+		if err := LoadDir(dir, &got); err != nil {
+			t.Fatalf("LoadDir() error = %v", err)
+		}
+		if got.Small != 255 || got.Large != uint64(1)<<63 ||
+			got.Ratio != 1.5 || got.Count != 2 {
+			t.Fatalf("numeric result = %+v", got)
+		}
+	})
+
+	tests := []struct {
+		name    string
+		content string
+		decode  func(string) error
+	}{
+		{
+			name:    "negative unsigned",
+			content: "value: -1\n",
+			decode: func(dir string) error {
+				var target struct{ Value uint8 }
+				return LoadDir(dir, &target)
+			},
+		},
+		{
+			name:    "unsigned overflow",
+			content: "value: 256\n",
+			decode: func(dir string) error {
+				var target struct{ Value uint8 }
+				return LoadDir(dir, &target)
+			},
+		},
+		{
+			name:    "float32 overflow",
+			content: "value: 3.5e38\n",
+			decode: func(dir string) error {
+				var target struct{ Value float32 }
+				return LoadDir(dir, &target)
+			},
+		},
+		{
+			name:    "non finite float",
+			content: "value: .inf\n",
+			decode: func(dir string) error {
+				var target struct{ Value float64 }
+				return LoadDir(dir, &target)
+			},
+		},
+		{
+			name:    "literal numeric string",
+			content: "value: '12'\n",
+			decode: func(dir string) error {
+				var target struct{ Value uint16 }
+				return LoadDir(dir, &target)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeConfig(t, dir, "config.yaml", test.content)
+			if err := test.decode(dir); !errs.IsCode(err, errs.CodeInvalidConfig) {
+				t.Fatalf("LoadDir() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestLoadDirRecursivelyMergesMappingsAndSequences(t *testing.T) {
 	// 在不同目录和格式中拆分同一 Mapping 与 Sequence。
 	dir := t.TempDir()
@@ -652,6 +735,60 @@ anything:
 	anything, ok := got.Anything.(map[string]any)
 	if !ok || len(anything) != 1 {
 		t.Fatalf("空接口解码错误: %#v", got.Anything)
+	}
+}
+
+func TestLoadDirDecodesFixedArraysAtomically(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		directory := t.TempDir()
+		writeConfig(t, directory, "config.yaml", "values: [1, 2, 3]\n")
+		target := struct{ Values [3]int }{Values: [3]int{7, 8, 9}}
+		if err := LoadDir(directory, &target); err != nil {
+			t.Fatalf("LoadDir() error = %v", err)
+		}
+		if target.Values != [3]int{1, 2, 3} {
+			t.Fatalf("Values = %v", target.Values)
+		}
+	})
+
+	// 数组长度和任一元素错误都必须在提交前失败，调用方原数组保持不变。
+	for _, test := range []struct {
+		name    string
+		content string
+	}{
+		{name: "length mismatch", content: "values: [1, 2]\n"},
+		{name: "element mismatch", content: "values: [1, invalid, 3]\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			writeConfig(t, directory, "config.yaml", test.content)
+			target := struct{ Values [3]int }{Values: [3]int{7, 8, 9}}
+			if err := LoadDir(directory, &target); !errs.IsCode(err, errs.CodeInvalidConfig) {
+				t.Fatalf("LoadDir() error = %v", err)
+			}
+			if target.Values != [3]int{7, 8, 9} {
+				t.Fatalf("failed decode changed Values = %v", target.Values)
+			}
+		})
+	}
+}
+
+func TestLoadDirRejectsNonFiniteYAMLFloat(t *testing.T) {
+	for _, value := range []string{".inf", "-.inf", ".nan"} {
+		t.Run(value, func(t *testing.T) {
+			directory := t.TempDir()
+			writeConfig(t, directory, "config.yaml", "ratio: "+value+"\n")
+			if _, err := LoadSnapshot(directory); !errs.IsCode(err, errs.CodeInvalidConfig) {
+				t.Fatalf("LoadSnapshot() error = %v", err)
+			}
+			target := struct{ Ratio float64 }{Ratio: 1.25}
+			if err := LoadDir(directory, &target); !errs.IsCode(err, errs.CodeInvalidConfig) {
+				t.Fatalf("LoadDir() error = %v", err)
+			}
+			if target.Ratio != 1.25 {
+				t.Fatalf("failed decode changed Ratio = %v", target.Ratio)
+			}
+		})
 	}
 }
 

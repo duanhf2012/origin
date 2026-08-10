@@ -22,7 +22,10 @@ type retirementService struct {
 	events              chan service.ServiceStateChanged
 	synchronousEventID  service.EventID
 	synchronousRetireTo chan error
+	module              *retirementModule
 }
+
+type retirementModule struct{ service.Module }
 
 func (target *retirementService) OnInit() error {
 	if err := target.SubscribeEvent(
@@ -38,6 +41,11 @@ func (target *retirementService) OnInit() error {
 	); err != nil {
 		return err
 	}
+	if target.module != nil {
+		if err := target.AddModule(target.module); err != nil {
+			return err
+		}
+	}
 	if target.synchronousEventID == 0 {
 		return nil
 	}
@@ -49,6 +57,88 @@ func (target *retirementService) OnInit() error {
 			return err
 		},
 	)
+}
+
+// TestModuleRetireAndResumeDelegatesToOwnerService 验证 Module 的状态控制门面提交所属
+// Service 的真实状态转换，并等待对应发现快照发布确认。
+func TestModuleRetireAndResumeDelegatesToOwnerService(t *testing.T) {
+	source := internaldiscovery.NewSource()
+	var changes []string
+	module := &retirementModule{}
+	target := &retirementService{
+		label:   "Only",
+		changes: &changes,
+		module:  module,
+	}
+	current := newRetirementNode(t, source, target)
+
+	if err := module.Retire(t.Context()); err != nil {
+		t.Fatalf("Module.Retire() error = %v", err)
+	}
+	if target.State() != service.StateRetired {
+		t.Fatalf("retired State = %v", target.State())
+	}
+	if err := module.Resume(t.Context()); err != nil {
+		t.Fatalf("Module.Resume() error = %v", err)
+	}
+	if target.State() != service.StateRunning {
+		t.Fatalf("resumed State = %v", target.State())
+	}
+	current.discoveryPublication.mu.Lock()
+	desired := current.discoveryPublication.desired
+	acknowledged := current.discoveryPublication.acknowledged
+	current.discoveryPublication.mu.Unlock()
+	if desired != 2 || acknowledged != desired {
+		t.Fatalf("publication generations desired=%d acknowledged=%d", desired, acknowledged)
+	}
+}
+
+// TestNodeRetireResumeReportsLifecycleState 验证公开状态控制在 Created、Stopping、Stopped
+// 和 Failed 四个边界返回稳定错误，不会在非 Ready Node 上提交部分状态转换。
+func TestNodeRetireResumeReportsLifecycleState(t *testing.T) {
+	var events []string
+	created := newTestNode(t, &lifecycleService{label: "created", events: &events})
+	if err := created.Retire(t.Context()); !errors.Is(err, errs.ErrServiceNotReady) {
+		t.Fatalf("created Retire() error = %v", err)
+	}
+
+	stopEntered := make(chan struct{})
+	releaseStop := make(chan struct{})
+	stoppingTarget := &lifecycleService{label: "stopping", events: &events}
+	stoppingTarget.onStopContext = func(context.Context) error {
+		close(stopEntered)
+		<-releaseStop
+		return nil
+	}
+	stopping := newTestNode(t, stoppingTarget)
+	if err := stopping.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	stopResult := make(chan error, 1)
+	go func() { stopResult <- stopping.Stop(context.Background()) }()
+	<-stopEntered
+	if err := stopping.Retire(t.Context()); !errors.Is(err, errs.ErrServiceStopping) {
+		t.Fatalf("stopping Retire() error = %v", err)
+	}
+	close(releaseStop)
+	if err := <-stopResult; err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if err := stopping.Resume(t.Context()); !errors.Is(err, errs.ErrServiceStopped) {
+		t.Fatalf("stopped Resume() error = %v", err)
+	}
+
+	failed := newTestNode(t, &lifecycleService{
+		label:   "failed",
+		events:  &events,
+		initErr: errors.New("init failed"),
+	})
+	if err := failed.Start(t.Context()); err == nil {
+		t.Fatal("failed Start() error = nil")
+	}
+	if err := failed.Retire(t.Context()); !errors.Is(err, errs.ErrServiceFailed) {
+		t.Fatalf("failed Retire() error = %v", err)
+	}
 }
 
 func newRetirementNode(

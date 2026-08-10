@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
@@ -37,9 +38,12 @@ type Service struct {
 	mu       sync.Mutex
 	cancel   context.CancelFunc
 	commands chan serverCommand
-	done     chan struct{}
-	prepared bool
-	closed   bool
+	// peerStates 保留不能被有界 Actor 队列丢弃的连接关闭事实。
+	peerStates sync.Map
+	closeWake  chan struct{}
+	done       chan struct{}
+	prepared   bool
+	closed     bool
 }
 
 type commandKind uint8
@@ -47,7 +51,6 @@ type commandKind uint8
 const (
 	commandOpen commandKind = iota + 1
 	commandMessage
-	commandClose
 )
 
 type serverCommand struct {
@@ -62,6 +65,10 @@ type serverClient struct {
 	sessionID uint64
 	hello     bool
 	published bool
+}
+
+type serverPeerState struct {
+	closed atomic.Bool
 }
 
 type serverRecord struct {
@@ -105,11 +112,12 @@ func NewService(
 	logger originlog.Logger,
 ) *Service {
 	return &Service{
-		config:   config,
-		pool:     pool,
-		logger:   logger.WithScope(config.Server.Node, "DiscoveryService"),
-		commands: make(chan serverCommand, actorQueueCommands),
-		done:     make(chan struct{}),
+		config:    config,
+		pool:      pool,
+		logger:    logger.WithScope(config.Server.Node, "DiscoveryService"),
+		commands:  make(chan serverCommand, actorQueueCommands),
+		closeWake: make(chan struct{}, 1),
+		done:      make(chan struct{}),
 	}
 }
 
@@ -202,7 +210,15 @@ func (service *Service) BindSystemRPC(runtime *rpc.Runtime) error {
 }
 
 func (handler *serverHandler) OnSystemOpen(peer rpc.SystemPeer) {
-	handler.service.enqueue(serverCommand{kind: commandOpen, conn: peer})
+	state := &serverPeerState{}
+	if _, exists := handler.service.peerStates.LoadOrStore(peer, state); exists {
+		peer.Close()
+		return
+	}
+	if !handler.service.enqueue(serverCommand{kind: commandOpen, conn: peer}) {
+		// enqueue 失败已关闭 Peer；它从未进入 Actor，因此不需要保留关闭墓碑。
+		handler.service.peerStates.Delete(peer)
+	}
 }
 
 func (handler *serverHandler) OnSystemMessage(
@@ -224,7 +240,15 @@ func (handler *serverHandler) OnSystemMessage(
 }
 
 func (handler *serverHandler) OnSystemClose(peer rpc.SystemPeer, _ error) {
-	handler.service.enqueue(serverCommand{kind: commandClose, conn: peer})
+	value, exists := handler.service.peerStates.Load(peer)
+	if !exists {
+		return
+	}
+	value.(*serverPeerState).closed.Store(true)
+	select {
+	case handler.service.closeWake <- struct{}{}:
+	default:
+	}
 }
 
 func (service *Service) enqueue(command serverCommand) bool {
@@ -279,34 +303,62 @@ func (service *Service) actorLoop(ctx context.Context, epoch uint64) {
 		}
 		timer.Reset(delay)
 	}
+	closeClient := func(conn rpc.SystemPeer) {
+		client := clients[conn]
+		if client != nil && client.published {
+			if record, exists := records[client.nodeID]; exists &&
+				record.owner == conn &&
+				record.node.SessionID == client.sessionID {
+				delete(records, client.nodeID)
+				totalServices -= len(record.node.Services)
+				totalBytes -= record.wireSize
+				revision++
+				if ready {
+					service.broadcast(
+						clients,
+						encodeDelete(revision, client.nodeID, client.sessionID),
+					)
+				}
+			}
+		}
+		delete(clients, conn)
+		service.peerStates.Delete(conn)
+	}
+	drainClosed := func() {
+		service.peerStates.Range(func(key, value any) bool {
+			state := value.(*serverPeerState)
+			if !state.closed.Load() {
+				return true
+			}
+			peer := key.(rpc.SystemPeer)
+			// Open 命令可能已在 Actor 队列中但尚未执行；留下墓碑，
+			// 由 commandOpen 拒绝这条已经关闭的 Peer。
+			if _, exists := clients[peer]; !exists {
+				return true
+			}
+			closeClient(peer)
+			return true
+		})
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-service.closeWake:
+			drainClosed()
+			resetTimer()
 		case command := <-service.commands:
 			switch command.kind {
 			case commandOpen:
-				clients[command.conn] = &serverClient{conn: command.conn}
-			case commandClose:
-				client := clients[command.conn]
-				if client != nil && client.published {
-					if record, exists := records[client.nodeID]; exists &&
-						record.owner == command.conn &&
-						record.node.SessionID == client.sessionID {
-						delete(records, client.nodeID)
-						totalServices -= len(record.node.Services)
-						totalBytes -= record.wireSize
-						revision++
-						if ready {
-							service.broadcast(
-								clients,
-								encodeDelete(revision, client.nodeID, client.sessionID),
-							)
-						}
-					}
+				value, exists := service.peerStates.Load(command.conn)
+				if !exists || value.(*serverPeerState).closed.Load() ||
+					len(clients) >= maxControlConnections {
+					service.peerStates.Delete(command.conn)
+					command.conn.Close()
+					break
 				}
-				delete(clients, command.conn)
+				clients[command.conn] = &serverClient{conn: command.conn}
 			case commandMessage:
 				client := clients[command.conn]
 				if client == nil {

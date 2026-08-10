@@ -7,16 +7,16 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 )
 
-// SnapshotConsumer 接收 Application 过渡数据源的当前完整原始快照。
+// SnapshotConsumer 接收 Application 进程内发现源的当前完整原始快照。
 //
 // 回调在 Source 更新冷路径同步执行，必须在返回前把所需数据复制到所属 Node 的所有权
 // 边界，不能保存并修改传入容器。
 type SnapshotConsumer func(RawSnapshot) error
 
-// Source 是 M14 同一 Application 多 Node 使用的进程内过渡完整快照源。
+// Source 是同一 Application 多 Node 使用的进程内完整快照源。
 //
-// 它只保存公开 RawNode，不拥有任何 Node 的可见目录，也不替代未来正式 Discovery
-// Provider。dispatchMu 保证 Publish、Withdraw 和晚订阅观察到严格顺序的完整快照。
+// 它只保存公开 RawNode，不拥有任何 Node 的可见目录，也不替代外部 Discovery Provider。
+// dispatchMu 保证 Publish、Withdraw 和晚订阅观察到严格顺序的完整快照。
 type Source struct {
 	dispatchMu sync.Mutex
 	mu         sync.Mutex
@@ -25,14 +25,14 @@ type Source struct {
 	nextID     uint64
 }
 
-// Subscription 表示一个 Node 对过渡数据源的订阅所有权。
+// Subscription 表示一个 Node 对进程内发现源的订阅所有权。
 type Subscription struct {
 	source *Source
 	id     uint64
 	once   sync.Once
 }
 
-// NewSource 创建一份没有公开 Node 的过渡数据源。
+// NewSource 创建一份没有公开 Node 的进程内发现源。
 func NewSource() *Source {
 	return &Source{
 		records:   make(map[string]RawNode),
@@ -128,7 +128,7 @@ func (source *Source) Withdraw(nodeID string, sessionID uint64) bool {
 	consumers := source.consumersLocked()
 	source.mu.Unlock()
 
-	// Application 过渡数据源的消费者只会执行内存快照 Apply；错误属于框架不变量问题。
+	// Application 进程内发现源的消费者只会执行内存快照 Apply；错误属于框架不变量问题。
 	// Withdraw 没有 error 返回值，调用方仍能通过 Node 日志和后续测试发现该内部错误。
 	_ = deliverSnapshot(consumers, snapshot)
 	return true

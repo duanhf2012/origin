@@ -2,6 +2,7 @@ package rpcfixture
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/duanhf2012/origin/v3/node"
 	"github.com/duanhf2012/origin/v3/rpc"
 	"github.com/duanhf2012/origin/v3/service"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 var benchmarkPlayerRPCClientSink PlayerRPCClient
@@ -139,6 +141,66 @@ func BenchmarkGeneratedLocalAwait(b *testing.B) {
 			}
 		}
 	}); err != nil {
+		b.Fatal(err)
+	}
+	<-done
+	b.StopTimer()
+	if benchmarkErr != nil {
+		b.Fatal(benchmarkErr)
+	}
+}
+
+// BenchmarkGeneratedLocalAsync 记录一次只有一个在途请求的同 Node 异步完整闭环，包含
+// 准备、编码、目标投递、响应、owner 串行回调和调用预算清理。回调提交下一轮，避免批量
+// 填满队列把过载策略混入单次调用成本。
+func BenchmarkGeneratedLocalAsync(b *testing.B) {
+	instance, caller := newBenchmarkNode(b)
+	defer stopBenchmarkNode(b, instance)
+
+	done := make(chan struct{})
+	client := NewPlayerRPCClient(caller, rpc.ToService("PlayerService"))
+	seed := PlayerData{Name: "benchmark", Tags: []string{"a", "b"}}
+	var benchmarkErr error
+	iteration := 0
+	var issue func(context.Context)
+	issue = func(ctx context.Context) {
+		if iteration >= b.N {
+			close(done)
+			return
+		}
+		iteration++
+		if err := client.AsyncGetPlayer(
+			ctx,
+			1001,
+			seed,
+			nil,
+			func(
+				callbackCtx context.Context,
+				result PlayerData,
+				_ *structpb.Struct,
+				callErr error,
+			) {
+				if callErr != nil {
+					benchmarkErr = callErr
+					close(done)
+					return
+				}
+				if result.ID != 1001 {
+					benchmarkErr = fmt.Errorf("Async GetPlayer ID = %d", result.ID)
+					close(done)
+					return
+				}
+				issue(callbackCtx)
+			},
+		); err != nil {
+			benchmarkErr = err
+			close(done)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	if err := caller.DispatchAsync(issue); err != nil {
 		b.Fatal(err)
 	}
 	<-done

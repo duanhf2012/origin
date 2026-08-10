@@ -15,8 +15,8 @@ config/
 ```
 
 执行 `run.bat` 或 `./run.sh`。脚本先设置 `ORIGIN_TUTORIAL_REGION=cn-east`，然后一次启动
-`game-1,game-2`。两个 Node 会分别输出同一份 JSON 业务配置；`game-1` 的 `region` 来自环境
-变量，`game-2` 直接写在 JSON 中。
+`game-1,game-2`。两个 Node 会分别输出同一份 JSON 业务配置；`game-1` 的 `region` 标签来自
+环境变量，`game-2` 的标签直接写在 JSON 中。
 
 ## 合并规则
 

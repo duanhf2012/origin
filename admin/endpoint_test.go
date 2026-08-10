@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,8 +31,10 @@ func TestEndpointGetPostAndValidation(t *testing.T) {
 	for _, endpoint := range []Endpoint{
 		Get("", handler),
 		Get("Bad_Name", handler),
+		Get(strings.Repeat("a", maxEndpointNameBytes+1), handler),
 		Post("missing", nil),
 		Post("bad-timeout", handler, WithTimeout(-time.Second)),
+		Post("long-timeout", handler, WithTimeout(DefaultTimeout+time.Nanosecond)),
 	} {
 		if endpoint.Validate() == nil {
 			t.Fatalf("Endpoint %+v unexpectedly valid", endpoint)
@@ -60,7 +63,9 @@ func TestEndpointDefaultsRejectInvalidLimitsAndRecoverHandlerPanics(t *testing.T
 	}
 	for _, endpoint := range []Endpoint{
 		Post("reload", func(context.Context, Request) (Response, error) { return Response{}, nil }, WithMaxBodyBytes(0)),
+		Post("reload", func(context.Context, Request) (Response, error) { return Response{}, nil }, WithMaxBodyBytes(DefaultMaxBodyBytes+1)),
 		Post("reload", func(context.Context, Request) (Response, error) { return Response{}, nil }, WithMaxResponseBytes(0)),
+		Post("reload", func(context.Context, Request) (Response, error) { return Response{}, nil }, WithMaxResponseBytes(DefaultMaxResponseBytes+1)),
 		Post("reload", func(context.Context, Request) (Response, error) { return Response{}, nil }, WithSuccessStatus(http.StatusBadRequest)),
 	} {
 		if endpoint.Validate() == nil {
@@ -79,9 +84,11 @@ func TestEndpointPreservesOptionErrorsUntilValidation(t *testing.T) {
 	want := errors.New("option failed")
 	endpoint := Get("summary", func(context.Context, Request) (Response, error) {
 		return Response{}, nil
-	}, func(*endpointOptions) error {
-		return want
-	})
+	},
+		func(*endpointOptions) error { return want },
+		nil,
+		func(*endpointOptions) error { return errors.New("later option failed") },
+	)
 	if err := endpoint.Validate(); !errors.Is(err, want) {
 		t.Fatalf("Validate() = %v, want option error", err)
 	}

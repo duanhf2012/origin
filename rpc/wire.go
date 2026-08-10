@@ -14,7 +14,7 @@ const (
 	// tcpWireVersion 标识 Origin TCP RPC 当前不兼容线布局版本。
 	tcpWireVersion byte = 1
 
-	// wireEnvelopeSize 是 M5 在业务 payload 上限之外允许的固定协议包络余量。
+	// wireEnvelopeSize 是 TCP 层在业务 payload 上限之外允许的固定协议包络余量。
 	wireEnvelopeSize = 576
 
 	// 主动方业务包必须区分 Request、Notify 和 Ping；被动方只返回 Response 或一字节 Pong。
@@ -23,7 +23,7 @@ const (
 	wireKindPing    byte = 3
 	wireKindPong    byte = 4
 
-	// 固定头大小与 M15 已确认的逐字段布局严格一致。
+	// 固定头大小与当前 TCP Wire 的逐字段布局严格一致。
 	wireRequestFixedSize  = 22
 	wireNotifyFixedSize   = 10
 	wireResponseFixedSize = 12

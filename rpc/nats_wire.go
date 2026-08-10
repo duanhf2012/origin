@@ -15,7 +15,7 @@ const (
 	natsPacketNotify   byte = 0x12
 	natsPacketResponse byte = 0x13
 
-	// 固定头大小与 M15 已确认布局严格一致。
+	// 固定头大小与当前 NATS Wire 布局严格一致。
 	natsRequestFixedSize  = 39
 	natsNotifyFixedSize   = 18
 	natsResponseFixedSize = 29

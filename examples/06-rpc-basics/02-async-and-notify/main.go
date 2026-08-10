@@ -1,8 +1,9 @@
-// 本示例对比生成客户端的 Async 返回回调与无业务返回值 Notify。
+// 本示例对比生成客户端的 Async 返回回调，以及无业务返回值的 Notify 与 Broadcast。
 package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/application"
@@ -25,9 +26,9 @@ func (target *CallerService) OnInit() error {
 	return nil
 }
 
-// OnStart 在后续 Service 任务中提交异步请求和单向通知。
+// OnStart 登记一个启动后 Timer Task，由它提交异步请求和单向通知。
 func (target *CallerService) OnStart(context.Context) error {
-	target.AfterFunc(100*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(100*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		// Async 提交成功不代表远端业务成功；最终结果由恰好一次的回调交付。
 		if err := target.players.AsyncGetPlayer(ctx, 1001, func(_ context.Context, value string, err error) {
 			if err != nil {
@@ -42,7 +43,13 @@ func (target *CallerService) OnStart(context.Context) error {
 		if err := target.players.NotifyRefresh(nil, 7); err != nil {
 			target.Logger().Error("notify failed")
 		}
-	})
+		// 当前 Node 只有一个匹配目标，Broadcast 仍走完整的广播准备与投递外观。
+		if err := target.players.BroadcastRefresh(ctx, 8); err != nil {
+			target.Logger().Error("broadcast failed")
+		}
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create rpc demo timer failed")
+	}
 	return nil
 }
 

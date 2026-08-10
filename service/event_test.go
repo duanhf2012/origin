@@ -22,6 +22,10 @@ type alternateTestEvent struct{ id EventID }
 
 func (event *alternateTestEvent) EventID() EventID { return event.id }
 
+type panickingTestEvent struct{}
+
+func (*panickingTestEvent) EventID() EventID { panic("event id") }
+
 func newEventFixture(
 	t testing.TB,
 	config SchedulerConfig,
@@ -137,6 +141,30 @@ func TestNotifyEventSyncIsolatesHandlersAndAggregatesFailures(t *testing.T) {
 	if err := fixture.service.NotifyEventAsync(&alternateTestEvent{id: 7}); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("payload mismatch error = %v", err)
 	}
+	if stats := fixture.service.EventStats(); stats.SyncNotifiedTotal != 1 || stats.AsyncNotifiedTotal != 0 ||
+		stats.HandlerFailureTotal != 2 {
+		t.Fatalf("EventStats() = %+v", stats)
+	}
+}
+
+func TestEventValidationRejectsNilZeroAndPanickingPayload(t *testing.T) {
+	var typedNil *testEvent
+	for name, event := range map[string]Event{
+		"nil":       nil,
+		"typed_nil": typedNil,
+		"zero_id":   &testEvent{},
+		"panic":     &panickingTestEvent{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := inspectEvent(event); !errors.Is(err, errs.ErrInvalidArgument) {
+				t.Fatalf("inspectEvent() error = %v", err)
+			}
+		})
+	}
+	var service *Service
+	if stats := service.EventStats(); stats != (EventStats{}) {
+		t.Fatalf("nil Service.EventStats() = %+v", stats)
+	}
 }
 
 // TestNotifyEventSyncAllowsAwaitAndPreservesListenerOrder 防止 awaitTask 因当前 Task
@@ -236,6 +264,42 @@ func TestNotifyEventAsyncUsesOneTaskAndAllowsAwait(t *testing.T) {
 	if payload != event {
 		t.Fatal("异步监听器未借用原 Event 实例")
 	}
+}
+
+func TestNotifyEventAsyncAggregatesFailuresWithoutStoppingScheduler(t *testing.T) {
+	completed := make(chan struct{})
+	fixture := newEventFixture(t, DefaultSchedulerConfig(), func(target *testService) error {
+		if err := target.SubscribeEvent(23, func(context.Context, Event) error {
+			return errors.New("first")
+		}); err != nil {
+			return err
+		}
+		if err := target.SubscribeEvent(23, func(context.Context, Event) error {
+			panic("second")
+		}); err != nil {
+			return err
+		}
+		return target.SubscribeEvent(23, func(context.Context, Event) error {
+			close(completed)
+			return nil
+		})
+	})
+	if err := fixture.service.NotifyEventAsync(&testEvent{id: 23}); err != nil {
+		t.Fatalf("NotifyEventAsync() error = %v", err)
+	}
+	waitSignal(t, completed)
+	waitForStats(t, fixture.service, func(stats ExecutionStats) bool {
+		return stats.CompletedTotal == 1
+	})
+	if stats := fixture.service.EventStats(); stats.AsyncNotifiedTotal != 1 || stats.HandlerFailureTotal != 2 {
+		t.Fatalf("EventStats() = %+v", stats)
+	}
+
+	next := make(chan struct{})
+	if err := fixture.service.DispatchAsync(func(context.Context) { close(next) }); err != nil {
+		t.Fatalf("DispatchAsync() after event failures error = %v", err)
+	}
+	waitSignal(t, next)
 }
 
 func TestEventRegistrationLimitsAndPhase(t *testing.T) {

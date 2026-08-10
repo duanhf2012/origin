@@ -9,6 +9,7 @@ import (
 	"github.com/duanhf2012/origin/v3/application"
 	"github.com/duanhf2012/origin/v3/discovery"
 	"github.com/duanhf2012/origin/v3/discovery/provider"
+	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/service"
 )
 
@@ -49,11 +50,15 @@ func (target *DiscoveryWatcherService) OnLost(_ context.Context, event discovery
 }
 
 // disappearingProvider 先发布一个权威远端快照，再提交空快照，演示 Lost 是立即状态事实。
-type disappearingProvider struct{ host provider.Host }
+type disappearingProvider struct {
+	host   provider.Host
+	cancel context.CancelFunc
+	done   chan struct{}
+}
 
 func (target *disappearingProvider) Start(context.Context) error {
 	// Provider 必须先设置 TTL，Host 才接受权威快照。
-	if err := target.host.SetTTL(time.Second); err != nil {
+	if err := target.host.SetTTL(3 * time.Second); err != nil {
 		return err
 	}
 	// 首个快照发布一个 Running 的远端 PlayerService。
@@ -64,19 +69,53 @@ func (target *disappearingProvider) Start(context.Context) error {
 		return err
 	}
 	target.host.Report(provider.Report{State: provider.StateReady})
-	// Provider 自己管理异步恢复 goroutine；空快照会立即产生 Lost。
+	// Provider 自己管理异步 goroutine，并在 Close 中取消、等待它退出。
+	runCtx, cancel := context.WithCancel(context.Background())
+	target.cancel = cancel
+	target.done = make(chan struct{})
 	go func() {
-		time.Sleep(500 * time.Millisecond)
-		_ = target.host.ReplaceSnapshot(provider.Snapshot{})
-		target.host.Report(provider.Report{State: provider.StateRecovering, Reconnects: 1})
+		defer close(target.done)
+		timer := time.NewTimer(500 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-runCtx.Done():
+			return
+		case <-timer.C:
+		}
+		// 空权威快照立即产生 Lost；不吞掉 Host 拒绝或关闭错误。
+		if err := target.host.ReplaceSnapshot(provider.Snapshot{}); err != nil {
+			target.host.Report(provider.Report{
+				State:     provider.StateRecovering,
+				ErrorCode: errs.CodeOf(err),
+			})
+			return
+		}
+		target.host.Report(provider.Report{
+			State:      provider.StateRecovering,
+			Reconnects: 1,
+		})
 	}()
 	return nil
 }
 
-// 这三个空实现满足完整 Provider SPI；示例不发布真实本地地址。
+// Publish 和 Withdraw 满足完整 Provider SPI；示例不发布真实本地地址。
 func (*disappearingProvider) Publish(context.Context, provider.Node) error { return nil }
 func (*disappearingProvider) Withdraw(context.Context) error               { return nil }
-func (*disappearingProvider) Close(context.Context) error                  { return nil }
+
+func (target *disappearingProvider) Close(ctx context.Context) error {
+	if target.cancel != nil {
+		target.cancel()
+	}
+	if target.done == nil {
+		return nil
+	}
+	select {
+	case <-target.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 // init 登记监听 Service 和名为 demo 的 Provider Factory。
 func init() {

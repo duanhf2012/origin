@@ -64,6 +64,49 @@ func TestDiagnosticsPreservesNodeAndServiceOrder(t *testing.T) {
 	}
 }
 
+// TestDiagnosticsStateTextCoversEveryPublishedState 固定诊断 JSON 中 Transport、Discovery
+// 和 Publication 的全部稳定文本，未知枚举统一降级为 unknown。
+func TestDiagnosticsStateTextCoversEveryPublishedState(t *testing.T) {
+	transport := map[TransportState]string{
+		TransportDisabled:   "disabled",
+		TransportStarting:   "starting",
+		TransportReady:      "ready",
+		TransportRecovering: "recovering",
+		TransportFailed:     "failed",
+		TransportStopping:   "stopping",
+		TransportStopped:    "stopped",
+		TransportState(255): "unknown",
+	}
+	for state, want := range transport {
+		if got := transportStateText(state); got != want {
+			t.Fatalf("transportStateText(%v) = %q", state, got)
+		}
+	}
+	discovery := map[DiscoveryState]string{
+		DiscoveryStarting:   "starting",
+		DiscoveryReady:      "ready",
+		DiscoveryRecovering: "recovering",
+		DiscoveryStopped:    "stopped",
+		DiscoveryState(255): "unknown",
+	}
+	for state, want := range discovery {
+		if got := discoveryStateText(state); got != want {
+			t.Fatalf("discoveryStateText(%v) = %q", state, got)
+		}
+	}
+	publication := map[PublicationState]string{
+		PublicationNotRequired: "not_required",
+		PublicationPending:     "pending",
+		PublicationPublished:   "published",
+		PublicationState(255):  "unknown",
+	}
+	for state, want := range publication {
+		if got := publicationStateText(state); got != want {
+			t.Fatalf("publicationStateText(%v) = %q", state, got)
+		}
+	}
+}
+
 // TestNilNodeDiagnostics 返回可解释失败 DTO，而不是在监控冷路径 panic。
 func TestNilNodeDiagnostics(t *testing.T) {
 	var current *Node

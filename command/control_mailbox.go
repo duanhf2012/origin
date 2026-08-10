@@ -326,14 +326,34 @@ func waitForControlResponse(
 	appName string,
 	requestID string,
 ) error {
+	return waitForControlResponseWithReader(
+		ctx,
+		paths,
+		appName,
+		requestID,
+		readOptionalRegularControlFile,
+	)
+}
+
+// waitForControlResponseWithReader 等待目标进程原子发布与 requestID 匹配的响应。
+//
+// readFile 参数只把平台文件读取边界显式化，便于确定性验证 Windows 瞬时共享冲突；正式
+// 路径始终传入 readOptionalRegularControlFile，不提供运行时替换或全局测试钩子。
+func waitForControlResponseWithReader(
+	ctx context.Context,
+	paths controlPaths,
+	appName string,
+	requestID string,
+	readFile func(string) ([]byte, error),
+) error {
 	ticker := time.NewTicker(controlPollInterval)
 	defer ticker.Stop()
 	for {
-		data, err := readOptionalRegularControlFile(paths.response)
-		if err != nil {
+		data, err := readFile(paths.response)
+		if err != nil && !isTransientControlResponseReadError(err) {
 			return processControlf("read control response %q: %v", paths.response, err)
 		}
-		if data != nil {
+		if err == nil && data != nil {
 			response, decodeErr := decodeControlResponse(data, requestID)
 			if decodeErr == nil {
 				if response.Success {

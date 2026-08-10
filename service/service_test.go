@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -123,6 +124,71 @@ func TestUnboundServiceUsesSafeDefaults(t *testing.T) {
 	}
 	if target.Logger().Enabled(originlog.InfoLevel) {
 		t.Fatal("未绑定 Logger 不应启用输出")
+	}
+}
+
+// TestDefaultLifecyclesAndStateNames 固定业务只嵌入基础类型、不覆盖生命周期方法时的空实现，
+// 以及全部公开状态用于日志和诊断时的稳定名称。
+func TestDefaultLifecyclesAndStateNames(t *testing.T) {
+	t.Parallel()
+
+	var base Service
+	if err := base.OnInit(); err != nil {
+		t.Fatalf("Service.OnInit() error = %v", err)
+	}
+	if err := base.OnStart(context.Background()); err != nil {
+		t.Fatalf("Service.OnStart() error = %v", err)
+	}
+	if err := base.OnStop(context.Background()); err != nil {
+		t.Fatalf("Service.OnStop() error = %v", err)
+	}
+	var module Module
+	if err := module.OnInit(); err != nil {
+		t.Fatalf("Module.OnInit() error = %v", err)
+	}
+	if err := module.OnStart(context.Background()); err != nil {
+		t.Fatalf("Module.OnStart() error = %v", err)
+	}
+	if err := module.OnStop(context.Background()); err != nil {
+		t.Fatalf("Module.OnStop() error = %v", err)
+	}
+
+	tests := []struct {
+		state State
+		want  string
+	}{
+		{state: StateCreated, want: "created"},
+		{state: StateInitializing, want: "initializing"},
+		{state: StateInitialized, want: "initialized"},
+		{state: StateStarting, want: "starting"},
+		{state: StateRunning, want: "running"},
+		{state: StateRetired, want: "retired"},
+		{state: StateStopping, want: "stopping"},
+		{state: StateStopped, want: "stopped"},
+		{state: StateFailed, want: "failed"},
+		{state: State(255), want: "unknown"},
+	}
+	for _, test := range tests {
+		if got := test.state.String(); got != test.want {
+			t.Errorf("State(%d).String() = %q, want %q", test.state, got, test.want)
+		}
+	}
+}
+
+func TestRuntimeOfReturnsOnlyBoundRuntime(t *testing.T) {
+	t.Parallel()
+
+	var typedNil *testService
+	if RuntimeOf(nil) != nil || RuntimeOf(typedNil) != nil || RuntimeOf(&testService{}) != nil {
+		t.Fatal("RuntimeOf() returned a Runtime for an unbound Service")
+	}
+	target := &testService{}
+	runtime := &testRuntime{nodeID: "game-1", name: "PlayerService", state: StateRunning}
+	if err := BindRuntime(target, runtime); err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeOf(target) != runtime {
+		t.Fatal("RuntimeOf() did not return the bound Runtime")
 	}
 }
 

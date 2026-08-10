@@ -12,7 +12,8 @@ import (
 
 // cronSchedule 是 Origin 对第三方 Cron Parser 的最小依赖边界。
 //
-// 框架只调用 Next 计算未来墙上时间，不创建 cron.Cron、不使用其 goroutine、Timer 或日志器。
+// 框架只调用 Next 计算 Node 逻辑时间轴上的未来日历点，不创建 cron.Cron、不使用其
+// goroutine、Timer 或日志器。
 type cronSchedule interface {
 	Next(time.Time) time.Time
 }
@@ -35,6 +36,15 @@ func (service *Service) CronFunc(
 	expression string,
 	fn TimerFunc,
 ) (TimerID, error) {
+	return service.cronFunc(expression, fn, nil, nil)
+}
+
+func (service *Service) cronFunc(
+	expression string,
+	fn TimerFunc,
+	module *Module,
+	registration *moduleTimerRegistration,
+) (TimerID, error) {
 	if service == nil || fn == nil {
 		return InvalidTimerID, invalidArgument("Cron Service 和回调不能为空")
 	}
@@ -51,7 +61,7 @@ func (service *Service) CronFunc(
 	if scheduler == nil {
 		return InvalidTimerID, errs.ErrServiceNotReady
 	}
-	timerID, err := scheduler.createCron(schedule, fn)
+	timerID, err := scheduler.createCron(schedule, fn, module, registration)
 	if err != nil {
 		return InvalidTimerID, err
 	}
@@ -87,6 +97,8 @@ func parseCronExpression(expression string) (cronSchedule, error) {
 func (scheduler *serviceScheduler) createCron(
 	schedule cronSchedule,
 	fn TimerFunc,
+	module *Module,
+	registration *moduleTimerRegistration,
 ) (TimerID, error) {
 	scheduler.mu.Lock()
 
@@ -119,6 +131,8 @@ func (scheduler *serviceScheduler) createCron(
 		schedule,
 		location,
 		fn,
+		module,
+		registration,
 	)
 	logQuota, suppressed := false, uint64(0)
 	if quotaRejected {

@@ -122,6 +122,27 @@ func TestLoggerAsyncFlushAndFixedFields(t *testing.T) {
 	}
 }
 
+// TestLoggerLogUsesDynamicPublicLevel 覆盖业务在运行时确定级别时使用的公开入口。
+func TestLoggerLogUsesDynamicPublicLevel(t *testing.T) {
+	t.Parallel()
+
+	handler := &memoryHandler{enabled: true}
+	config := DefaultConfig()
+	config.Mode = SyncMode
+	runtime, err := NewRuntime(config, handler)
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	t.Cleanup(func() { _ = runtime.Close(context.Background()) })
+
+	runtime.Logger().Log(WarnLevel, "dynamic", Int("attempt", 2))
+	records := handler.snapshot()
+	if len(records) != 1 || records[0].record.Level != WarnLevel ||
+		len(records[0].fields) != 1 || records[0].fields[0].Key() != "attempt" {
+		t.Fatalf("dynamic records = %+v", records)
+	}
+}
+
 // TestLoggerWithScopeAddsReservedContextOnce 防止框架归属字段被普通 With 过滤后同时丢失，
 // 也防止调用参数伪造 node_id 或 service_name 覆盖真实作用域。
 func TestLoggerWithScopeAddsReservedContextOnce(t *testing.T) {
@@ -261,10 +282,15 @@ func TestQueueFullDropsNewLog(t *testing.T) {
 	for range eventQueueSize {
 		logger.Info("queued")
 	}
-	// 队列满后的新 Warn 必须立即丢弃并分级计数。
+	// 队列满后的四种公开级别都必须立即丢弃并各自计数。
+	logger.Debug("dropped")
+	logger.Info("dropped")
 	logger.Warn("dropped")
-	if got := runtime.Stats().DroppedWarn; got != 1 {
-		t.Fatalf("DroppedWarn = %d, want 1", got)
+	logger.Error("dropped")
+	stats := runtime.Stats()
+	if stats.DroppedDebug != 1 || stats.DroppedInfo != 1 ||
+		stats.DroppedWarn != 1 || stats.DroppedError != 1 {
+		t.Fatalf("Dropped stats = %+v", stats)
 	}
 
 	// 解除 Handler 阻塞并完整关闭，确保大量排队日志被排空。
@@ -489,6 +515,12 @@ func TestNewNop(t *testing.T) {
 	}
 	logger.Info("ignored")
 	logger.ErrorStack("ignored")
+
+	// nil Runtime 的查询入口也必须保持与 Nop Logger 相同的安全语义。
+	var runtime *Runtime
+	if runtime.Logger().Enabled(InfoLevel) || runtime.Stats() != (Stats{}) {
+		t.Fatal("nil Runtime did not return safe zero values")
+	}
 }
 
 func TestNewRuntimeValidation(t *testing.T) {

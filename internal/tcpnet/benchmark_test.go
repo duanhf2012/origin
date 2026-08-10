@@ -11,7 +11,7 @@ import (
 
 func BenchmarkFrameLength(b *testing.B) {
 	// 基准覆盖 RPC 默认四字节大端帧头的编码和解码热路径。
-	options := FrameOptions{LengthFieldSize: 4, ByteOrder: BigEndian}
+	options := FrameOptions{LengthFieldSize: 4}
 	var header [4]byte
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -76,7 +76,7 @@ func BenchmarkScatterGatherAndCopy(b *testing.B) {
 	encodeFrameLength(
 		&header,
 		len(payload),
-		FrameOptions{LengthFieldSize: 4, ByteOrder: BigEndian},
+		FrameOptions{LengthFieldSize: 4},
 	)
 
 	b.Run("scatter_gather", func(b *testing.B) {

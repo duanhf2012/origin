@@ -20,7 +20,7 @@ import (
 	"github.com/duanhf2012/origin/v3/service"
 )
 
-// loadedConfig 是 M7 真正消费的框架配置快照。
+// loadedConfig 是 Application 启动过程消费的框架配置快照。
 type loadedConfig struct {
 	root            *originconfig.Snapshot
 	log             originlog.Config
@@ -36,7 +36,7 @@ type discoverySelection struct {
 	configRoot string
 }
 
-// bufferPoolConfig 只包含 M7 已实现的内存池开关。
+// bufferPoolConfig 只包含当前对外提供的内存池开关。
 type bufferPoolConfig struct {
 	TrackUsage bool `json:"track_usage"`
 }
@@ -186,7 +186,7 @@ type retentionConfigMirror struct {
 	Compress bool                  `json:"compress"`
 }
 
-// loadConfig 读取整个配置目录，再只解析 M7 已经拥有运行语义的框架字段。
+// loadConfig 读取整个配置目录，再只解析当前具有运行语义的框架字段。
 func loadConfig(directory string) (loadedConfig, error) {
 	snapshot, err := originconfig.LoadSnapshot(directory)
 	if err != nil {
@@ -197,11 +197,11 @@ func loadConfig(directory string) (loadedConfig, error) {
 		return loadedConfig{}, err
 	}
 
-	// 已经保留给后续里程碑的框架字段不能被静默忽略。
+	// 容易被误认为框架配置、但当前不受支持的顶层字段不能被静默忽略。
 	for _, name := range []string{"timer"} {
 		if _, exists := root[name]; exists {
 			return loadedConfig{}, invalidConfigf(
-				"配置字段 %q 尚未在 M7 实现",
+				"顶层框架配置字段 %q 不受支持",
 				name,
 			)
 		}
@@ -462,7 +462,7 @@ func decodeDiscoveryFilter(
 	nodeID string,
 	raw json.RawMessage,
 ) (internaldiscovery.Filter, error) {
-	// RawMessage 为 nil 只表示字段完全省略，此时保持兼容默认的全量公开发现。
+	// RawMessage 为 nil 只表示字段完全省略，此时采用全量公开发现的当前默认值。
 	if len(raw) == 0 {
 		return internaldiscovery.CompileFilter(false, nil)
 	}
@@ -817,7 +817,7 @@ func decodeSection(name string, raw any, target any) error {
 	return nil
 }
 
-// parseLogFormat 只接受 M1 内置的两种稳定格式名。
+// parseLogFormat 只接受当前内置的两种稳定格式名。
 func parseLogFormat(path, value string) (originlog.Format, error) {
 	switch strings.ToLower(value) {
 	case string(originlog.TextFormat):

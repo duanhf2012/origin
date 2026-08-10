@@ -8,15 +8,18 @@ import (
 
 	"github.com/duanhf2012/origin/v3/discovery"
 	"github.com/duanhf2012/origin/v3/errs"
+	"github.com/duanhf2012/origin/v3/internal/timerwheel"
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
 
 // discoveryServiceTestRuntime 提供公开 Service 外观所需的最小 Node 发现桥。
 type discoveryServiceTestRuntime struct {
-	state     State
-	instances []discovery.Instance
-	listener  discovery.IListener
-	nextID    discovery.ListenerID
+	state            State
+	instances        []discovery.Instance
+	listener         discovery.IListener
+	nextID           discovery.ListenerID
+	awaitNodeID      string
+	awaitServiceName string
 }
 
 func (runtime *discoveryServiceTestRuntime) NodeID() string      { return "gateway-1" }
@@ -64,10 +67,12 @@ func (runtime *discoveryServiceTestRuntime) ListDiscoveredServices(
 }
 
 func (runtime *discoveryServiceTestRuntime) AwaitDiscoveredService(
-	context.Context,
-	string,
-	string,
+	_ context.Context,
+	nodeID string,
+	serviceName string,
 ) error {
+	runtime.awaitNodeID = nodeID
+	runtime.awaitServiceName = serviceName
 	return nil
 }
 
@@ -121,6 +126,45 @@ func TestServiceDiscoveryQueryAndListenerFacade(t *testing.T) {
 	list := target.ListDiscoveredServices("PlayerService")
 	if len(list) != 1 || list[0].NodeID != "game-1" {
 		t.Fatalf("ListDiscoveredServices() = %+v", list)
+	}
+	engine, err := timerwheel.New(timerwheel.DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = engine.Close() })
+	runtime.state = StateStarting
+	if err := PrepareScheduler(target, DefaultSchedulerConfig(), engine); err != nil {
+		t.Fatal(err)
+	}
+	runtime.state = StateRunning
+	if err := ActivateScheduler(target); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		runtime.state = StateStopping
+		stopContext, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = StopScheduler(stopContext, target)
+		runtime.state = StateStopped
+	})
+	awaitResult := make(chan error, 1)
+	if err := target.DispatchAsync(func(ctx context.Context) {
+		awaitResult <- target.AwaitService(ctx, "PlayerService")
+	}); err != nil {
+		t.Fatalf("DispatchAsync() error = %v", err)
+	}
+	if err := <-awaitResult; err != nil {
+		t.Fatalf("AwaitService() error = %v", err)
+	}
+	if runtime.awaitNodeID != "" || runtime.awaitServiceName != "PlayerService" {
+		t.Fatalf(
+			"AwaitService() delegated node/service = %q/%q",
+			runtime.awaitNodeID,
+			runtime.awaitServiceName,
+		)
 	}
 
 	id, err := target.AddDiscoveryListener(discoveryTestListener{})

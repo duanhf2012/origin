@@ -32,7 +32,7 @@ type Options struct {
 	// 测试或独立使用 node.New 时可以省略，Node 会创建关闭统计的私有 Pool；正式
 	// Application 始终传入同一个共享实例。
 	BufferPool *bufferpool.Pool
-	// DiscoverySource 是 Application 在 M14 为实际启动 Node 创建的内部过渡完整快照源。
+	// DiscoverySource 是 Application 为同进程 Node 创建的内部完整快照源。
 	//
 	// 正式项目不直接设置该字段；省略时 Node 仍拥有空的本地目录，便于独立单元测试。
 	DiscoverySource *internaldiscovery.Source

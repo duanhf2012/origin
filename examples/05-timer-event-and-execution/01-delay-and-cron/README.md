@@ -1,6 +1,6 @@
 # 延迟 Timer 与 Cron
 
-Timer 回调始终回到所属 Service 的串行执行语义中，因此适合更新该 Service 的业务状态。`AfterFunc` 只执行一次，`NewTicker` 使用固定节拍重复执行，`CronFunc` 按墙上时间表达式调度。
+Timer 回调始终回到所属 Service 的串行执行语义中，因此适合更新该 Service 的业务状态。`AfterFunc` 只执行一次，`NewTicker` 使用固定节拍重复执行，`CronFunc` 按当前 Node 逻辑时间的日历表达式调度。
 
 ## 关键代码
 

@@ -76,6 +76,33 @@ func TestControlResponseCodecRejectsInvalidRecords(t *testing.T) {
 	}
 }
 
+func TestControlResponseCodecAcceptsCurrentAdminErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []errs.Code{
+		errs.CodeAdminUnavailable,
+		errs.CodeAdminStateConflict,
+	} {
+		encoded, err := encodeControlResponse(controlResponseRecord{
+			ID:        testControlID,
+			ErrorCode: code,
+			Message:   "admin control error",
+		})
+		if err != nil {
+			t.Fatalf("encodeControlResponse(%d) error = %v", code, err)
+		}
+		response, err := decodeControlResponse(encoded, testControlID)
+		if err != nil || response.ErrorCode != code {
+			t.Fatalf(
+				"decodeControlResponse(%d) = (%+v, %v)",
+				code,
+				response,
+				err,
+			)
+		}
+	}
+}
+
 func TestControlPathsUsePIDDirectoryAndApplicationPrefix(t *testing.T) {
 	t.Parallel()
 

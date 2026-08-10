@@ -87,7 +87,7 @@ func (target *EventService) onPlayerAudit(ctx context.Context, event service.Eve
 
 // OnStart 通过一次性 Timer 进入正常的 Service 任务上下文后发送事件。
 func (target *EventService) OnStart(context.Context) error {
-	target.AfterFunc(100*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
+	if id := target.AfterFunc(100*time.Millisecond, func(ctx context.Context, _ service.TimerID) {
 		// 同步通知会在当前任务中按订阅顺序执行全部监听器，并聚合返回错误。
 		if err := target.NotifyEventSync(ctx, PlayerJoined{PlayerID: 1001, Mode: "sync"}); err != nil {
 			target.Logger().Error("sync event failed")
@@ -99,7 +99,7 @@ func (target *EventService) OnStart(context.Context) error {
 		}
 
 		// 稍后读取累计统计，确保异步事件已有机会完成。
-		target.AfterFunc(200*time.Millisecond, func(context.Context, service.TimerID) {
+		if statsID := target.AfterFunc(200*time.Millisecond, func(context.Context, service.TimerID) {
 			stats := target.EventStats()
 			target.Logger().Info(fmt.Sprintf(
 				"event stats: sync=%d async=%d failures=%d",
@@ -107,8 +107,12 @@ func (target *EventService) OnStart(context.Context) error {
 				stats.AsyncNotifiedTotal,
 				stats.HandlerFailureTotal,
 			))
-		})
-	})
+		}); statsID == service.InvalidTimerID {
+			target.Logger().Error("create event stats timer failed")
+		}
+	}); id == service.InvalidTimerID {
+		return fmt.Errorf("create event demonstration timer failed")
+	}
 	return nil
 }
 

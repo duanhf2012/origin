@@ -69,6 +69,18 @@ func TestNormalizeSnapshotCopiesSortsAndRejectsDuplicates(t *testing.T) {
 	}
 }
 
+// TestNormalizeSnapshotRejectsNodeCapacityBeforeTraversal 验证完整快照在超过公开 Node
+// 上限时快速失败，不进入逐项规范化或分配巨量索引。
+func TestNormalizeSnapshotRejectsNodeCapacityBeforeTraversal(t *testing.T) {
+	oversized := Snapshot{Nodes: make([]Node, MaxNodes+1)}
+	if _, err := NormalizeSnapshot(oversized); !errs.IsCode(
+		err,
+		errs.CodeDiscoveryCapacity,
+	) {
+		t.Fatalf("NormalizeSnapshot(MaxNodes+1) error = %v", err)
+	}
+}
+
 func TestNormalizeNodeRejectsInvalidTCPAddressWithoutPanicking(t *testing.T) {
 	node := validNode("game-1", 1)
 	node.Transport = TransportTCP

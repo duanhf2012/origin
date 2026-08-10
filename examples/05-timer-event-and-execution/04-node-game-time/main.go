@@ -76,12 +76,21 @@ func (target *TimedService) OnStart(context.Context) error {
 
 	// 快进跨过多个 6 小时节拍时只合并执行一次，不会补跑全部历史周期。
 	target.tickerID = target.NewTicker(6*time.Hour, func(context.Context, service.TimerID) {
-		stats := target.TimerStats()
 		target.Logger().Info(fmt.Sprintf(
-			"Ticker fired logical=%s coalesced=%d",
+			"Ticker fired logical=%s",
 			target.GetNode().Now().Format(time.RFC3339),
-			stats.CoalescedTotal,
 		))
+		// Ticker 的合并统计在本回调返回、框架计算下一名义点时提交。用后续 Service
+		// Timer 读取，避免在当前回调内看到提交前的旧值。
+		if id := target.AfterFunc(0, func(context.Context, service.TimerID) {
+			stats := target.TimerStats()
+			target.Logger().Info(fmt.Sprintf(
+				"Ticker coalesced=%d",
+				stats.CoalescedTotal,
+			))
+		}); id == service.InvalidTimerID {
+			target.Logger().Error("create ticker stats timer failed")
+		}
 	})
 	if target.tickerID == service.InvalidTimerID {
 		return fmt.Errorf("create ticker failed")

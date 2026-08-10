@@ -4,13 +4,116 @@ package command
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/duanhf2012/origin/v3/errs"
+	"golang.org/x/sys/windows"
 )
+
+func TestWindowsControlResponseSharingViolationIsTransient(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "game.control.response")
+	if err := os.WriteFile(path, []byte("response"), 0o600); err != nil {
+		t.Fatalf("WriteFile(response) error = %v", err)
+	}
+	pathPointer, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatalf("UTF16PtrFromString(response path) error = %v", err)
+	}
+	handle, err := windows.CreateFile(
+		pathPointer,
+		windows.GENERIC_READ,
+		0,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("CreateFile(exclusive response) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = windows.CloseHandle(handle)
+	})
+
+	_, readErr := readOptionalRegularControlFile(path)
+	if readErr == nil {
+		t.Fatal("readOptionalRegularControlFile(exclusive response) error = nil")
+	}
+	if !isTransientControlResponseReadError(readErr) {
+		t.Fatalf("exclusive response error = %v, want transient", readErr)
+	}
+}
+
+func TestWindowsControlResponseRetriesTransientRead(t *testing.T) {
+	t.Parallel()
+
+	pidDir := t.TempDir()
+	lease, err := acquirePIDLease(pidDir, "game")
+	if err != nil {
+		t.Fatalf("acquirePIDLease() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = lease.close()
+	})
+	paths := newControlPaths(pidDir, "game")
+	encoded, err := encodeControlResponse(controlResponseRecord{
+		ID:      testControlID,
+		Success: true,
+	})
+	if err != nil {
+		t.Fatalf("encodeControlResponse() error = %v", err)
+	}
+
+	reads := 0
+	readFile := func(path string) ([]byte, error) {
+		if path != paths.response {
+			t.Fatalf("response path = %q, want %q", path, paths.response)
+		}
+		reads++
+		if reads == 1 {
+			return nil, &os.PathError{
+				Op:   "open",
+				Path: path,
+				Err:  windows.ERROR_SHARING_VIOLATION,
+			}
+		}
+		return encoded, nil
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := waitForControlResponseWithReader(
+		ctx,
+		paths,
+		"game",
+		testControlID,
+		readFile,
+	); err != nil {
+		t.Fatalf("waitForControlResponseWithReader() error = %v", err)
+	}
+	if reads != 2 {
+		t.Fatalf("response reads = %d, want 2", reads)
+	}
+
+	if !isTransientControlResponseReadError(
+		&os.PathError{Err: windows.ERROR_LOCK_VIOLATION},
+	) {
+		t.Fatal("ERROR_LOCK_VIOLATION was not classified as transient")
+	}
+	if isTransientControlResponseReadError(
+		&os.PathError{Err: windows.ERROR_ACCESS_DENIED},
+	) {
+		t.Fatal("ERROR_ACCESS_DENIED was classified as transient")
+	}
+	if isTransientControlResponseReadError(errors.New("sharing violation text only")) {
+		t.Fatal("plain text error was classified as transient")
+	}
+}
 
 func TestWindowsStopControlLifecycle(t *testing.T) {
 	t.Parallel()

@@ -265,6 +265,22 @@ func awaitRemoteEcho(
 	}
 }
 
+// TestTCPHeartbeatKeepsIdleRPCSessionUsable 验证连接空闲超过 ReadIdleTimeout 后，应用层
+// Ping/Pong 能保持真实双 Node 会话存活，后续业务调用仍复用同一可用链路。
+func TestTCPHeartbeatKeepsIdleRPCSessionUsable(t *testing.T) {
+	fixture := newRemoteRPCFixture(t)
+	if result := awaitRemoteEcho(t, fixture, "before-idle"); result != "before-idle-echo" {
+		t.Fatalf("initial remote echo = %q", result)
+	}
+
+	// 测试配置的心跳周期是 1s/3；等待超过完整 ReadIdleTimeout，确保至少一轮
+	// Ping/Pong 已经发生，而不是依赖业务流量刷新读空闲计时。
+	time.Sleep(1200 * time.Millisecond)
+	if result := awaitRemoteEcho(t, fixture, "after-idle"); result != "after-idle-echo" {
+		t.Fatalf("post-heartbeat remote echo = %q", result)
+	}
+}
+
 func TestGeneratedRemoteAwaitAsyncNotifyAndReconnect(t *testing.T) {
 	fixture := newRemoteRPCFixture(t)
 	if result := awaitRemoteEcho(t, fixture, "first"); result != "first-echo" {
@@ -1076,21 +1092,14 @@ func TestRemoteContractFingerprintMismatchFailsBeforeSend(t *testing.T) {
 			playerRPCContractID,
 			fingerprint,
 		)
-		request, encodeErr := encodePlayerRPCEchoNameRequest(
-			client,
-			rpc.CallRequest,
-			"mismatch",
-		)
-		if encodeErr != nil {
-			result <- encodeErr
-			return
-		}
-		result <- client.Await(
+		prepared, prepareErr := client.PrepareAwait(
 			ctx,
 			playerRPCEchoNameMethodID,
-			request,
-			func([]byte) error { return nil },
 		)
+		if prepareErr == nil {
+			prepared.FinishInvocation()
+		}
+		result <- prepareErr
 	}); err != nil {
 		t.Fatal(err)
 	}

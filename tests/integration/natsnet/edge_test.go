@@ -64,6 +64,13 @@ func TestInvalidPublicArguments(t *testing.T) {
 	if err := conn.Publish("", nil); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("Publish(empty subject) error = %v", err)
 	}
+	if err := conn.PublishRequest(
+		"origin.integration.invalid",
+		"",
+		nil,
+	); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("PublishRequest(empty reply) error = %v", err)
+	}
 	if _, err := conn.Subscribe(
 		context.Background(),
 		"",

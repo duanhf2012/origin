@@ -63,12 +63,20 @@ func newStatsTestClient(
 		dispatcher:  dispatcher,
 		public:      true,
 	}
+	invocationCtx, finishInvocation := context.WithTimeout(
+		context.Background(),
+		service.DefaultAwaitTimeout,
+	)
 	client := Client{
 		owner:       &statsTestOwner{},
 		runtime:     runtime,
 		target:      ToService("PlayerService"),
 		contractID:  1,
 		fingerprint: runtimeTestFingerprint,
+		invocation: &clientInvocation{
+			ctx:    invocationCtx,
+			finish: finishInvocation,
+		},
 		prepared: preparedTarget{
 			transport:   preparedLocal,
 			serviceName: "PlayerService",
@@ -179,6 +187,29 @@ func TestAwaitStatsRejected(t *testing.T) {
 	if stats.OutboundRejected != 1 || stats.InboundRejected != 1 ||
 		stats.OutboundAccepted != 0 || stats.Pending != 0 {
 		t.Fatalf("rejected stats = %+v", stats)
+	}
+}
+
+func TestAwaitRejectsSubmissionWithoutPreparedInvocation(t *testing.T) {
+	runtime, client := newStatsTestClient(
+		t,
+		&runtimeTestDispatcher{},
+		&statsTestTarget{},
+	)
+	// 丢弃白盒夹具预建的预算，模拟跳过 PrepareAwait 直接进入底层提交阶段。
+	client.FinishInvocation()
+	client.invocation = nil
+	request := runtime.pool.Acquire(2)
+	if err := client.Await(
+		context.Background(),
+		1,
+		request,
+		func([]byte) error { return nil },
+	); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("Await() error = %v, want invalid argument", err)
+	}
+	if stats := runtime.pool.Stats(); stats.InUseBuffers != 0 {
+		t.Fatalf("buffer stats after rejected direct Await = %+v", stats)
 	}
 }
 

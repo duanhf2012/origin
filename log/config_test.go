@@ -2,6 +2,7 @@ package log_test
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/duanhf2012/origin/v3/errs"
@@ -125,13 +126,30 @@ func TestConfigValidation(t *testing.T) {
 func TestParseLevel(t *testing.T) {
 	t.Parallel()
 
-	// 合法级别允许大小写差异，并返回标准枚举。
-	level, ok := originlog.ParseLevel("WARN")
-	if !ok || level != originlog.WarnLevel {
-		t.Fatalf("ParseLevel(WARN) = %v, %v", level, ok)
+	// 全部公开级别都允许大小写差异，并稳定输出小写名称。
+	tests := []struct {
+		input string
+		want  originlog.Level
+	}{
+		{input: "DEBUG", want: originlog.DebugLevel},
+		{input: "Info", want: originlog.InfoLevel},
+		{input: "WARN", want: originlog.WarnLevel},
+		{input: "error", want: originlog.ErrorLevel},
+	}
+	for _, test := range tests {
+		level, ok := originlog.ParseLevel(test.input)
+		if !ok || level != test.want {
+			t.Errorf("ParseLevel(%q) = %v, %v, want %v, true", test.input, level, ok, test.want)
+		}
+		if got := level.String(); got != strings.ToLower(test.input) {
+			t.Errorf("Level.String() = %q, want %q", got, strings.ToLower(test.input))
+		}
 	}
 	// 未支持的 trace 必须明确失败。
-	if _, ok := originlog.ParseLevel("trace"); ok {
+	if level, ok := originlog.ParseLevel("trace"); ok || level != originlog.LevelInvalid {
 		t.Fatalf("ParseLevel(trace) unexpectedly succeeded")
+	}
+	if got := originlog.Level(255).String(); got != "invalid" {
+		t.Fatalf("invalid Level.String() = %q", got)
 	}
 }

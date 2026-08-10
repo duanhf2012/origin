@@ -4,9 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
+	runtimepprof "runtime/pprof"
+	"runtime/trace"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,6 +124,214 @@ func TestPprofValidation(t *testing.T) {
 		errs.ErrDiagnosticsStateConflict,
 	) {
 		t.Fatalf("created StartPprof() error = %v", err)
+	}
+}
+
+// TestPprofDurationValidation 防止超大 seconds 在转换为 time.Duration 时回绕为负数，
+// 导致原本应长期采集的 CPU Profile 或 Trace 立即返回一个误导性的成功结果。
+func TestPprofDurationValidation(t *testing.T) {
+	const overflowingSeconds = "9223372036854775807"
+	mux := newPprofMux()
+	for _, route := range []string{"profile", "trace"} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(
+			http.MethodGet,
+			"http://origin.test/debug/pprof/"+route+"?seconds="+overflowingSeconds,
+			nil,
+		)
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s overflowing seconds status = %d, want 400", route, response.Code)
+		}
+	}
+
+	maximumSeconds := int64(time.Duration(1<<63-1) / time.Second)
+	request := httptest.NewRequest(http.MethodGet, "http://origin.test/debug/pprof/profile", nil)
+	request.URL.RawQuery = "seconds=" + fmt.Sprint(maximumSeconds)
+	duration, err := parsePositiveDuration(request, "seconds", time.Second)
+	if err != nil || duration != time.Duration(maximumSeconds)*time.Second {
+		t.Fatalf("maximum duration = %s, %v", duration, err)
+	}
+}
+
+// TestPprofMuxProfileAndSymbolBoundaries 固定索引使用的每个 Runtime Profile 都真实注册，
+// symbol 遵守 pprof 握手格式，并对超限 POST 明确失败而不是返回静默截断的部分结果。
+func TestPprofMuxProfileAndSymbolBoundaries(t *testing.T) {
+	mux := newPprofMux()
+	for _, profile := range runtimepprof.Profiles() {
+		request := httptest.NewRequest(
+			http.MethodGet,
+			"http://origin.test/debug/pprof/"+profile.Name(),
+			nil,
+		)
+		_, pattern := mux.Handler(request)
+		if pattern == "" {
+			t.Errorf("Runtime profile %q is listed but not registered", profile.Name())
+		}
+	}
+
+	symbol := httptest.NewRecorder()
+	mux.ServeHTTP(
+		symbol,
+		httptest.NewRequest(http.MethodGet, "http://origin.test/debug/pprof/symbol", nil),
+	)
+	if symbol.Code != http.StatusOK || !strings.HasPrefix(symbol.Body.String(), "num_symbols: 1\n") {
+		t.Fatalf("symbol handshake status=%d body=%q", symbol.Code, symbol.Body.String())
+	}
+
+	overflow := httptest.NewRecorder()
+	mux.ServeHTTP(
+		overflow,
+		httptest.NewRequest(
+			http.MethodPost,
+			"http://origin.test/debug/pprof/symbol",
+			strings.NewReader(strings.Repeat("1", pprofSymbolMaxBodyBytes+1)),
+		),
+	)
+	if overflow.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("symbol overflow status = %d, want 413", overflow.Code)
+	}
+}
+
+// TestPprofHandlers 验证私有 pprof Mux 的标准读取、方法限制、运行时互斥与取消分支。
+// 底层 ResponseWriter/Runtime Profile 的写失败没有稳定公共注入点，不为覆盖率增加生产钩子。
+func TestPprofHandlers(t *testing.T) {
+	mux := newPprofMux()
+
+	for _, test := range []struct {
+		name        string
+		method      string
+		target      string
+		wantStatus  int
+		wantContent string
+	}{
+		{name: "index", method: http.MethodGet, target: "/debug/pprof/", wantStatus: http.StatusOK, wantContent: "Origin pprof"},
+		{name: "index wrong method", method: http.MethodPost, target: "/debug/pprof/", wantStatus: http.StatusMethodNotAllowed},
+		{name: "unknown index child", method: http.MethodGet, target: "/debug/pprof/missing", wantStatus: http.StatusNotFound},
+		{name: "cmdline", method: http.MethodGet, target: "/debug/pprof/cmdline", wantStatus: http.StatusOK},
+		{name: "cmdline wrong method", method: http.MethodPost, target: "/debug/pprof/cmdline", wantStatus: http.StatusMethodNotAllowed},
+		{name: "named binary", method: http.MethodGet, target: "/debug/pprof/goroutine", wantStatus: http.StatusOK},
+		{name: "named text", method: http.MethodGet, target: "/debug/pprof/goroutine?debug=1", wantStatus: http.StatusOK, wantContent: "goroutine profile"},
+		{name: "named invalid debug", method: http.MethodGet, target: "/debug/pprof/goroutine?debug=-1", wantStatus: http.StatusBadRequest},
+		{name: "named wrong method", method: http.MethodPost, target: "/debug/pprof/goroutine", wantStatus: http.StatusMethodNotAllowed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, httptest.NewRequest(test.method, "http://origin.test"+test.target, nil))
+			if response.Code != test.wantStatus ||
+				test.wantContent != "" && !strings.Contains(response.Body.String(), test.wantContent) {
+				t.Fatalf("status=%d body=%q, want status=%d content=%q",
+					response.Code, response.Body.String(), test.wantStatus, test.wantContent)
+			}
+		})
+	}
+
+	missing := httptest.NewRecorder()
+	handleNamedProfile(
+		missing,
+		httptest.NewRequest(http.MethodGet, "http://origin.test/debug/pprof/missing", nil),
+		"missing",
+	)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing named profile status = %d, want 404", missing.Code)
+	}
+
+	t.Run("CPU canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		response := httptest.NewRecorder()
+		handlePprofCPU(
+			response,
+			httptest.NewRequest(http.MethodGet, "http://origin.test/debug/pprof/profile?seconds=1", nil).WithContext(ctx),
+		)
+		if response.Code != http.StatusOK || response.Body.Len() == 0 {
+			t.Fatalf("canceled CPU profile status=%d bytes=%d", response.Code, response.Body.Len())
+		}
+	})
+
+	t.Run("CPU already active", func(t *testing.T) {
+		if err := runtimepprof.StartCPUProfile(io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		defer runtimepprof.StopCPUProfile()
+		response := httptest.NewRecorder()
+		handlePprofCPU(
+			response,
+			httptest.NewRequest(http.MethodGet, "http://origin.test/debug/pprof/profile?seconds=1", nil),
+		)
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("concurrent CPU profile status = %d, want 500", response.Code)
+		}
+	})
+
+	t.Run("trace canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		response := httptest.NewRecorder()
+		handlePprofTrace(
+			response,
+			httptest.NewRequest(http.MethodGet, "http://origin.test/debug/pprof/trace?seconds=1", nil).WithContext(ctx),
+		)
+		if response.Code != http.StatusOK || response.Body.Len() == 0 {
+			t.Fatalf("canceled trace status=%d bytes=%d", response.Code, response.Body.Len())
+		}
+	})
+
+	t.Run("trace already active", func(t *testing.T) {
+		if err := trace.Start(io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		defer trace.Stop()
+		response := httptest.NewRecorder()
+		handlePprofTrace(
+			response,
+			httptest.NewRequest(http.MethodGet, "http://origin.test/debug/pprof/trace?seconds=1", nil),
+		)
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("concurrent trace status = %d, want 500", response.Code)
+		}
+	})
+
+	for _, route := range []string{"profile", "trace"} {
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(
+			response,
+			httptest.NewRequest(http.MethodPost, "http://origin.test/debug/pprof/"+route, nil),
+		)
+		if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet {
+			t.Fatalf("POST %s status=%d Allow=%q", route, response.Code, response.Header().Get("Allow"))
+		}
+	}
+
+	programCounter := reflect.ValueOf(handlePprofSymbol).Pointer()
+	symbol := httptest.NewRecorder()
+	mux.ServeHTTP(
+		symbol,
+		httptest.NewRequest(
+			http.MethodPost,
+			"http://origin.test/debug/pprof/symbol",
+			strings.NewReader(fmt.Sprintf("%d+1", programCounter)),
+		),
+	)
+	if symbol.Code != http.StatusOK || !strings.Contains(symbol.Body.String(), "handlePprofSymbol") {
+		t.Fatalf("symbol lookup status=%d body=%q", symbol.Code, symbol.Body.String())
+	}
+
+	readFailure := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "http://origin.test/debug/pprof/symbol", nil)
+	request.Body = failingAdminBody{}
+	mux.ServeHTTP(readFailure, request)
+	if readFailure.Code != http.StatusBadRequest {
+		t.Fatalf("symbol read failure status = %d, want 400", readFailure.Code)
+	}
+
+	wrongSymbolMethod := httptest.NewRecorder()
+	mux.ServeHTTP(
+		wrongSymbolMethod,
+		httptest.NewRequest(http.MethodPut, "http://origin.test/debug/pprof/symbol", nil),
+	)
+	if wrongSymbolMethod.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("PUT symbol status = %d, want 405", wrongSymbolMethod.Code)
 	}
 }
 

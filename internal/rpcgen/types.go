@@ -41,7 +41,7 @@ func validateType(
 	)
 }
 
-// validateTypeWithCodecs 在 M11 内置规则前选择精确具名自定义 Codec。
+// validateTypeWithCodecs 在内置规则前选择精确具名自定义 Codec。
 func validateTypeWithCodecs(
 	typ types.Type,
 	topLevel bool,
@@ -57,7 +57,7 @@ func validateTypeWithCodecs(
 		stack = make(map[types.Type]bool)
 	}
 	// 自定义 Codec 把目标具名值视为一个完整叶子，不再检查其内部未导出字段或
-	// Protobuf Opaque 表示；外层指针和容器会先在递归调用处保持 M11 语义。
+	// Protobuf Opaque 表示；外层指针和容器会先在递归调用处保持当前语义。
 	if codecs.lookup(typ) != nil {
 		return nil
 	}
@@ -140,7 +140,7 @@ func validateTypeWithCodecs(
 			}
 			if field.Embedded() {
 				return fmt.Errorf(
-					"%s.%s: M11 不支持匿名嵌入字段",
+					"%s.%s: RPC 契约不支持匿名嵌入字段",
 					path,
 					field.Name(),
 				)
@@ -187,7 +187,7 @@ func validateNested(
 	)
 }
 
-// supportedBasic 列出 M11 具有固定线值的全部 Go 基础类型。
+// supportedBasic 列出当前具有固定线值的全部 Go 基础类型。
 func supportedBasic(kind types.BasicKind) bool {
 	switch kind {
 	case types.Bool,

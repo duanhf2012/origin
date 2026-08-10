@@ -37,6 +37,6 @@
   Event 后编码 JSON。Summary 适合秒级监控，Full 与 pprof 适合按需排障。
 - OS RSS、容器 working set/limit、进程 CPU、宿主机负载和网络吞吐继续由外部系统指标采集；
   pprof 不是 Metrics API。
-- 完整用法、API 路径、迁移与六组可运行程序见
+- 完整用法、API 路径、迁移与七组可运行程序见
   [第 10 章教程](../guides/10.admin-diagnostics-and-pprof.md) 和
   [`examples/10-admin-diagnostics-and-pprof`](../../../../examples/10-admin-diagnostics-and-pprof/README.md)。

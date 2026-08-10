@@ -3,6 +3,8 @@ package rpcfixture
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,28 +111,234 @@ func TestV31ExplicitCallDeadlineOverridesDefault(t *testing.T) {
 	}
 }
 
-// TestV31AwaitAcceptsNilContext 验证 AwaitXxx 的执行身份来自 owner 当前 Service Task，
-// nil 只表示让框架为这次公开调用建立新的默认预算。
-func TestV31AwaitAcceptsNilContext(t *testing.T) {
+// TestV31AwaitAcceptsOptionalContexts 验证 AwaitXxx 的执行身份来自 owner 当前 Service
+// Task；nil、Background 和 TODO 只决定本次调用如何建立 Context 预算。
+func TestV31AwaitAcceptsOptionalContexts(t *testing.T) {
 	fixture := newRPCFixture(t)
-	result := make(chan string, 1)
-	errors := make(chan error, 1)
+	done := make(chan struct{})
 	if err := fixture.caller.DispatchAsync(func(context.Context) {
-		value, callErr := NewPlayerRPCClient(
+		defer close(done)
+		client := NewPlayerRPCClient(
 			fixture.caller,
 			rpc.ToService("PlayerService"),
-		).AwaitEchoName(nil, "managed")
-		result <- value
-		errors <- callErr
+		)
+		contexts := []struct {
+			name string
+			ctx  context.Context
+		}{
+			{name: "nil", ctx: nil},
+			{name: "background", ctx: context.Background()},
+			{name: "todo", ctx: context.TODO()},
+		}
+		for _, current := range contexts {
+			value, callErr := client.AwaitEchoName(current.ctx, current.name)
+			if callErr != nil || value != current.name+"-echo" {
+				t.Errorf(
+					"AwaitEchoName(%s) value=%q error=%v",
+					current.name,
+					value,
+					callErr,
+				)
+			}
+		}
 	}); err != nil {
 		t.Fatalf("DispatchAsync() error = %v", err)
 	}
+	awaitSignal(t, done)
+}
 
-	if err := <-errors; err != nil {
-		t.Fatalf("AwaitEchoName(nil) error = %v", err)
+// TestV31GeneratedCallErrorsAndConcurrency 验证普通 goroutine 的 Call 复用与 Await 相同的
+// 路由、业务错误、panic 边界，并允许同一个轻量客户端被并发调用。
+func TestV31GeneratedCallErrorsAndConcurrency(t *testing.T) {
+	fixture := newRPCFixture(t)
+	client := NewPlayerRPCClient(
+		fixture.caller,
+		rpc.ToService("PlayerService"),
+	)
+
+	fixture.player.ShouldFail = true
+	_, _, err := client.CallGetPlayer(
+		nil,
+		1,
+		PlayerData{Name: "business-error"},
+		nil,
+	)
+	if !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("Call business error = %v", err)
 	}
-	if value := <-result; value != "managed-echo" {
-		t.Fatalf("AwaitEchoName(nil) value = %q", value)
+	fixture.player.ShouldFail = false
+	fixture.player.ShouldPanic = true
+	_, _, err = client.CallGetPlayer(
+		nil,
+		2,
+		PlayerData{Name: "panic"},
+		nil,
+	)
+	if !errors.Is(err, errs.ErrRPCExecutionPanic) {
+		t.Fatalf("Call panic error = %v", err)
+	}
+	fixture.player.ShouldPanic = false
+
+	wrongNode := NewPlayerRPCClient(
+		fixture.caller,
+		rpc.ToServiceOnNode("missing-node", "PlayerService"),
+	)
+	if _, err := wrongNode.CallEchoName(nil, "missing"); !errors.Is(
+		err,
+		errs.ErrRPCNoRoute,
+	) {
+		t.Fatalf("Call no-route error = %v", err)
+	}
+	mismatch := NewPlayerRPCClient(
+		fixture.caller,
+		rpc.ToService("CallerService"),
+	)
+	if _, err := mismatch.CallEchoName(nil, "mismatch"); !errors.Is(
+		err,
+		errs.ErrRPCContractMismatch,
+	) {
+		t.Fatalf("Call contract error = %v", err)
+	}
+
+	const callers = 32
+	var group sync.WaitGroup
+	errorsCh := make(chan error, callers)
+	for index := 0; index < callers; index++ {
+		index := index
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			input := fmt.Sprintf("caller-%d", index)
+			value, callErr := client.CallEchoName(nil, input)
+			if callErr != nil {
+				errorsCh <- callErr
+				return
+			}
+			if value != input+"-echo" {
+				errorsCh <- fmt.Errorf("value=%q", value)
+			}
+		}()
+	}
+	group.Wait()
+	close(errorsCh)
+	for callErr := range errorsCh {
+		t.Errorf("concurrent Call error: %v", callErr)
+	}
+}
+
+// TestV31GeneratedCallCancellationReleasesLateResponse 验证 Call 观察取消后立即返回，目标
+// 晚到的完成仍严格归还 Buffer，不会二次完成或泄漏。
+func TestV31GeneratedCallCancellationReleasesLateResponse(t *testing.T) {
+	fixture := newRPCFixture(t)
+	release := make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(release)
+		}
+	})
+	started := make(chan struct{}, 1)
+	fixture.player.Wait = release
+	fixture.player.WaitStarted = started
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, _, callErr := NewPlayerRPCClient(
+			fixture.caller,
+			rpc.ToService("PlayerService"),
+		).CallGetPlayer(
+			ctx,
+			3,
+			PlayerData{Name: "cancel"},
+			nil,
+		)
+		result <- callErr
+	}()
+	awaitSignal(t, started)
+	cancel()
+	if err := <-result; !errors.Is(err, errs.ErrCanceled) {
+		t.Fatalf("Call cancel error = %v", err)
+	}
+
+	close(release)
+	released = true
+	barrier := make(chan struct{})
+	if err := fixture.player.DispatchAsync(func(context.Context) {
+		close(barrier)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	awaitSignal(t, barrier)
+	if stats := fixture.pool.Stats(); stats.InUseBuffers != 0 {
+		t.Fatalf("canceled Call Buffer not released: %+v", stats)
+	}
+}
+
+// TestV31GeneratedClientRejectsInvalidBinding 验证生成客户端在 owner 或逻辑目标无效时安全
+// 返回固定参数错误，不编码、不投递，也不执行 Async 回调。
+func TestV31GeneratedClientRejectsInvalidBinding(t *testing.T) {
+	fixture := newRPCFixture(t)
+	cases := []struct {
+		name   string
+		client PlayerRPCClient
+	}{
+		{
+			name: "nil-owner",
+			client: NewPlayerRPCClient(
+				nil,
+				rpc.ToService("PlayerService"),
+			),
+		},
+		{
+			name: "empty-target",
+			client: NewPlayerRPCClient(
+				fixture.caller,
+				rpc.ToService(""),
+			),
+		},
+	}
+	for _, current := range cases {
+		t.Run(current.name, func(t *testing.T) {
+			if _, err := current.client.CallEchoName(nil, "invalid"); !errors.Is(
+				err,
+				errs.ErrInvalidArgument,
+			) {
+				t.Fatalf("Call error = %v", err)
+			}
+			callbackCalled := false
+			if err := current.client.AsyncEchoName(
+				nil,
+				"invalid",
+				func(context.Context, string, error) {
+					callbackCalled = true
+				},
+			); !errors.Is(err, errs.ErrInvalidArgument) {
+				t.Fatalf("Async error = %v", err)
+			}
+			if callbackCalled {
+				t.Fatal("invalid Async executed callback")
+			}
+			if err := current.client.NotifyPlayerOnline(nil, 1); !errors.Is(
+				err,
+				errs.ErrInvalidArgument,
+			) {
+				t.Fatalf("Notify error = %v", err)
+			}
+			if err := current.client.BroadcastPlayerOnline(nil, 1); !errors.Is(
+				err,
+				errs.ErrInvalidArgument,
+			) {
+				t.Fatalf("Broadcast error = %v", err)
+			}
+		})
+	}
+	if fixture.player.GetCount != 0 || fixture.player.OnlineID != 0 {
+		t.Fatalf(
+			"invalid client reached target: gets=%d online=%d",
+			fixture.player.GetCount,
+			fixture.player.OnlineID,
+		)
 	}
 }
 

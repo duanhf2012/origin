@@ -1,10 +1,5 @@
 # Node 游戏逻辑时间
 
-> 状态：已实施
-> 基线：v3.0
-> 目标版本：v3.1.0
-> 兼容性：新增 `NodeRuntime` 与 `GetNode`；既有 Timer 方法签名不变
-
 游戏开发中经常需要验证跨天刷新、活动开启、周期结算和时间回退。Origin 不修改操作系统时钟，而是让每个 Node 拥有一套独立的游戏逻辑时间。
 
 可直接运行 [04-node-game-time](../../../../examples/05-timer-event-and-execution/04-node-game-time/README.md)，观察同 Node 两个 Service 的完整行为。

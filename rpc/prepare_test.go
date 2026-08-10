@@ -297,6 +297,42 @@ func TestPrepareNotifySelectsRunningLocalPrivateService(t *testing.T) {
 	}
 }
 
+func TestPrepareNotifyLocalRetiredBoundaries(t *testing.T) {
+	runtime := newPrepareTestRuntime(t, "gateway-1", "", nil)
+	addPrepareTestLocal(
+		t,
+		runtime,
+		"PlayerService",
+		service.StateRetired,
+		&runtimeTestDispatcher{},
+	)
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+
+	base := prepareTestClient(runtime, ToService("PlayerService"))
+	if _, err := base.PrepareNotify(context.Background(), 1); !errors.Is(
+		err,
+		errs.ErrRPCNoRoute,
+	) {
+		t.Fatalf("default Retired PrepareNotify() error = %v", err)
+	}
+
+	for name, client := range map[string]Client{
+		"include retired":  base.IncludeRetired(),
+		"exact local node": base.OnNode("gateway-1"),
+	} {
+		prepared, err := client.PrepareNotify(context.Background(), 1)
+		if err != nil {
+			t.Fatalf("%s PrepareNotify() error = %v", name, err)
+		}
+		if prepared.prepared.transport != preparedLocal ||
+			prepared.prepared.nodeID != "gateway-1" {
+			t.Fatalf("%s prepared target = %+v", name, prepared.prepared)
+		}
+	}
+}
+
 func TestPrepareNotifyRoundRobinUsesRuntimeStateAcrossClients(t *testing.T) {
 	snapshot := &prepareTestSnapshot{candidates: []RemoteCandidate{
 		{
@@ -1029,6 +1065,11 @@ func TestPrepareAwaitWaitsForConnectedRouteEvent(t *testing.T) {
 	owner := &prepareAwaitTestOwner{entered: make(chan struct{})}
 	client := prepareTestClient(runtime, ToService("PlayerService"))
 	client.owner = owner
+	invocationCtx, finishInvocation := context.WithTimeout(
+		t.Context(),
+		service.DefaultAwaitTimeout,
+	)
+	client.invocation = &clientInvocation{ctx: invocationCtx, finish: finishInvocation}
 	type result struct {
 		client Client
 		err    error
@@ -1052,6 +1093,7 @@ func TestPrepareAwaitWaitsForConnectedRouteEvent(t *testing.T) {
 		if current.err != nil {
 			t.Fatalf("PrepareAwait() error = %v", current.err)
 		}
+		defer current.client.FinishInvocation()
 		if current.client.prepared.tcpSession != session {
 			t.Fatalf("prepared session = %p", current.client.prepared.tcpSession)
 		}
@@ -1092,6 +1134,11 @@ func TestPrepareAsyncDoesNotWaitForDisconnectedRoute(t *testing.T) {
 	owner := &prepareAwaitTestOwner{}
 	client := prepareTestClient(runtime, ToService("PlayerService"))
 	client.owner = owner
+	invocationCtx, finishInvocation := context.WithTimeout(
+		t.Context(),
+		service.DefaultAwaitTimeout,
+	)
+	client.invocation = &clientInvocation{ctx: invocationCtx, finish: finishInvocation}
 
 	_, err := client.PrepareAsync(context.Background(), 1)
 	if !errors.Is(err, errs.ErrTransportUnavailable) {

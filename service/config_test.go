@@ -91,6 +91,49 @@ services:
 	}
 }
 
+// TestModuleBusinessConfigFacade 验证 Module 不建立第二套配置语义，而是读取所属
+// Service 已冻结的根配置和有效业务配置。
+func TestModuleBusinessConfigFacade(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "runtime.yaml"), []byte(`
+services:
+  ActualPlayer:
+    timeout: 9
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := originconfig.LoadSnapshot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := snapshot.Root().Lookup("services.ActualPlayer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &Service{}
+	if err := BindRuntime(owner, &configTestRuntime{
+		testRuntime: &testRuntime{nodeID: "player-1", name: "ActualPlayer"},
+		root:        snapshot.Root(),
+		service:     view,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	module := &testModule{}
+	module.owner = owner
+
+	var serviceTimeout int
+	if err := module.GetServiceConfig("timeout", &serviceTimeout); err != nil {
+		t.Fatalf("Module.GetServiceConfig() error = %v", err)
+	}
+	var rootTimeout int
+	if err := module.GetConfig("services.ActualPlayer.timeout", &rootTimeout); err != nil {
+		t.Fatalf("Module.GetConfig() error = %v", err)
+	}
+	if serviceTimeout != 9 || rootTimeout != 9 {
+		t.Fatalf("Module config values = service:%d root:%d", serviceTimeout, rootTimeout)
+	}
+}
+
 func TestServiceMissingBusinessConfigKeepsDefaults(t *testing.T) {
 	target := &Service{}
 	if err := BindRuntime(target, &configTestRuntime{
