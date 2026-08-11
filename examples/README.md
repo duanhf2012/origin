@@ -20,6 +20,7 @@
 | `12-troubleshooting` | 可控故障与修复练习 |
 | [`13-network`](./13-network/README.md) | v3.2 TCP/WebSocket/KCP Session、Server、Client、Dialer 与协议 Router |
 | [`14-http`](./14-http/README.md) | v3.2 Gin 普通/Safe 路由、Server 配置、HTTP Client 与同 Service 自调用 |
+| [`15-mongodb`](./15-mongodb/README.md) | v3.2 MongoDB 生命周期、官方 CRUD、索引/事务便利层与 Origin Await |
 
 每个可直接运行的程序示例都包含 `run.bat` 和 `run.sh`。依赖 NATS 或 etcd 的示例提供其对应的 `deps-*` 检查、启动或停止脚本。脚本只包装 README 中公开的命令，不会隐藏后台进程或自动修改系统状态。
 

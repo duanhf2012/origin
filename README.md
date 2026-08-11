@@ -58,6 +58,7 @@ go run ./examples/00-quickstart/01-hello-service
 | --- | --- | --- | --- | --- |
 | 13 | TCP、WebSocket 与 KCP 网络模块 | 使用统一 Session、Server、Client、Dialer 与 PB/JSON Router | [网络模块文档](./docs/maintenance/v3.2/README.md) | [13-network](./examples/13-network/) |
 | 14 | Gin HTTP Module 与 HTTP Client | 使用普通/Safe 路由、分层鉴权、有界 Client 与同 Service HTTP 自调用 | [HTTP 组件文档](./docs/maintenance/v3.2/README.md) | [14-http](./examples/14-http/) |
+| 15 | MongoDB Module | 使用官方 Collection、索引/事务便利层与 Origin Await 完成游戏数据访问 | [MongoDB Module 使用指南](./docs/maintenance/v3.2/guides/MongoDB%20Module使用指南.md) | [15-mongodb](./examples/15-mongodb/) |
 
 ## 学习方式
 

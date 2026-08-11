@@ -30,6 +30,16 @@ Gin Server 与 HTTP Client 不加入长连接 Session 外观：前者使用请�
 | Gin HTTP Module | 业务 HTTP API、普通请求回调、Service 串行 Safe 回调与分层鉴权 | [Gin HTTP Module 使用指南](guides/Gin%20HTTP%20Module使用指南.md) | [Gin Safe 路由与 HTTP 自调用](../../../examples/14-http/01-gin-safe-self-call/README.md) |
 | HTTP Client | 服务间 HTTP、流式响应、有界完整响应、连接池与同 Service 自调用 | [HTTP Client 使用指南](guides/HTTP%20Client使用指南.md) | [Gin Safe 路由与 HTTP 自调用](../../../examples/14-http/01-gin-safe-self-call/README.md) |
 
+## MongoDB 组件教程
+
+MongoDB Module 不重复包装官方 CRUD。教程按三层说明：普通数据访问直接使用 `Collection`；索引、Session 和事务使用 Module 便利层；从 Service 工作协程等待数据库 I/O 时使用 `Await` 释放执行权。
+
+| 组件 | 适用场景 | 使用指南 | Example |
+| --- | --- | --- | --- |
+| MongoDB Module | 玩家数据、道具、邮件、幂等记录、条件更新、批量写与跨文档事务 | [MongoDB Module 使用指南](guides/MongoDB%20Module使用指南.md) | [MongoDB 游戏存储](../../../examples/15-mongodb/01-game-store/README.md) |
+
+Example 包含配置、索引、CRUD、两类 Upsert、条件扣金币、乐观锁、有界多行查询、BulkWrite、幂等奖励、事务转账和安全删除，并明确每种调用和回调所在的 goroutine。
+
 ## 设计与实施资料
 
 本目录沿用 `../v3.1/README.md` 定义的文档分层：
@@ -75,6 +85,7 @@ KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB、Redis �
 - [`WebSocket 网络纵向切片实施计划`](plans/WebSocket网络纵向切片实施计划.md)
 - [`KCP 网络纵向切片实施计划`](plans/KCP网络纵向切片实施计划.md)
 - [`Gin 与 HTTP Client 纵向切片实施计划`](plans/Gin与HTTP%20Client纵向切片实施计划.md)：实施与双平台验收完成。
+- [`MongoDB Module 纵向切片实施计划`](plans/MongoDB%20Module纵向切片实施计划.md)
 
 当前变更与验收材料：
 
@@ -86,5 +97,7 @@ KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB、Redis �
 - [`KCP 网络纵向切片验收报告`](reports/KCP网络纵向切片验收报告.md)
 - [`Gin 与 HTTP Client 纵向切片变更记录`](changes/Gin与HTTP%20Client纵向切片变更记录.md)
 - [`Gin 与 HTTP Client 纵向切片验收报告`](reports/Gin与HTTP%20Client纵向切片验收报告.md)
+- [`MongoDB Module 纵向切片变更记录`](changes/MongoDB%20Module纵向切片变更记录.md)
+- [`MongoDB Module 纵向切片验收报告`](reports/MongoDB%20Module纵向切片验收报告.md)
 
 v3.1 的维护资料继续保留在 `../v3.1/`，不得混入本目录。

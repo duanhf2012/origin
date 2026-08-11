@@ -1,0 +1,22 @@
+log:
+  mode: async
+  console:
+    enabled: true
+    level: info
+    format: text
+
+nodes:
+  - id: mongodb-1
+    services:
+      - GameStoreService
+
+services:
+  GameStoreService:
+    mongodb:
+      # URI 从环境变量读取，避免把账号和密码提交到仓库。run 脚本只在变量为空时提供本地 Replica Set 默认值。
+      # 生产建议在 URI 中显式配置 replicaSet、authSource、连接池和超时；完整建议见使用指南。
+      uri: "${ORIGIN_MONGODB_URI}"
+      # 当前 Service 的默认数据库。不同业务库可组合多个 MongoDB Module，不要在运行期切换该字段。
+      database: "origin_game_example"
+      # 使用系统公共 CA 时留空；DocumentDB 等私有 CA 场景填写宿主机 PEM 文件路径。
+      tls_ca_file: ""
