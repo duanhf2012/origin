@@ -73,19 +73,6 @@ go run ./examples/00-quickstart/01-hello-service
 网络模块属于 Origin 发布能力；即使内部使用成熟开源库，也不要求使用者自行适配，因此不归入第三方
 集成。NATS、etcd 等需要独立部署和运维的基础设施才放入第三方教程。
 
-## 当前版本使用更新
-
-- v3.1 RPC Context、`CallXxx` 与 Async 规则见 [v3.1 RPC 使用变更](./docs/maintenance/v3.1/guides/README.md)；
-- Node 游戏逻辑时间见 [Node 游戏逻辑时间教程](./docs/maintenance/v3.1/guides/node-game-time.md)；
-- 日志与 Admin 的当前外观分别见 [日志输出与管理](./docs/maintenance/v3.1/guides/03.logging.md)以及
-  [Admin、Diagnostics 与 pprof](./docs/maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md)；
-- v3.2 TCP/WebSocket 统一外观见 [v3.2 网络模块文档](./docs/maintenance/v3.2/README.md)；
-- 生产构建、进程管理和依赖安全见
-  [部署与运维](./docs/maintenance/v3.1/guides/deployment-and-operations.md)。
-
-完整框架教程见 [使用指南](./docs/baseline/v3.0/guides/README.md)，全部可运行程序见
-[示例索引](./examples/README.md)。
-
 ## 学习方式
 
 每一章都先从一个实际任务开始：复制命令、运行示例、修改少量代码并观察结果。后续章节才说明原理、限制和排错方式。
