@@ -108,6 +108,7 @@ Client，使 Client 启动连接前监听端已经就绪；停止时框架会按
 
 `tcp.Dialer` 只尝试一次，不重连。它要求 owner Service 已经处于 Running/Retired，调用方必须在
 owner 停止前关闭返回的 Session。需要自动停止或重连时使用 Client，不要用 Dialer 自建后台循环。
+Dialer 不读取 YAML，也没有 `DialerConfig`；从 `DefaultDialOptions(handler)` 开始在代码中按需覆盖。
 
 ## 4. PB、JSON 与自定义 Codec
 

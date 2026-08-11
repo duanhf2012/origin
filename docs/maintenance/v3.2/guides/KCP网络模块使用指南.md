@@ -64,8 +64,9 @@ kcp:
     read_idle_timeout: 60s
 ```
 
-`ServerConfig`、`ClientConfig` 和 `DialerConfig` 相互独立。共同容量字段与 TCP/WebSocket 同名，
-KCP 专属字段不会出现在其他模块中。`BlockCrypt` 不进入 YAML，必须在 Config 转换成功后由代码注入。
+`ServerConfig` 与 `ClientConfig` 相互独立。共同容量字段与 TCP/WebSocket 同名，KCP 专属字段不会
+出现在其他模块中。Dialer 不读取 YAML：从 `DefaultDialOptions` 开始在代码中覆盖，并调用
+`NewDialer`。`BlockCrypt` 不进入 YAML，必须在 Config/Options 准备完成后由代码注入。
 
 ## 2. KCP 与 TCP 不同的连接语义
 
@@ -79,7 +80,7 @@ KCP 建立客户端时只创建本地 UDP Session，没有 TCP 三次握手或 W
 
 如果项目要求更快发现断线，应实现业务心跳并缩短读空闲值，但不要小于正常心跳抖动上限。
 
-## 3. Client 与 Dialer
+## 3. Client 与一次性 Dialer
 
 长期连接使用由 Service 托管的 `kcp.Client`：
 

@@ -17,7 +17,8 @@
 - 严格限制 `MTU + 加密头 + FEC 头 <= 1500`，避免触发 `kcp-go` 固定报文缓冲边界；
 - 明确 KCP 无远端握手、无 FIN/标准 Close 帧：`OnOpen` 只代表本地 UDP Session 就绪，静默对端
   依赖正数读空闲和业务心跳发现；
-- 新增独立 `ServerConfig`、`ClientConfig`、`DialerConfig`、完整默认值与严格 Service 配置转换；
+- 新增独立 `ServerConfig`、`ClientConfig`、完整默认值与严格 Service 配置转换；Dialer 是一次性
+  代码对象，只使用 `DialOptions`，不进入 Service 配置；
 - Config 保留 v2 真正有效的 KCP 参数，删除可变 StreamMode、重复读写消息上限和单一
   `PendingWriteNum`；不增加具有错误握手暗示的 `dial_timeout`，也不允许静态密钥进入 YAML；
 - 新增配置驱动、由业务 Module 组合 Server/Client 的 KCP 服务自调用 Example 和使用指南；

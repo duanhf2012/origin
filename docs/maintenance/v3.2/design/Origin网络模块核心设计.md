@@ -548,20 +548,24 @@ Go Options 校验完成后保存为整数 Byte 和 `time.Duration`，热路径�
 
 ### 9.1 Service 配置的最终外观
 
-TCP、WebSocket 和 KCP 分别公开自己的 `ServerConfig`、`ClientConfig` 与 `DialerConfig`，不公开一个
-包含三种传输全部字段的总 Config。三套 Config 对真正同义的容量和超时使用相同字段名，转换到运行期
-时再复用内部校验；传输专属字段只存在于自己的包中。配置对象只保存可序列化数据，`Handler`、
+TCP、WebSocket 和 KCP 分别只公开自己的 `ServerConfig` 与 `ClientConfig`，不公开一个包含三种传输
+全部字段的总 Config。三套 Config 对真正同义的容量和超时使用相同字段名，转换到运行期时再复用
+内部校验；传输专属字段只存在于自己的包中。配置对象只保存可序列化数据，`Handler`、
 `StateChange`、TLS、WebSocket Origin/Header 和 KCP `BlockCrypt` 继续由代码注入。
+
+`Dialer` 是调用点持有的一次性运行时能力，不属于 Service 生命周期配置。三种传输均通过
+`DefaultDialOptions(handler)` 取得默认值、在代码中按需覆盖，再调用 `NewDialer`；不提供
+`DialerConfig`、`DefaultDialerConfig` 或 YAML `dialer` 节点。这样可以避免临时拨号参数进入长期服务
+配置，也不会让使用者误以为 Dialer 会被框架托管或自动重连。
 
 本节冻结的是目标外观。KCP 已按“先完成 Server/Client/Dialer 和运行期 Options，再通过公共契约与
 Ubuntu 弱网验证，最后实现 Config 到 Options 映射”的顺序完成；没有为匹配文档保留无效参数或兼容层。
 
-每个 Config 都提供完整默认值：
+Server 与托管 Client Config 都提供完整默认值：
 
 ```go
 func DefaultServerConfig() ServerConfig
 func DefaultClientConfig() ClientConfig
-func DefaultDialerConfig() DialerConfig
 ```
 
 使用者先取得默认值，再从所属 Service 的相对路径严格覆盖，最后转换为现有 Options。严格读取必须拒绝
@@ -623,14 +627,6 @@ services:
           # 退避随机抖动比例；0.2 表示在基准值附近加入最多 20% 抖动。
           jitter: 0.2
 
-      dialer:
-        # 单次拨号的默认远端地址；Dialer 不创建重连 goroutine。
-        address: "127.0.0.1:19090"
-        # 单次拨号自身的上限；调用方 Context 更早到期时以 Context 为准。
-        dial_timeout: 10s
-        frame: {length_field_size: 4, byte_order: big}
-        keep_alive: 30s
-
     websocket:
       server:
         # HTTP/WebSocket 监听地址。
@@ -661,15 +657,6 @@ services:
         pong_timeout: 60s
         subprotocols: []
         reconnect: {enabled: false, max_attempts: 10, initial_delay: 200ms, max_delay: 5s, jitter: 0.2}
-
-      dialer:
-        # 单次拨号 URL；超时由调用方 Context 与 handshake_timeout 共同约束。
-        url: "ws://127.0.0.1:19091/ws"
-        message_type: binary
-        handshake_timeout: 10s
-        ping_interval: 30s
-        pong_timeout: 60s
-        subprotocols: []
 
     kcp:
       server:
@@ -725,21 +712,6 @@ services:
         read_idle_timeout: 60s
         reconnect: {enabled: false, max_attempts: 10, initial_delay: 200ms, max_delay: 5s, jitter: 0.2}
 
-      dialer:
-        # 单次建立本地 KCP Session；它不证明远端业务已经应答，不自动重连。
-        address: "127.0.0.1:19092"
-        frame: {length_field_size: 4, byte_order: big}
-        mtu: 1400
-        send_window: 1024
-        receive_window: 1024
-        no_delay: {enabled: true, interval: 10ms, fast_resend: 2, disable_congestion_control: true}
-        ack_no_delay: false
-        write_delay: false
-        fec: {data_shards: 0, parity_shards: 0}
-        dscp: 0
-        socket_read_buffer: 0B
-        socket_write_buffer: 0B
-        read_idle_timeout: 60s
 ```
 
 YAML 允许把 WebSocket `address` 与 `path` 写成一行，例如

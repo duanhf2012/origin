@@ -3,6 +3,7 @@ package tcp
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,8 +12,8 @@ import (
 	"github.com/duanhf2012/origin/v3/sysmodule/network"
 )
 
-// TestDefaultConfigsConvertToValidOptions 验证三类默认配置无需补字段即可构造有效端点，
-// 并检查单连接配置不会携带没有意义的 Server 总预算。
+// TestDefaultConfigsConvertToValidOptions 验证 Server 和托管 Client 的默认配置无需补字段即可使用，
+// 并检查 Client 的单连接配置不会携带没有意义的 Server 总预算。
 func TestDefaultConfigsConvertToValidOptions(t *testing.T) {
 	handler := network.HandlerFuncs{}
 	serverConfig := DefaultServerConfig()
@@ -25,19 +26,6 @@ func TestDefaultConfigsConvertToValidOptions(t *testing.T) {
 		t.Fatalf("server options = %+v", serverOptions)
 	}
 
-	dialerConfig := DefaultDialerConfig()
-	dialOptions, err := dialerConfig.Options(handler)
-	if err != nil {
-		t.Fatalf("DialerConfig.Options() error = %v", err)
-	}
-	if dialOptions.DialTimeout != 10*time.Second || dialOptions.Network.MaxSessions != 1 {
-		t.Fatalf("dial options = %+v", dialOptions)
-	}
-	if dialOptions.Network.ReceivePendingTotalSize != dialOptions.Network.ReceivePendingSize ||
-		dialOptions.Network.SendQueueTotalSize != dialOptions.Network.SendQueueSize {
-		t.Fatalf("single-session budgets = %+v", dialOptions.Network)
-	}
-
 	clientConfig := DefaultClientConfig()
 	clientOptions, err := clientConfig.Options(handler)
 	if err != nil {
@@ -45,6 +33,18 @@ func TestDefaultConfigsConvertToValidOptions(t *testing.T) {
 	}
 	if clientOptions.Reconnect.Enabled || clientOptions.Reconnect.MaxAttempts != 10 {
 		t.Fatalf("client reconnect = %+v", clientOptions.Reconnect)
+	}
+	// Client 只有一个 Session，未公开的端点总预算应收敛为对应的单 Session 容量。
+	expected := DefaultClientOptions(handler)
+	expected.Dial.Network.ReceivePendingTotalSize = expected.Dial.Network.ReceivePendingSize
+	expected.Dial.Network.SendQueueTotalSize = expected.Dial.Network.SendQueueSize
+	if !reflect.DeepEqual(clientOptions, expected) {
+		t.Fatalf("client options = %+v, want %+v", clientOptions, expected)
+	}
+	if clientOptions.Dial.DialTimeout != 10*time.Second || clientOptions.Dial.Network.MaxSessions != 1 ||
+		clientOptions.Dial.Network.ReceivePendingTotalSize != clientOptions.Dial.Network.ReceivePendingSize ||
+		clientOptions.Dial.Network.SendQueueTotalSize != clientOptions.Dial.Network.SendQueueSize {
+		t.Fatalf("client dial options = %+v", clientOptions.Dial)
 	}
 }
 
@@ -113,25 +113,25 @@ func TestConfigRejectsInvalidValues(t *testing.T) {
 		t.Fatalf("invalid byte order error = %v", err)
 	}
 
-	dialer := DefaultDialerConfig()
-	dialer.Address = ""
-	if _, err := dialer.Options(handler); err == nil {
-		t.Fatal("empty dial address unexpectedly accepted")
-	}
-
-	dialer = DefaultDialerConfig()
-	dialer.Frame.ByteOrder = "native"
-	if _, err := dialer.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
-		t.Fatalf("dial byte order error = %v", err)
-	}
-
-	dialer = DefaultDialerConfig()
-	dialer.DialTimeout = 0
-	if _, err := dialer.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
-		t.Fatalf("zero dial timeout error = %v", err)
-	}
-
 	client := DefaultClientConfig()
+	client.Address = ""
+	if _, err := client.Options(handler); err == nil {
+		t.Fatal("empty client address unexpectedly accepted")
+	}
+
+	client = DefaultClientConfig()
+	client.Frame.ByteOrder = "native"
+	if _, err := client.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
+		t.Fatalf("client byte order error = %v", err)
+	}
+
+	client = DefaultClientConfig()
+	client.DialTimeout = 0
+	if _, err := client.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
+		t.Fatalf("zero client dial timeout error = %v", err)
+	}
+
+	client = DefaultClientConfig()
 	client.Reconnect.Jitter = -0.1
 	if _, err := client.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("invalid jitter error = %v", err)

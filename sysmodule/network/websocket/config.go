@@ -71,9 +71,11 @@ type ServerConfig struct {
 	SlowClientTimeout originconfig.Duration
 }
 
-// DialerConfig 是 WebSocket Dialer 和托管 Client 共享的单连接配置。
-type DialerConfig struct {
-	// URL 是包含 ws/wss Scheme、主机和路径的完整远端地址。
+// ClientConfig 配置由 Service 生命周期托管的单连接 WebSocket Client。
+//
+// Dialer 是一次性的代码对象，只使用 DialOptions，不从 Service 配置读取参数。
+type ClientConfig struct {
+	// URL 是托管 Client 使用的完整远端地址，包含 ws/wss Scheme、主机和路径。
 	URL string
 	// MessageType 只允许 binary 或 text，并在连接生命周期内保持不变。
 	MessageType string
@@ -101,12 +103,6 @@ type DialerConfig struct {
 	WriteTimeout originconfig.Duration
 	// SlowClientTimeout 是发送队列连续处于高水位的最长时间。
 	SlowClientTimeout originconfig.Duration
-}
-
-// ClientConfig 配置由 Service 生命周期托管的单连接 WebSocket Client。
-type ClientConfig struct {
-	// DialerConfig 匿名嵌入后保持与 Dialer 相同的扁平 YAML 字段。
-	DialerConfig
 	// Reconnect 配置初始失败和断线后的有界自动重连。
 	Reconnect ReconnectConfig
 }
@@ -137,34 +133,24 @@ func DefaultServerConfig() ServerConfig {
 	}
 }
 
-// DefaultDialerConfig 返回单连接、单次拨号且不重试的 WebSocket Dialer 默认配置。
-func DefaultDialerConfig() DialerConfig {
-	// DialOptions 固定 MaxSessions=1；配置不再暴露该不可修改字段和冗余总预算。
-	options := DefaultDialOptions(network.HandlerFuncs{})
-	return DialerConfig{
-		URL:                    "ws://127.0.0.1:19091/ws",
-		MessageType:            configMessageType(options.MessageType),
-		HandshakeTimeout:       originconfig.Duration(options.HandshakeTimeout),
-		PingInterval:           originconfig.Duration(options.PingInterval),
-		PongTimeout:            originconfig.Duration(options.PongTimeout),
-		Subprotocols:           append([]string(nil), options.Subprotocols...),
-		MaxMessageSize:         originconfig.ByteSize(options.Network.MaxMessageSize),
-		ReceivePendingMessages: options.Network.ReceivePendingMessages,
-		ReceivePendingSize:     originconfig.ByteSize(options.Network.ReceivePendingSize),
-		SendQueueMessages:      options.Network.SendQueueMessages,
-		SendQueueSize:          originconfig.ByteSize(options.Network.SendQueueSize),
-		ReadIdleTimeout:        originconfig.Duration(options.Network.ReadIdleTimeout),
-		WriteTimeout:           originconfig.Duration(options.Network.WriteTimeout),
-		SlowClientTimeout:      originconfig.Duration(options.Network.SlowClientTimeout),
-	}
-}
-
 // DefaultClientConfig 返回默认不自动重连的托管 WebSocket Client 配置。
 func DefaultClientConfig() ClientConfig {
-	// Client 的连接字段复用 Dialer 默认值，重连字段从现有 ClientOptions 派生。
 	options := DefaultClientOptions(network.HandlerFuncs{})
 	return ClientConfig{
-		DialerConfig: DefaultDialerConfig(),
+		URL:                    "ws://127.0.0.1:19091/ws",
+		MessageType:            configMessageType(options.Dial.MessageType),
+		HandshakeTimeout:       originconfig.Duration(options.Dial.HandshakeTimeout),
+		PingInterval:           originconfig.Duration(options.Dial.PingInterval),
+		PongTimeout:            originconfig.Duration(options.Dial.PongTimeout),
+		Subprotocols:           append([]string(nil), options.Dial.Subprotocols...),
+		MaxMessageSize:         originconfig.ByteSize(options.Dial.Network.MaxMessageSize),
+		ReceivePendingMessages: options.Dial.Network.ReceivePendingMessages,
+		ReceivePendingSize:     originconfig.ByteSize(options.Dial.Network.ReceivePendingSize),
+		SendQueueMessages:      options.Dial.Network.SendQueueMessages,
+		SendQueueSize:          originconfig.ByteSize(options.Dial.Network.SendQueueSize),
+		ReadIdleTimeout:        originconfig.Duration(options.Dial.Network.ReadIdleTimeout),
+		WriteTimeout:           originconfig.Duration(options.Dial.Network.WriteTimeout),
+		SlowClientTimeout:      originconfig.Duration(options.Dial.Network.SlowClientTimeout),
 		Reconnect: ReconnectConfig{
 			Enabled:      options.Reconnect.Enabled,
 			MaxAttempts:  options.Reconnect.MaxAttempts,
@@ -217,9 +203,9 @@ func (configured ServerConfig) Options(handler network.Handler) (ServerOptions, 
 	return options, nil
 }
 
-// Options 把 WebSocket Dialer 配置转换为固定单 Session 的运行期 Options。
-func (configured DialerConfig) Options(handler network.Handler) (DialOptions, error) {
-	// Client/Dialer 只有一个活动 Session，总预算直接等于单 Session 上限，避免公开冗余字段。
+// dialOptions 把托管 Client 的连接字段转换为固定单 Session 的运行期 Options。
+func (configured ClientConfig) dialOptions(handler network.Handler) (DialOptions, error) {
+	// Client 只有一个活动 Session，总预算直接等于单 Session 上限，避免公开冗余字段。
 	maxMessageSize, err := websocketConfigMessageSize(configured.MaxMessageSize)
 	if err != nil {
 		return DialOptions{}, err
@@ -257,8 +243,7 @@ func (configured DialerConfig) Options(handler network.Handler) (DialOptions, er
 
 // Options 把托管 WebSocket Client 配置转换为已经完整校验的运行期 Options。
 func (configured ClientConfig) Options(handler network.Handler) (ClientOptions, error) {
-	// 先复用 Dialer 的单连接转换，再叠加只属于托管 Client 的重连策略。
-	dial, err := configured.DialerConfig.Options(handler)
+	dial, err := configured.dialOptions(handler)
 	if err != nil {
 		return ClientOptions{}, err
 	}
@@ -283,8 +268,8 @@ func (configured ServerConfig) messageType() (MessageType, error) {
 	return parseConfigMessageType(configured.MessageType)
 }
 
-// messageType 把单连接配置字符串转换为热路径使用的固定消息类型枚举。
-func (configured DialerConfig) messageType() (MessageType, error) {
+// messageType 把 Client 配置字符串转换为热路径使用的固定消息类型枚举。
+func (configured ClientConfig) messageType() (MessageType, error) {
 	return parseConfigMessageType(configured.MessageType)
 }
 

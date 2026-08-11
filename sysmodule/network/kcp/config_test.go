@@ -3,6 +3,7 @@ package kcp
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -24,17 +25,6 @@ func TestDefaultConfigsConvertToValidOptions(t *testing.T) {
 		t.Fatalf("server options = %+v", serverOptions)
 	}
 
-	dialerConfig := DefaultDialerConfig()
-	dialOptions, err := dialerConfig.Options(handler)
-	if err != nil {
-		t.Fatalf("DialerConfig.Options() error = %v", err)
-	}
-	if dialOptions.Network.MaxSessions != 1 ||
-		dialOptions.Network.ReceivePendingTotalSize != dialOptions.Network.ReceivePendingSize ||
-		dialOptions.Network.SendQueueTotalSize != dialOptions.Network.SendQueueSize {
-		t.Fatalf("dial options = %+v", dialOptions)
-	}
-
 	clientConfig := DefaultClientConfig()
 	clientOptions, err := clientConfig.Options(handler)
 	if err != nil {
@@ -42,6 +32,18 @@ func TestDefaultConfigsConvertToValidOptions(t *testing.T) {
 	}
 	if clientOptions.Reconnect.Enabled || clientOptions.Reconnect.MaxAttempts != 10 {
 		t.Fatalf("client reconnect = %+v", clientOptions.Reconnect)
+	}
+	// Client 只有一个 Session，未公开的端点总预算应收敛为对应的单 Session 容量。
+	expected := DefaultClientOptions(handler)
+	expected.Dial.Network.ReceivePendingTotalSize = expected.Dial.Network.ReceivePendingSize
+	expected.Dial.Network.SendQueueTotalSize = expected.Dial.Network.SendQueueSize
+	if !reflect.DeepEqual(clientOptions, expected) {
+		t.Fatalf("client options = %+v, want %+v", clientOptions, expected)
+	}
+	if clientOptions.Dial.Network.MaxSessions != 1 ||
+		clientOptions.Dial.Network.ReceivePendingTotalSize != clientOptions.Dial.Network.ReceivePendingSize ||
+		clientOptions.Dial.Network.SendQueueTotalSize != clientOptions.Dial.Network.SendQueueSize {
+		t.Fatalf("client dial options = %+v", clientOptions.Dial)
 	}
 }
 
@@ -123,7 +125,7 @@ dial_timeout: 3s
 	if err != nil {
 		t.Fatal(err)
 	}
-	configured := DefaultDialerConfig()
+	configured := DefaultClientConfig()
 	if err := snapshot.Root().DecodeStrict(&configured); err == nil {
 		t.Fatal("KCP 不存在 dial_timeout，严格解码不应接受该字段")
 	}
@@ -156,19 +158,19 @@ func TestConfigRejectsInvalidValues(t *testing.T) {
 		t.Fatalf("invalid fec error = %v", err)
 	}
 
-	dialer := DefaultDialerConfig()
-	dialer.Address = ""
-	if _, err := dialer.Options(handler); err == nil {
-		t.Fatal("empty dial address unexpectedly accepted")
+	client := DefaultClientConfig()
+	client.Address = ""
+	if _, err := client.Options(handler); err == nil {
+		t.Fatal("empty client address unexpectedly accepted")
 	}
 
-	dialer = DefaultDialerConfig()
-	dialer.SocketReadBuffer = originconfig.ByteSize(-1)
-	if _, err := dialer.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
+	client = DefaultClientConfig()
+	client.SocketReadBuffer = originconfig.ByteSize(-1)
+	if _, err := client.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("negative socket buffer error = %v", err)
 	}
 
-	client := DefaultClientConfig()
+	client = DefaultClientConfig()
 	client.Reconnect.Jitter = -0.1
 	if _, err := client.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("invalid jitter error = %v", err)

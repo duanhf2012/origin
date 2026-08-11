@@ -111,12 +111,12 @@ type ServerConfig struct {
 	SlowClientTimeout originconfig.Duration
 }
 
-// DialerConfig 是 KCP Dialer 和托管 Client 共享的单 Session 配置。
+// ClientConfig 配置由 Service 生命周期托管的单 Session KCP Client。
 //
-// KCP 没有远端握手，因此不提供会产生错误可用性承诺的 dial_timeout 字段；调用方 Context
-// 只约束 DNS 与本地 UDP Session 创建，首条业务应答才证明远端可用。
-type DialerConfig struct {
-	// Address 是单次拨号或托管 Client 使用的远端 UDP 地址。
+// Dialer 是一次性的代码对象，只使用 DialOptions，不从 Service 配置读取参数。KCP 没有远端握手，
+// 因此 Client 也不提供会产生错误可用性承诺的 dial_timeout 字段；首条业务应答才证明远端可用。
+type ClientConfig struct {
+	// Address 是托管 Client 使用的远端 UDP 地址。
 	Address string
 	// Frame 配置每条 KCP 逻辑消息的长度前缀。
 	Frame FrameConfig
@@ -156,12 +156,6 @@ type DialerConfig struct {
 	WriteTimeout originconfig.Duration
 	// SlowClientTimeout 是发送队列连续处于高水位的最长时间。
 	SlowClientTimeout originconfig.Duration
-}
-
-// ClientConfig 配置由 Service 生命周期托管的单 Session KCP Client。
-type ClientConfig struct {
-	// DialerConfig 匿名嵌入后保持与 Dialer 相同的扁平 YAML 字段。
-	DialerConfig
 	// Reconnect 配置 Session 失活或本地创建失败后的有界自动重连。
 	Reconnect ReconnectConfig
 }
@@ -196,38 +190,30 @@ func DefaultServerConfig() ServerConfig {
 	}
 }
 
-// DefaultDialerConfig 返回创建单个本地 KCP Session 且不重试的默认配置。
-func DefaultDialerConfig() DialerConfig {
-	options := DefaultDialOptions(network.HandlerFuncs{})
-	return DialerConfig{
-		Address:                "127.0.0.1:19092",
-		Frame:                  kcpFrameConfig(options.Frame),
-		MTU:                    options.MTU,
-		SendWindow:             options.SendWindow,
-		ReceiveWindow:          options.ReceiveWindow,
-		NoDelay:                kcpNoDelayConfig(options.NoDelay),
-		ACKNoDelay:             options.ACKNoDelay,
-		WriteDelay:             options.WriteDelay,
-		FEC:                    kcpFECConfig(options.FEC),
-		DSCP:                   options.DSCP,
-		SocketReadBuffer:       originconfig.ByteSize(options.SocketReadBuffer),
-		SocketWriteBuffer:      originconfig.ByteSize(options.SocketWriteBuffer),
-		MaxMessageSize:         originconfig.ByteSize(options.Network.MaxMessageSize),
-		ReceivePendingMessages: options.Network.ReceivePendingMessages,
-		ReceivePendingSize:     originconfig.ByteSize(options.Network.ReceivePendingSize),
-		SendQueueMessages:      options.Network.SendQueueMessages,
-		SendQueueSize:          originconfig.ByteSize(options.Network.SendQueueSize),
-		ReadIdleTimeout:        originconfig.Duration(options.Network.ReadIdleTimeout),
-		WriteTimeout:           originconfig.Duration(options.Network.WriteTimeout),
-		SlowClientTimeout:      originconfig.Duration(options.Network.SlowClientTimeout),
-	}
-}
-
 // DefaultClientConfig 返回默认不自动重连的托管 KCP Client 配置。
 func DefaultClientConfig() ClientConfig {
 	options := DefaultClientOptions(network.HandlerFuncs{})
 	return ClientConfig{
-		DialerConfig: DefaultDialerConfig(),
+		Address:                "127.0.0.1:19092",
+		Frame:                  kcpFrameConfig(options.Dial.Frame),
+		MTU:                    options.Dial.MTU,
+		SendWindow:             options.Dial.SendWindow,
+		ReceiveWindow:          options.Dial.ReceiveWindow,
+		NoDelay:                kcpNoDelayConfig(options.Dial.NoDelay),
+		ACKNoDelay:             options.Dial.ACKNoDelay,
+		WriteDelay:             options.Dial.WriteDelay,
+		FEC:                    kcpFECConfig(options.Dial.FEC),
+		DSCP:                   options.Dial.DSCP,
+		SocketReadBuffer:       originconfig.ByteSize(options.Dial.SocketReadBuffer),
+		SocketWriteBuffer:      originconfig.ByteSize(options.Dial.SocketWriteBuffer),
+		MaxMessageSize:         originconfig.ByteSize(options.Dial.Network.MaxMessageSize),
+		ReceivePendingMessages: options.Dial.Network.ReceivePendingMessages,
+		ReceivePendingSize:     originconfig.ByteSize(options.Dial.Network.ReceivePendingSize),
+		SendQueueMessages:      options.Dial.Network.SendQueueMessages,
+		SendQueueSize:          originconfig.ByteSize(options.Dial.Network.SendQueueSize),
+		ReadIdleTimeout:        originconfig.Duration(options.Dial.Network.ReadIdleTimeout),
+		WriteTimeout:           originconfig.Duration(options.Dial.Network.WriteTimeout),
+		SlowClientTimeout:      originconfig.Duration(options.Dial.Network.SlowClientTimeout),
 		Reconnect: ReconnectConfig{
 			Enabled:      options.Reconnect.Enabled,
 			MaxAttempts:  options.Reconnect.MaxAttempts,
@@ -294,10 +280,8 @@ func (configured ServerConfig) Options(handler network.Handler) (ServerOptions, 
 	return options, nil
 }
 
-// Options 把 KCP Dialer 配置转换为固定单 Session 的运行期 Options。
-//
-// 如需加密，应在本方法成功后设置返回值的 BlockCrypt，再交给 NewDialer 做最终校验。
-func (configured DialerConfig) Options(handler network.Handler) (DialOptions, error) {
+// dialOptions 把托管 Client 的连接字段转换为固定单 Session 的运行期 Options。
+func (configured ClientConfig) dialOptions(handler network.Handler) (DialOptions, error) {
 	if err := validateAddress(configured.Address); err != nil {
 		return DialOptions{}, err
 	}
@@ -354,7 +338,7 @@ func (configured DialerConfig) Options(handler network.Handler) (DialOptions, er
 //
 // 如需加密，应设置返回值的 Dial.BlockCrypt，再交给 NewClient 做最终校验。
 func (configured ClientConfig) Options(handler network.Handler) (ClientOptions, error) {
-	dial, err := configured.DialerConfig.Options(handler)
+	dial, err := configured.dialOptions(handler)
 	if err != nil {
 		return ClientOptions{}, err
 	}

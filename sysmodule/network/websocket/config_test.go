@@ -3,6 +3,7 @@ package websocket
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,8 +12,8 @@ import (
 	"github.com/duanhf2012/origin/v3/sysmodule/network"
 )
 
-// TestDefaultConfigsConvertToValidOptions 验证三类 WebSocket 默认配置可以直接使用，
-// 且 Client/Dialer 的固定单连接语义不会暴露冗余总预算。
+// TestDefaultConfigsConvertToValidOptions 验证 Server 和托管 Client 的默认配置可以直接使用，
+// 且 Client 的固定单连接语义不会暴露冗余总预算。
 func TestDefaultConfigsConvertToValidOptions(t *testing.T) {
 	handler := network.HandlerFuncs{}
 	serverConfig := DefaultServerConfig()
@@ -25,23 +26,24 @@ func TestDefaultConfigsConvertToValidOptions(t *testing.T) {
 		t.Fatalf("server options = %+v", serverOptions)
 	}
 
-	dialerConfig := DefaultDialerConfig()
-	dialOptions, err := dialerConfig.Options(handler)
-	if err != nil {
-		t.Fatalf("DialerConfig.Options() error = %v", err)
-	}
-	if dialOptions.Network.MaxSessions != 1 ||
-		dialOptions.Network.ReceivePendingTotalSize != dialOptions.Network.ReceivePendingSize ||
-		dialOptions.Network.SendQueueTotalSize != dialOptions.Network.SendQueueSize {
-		t.Fatalf("single-session options = %+v", dialOptions.Network)
-	}
-
 	clientOptions, err := DefaultClientConfig().Options(handler)
 	if err != nil {
 		t.Fatalf("ClientConfig.Options() error = %v", err)
 	}
 	if clientOptions.Reconnect.Enabled || clientOptions.Reconnect.MaxAttempts != 10 {
 		t.Fatalf("client reconnect = %+v", clientOptions.Reconnect)
+	}
+	// Client 只有一个 Session，未公开的端点总预算应收敛为对应的单 Session 容量。
+	expected := DefaultClientOptions(handler)
+	expected.Dial.Network.ReceivePendingTotalSize = expected.Dial.Network.ReceivePendingSize
+	expected.Dial.Network.SendQueueTotalSize = expected.Dial.Network.SendQueueSize
+	if !reflect.DeepEqual(clientOptions, expected) {
+		t.Fatalf("client options = %+v, want %+v", clientOptions, expected)
+	}
+	if clientOptions.Dial.Network.MaxSessions != 1 ||
+		clientOptions.Dial.Network.ReceivePendingTotalSize != clientOptions.Dial.Network.ReceivePendingSize ||
+		clientOptions.Dial.Network.SendQueueTotalSize != clientOptions.Dial.Network.SendQueueSize {
+		t.Fatalf("client single-session options = %+v", clientOptions.Dial.Network)
 	}
 }
 
@@ -118,21 +120,21 @@ func TestConfigRejectsInvalidValues(t *testing.T) {
 		t.Fatalf("invalid message type error = %v", err)
 	}
 
-	dialer := DefaultDialerConfig()
-	dialer.MessageType = "json"
-	if _, err := dialer.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
-		t.Fatalf("dial message type error = %v", err)
+	client := DefaultClientConfig()
+	client.MessageType = "json"
+	if _, err := client.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
+		t.Fatalf("client message type error = %v", err)
 	}
 
-	dialer = DefaultDialerConfig()
-	dialer.URL = "http://example.test/ws"
-	if _, err := dialer.Options(handler); err == nil {
+	client = DefaultClientConfig()
+	client.URL = "http://example.test/ws"
+	if _, err := client.Options(handler); err == nil {
 		t.Fatal("HTTP URL unexpectedly accepted")
 	}
 
-	dialer = DefaultDialerConfig()
-	dialer.PongTimeout = dialer.PingInterval
-	if _, err := dialer.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
+	client = DefaultClientConfig()
+	client.PongTimeout = client.PingInterval
+	if _, err := client.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("invalid heartbeat error = %v", err)
 	}
 
@@ -142,7 +144,7 @@ func TestConfigRejectsInvalidValues(t *testing.T) {
 		t.Fatalf("invalid capacity error = %v", err)
 	}
 
-	client := DefaultClientConfig()
+	client = DefaultClientConfig()
 	client.Reconnect.Jitter = -0.1
 	if _, err := client.Options(handler); !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("invalid reconnect error = %v", err)

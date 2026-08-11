@@ -26,9 +26,10 @@ Codec，以及 TCP Server、Client、Dialer。WebSocket、KCP 和 Gin 不在本�
 
 ## 2026-08-11 Service 配置补充
 
-- 新增独立 `ServerConfig`、`ClientConfig`、`DialerConfig` 和完整默认值；
+- 新增独立 `ServerConfig`、`ClientConfig` 和完整默认值；Dialer 是一次性代码对象，只使用
+  `DialOptions`，不进入 Service 配置；
 - 配置使用带单位 `Duration`/`ByteSize`，通过 `Options(handler)` 在启动冷路径转换并复用原校验；
-- Client/Dialer 固定单 Session，不公开冗余连接数和端点总预算；
+- Client/Dialer 固定单 Session；Client 配置不公开冗余连接数和端点总预算；
 - 新增默认 10s 的单次 TCP `DialTimeout`，调用方 Context 更早到期时仍优先生效；
 - 自调用 Example 改为从所属 Service 严格读取 `tcp.server`/`tcp.client`，未知字段直接阻止启动；
 - 补全 TCP Config、Options 和 Example 的中文字段及执行步骤注释。

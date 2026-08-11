@@ -13,7 +13,8 @@
 - MTU/加密/FEC 总报文边界、窗口、NoDelay、ACK、写延迟、DSCP 和 UDP Buffer 校验；
 - 连接数、消息数、Session/端点字节预算、发送水位、容量拒绝和 Buffer Pool 配平；
 - Handler error/panic、读空闲、静默对端重连、重复关闭和确定性停止；
-- Server/Client/Dialer Config 默认值、严格解码、单位转换、非法值与配置驱动 Example；
+- Server/Client Config 默认值、严格解码、单位转换、非法值与配置驱动 Example；Dialer 仅使用代码
+  `DialOptions`，不读取 Service 配置；
 - TCP 改用共用长度字段算法后的全仓回归。
 
 ## Windows 结果
