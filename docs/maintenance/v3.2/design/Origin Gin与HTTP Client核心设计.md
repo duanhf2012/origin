@@ -27,6 +27,7 @@ package ginmodule
 
 type ServerConfig struct {
     Address            string
+    RequestTimeout     config.Duration
     ReadHeaderTimeout  config.Duration
     ReadTimeout        config.Duration
     WriteTimeout       config.Duration
@@ -41,6 +42,7 @@ func DefaultServerConfig() ServerConfig
 func (ServerConfig) Options() (ServerOptions, error)
 
 type ServerOptions struct {
+    RequestTimeout     time.Duration
     ReadHeaderTimeout  time.Duration
     ReadTimeout        time.Duration
     WriteTimeout       time.Duration
@@ -61,17 +63,22 @@ func DefaultServerOptions() ServerOptions
 | 字段 | 默认值 | 说明 |
 | --- | ---: | --- |
 | `address` | `0.0.0.0:19093` | 示例起始值，生产环境按暴露范围修改 |
+| `request_timeout` | `15s` | 请求 Context 总预算；Handler 必须向 RPC、数据库和下游 I/O 传递 Context |
 | `read_header_timeout` | `5s` | 防止慢速 Header 占用连接 |
 | `read_timeout` | `15s` | 包含读取请求 Body；大上传应按实际业务调整 |
-| `write_timeout` | `15s` | 普通 API 响应上限；SSE/长流式响应需单独设计或关闭 |
+| `write_timeout` | `20s` | 比请求预算稍长，为取消收敛和错误响应保留时间 |
 | `idle_timeout` | `60s` | Keep-Alive 空闲连接保留时间 |
 | `max_header_bytes` | `1MiB` | 与 Go Server 默认量级一致 |
 | `max_request_body_size` | `4MiB` | 普通 JSON/PB API 的安全起点，不代表上传接口最优值 |
 | `max_active_requests` | `1024` | 当前 Server 的在途请求硬上限 |
 | `trusted_proxies` | `[]` | 默认不信任任何转发代理 |
 
-所有正时长和正容量必须大于零。首批不允许用零值隐式关闭边界；确有 SSE、超大上传等需求时，
-应先补充对应测试和设计，而不是把普通 Server 默认值整体放开。
+所有超时和容量必须大于零，并校验 `write_timeout > request_timeout`。首批不允许用零值隐式关闭边界；
+确有 SSE、超大上传等需求时，应先补充对应测试和设计，而不是把普通 Server 默认值整体放开。
+
+`request_timeout` 只通过首个框架 Middleware 为 `Request.Context()` 建立 Deadline，不把 Handler 放入新的
+goroutine，也不承诺强制中断忽略 Context 的业务代码。Handler 应把 `ctx.Request.Context()` 传给生成的
+`CallXxx`、数据库和下游客户端；业务错误响应格式仍由项目定义。
 
 ### 2.2 Server
 
@@ -90,6 +97,7 @@ type ServerStats struct {
     ActiveRequests   int64
     TotalRequests    uint64
     RejectedRequests uint64
+    TimedOutRequests uint64
     PanicTotal       uint64
 }
 ```
@@ -102,6 +110,7 @@ type ServerStats struct {
 
 - 活动请求准入，超限立即返回 `503`；
 - 使用 `http.MaxBytesReader` 限制请求 Body；
+- 为 Request Context 建立统一截止时间，并在 Handler 返回后释放 Timer；
 - 捕获未处理 panic，记录 Origin 结构化日志，并在尚未提交响应时返回 `500`；
 - 维护低基数固定统计。
 
@@ -152,8 +161,24 @@ type Options struct {
 }
 
 func DefaultOptions() Options
-func DefaultTransport() *http.Transport
 func New(options Options) (*Client, error)
+
+type TransportOptions struct {
+    DialTimeout            time.Duration
+    DialKeepAlive          time.Duration
+    TLSHandshakeTimeout    time.Duration
+    ResponseHeaderTimeout  time.Duration
+    IdleConnTimeout        time.Duration
+    MaxIdleConns           int
+    MaxIdleConnsPerHost    int
+    MaxConnsPerHost        int
+    MaxResponseHeaderBytes int64
+    Proxy                   func(*http.Request) (*url.URL, error)
+    TLSConfig               *tls.Config
+}
+
+func DefaultTransportOptions() TransportOptions
+func NewTransport(options TransportOptions) (*http.Transport, error)
 
 type Response struct {
     StatusCode int
@@ -172,11 +197,37 @@ func (client *Client) CloseIdleConnections()
 
 - `Timeout`：`30s`，覆盖连接、重定向和读取响应 Body 的总时间；请求 Context 可以提供更短预算；
 - `MaxResponseBodySize`：`4MiB`，只作用于 `DoBytes`；
-- 默认 Transport：每个 Client 独占一个连接池，启用系统代理和 HTTP/2；连接、TLS 握手、响应 Header、
-  空闲连接均有界；每主机允许适合服务间调用的连接复用，而不是沿用每主机仅少量空闲连接的默认值；
-- TLS 证书校验始终开启；需要自签证书时注入正确的 Root CA，不提供 `InsecureSkipVerify` 快捷开关。
+- `CheckRedirect`：`nil`，采用标准库最多连续 10 次跳转的策略；服务间调用不允许跳转时，由使用者返回
+  `http.ErrUseLastResponse`；
+- `Jar`：`nil`，默认不自动持久化 Cookie；
+- `Transport`：`nil` 时由 Client 调用 `NewTransport(DefaultTransportOptions())` 创建私有连接池；非 nil
+  表示使用调用方提供且可能共享的 `RoundTripper`；
+- 框架创建的 Transport 始终校验 TLS；需要自签证书时注入正确的 Root CA，`NewTransport` 拒绝
+  `InsecureSkipVerify=true`。完全自定义的 `RoundTripper` 由调用方承担安全责任。
 
-首批实现前通过测试冻结具体 Transport 数值；选择标准库默认量级附近的保守值，不根据假设吞吐盲目调大。
+默认 `TransportOptions`：
+
+| 字段 | 默认值 | 说明 |
+| --- | ---: | --- |
+| `dial_timeout` | `5s` | DNS/TCP 单次建连预算，请求 Context 更早到期时以 Context 为准 |
+| `dial_keep_alive` | `30s` | TCP KeepAlive 探测周期，不是 HTTP 连接池空闲时间 |
+| `tls_handshake_timeout` | `10s` | TLS 握手预算 |
+| `response_header_timeout` | `15s` | 请求 Body 写完后等待响应 Header 的预算 |
+| `idle_conn_timeout` | `90s` | HTTP Keep-Alive 空闲连接保留时间 |
+| `max_idle_conns` | `128` | 全部目标合计的空闲连接上限 |
+| `max_idle_conns_per_host` | `16` | 单目标保留的空闲连接上限；标准库默认 2 对服务间并发通常偏小 |
+| `max_conns_per_host` | `64` | 单目标正在拨号、活动和空闲连接总上限，达到后请求等待可用连接 |
+| `max_response_header_bytes` | `1MiB` | 单次响应 Header 上限 |
+| `proxy` | `http.ProxyFromEnvironment` | 遵循 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` |
+| `tls_config` | `nil` | 使用系统根证书；非 nil 时构造器克隆配置 |
+
+`NewTransport` 还固定 `ExpectContinueTimeout=1s`、启用透明 gzip 和 `ForceAttemptHTTP2=true`。这些属于
+安全互操作默认值，不再增加低价值的同名包装字段；高级使用者可以在首次请求前修改返回的
+`*http.Transport`。`MaxIdleConns >= MaxIdleConnsPerHost`、`MaxConnsPerHost >= MaxIdleConnsPerHost`，
+全部时间和容量必须为正。默认值只是普通服务间 API 的安全起点，连接并发必须结合上游容量和压测调整。
+
+框架不增加业务级重试、退避或熔断。Go Transport 仍可能在已复用连接发生网络错误时，对可重放且被识别为
+幂等的请求执行标准安全重试；业务不得把它误认为应用层可靠投递保证。
 
 ### 3.2 请求与响应所有权
 
@@ -184,10 +235,13 @@ func (client *Client) CloseIdleConnections()
 - `DoBytes` 最多读取 `MaxResponseBodySize + 1` 字节，超限返回稳定错误并关闭 Body；成功结果克隆 Header，
   Body 完全归调用方；
 - `DoBytes` 与标准库一致，不把 `4xx/5xx` 状态自动转换为 Go error，业务根据 `StatusCode` 处理；
+- `Do` 保留标准库 `*url.Error`、Context 和网络错误链；`DoBytes` 只补充
+  `ErrResponseBodyTooLarge` 以及读取/关闭 Body 的错误，不重新发明 HTTP 错误码映射；
 - Client 不修改调用方 Request、Header 或 Body，不自动添加鉴权、Content-Type 或 Trace Header；
-- 默认 Transport 由 Client 持有，`CloseIdleConnections` 只关闭该池的空闲连接；调用方注入的 Transport
-  被视为共享资源，不由 Client 关闭；
-- Client 关闭空闲连接后仍可继续使用，行为与标准库一致；活动请求由各自 Context 取消。
+- `DoBytes` 的大小上限作用于透明解压后的 Body，避免小压缩包展开后无界占用内存；
+- Client 不自动关闭连接池；显式 `CloseIdleConnections` 转发给底层 Transport，只关闭空闲连接，不中断
+  活动请求。注入共享 Transport 时，调用方必须统一决定调用时机；
+- 关闭空闲连接后 Client 仍可继续使用，行为与标准库一致；活动请求由各自 Context 取消。
 
 ### 3.3 在 Service 中调用
 
@@ -212,7 +266,7 @@ err := module.Await(ctx, func(waitCtx context.Context) error {
 
 ### 4.1 Gin Server
 
-- 默认值、严格配置、非法地址/代理/容量/TLS；
+- 默认值、严格配置、非法地址/代理/容量/TLS、请求 Context 到期统计；
 - `127.0.0.1:0` 启动、真实地址、正常路由、404；
 - 端口占用同步失败和部分启动回滚；
 - Header/Body/活动请求上限及拒绝统计；
@@ -224,10 +278,11 @@ err := module.Await(ctx, func(waitCtx context.Context) error {
 ### 4.2 HTTP Client
 
 - 默认值与非法 Options；
+- `TransportOptions` 的连接、TLS、代理、响应 Header 和连接池边界，以及非法字段组合；
 - 同一 Client 顺序和并发请求复用底层连接；不同 Client 不共享可关闭连接池；
 - Context 取消、总超时、重定向策略和 TLS 默认校验；
 - `Do` Body 所有权，`DoBytes` 精确边界、超限、读失败和 Close 失败主错误语义；
-- 注入 Transport 不被 Client 关闭；默认 Transport 的空闲连接可关闭；
+- 显式关闭默认或注入 Transport 的空闲连接不影响活动请求；
 - 不泄漏 goroutine、Timer、Body 或连接。
 
 ### 4.3 纵向验收

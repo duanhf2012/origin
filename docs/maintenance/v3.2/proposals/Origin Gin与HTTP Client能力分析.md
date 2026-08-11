@@ -61,8 +61,8 @@ v2 提供请求构造、Header 和读取响应 Body 的便捷能力，但生命�
 
 - 由 `Service.AddModule` 托管，启动时同步绑定 Listener，停止时优雅耗尽请求；
 - 使用者通过原生 `*gin.Engine` 注册路由和中间件，不重复包装 GET、POST 等 Gin API；
-- 提供严格 `ServerConfig`，包括监听地址、Header/读/写/空闲超时、Header/Body 上限、活动请求上限
-  和可信代理；
+- 提供严格 `ServerConfig`，包括监听地址、请求 Context/Header/读/写/空闲超时、Header/Body 上限、
+  活动请求上限和可信代理；
 - TLS 证书与动态安全策略通过代码注入，不写入通用 YAML；
 - 默认不信任转发代理，具备 panic 边界、过载拒绝和最小固定统计；
 - 暴露真实监听地址，支持测试使用 `127.0.0.1:0`；
@@ -78,12 +78,17 @@ Gin Handler 如果需要读取或修改 Service 串行状态，应调用已生�
 - `Do` 保留标准流式响应能力，由调用方关闭 Body；
 - `DoBytes` 提供有界完整读取并自动关闭 Body；
 - 请求使用调用方 `context.Context`，Client 同时提供非零总超时兜底；
-- 默认校验 TLS，支持 HTTP/2，复用独占 Transport 连接池；
+- 默认校验 TLS，支持 HTTP/2，复用独占 Transport 连接池；连接、TLS 握手、响应 Header、空闲连接和
+  每主机连接总数均有界；
+- 提供独立 `TransportOptions` 覆盖生产常调的拨号、TLS、代理、响应 Header 和连接池字段，不把整个
+  `http.Transport` 复制成第二套框架 API；
 - 自定义 `RoundTripper`、重定向策略和 Cookie Jar 通过代码注入；
-- 不自动重试。HTTP 方法是否幂等、Body 能否重放和业务去重只能由业务判断；
+- 不增加框架级业务重试。HTTP 方法是否幂等、Body 能否重放和业务去重只能由业务判断；保留 Go
+  Transport 对已复用失效连接执行的标准安全重试；
 - 不提供异步 Channel 包装。普通 goroutine 直接调用；Service 任务使用 `Module.Await` 或
   `Service.Await`，在等待网络 I/O 时释放 Service 执行权；
-- 默认创建的 Transport 由 Client 持有，可关闭空闲连接；调用方注入的 Transport 仍由调用方持有。
+- Client 不自动关闭 Transport；显式 `CloseIdleConnections` 只关闭空闲连接，不中断活动请求。注入共享
+  Transport 时，调用方负责决定何时调用该方法。
 
 ## 5. 首批不做的能力
 
@@ -97,14 +102,31 @@ Gin Handler 如果需要读取或修改 Service 串行状态，应调用已生�
 | Gin Context/HTTP Body 内存池 | 生命周期和收益不明确，错误池化容易保留大对象或产生数据竞争 |
 | 抽取 Application 全部 HTTP Runtime | 当前 Admin/pprof 有独立错误和安全语义；首批强行共用会扩大回归范围 |
 
+## 5.1 最终配置精简结论
+
+| 未增加的字段或便捷能力 | 处理方式 |
+| --- | --- |
+| Server `shutdown_timeout` | 使用 Application 传入 `OnStop(ctx)` 的统一停止预算，避免两套 Deadline |
+| Server TLS 证书路径、私钥、自动证书 | 使用代码注入的 `tls.Config`，不把密钥路径和证书管理固化进通用配置 |
+| Server `base_path`、CORS、鉴权、访问日志格式 | 继续使用 Gin Route/Middleware；这些属于业务或部署策略 |
+| Server KeepAlive 开关、HTTP/2 细项 | 使用 Go 安全默认值；首批没有真实需求证明需要公开 |
+| Client `base_url`、默认 Header、鉴权 | 写入具体 Request 或业务 Client，避免共享 Client 隐式污染请求 |
+| Client GET/POST/JSON/PB 便捷方法 | 使用 `http.NewRequestWithContext` 和标准编码库，避免复制标准库 API |
+| Client 业务重试、退避、熔断 | 需要业务幂等与上游策略，后续独立设计；不改变 Go Transport 的安全重试 |
+| Client 全部 `http.Transport` 字段 | 常用字段进入 `TransportOptions`；罕见字段在首次请求前修改 `NewTransport` 返回值 |
+
+最终 Server YAML 仅保留生产部署经常调整、且由 Server 唯一拥有的字段；HTTP Client 仍无 YAML，
+请求级 Options 与连接级 TransportOptions 分层，避免一个大而混杂的配置结构。
+
 ## 6. 额外补充且有必要的能力
 
 相对 v2，首批增加四项必要能力：
 
 1. 默认禁用代理 Header 信任，只有显式可信代理 IP/CIDR 才接受转发客户端地址；
 2. Server 请求并发、Header 和 Body 有界，Client 完整响应读取有界；
-3. Server 启动绑定失败同步返回，停止等待在途请求，超时后强制释放 Listener；
-4. 验证“Service 通过 Await 调 HTTP Client → 自身 Gin Handler → CallXxx 回到同一 Service”的完整自调用。
+3. Server 为请求 Context 建立总截止时间，使 RPC、数据库和 HTTP 下游能够随请求取消；
+4. Server 启动绑定失败同步返回，停止等待在途请求，超时后强制释放 Listener；
+5. 验证“Service 通过 Await 调 HTTP Client → 自身 Gin Handler → CallXxx 回到同一 Service”的完整自调用。
 
 这些能力直接解决安全、过载、生命周期和死锁风险，不属于过度设计。
 
