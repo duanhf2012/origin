@@ -52,14 +52,19 @@ Gin Server 与 HTTP Client 不加入长连接 Session 外观：前者使用请�
   服务端 Module 与代码持有 Client 实现依据。
 - [`Origin MongoDB Module 核心设计`](design/Origin%20MongoDB%20Module核心设计.md)：已确认的 MongoDB
   生命周期、多集群、配置、便利层、原子操作、测试和游戏场景 Example 实现依据。
+- [`Origin Redis Module 核心设计`](design/Origin%20Redis%20Module核心设计.md)：已完成内部 Review、待使用者
+  最终复核的 Redis
+  Standalone/Sentinel/Cluster、生产配置、高频便利层、Pipeline/Lua、分布式锁、测试和游戏场景 Example
+  实现依据。
 - [`Gin HTTP Module 使用指南`](guides/Gin%20HTTP%20Module使用指南.md)：普通/Safe 路由选择、配置、所有权，
   以及每组公开函数和函数参数的实际执行协程。
 - [`HTTP Client 使用指南`](guides/HTTP%20Client使用指南.md)：连接池、请求/响应所有权、Service Await，
   以及 Client 扩展回调的实际执行协程。
 
 两份网络 Proposal 保存能力分析和调研依据，不单独授权实现。网络核心设计已允许按 TCP、WebSocket、
-KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB 核心设计已经确认，但必须等待 Redis、MySQL、
-Kafka 和 Blueprint 设计全部确认后再统一制定实施计划。每个实施切片都必须独立完成计划、测试、文档和验收。
+KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB 核心设计已经确认，Redis 书面设计等待最终
+复核；之后必须完成 MySQL、Kafka 和 Blueprint 设计，再统一制定实施计划。每个实施切片都必须独立完成
+计划、测试、文档和验收。
 
 当前实施计划：
 
