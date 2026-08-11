@@ -19,6 +19,19 @@ Windows 可执行 `run.bat`，Linux/macOS 可执行 `./run.sh`。预期依次看
 `hello through websocket`。示例从 `services.NetworkService.websocket` 严格读取配置；端口或 Path
 需要改变时，同时修改 `config/application.yaml` 中的 Server 字段与 Client URL。
 
+## 函数与参数在哪个协程执行
+
+| 示例函数或参数 | 执行位置 | 使用规则 |
+| --- | --- | --- |
+| `OnInit`、`Default*Config`、`Config.Options(handler)`、`NewServer/NewClient` | Origin 启动装配上下文；`handler` 此时只被保存 | 只做配置和注册，不在这里处理网络消息 |
+| `onServerMessage`、`onClientOpen`、`onClientMessage` 及其 `ctx/session/payload` 参数 | `NetworkService` 工作协程串行执行 | 可以直接访问当前 Service 私有状态；payload 只在回调返回前有效 |
+| `session.Send(payload)` | 当前 Handler 所在的 Service 工作协程同步提交；实际 WebSocket 写出在内部 I/O goroutine | Send 返回前已经复制 payload |
+| `CheckOrigin(request)` 与 TLS 回调（本示例未设置） | HTTP Upgrade/TLS 握手的网络 goroutine，不同连接可并发调用 | 只能访问不可变或并发安全数据，不能直接读取 Service 私有状态 |
+| Client 的连接、心跳、读取、写出和重连 | 框架内部 I/O/重连 goroutine | 业务结果通过 Handler 回到 Service |
+
+在 Timer、事件、RPC 或 Handler 中调用一次性 `Dialer.Dial(ctx, 当前Service)` 时必须放入 `Await`，
+否则 Dial 等待的 `OnOpen` 无法取得当前 Service 执行权。
+
 ## 配置怎么改
 
 示例 YAML 列出完整 Server 起始值；没有准备调整的字段可以删除，由 `DefaultServerConfig` 补齐。

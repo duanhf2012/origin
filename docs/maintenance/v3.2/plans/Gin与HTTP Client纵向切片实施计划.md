@@ -1,7 +1,7 @@
 # Gin 与 HTTP Client 纵向切片实施计划
 
 > 目标版本：v3.2  
-> 状态：核心设计已确认，正在实施
+> 状态：实施与双平台验收完成
 > 实现依据：[Origin Gin 与 HTTP Client 核心设计](../design/Origin%20Gin与HTTP%20Client核心设计.md)
 
 ## 1. 范围
@@ -40,33 +40,33 @@
 
 ### 阶段 2：HTTP Client 小切片
 
-- [ ] 实现 `TransportOptions`、独占默认 Transport 和清晰的共享 Transport 所有权；
-- [ ] 实现 `Do`、`DoBytes`、总超时、响应上限和空闲连接关闭；
-- [ ] 完成连接复用、TLS、取消、超限、Body 关闭和并发测试；
-- [ ] Review 后冻结 Client 外观。
+- [x] 实现 `TransportOptions`、独占默认 Transport 和清晰的共享 Transport 所有权；
+- [x] 实现 `Do`、`DoBytes`、总超时、响应上限和空闲连接关闭；
+- [x] 完成连接复用、TLS、取消、超限、Body 关闭和并发测试；
+- [x] Review 后冻结 Client 外观。
 
 ### 阶段 3：纵向集成与性能验证
 
-- [ ] 增加同 Service Gin + HTTP Client 自调用集成测试；
-- [ ] 验证 `Await` 与 `SafePOST` 自调用组合不存在死锁、晚写、任务泄漏或停止悬挂；
-- [ ] 添加最小 Benchmark，确认没有每请求新建 Client/Transport 或框架辅助 goroutine；
-- [ ] 只处理测试或 Profile 证明的性能问题，不在本阶段扩展功能。
+- [x] 增加同 Service Gin + HTTP Client 自调用集成测试；
+- [x] 验证 `Await` 与 `SafePOST` 自调用组合不存在死锁、晚写、任务泄漏或停止悬挂；
+- [x] 添加最小 Benchmark，确认没有每请求新建 Client/Transport 或框架辅助 goroutine；
+- [x] 只处理测试或 Profile 证明的性能问题，不在本阶段扩展功能。
 
 ### 阶段 4：教程与整体验收
 
-- [ ] 增加 `examples/14-http`，业务类型匿名嵌入 `ginmodule.Module`，路由和业务逻辑集中在同一类型；
-- [ ] 增加 Gin Module、普通/Safe Handler、鉴权 Middleware 和 HTTP Client 使用指南，完整注释配置字段与
+- [x] 增加 `examples/14-http`，业务类型匿名嵌入 `ginmodule.Module`，路由和业务逻辑集中在同一类型；
+- [x] 增加 Gin Module、普通/Safe Handler、鉴权 Middleware 和 HTTP Client 使用指南，完整注释配置字段与
   建议值；
-- [ ] 教程必须逐项说明公开函数的调用位置，以及 `handler`、`middleware`、`SafeErrorMapper`、HTTP Client
+- [x] 教程必须逐项说明公开函数的调用位置，以及 `handler`、`middleware`、`SafeErrorMapper`、HTTP Client
   回调等函数参数实际在哪个 goroutine 执行；同时说明 Context、请求、响应和业务数据的所有权与有效期，
   让使用者能够据此判断是否可以直接访问 Service 串行状态；
-- [ ] Example 在首次注册普通路由、Safe 路由、普通 Group、SafeGroup 和发起 `Await` HTTP 调用处补充简短
+- [x] Example 在首次注册普通路由、Safe 路由、普通 Group、SafeGroup 和发起 `Await` HTTP 调用处补充简短
   协程注释，且注释必须与教程中的执行位置表一致；
-- [ ] 根 README 的扩展组件表增加 HTTP 章节，不改动 `00`～`12` 基础教程结构；
-- [ ] Windows：完整测试、`go vet`、Example 启停；
-- [ ] Ubuntu：完整测试、`-race`、覆盖率、Example 启停；
-- [ ] 对照代码、配置、Example、教程逐项 Review，形成变更记录和验收报告；
-- [ ] 提交到本地 `v3` 分支，不推送远端。
+- [x] 根 README 的扩展组件表增加 HTTP 章节，不改动 `00`～`12` 基础教程结构；
+- [x] Windows：完整测试、`go vet`、Example 启停；
+- [x] Ubuntu：完整测试、`-race`、覆盖率、Example 启停；
+- [x] 对照代码、配置、Example、教程逐项 Review，形成变更记录和验收报告；
+- [x] 提交到本地 `v3` 分支，不推送远端。
 
 ## 3. 防疏漏策略
 

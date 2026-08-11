@@ -19,6 +19,18 @@ Windows 可执行 `run.bat`，Linux/macOS 可执行 `./run.sh`。预期依次看
 `hello from the same service`。示例从 `services.NetworkService.tcp` 严格读取配置；端口被占用时
 修改 `config/application.yaml` 中 Server 与 Client 的地址，并保持两处一致。
 
+## 函数与参数在哪个协程执行
+
+| 示例函数或参数 | 执行位置 | 使用规则 |
+| --- | --- | --- |
+| `OnInit`、`Default*Config`、`Config.Options(handler)`、`NewServer/NewClient` | Origin 启动装配上下文；`handler` 此时只被保存 | 只做配置和注册，不在这里处理网络消息 |
+| `onServerMessage`、`onClientOpen`、`onClientMessage` 及其 `ctx/session/payload` 参数 | `NetworkService` 工作协程串行执行 | 可以直接访问当前 Service 私有状态；payload 只在回调返回前有效 |
+| `session.Send(payload)` | 当前 Handler 所在的 Service 工作协程同步提交；实际 TCP 写出在内部 I/O goroutine | Send 返回前已经复制 payload，不会把业务 Slice 交给 I/O goroutine |
+| Client 的连接、读取、写出和重连 | 框架内部 I/O/重连 goroutine | 不直接访问业务状态，业务结果会通过 Handler 回到 Service |
+
+如果改为在 Timer、事件、RPC 或 Handler 中调用一次性 `Dialer.Dial(ctx, 当前Service)`，必须把 Dial
+放入 `Await`：Dial 的调用 goroutine 会等待 `OnOpen`，而 `OnOpen` 需要当前 Service 的执行权。
+
 ## 配置怎么改
 
 示例 YAML 有意列出完整 Server 起始值，可直接复制到自己的 Service；没有准备调整的字段也可以删除，

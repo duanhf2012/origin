@@ -57,6 +57,7 @@ go run ./examples/00-quickstart/01-hello-service
 | 序号 | 组件 | 学习目标 | 教程 | 示例目录 |
 | --- | --- | --- | --- | --- |
 | 13 | TCP、WebSocket 与 KCP 网络模块 | 使用统一 Session、Server、Client、Dialer 与 PB/JSON Router | [网络模块文档](./docs/maintenance/v3.2/README.md) | [13-network](./examples/13-network/) |
+| 14 | Gin HTTP Module 与 HTTP Client | 使用普通/Safe 路由、分层鉴权、有界 Client 与同 Service HTTP 自调用 | [HTTP 组件文档](./docs/maintenance/v3.2/README.md) | [14-http](./examples/14-http/) |
 
 ## 学习方式
 

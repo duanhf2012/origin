@@ -21,7 +21,9 @@ type Resolver interface {
 
 // Codec 在一条完整 Raw 消息和类型消息之间转换。
 //
-// Codec 由所属 Service 串行调用。Encode 必须只把最终字节写入 Encoder，不能保存 Encoder。
+// Decode 由所属 Service 在 OnMessage 中串行调用；Encode 在 Router.Send 的调用 goroutine 中同步
+// 执行。跨 goroutine 调用 Router.Send 时 Codec 和消息值必须并发安全。Encode 只能把最终字节写入
+// Encoder，不能保存 Encoder。
 type Codec interface {
 	Decode([]byte, Resolver) (Message, error)
 	Encode(*Encoder, MessageID, any) error

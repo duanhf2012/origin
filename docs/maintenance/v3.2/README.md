@@ -1,7 +1,7 @@
 # Origin v3.2 文档
 
-v3.2 已进入纵向切片实施阶段。公共网络契约、TCP、WebSocket 和 KCP 已完成对应纵向切片；KCP
-运行时默认值经过 Windows 与 Ubuntu 弱网验证后，已提供严格 Service Config。
+v3.2 已进入纵向切片实施阶段。公共网络契约、TCP、WebSocket、KCP、Gin HTTP Module 与 HTTP Client
+已完成对应纵向切片；KCP 运行时默认值经过 Windows 与 Ubuntu 弱网验证后，已提供严格 Service Config。
 
 ## 网络模块教程
 
@@ -17,7 +17,18 @@ JSON 或自定义 Codec。
 
 全部网络 Example 见 [`examples/13-network`](../../../examples/13-network/README.md)。三个示例都从完整
 默认配置开始，通过所属 Service 的严格配置覆盖启动。每份 Example YAML 都给出完整、带注释的
-Server 起始配置；教程说明字段关系和调整依据，避免把默认值误当成所有部署的最优值。
+Server 起始配置；教程说明字段关系和调整依据，并逐组列出公开函数及函数参数的实际执行协程，避免
+把默认值误当成所有部署的最优值，也避免在网络 I/O goroutine 中误访 Service 串行状态。
+
+## HTTP 组件教程
+
+Gin Server 与 HTTP Client 不加入长连接 Session 外观：前者使用请求/响应和路由模型，后者是由代码
+长期持有的并发 Client。先运行同 Service 自调用 Example，再按实际入口选择普通或 Safe 路由。
+
+| 组件 | 适用场景 | 使用指南 | Example |
+| --- | --- | --- | --- |
+| Gin HTTP Module | 业务 HTTP API、普通请求回调、Service 串行 Safe 回调与分层鉴权 | [Gin HTTP Module 使用指南](guides/Gin%20HTTP%20Module使用指南.md) | [Gin Safe 路由与 HTTP 自调用](../../../examples/14-http/01-gin-safe-self-call/README.md) |
+| HTTP Client | 服务间 HTTP、流式响应、有界完整响应、连接池与同 Service 自调用 | [HTTP Client 使用指南](guides/HTTP%20Client使用指南.md) | [Gin Safe 路由与 HTTP 自调用](../../../examples/14-http/01-gin-safe-self-call/README.md) |
 
 ## 设计与实施资料
 
@@ -41,6 +52,8 @@ Server 起始配置；教程说明字段关系和调整依据，避免把默认�
   服务端 Module 与代码持有 Client 实现依据。
 - [`Gin HTTP Module 使用指南`](guides/Gin%20HTTP%20Module使用指南.md)：普通/Safe 路由选择、配置、所有权，
   以及每组公开函数和函数参数的实际执行协程。
+- [`HTTP Client 使用指南`](guides/HTTP%20Client使用指南.md)：连接池、请求/响应所有权、Service Await，
+  以及 Client 扩展回调的实际执行协程。
 
 两份网络 Proposal 保存能力分析和调研依据，不单独授权实现。网络核心设计已允许按 TCP、WebSocket、
 KCP 纵向切片实施；Gin 与 HTTP Client 核心设计已经确认并进入实施。每个切片都必须独立完成计划、测试、
@@ -51,7 +64,7 @@ KCP 纵向切片实施；Gin 与 HTTP Client 核心设计已经确认并进入�
 - [`TCP 网络首批纵向切片实施计划`](plans/TCP网络首批纵向切片实施计划.md)
 - [`WebSocket 网络纵向切片实施计划`](plans/WebSocket网络纵向切片实施计划.md)
 - [`KCP 网络纵向切片实施计划`](plans/KCP网络纵向切片实施计划.md)
-- [`Gin 与 HTTP Client 纵向切片实施计划`](plans/Gin与HTTP%20Client纵向切片实施计划.md)：正在实施。
+- [`Gin 与 HTTP Client 纵向切片实施计划`](plans/Gin与HTTP%20Client纵向切片实施计划.md)：实施与双平台验收完成。
 
 当前变更与验收材料：
 
@@ -61,5 +74,7 @@ KCP 纵向切片实施；Gin 与 HTTP Client 核心设计已经确认并进入�
 - [`WebSocket 网络纵向切片验收报告`](reports/WebSocket网络纵向切片验收报告.md)
 - [`KCP 网络纵向切片变更记录`](changes/KCP网络纵向切片变更记录.md)
 - [`KCP 网络纵向切片验收报告`](reports/KCP网络纵向切片验收报告.md)
+- [`Gin 与 HTTP Client 纵向切片变更记录`](changes/Gin与HTTP%20Client纵向切片变更记录.md)
+- [`Gin 与 HTTP Client 纵向切片验收报告`](reports/Gin与HTTP%20Client纵向切片验收报告.md)
 
 v3.1 的维护资料继续保留在 `../v3.1/`，不得混入本目录。

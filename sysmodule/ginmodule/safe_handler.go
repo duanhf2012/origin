@@ -131,6 +131,10 @@ func (module *Module) safeAdapter(
 
 			safeContext := newSafeContext(mergedContext, snapshot, handler, chain)
 			safeContext.run()
+			if cause := context.Cause(mergedContext); cause != nil {
+				deliverSafeResult(resultChannel, safeInvocationResult{err: cause})
+				return
+			}
 			response, responseErr := module.freezeSafeResponse(safeContext)
 			deliverSafeResult(resultChannel, safeInvocationResult{
 				response: response,

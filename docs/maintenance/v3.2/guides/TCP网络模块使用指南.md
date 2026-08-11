@@ -108,7 +108,31 @@ services:
 `Handler` 的 `OnOpen → OnMessage/OnWritableChanged → OnClose` 全部进入所属 Service 的串行上下文；
 同一 Session 保序，`OnClose` 恰好一次且最后执行。
 
-## 3. Client 与一次性 Dialer
+## 3. 函数、回调参数与执行协程
+
+这里的“执行协程”表示并发访问域，不承诺固定 goroutine ID。`address`、`id`、`payload` 等普通参数
+本身不会被延后执行；表中同时说明它们在哪一步被读取或复制。Handler、StateChange、Codec 和注册的
+消息 Handler 等函数参数才会在之后被框架调用。
+
+| 函数或函数族 | 函数参数实际执行位置 | 参数与所有权规则 | 可直接访问 Service 串行状态 |
+| --- | --- | --- | --- |
+| `Default*Config()`、`Default*Options(handler)`、`Config.Options(handler)` | 当前调用 goroutine；`handler` 只被保存，不在构造时调用 | 配置和普通参数同步读取 | 仅装配，不应处理业务状态 |
+| `NewServer/NewClient/NewDialer(address, options)` | 当前调用 goroutine；Options 中的回调只被保存 | 构造器同步校验并保存配置 | 仅装配，不应处理业务状态 |
+| `OnInit/OnStart/OnStop(ctx)` | Origin 管理的 Service 生命周期上下文；运行期 I/O 和 Client 重连另有内部 goroutine | 应通过 `AddModule` 让框架调用，不要手动并发调用 | 生命周期装配可以；不要当成普通消息回调 |
+| `Handler.OnOpen/OnMessage/OnWritableChanged/OnClose` 及 `HandlerFuncs` 对应函数字段 | 所属 Service 工作协程串行执行；停止收口时 `OnClose` 在独占 finalizer 上下文执行 | `ctx` 和 `payload` 只在回调期间有效；保存 payload 前必须复制 | 是 |
+| `ClientOptions.StateChange(ctx, snapshot)` | 所属 Service 串行上下文 | 不可变快照；不得阻塞，等待 I/O 时使用 `Await` | 是 |
+| `Session.Send/Close/ID/Transport/LocalAddr/RemoteAddr/Context/Done/Writable/Cause/Stats` | 当前调用 goroutine；`Send/Close` 只同步提交，实际网络读写由内部 I/O goroutine 完成 | `Send` 返回前复制 payload；其他返回值按接口注释使用 | 调用本身并发安全，但不因此取得 Service 执行权 |
+| `Server.Addr/Session/SessionCount/CloseSession/Stats`、`Client.Session/State/Stats` | 当前调用 goroutine | 返回并发安全快照或 Session；`CloseSession` 的 `OnClose` 稍后回到 Service | 调用本身并发安全，但不因此取得 Service 执行权 |
+| `Dialer.Dial(ctx, owner)` | 调用 goroutine 同步等待；连接 I/O 在内部 goroutine，`OnOpen` 在 `owner` Service 工作协程 | `ctx` 控制整个拨号等待；返回 Session 由调用方关闭 | 在 `owner` 的 Task 中调用时必须放进 `Await`，否则会等待自己持有的执行权 |
+| `protocol.NewRouter/Register/Freeze` | 当前调用 goroutine；注册的 Handler 只保存到构造期路由表 | 必须在 Module `OnInit` 冻结前完成注册 | 仅装配 |
+| `Codec.Decode`、`RouterOptions.Unknown`、注册的消息 Handler | 所属 Service 工作协程，位于 `OnMessage` 的同一个 Task | Decode 的 payload 是借用视图；消息 Handler 可以访问 Service 状态 | 是 |
+| `Router.Send` 与 `Codec.Encode` | 调用 `Send` 的当前 goroutine 同步执行 | Encoder 仅在本次 Encode 内有效；跨 goroutine 调用时 Codec 和消息值必须并发安全 | 只有调用方原本就在 Service 上下文时才可以 |
+
+最容易出错的是 `Dialer.Dial`：它虽然由当前 goroutine 发起，却要等待 `owner` Service 中的 `OnOpen`。
+从该 Service 的 Timer、事件、RPC 或网络 Handler 内拨号时，应使用 `module.Await(ctx, func(waitCtx
+context.Context) error { ... })` 释放 Service 执行权后再调用。
+
+## 4. Client 与一次性 Dialer
 
 长期连接使用 `tcp.Client`，它由 Module 自动停止：
 
@@ -139,7 +163,7 @@ Client，使 Client 启动连接前监听端已经就绪；停止时框架会按
 owner 停止前关闭返回的 Session。需要自动停止或重连时使用 Client，不要用 Dialer 自建后台循环。
 Dialer 不读取 YAML，也没有 `DialerConfig`；从 `DefaultDialOptions(handler)` 开始在代码中按需覆盖。
 
-## 4. PB、JSON 与自定义 Codec
+## 5. PB、JSON 与自定义 Codec
 
 Router 在构造期注册消息，Module `OnInit` 会自动冻结它：
 
@@ -167,7 +191,7 @@ err = protocol.Register(router, 1001,
 MessageID 是非零 `uint16`。PB MessageID 端序和 TCP 长度帧端序是两个独立配置，不要误以为修改
 其中一个会同步修改另一个。未知 ID 默认按协议错误关闭 Session；需要忽略或记录时配置 `Unknown`。
 
-## 5. 帧、容量与过载
+## 6. 帧、容量与过载
 
 TCP 每条消息前有 1、2 或 4 字节无符号长度。默认 4 字节 Big Endian；游戏客户端使用小端时设置：
 
@@ -190,7 +214,7 @@ Buffer 保留容量记账，不是只看 payload 长度。
 `Writable` 和 `OnWritableChanged` 只提供高低水位提示，最终仍以 `Send` 返回值为准。队列持续高水位
 超过 `SlowClientTimeout` 时会关闭慢连接，避免单个客户端长期占用内存。
 
-## 6. 所有权与停止
+## 7. 所有权与停止
 
 - Raw `Send([]byte)` 会复制，调用返回后可立即复用原 Slice；
 - `OnMessage` 的 payload 是借用视图，保存或异步使用前必须复制；

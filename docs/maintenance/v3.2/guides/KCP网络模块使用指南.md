@@ -117,7 +117,30 @@ services:
 MTU、窗口、NoDelay 或 FEC。不要把 FEC、Socket Buffer 和窗口一起调大后只观察平均延迟；至少同时
 记录 P99 延迟、丢包/重传、带宽、CPU 和内存。
 
-## 2. KCP 与 TCP 不同的连接语义
+## 2. 函数、回调参数与执行协程
+
+这里的“执行协程”表示并发访问域，不承诺固定 goroutine ID。地址、MTU、窗口等普通参数由调用函数
+同步读取；真正会延后执行的是 Handler、StateChange、BlockCrypt、Codec 和注册的消息 Handler。
+
+| 函数或函数族 | 函数参数实际执行位置 | 参数与所有权规则 | 可直接访问 Service 串行状态 |
+| --- | --- | --- | --- |
+| `Default*Config()`、`Default*Options(handler)`、`Config.Options(handler)` | 当前调用 goroutine；`handler` 和 `BlockCrypt` 只被保存 | 配置同步读取 | 仅装配，不应处理业务状态 |
+| `NewServer/NewClient/NewDialer(address, options)` | 当前调用 goroutine；Options 中的回调和接口只被保存 | 构造器同步校验配置 | 仅装配，不应处理业务状态 |
+| `OnInit/OnStart/OnStop(ctx)` | Origin 管理的 Service 生命周期上下文；UDP/KCP 更新、连接读写和 Client 重连另有内部 goroutine | 应通过 `AddModule` 让框架调用 | 生命周期装配可以；不要当成普通消息回调 |
+| `Handler.OnOpen/OnMessage/OnWritableChanged/OnClose` 及 `HandlerFuncs` 对应函数字段 | 所属 Service 工作协程串行执行；停止收口时 `OnClose` 在独占 finalizer 上下文执行 | `ctx` 和 `payload` 只在回调期间有效；保存 payload 前必须复制 | 是 |
+| `ClientOptions.StateChange(ctx, snapshot)` | 所属 Service 串行上下文 | 不可变快照；等待外部 I/O 时使用 `Await` | 是 |
+| `BlockCrypt` 的加解密方法 | KCP 内部 UDP/更新 I/O goroutine，不同 Session 可能并发调用 | 同一实例可被多个 Session 共享，必须并发安全，不能访问 Service 私有状态 | 否 |
+| `Session.Send/Close` 与全部查询方法 | 当前调用 goroutine；实际 KCP 编解码和 UDP I/O 在内部 goroutine | `Send` 返回前复制 payload；调用不改变当前执行权 | 只有调用方原本就在 Service 上下文时才可以访问业务状态 |
+| `Server.Addr/Session/SessionCount/CloseSession/Stats`、`Client.Session/State/Stats` | 当前调用 goroutine | 返回并发安全快照或 Session；最终 `OnClose` 稍后回到 Service | 调用本身不取得 Service 执行权 |
+| `Dialer.Dial(ctx, owner)` | 调用 goroutine 同步创建本地 Session 并等待结果；`OnOpen` 在 `owner` Service 工作协程 | 成功不表示远端可达；返回 Session 由调用方关闭 | 在 `owner` Task 内必须放入 `Await`，避免等待自己持有的执行权 |
+| `protocol.NewRouter/Register/Freeze` | 当前调用 goroutine；注册的 Handler 只保存 | 必须在 Module `OnInit` 冻结前注册完成 | 仅装配 |
+| `Codec.Decode`、`RouterOptions.Unknown`、注册的消息 Handler | 所属 Service 工作协程，位于 `OnMessage` 的同一个 Task | Decode payload 是借用视图 | 是 |
+| `Router.Send` 与 `Codec.Encode` | 调用 `Send` 的当前 goroutine 同步执行 | Encoder 只在本次 Encode 内有效；跨 goroutine 调用时 Codec 和消息值必须并发安全 | 只有调用方原本就在 Service 上下文时才可以 |
+
+特别注意：KCP `Dial` 没有远端握手，但仍会等待本地 `OnOpen` 在 `owner` Service 执行。从该 Service
+的 Timer、事件、RPC 或网络 Handler 内调用时，同样必须用 `Await` 先释放执行权。
+
+## 3. KCP 与 TCP 不同的连接语义
 
 KCP 建立客户端时只创建本地 UDP Session，没有 TCP 三次握手或 WebSocket Upgrade：
 
@@ -129,7 +152,7 @@ KCP 建立客户端时只创建本地 UDP Session，没有 TCP 三次握手或 W
 
 如果项目要求更快发现断线，应实现业务心跳并缩短读空闲值，但不要小于正常心跳抖动上限。
 
-## 3. Client 与一次性 Dialer
+## 4. Client 与一次性 Dialer
 
 长期连接使用由 Service 托管的 `kcp.Client`：
 
@@ -152,7 +175,7 @@ return module.AddModule(client)
 `kcp.Dialer` 只创建一次本地 Session，不自动停止或重连。它要求 owner Service 已处于
 Running/Retired，调用方必须在 owner 停止前关闭返回的 Session。需要生命周期托管时使用 Client。
 
-## 4. 帧、MTU 与窗口
+## 5. 帧、MTU 与窗口
 
 KCP 固定启用 Stream Mode，并在字节流上叠加与 TCP 相同的无符号长度帧。默认是 4 字节 Big
 Endian；也支持 1/2/4 字节和 Little Endian：
@@ -179,7 +202,7 @@ options.Frame.ByteOrder = network.LittleEndian
 实现严格拒绝 KCP 库会静默修正的非法值。库内 UDP 报文缓冲上限为 1500 字节；启用 BlockCrypt
 会增加 20 字节头，启用 FEC 会再增加 8 字节头，因此两者同时启用时 `MTU` 不能超过 1472。
 
-## 5. FEC 与加密
+## 6. FEC 与加密
 
 FEC 默认关闭。确认丢包率和冗余带宽可接受后再配置，例如：
 
@@ -209,7 +232,7 @@ options.BlockCrypt = block
 密钥；同一 BlockCrypt 实例被多个 Session 共享时实现必须并发安全。KCP 包加密不替代业务鉴权、
 重放防护和密钥轮换。
 
-## 6. 容量、所有权与停止
+## 7. 容量、所有权与停止
 
 KCP 复用公共端点容量：单消息、入站待处理消息/字节、出站队列消息/字节和 Module 总预算全部有界。
 `Session.Send` 非阻塞提交；过载返回 `ErrTransportOverloaded`，不会静默丢弃可靠消息。

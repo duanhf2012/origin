@@ -21,6 +21,19 @@ KCP 没有 TCP/HTTP 式远端握手：`OnOpen` 只表示本地 UDP Session 已�
 配置从完整默认值开始严格覆盖，配置文件只需列出希望明确调整的字段；拼错字段会在启动期报错。
 `BlockCrypt` 不应写入普通配置文件，需要在 `Options` 转换后从代码安全注入。
 
+## 函数与参数在哪个协程执行
+
+| 示例函数或参数 | 执行位置 | 使用规则 |
+| --- | --- | --- |
+| `OnInit`、`Default*Config`、`Config.Options(handler)`、`NewServer/NewClient` | Origin 启动装配上下文；`handler` 和 `BlockCrypt` 此时只被保存 | 只做配置和注册，不在这里处理网络消息 |
+| `onServerMessage`、`onClientOpen`、`onClientMessage` 及其 `ctx/session/payload` 参数 | `NetworkService` 工作协程串行执行 | 可以直接访问当前 Service 私有状态；payload 只在回调返回前有效 |
+| `session.Send(payload)` | 当前 Handler 所在的 Service 工作协程同步提交；实际 KCP/UDP 写出在内部 I/O goroutine | Send 返回前已经复制 payload |
+| `BlockCrypt` 加解密方法（本示例未设置） | KCP 内部 I/O goroutine，不同 Session 可能并发调用 | 实现必须并发安全，不能直接读取 Service 私有状态 |
+| Client 的 KCP 更新、读取、写出和重连 | 框架内部 I/O/重连 goroutine | 业务结果通过 Handler 回到 Service |
+
+KCP 没有远端握手，但一次性 `Dialer.Dial(ctx, 当前Service)` 仍会等待本地 `OnOpen`。从 Timer、事件、
+RPC 或 Handler 中调用时必须放入 `Await`，先释放当前 Service 执行权。
+
 ## 配置怎么改
 
 示例 YAML 列出完整 Server 起始值。第一次接入先确认 UDP 端口确实可达、业务心跳和

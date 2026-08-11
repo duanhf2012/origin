@@ -1,7 +1,7 @@
 # Origin Gin 与 HTTP Client 核心设计
 
 > 目标版本：v3.2  
-> 状态：待公开外观确认后实施  
+> 状态：公开外观已确认，实现与双平台验收完成
 > 能力依据：[Origin Gin 与 HTTP Client 能力分析](../proposals/Origin%20Gin与HTTP%20Client能力分析.md)
 
 ## 1. 包、组合与所有权

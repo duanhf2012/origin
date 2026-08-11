@@ -1,0 +1,38 @@
+log:
+  mode: async
+  console:
+    enabled: true
+    level: info
+    format: text
+
+nodes:
+  - id: http-1
+    services:
+      - HTTPService
+
+services:
+  HTTPService:
+    http:
+      server:
+        # 示例仅允许本机访问；对外提供服务时按实际网卡配置，并配合防火墙或反向代理。
+        address: "127.0.0.1:19093"
+        # 单请求 Context 总预算，包含 Safe Task 排队与业务处理；通常按接口 SLO 收紧。
+        request_timeout: 15s
+        # 读取完整请求 Header 的最长时间，用于限制慢速请求头攻击。
+        read_header_timeout: 5s
+        # 读取完整请求（包括 Body）的最长时间。
+        read_timeout: 15s
+        # 写响应的最长时间；必须大于 request_timeout，给框架提交响应留出余量。
+        write_timeout: 20s
+        # HTTP Keep-Alive 空闲连接保留时间，不是业务心跳。
+        idle_timeout: 60s
+        # 请求 Header 与 Safe 响应 Header 的字节上限；普通 JSON API 通常保留 1MiB 起始值。
+        max_header_bytes: 1M
+        # 单请求 Body 上限；应按真实 JSON/PB 接口最大负载尽量收紧。
+        max_request_body_size: 4M
+        # Safe Handler 私有响应 Body 上限；流式或大响应改用普通 Handler。
+        max_safe_response_body_size: 4M
+        # 当前 Module 同时处理的在途请求硬上限，超限立即返回 503；按上游容量和压测调整。
+        max_active_requests: 1024
+        # 允许提供转发客户端地址的代理 IP/CIDR；示例直连，因此不信任任何代理。
+        trusted_proxies: []
