@@ -12,27 +12,46 @@ TCP Module 适合游戏客户端、网关、自定义长连接协议等需要直
 
 不要为了统一形式给 Raw 消息套一个空 Codec。Gin/HTTP 也不接入这套 Session 外观。
 
-## 2. 创建 Raw Server
+## 2. 在业务 Module 中创建 Raw Server
 
-在 Service 的 `OnInit` 中创建并加入 Module：
+推荐由项目自己的业务 Module 保存 Server 和消息处理逻辑，Service 只负责装配业务 Module：
 
 ```go
-handler := network.HandlerFuncs{
-    Message: func(ctx context.Context, session network.Session, payload []byte) error {
-        // payload 只在回调返回前有效；Send 会安全复制。
-        return session.Send(payload)
-    },
+type GatewayTCPModule struct {
+    service.Module
+    server *tcp.Server
 }
 
-options := tcp.DefaultServerOptions(handler)
-server, err := tcp.NewServer("127.0.0.1:19090", options)
-if err != nil {
-    return err
+func (module *GatewayTCPModule) OnInit() error {
+    handler := network.HandlerFuncs{Message: module.onMessage}
+    server, err := tcp.NewServer(
+        "127.0.0.1:19090",
+        tcp.DefaultServerOptions(handler),
+    )
+    if err != nil {
+        return err
+    }
+    module.server = server
+    return module.AddModule(server)
 }
-return service.AddModule(server)
+
+func (module *GatewayTCPModule) onMessage(
+    _ context.Context,
+    session network.Session,
+    payload []byte,
+) error {
+    // payload 只在回调返回前有效；Send 会安全复制。
+    return session.Send(payload)
+}
+
+type GatewayService struct{ service.Service }
+
+func (target *GatewayService) OnInit() error {
+    return target.AddModule(&GatewayTCPModule{})
+}
 ```
 
-实际代码中的 `service` 是当前业务 Service，例如 `target.AddModule(server)`。完整程序见
+这种结构把协议路由、连接状态和网络事件集中在业务 Module，避免业务代码散落到 Service。完整程序见
 [`01-tcp-raw-self-call`](../../../../examples/13-network/01-tcp-raw-self-call/)。
 
 `Handler` 的 `OnOpen → OnMessage/OnWritableChanged → OnClose` 全部进入所属 Service 的串行上下文；
@@ -49,8 +68,11 @@ client, err := tcp.NewClient(address, options)
 if err != nil {
     return err
 }
-return target.AddModule(client)
+return module.AddModule(client)
 ```
+
+这里的 `module` 是项目自己的业务 Module。需要同时提供 Server 和 Client 时，先加入 Server、再加入
+Client，使 Client 启动连接前监听端已经就绪；停止时框架会按相反顺序清理。
 
 开启重连后，默认最多尝试 10 次，退避从 200ms 增长到 5s，并带 20% 抖动。每次重连都会产生
 新的 Session 和 SessionID；不要把旧 Session 当作恢复后的连接。

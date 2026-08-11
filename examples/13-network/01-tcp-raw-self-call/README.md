@@ -1,7 +1,11 @@
 # TCP Raw 回环
 
-本示例不依赖 NATS、etcd 或其他进程。一个 `NetworkService` 同时托管 TCP Server 与 Client，
-Client 在 `OnOpen` 发送消息，Server 收到后原样回显，用于验证服务调用自己的网络入口不会死锁。
+本示例不依赖 NATS、etcd 或其他进程。`NetworkService` 只装配业务 `EchoTCPModule`，后者把
+TCP Server 与 Client 作为子 Module 管理，并集中实现全部网络业务回调。Client 在 `OnOpen`
+发送消息，Server 收到后原样回显，用于验证服务调用自己的网络入口不会死锁。
+
+示例采用 `NetworkService → EchoTCPModule → Server/Client` 的结构。实际项目可以在自己的业务
+Module 中保存连接状态、注册消息路由、使用定时器和处理网络事件，无需把这些代码放进 Service。
 
 从仓库根目录运行：
 

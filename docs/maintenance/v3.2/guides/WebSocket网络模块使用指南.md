@@ -4,27 +4,47 @@ WebSocket Module 适合浏览器、网关和需要穿过 HTTP 基础设施的长
 `network.Session` 与 `network.Handler`；只有 Upgrade、Origin、Text/Binary、TLS 和心跳留在
 `websocket` 子包。
 
-## 1. 创建 Server
+## 1. 在业务 Module 中创建 Server
 
-在 Service 的 `OnInit` 中创建并加入 Module：
+推荐由项目自己的业务 Module 保存 Server 和消息处理逻辑，Service 只负责装配业务 Module：
 
 ```go
-handler := network.HandlerFuncs{
-    Message: func(ctx context.Context, session network.Session, payload []byte) error {
-        // payload 只在回调返回前有效；Send 会安全复制。
-        return session.Send(payload)
-    },
+type GatewayWebSocketModule struct {
+    service.Module
+    server *websocket.Server
 }
 
-options := websocket.DefaultServerOptions(handler)
-server, err := websocket.NewServer("127.0.0.1:19091", options)
-if err != nil {
-    return err
+func (module *GatewayWebSocketModule) OnInit() error {
+    handler := network.HandlerFuncs{Message: module.onMessage}
+    server, err := websocket.NewServer(
+        "127.0.0.1:19091",
+        websocket.DefaultServerOptions(handler),
+    )
+    if err != nil {
+        return err
+    }
+    module.server = server
+    return module.AddModule(server)
 }
-return target.AddModule(server)
+
+func (module *GatewayWebSocketModule) onMessage(
+    _ context.Context,
+    session network.Session,
+    payload []byte,
+) error {
+    // payload 只在回调返回前有效；Send 会安全复制。
+    return session.Send(payload)
+}
+
+type GatewayService struct{ service.Service }
+
+func (target *GatewayService) OnInit() error {
+    return target.AddModule(&GatewayWebSocketModule{})
+}
 ```
 
-默认 Path 是 `/ws`，消息类型是 Binary。完整程序见
+这种结构把协议路由、连接状态和网络事件集中在业务 Module，避免业务代码散落到 Service。默认 Path
+是 `/ws`，消息类型是 Binary。完整程序见
 [`02-websocket-raw-self-call`](../../../../examples/13-network/02-websocket-raw-self-call/)。
 
 `OnOpen → OnMessage/OnWritableChanged → OnClose` 都进入所属 Service 的串行上下文；同一 Session
@@ -67,8 +87,11 @@ client, err := websocket.NewClient("wss://gateway.example.com/ws", options)
 if err != nil {
     return err
 }
-return target.AddModule(client)
+return module.AddModule(client)
 ```
+
+这里的 `module` 是项目自己的业务 Module。需要同时提供 Server 和 Client 时，先加入 Server、再加入
+Client，使 Client 启动连接前监听端已经就绪；停止时框架会按相反顺序清理。
 
 请求 Header 不能覆盖 WebSocket 握手保留字段。开启重连后默认最多尝试 10 次，退避从 200ms 增长到
 5s，并带 20% 抖动；每次成功连接都会产生新的 Session。
