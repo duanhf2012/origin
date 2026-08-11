@@ -1,6 +1,6 @@
 # Origin Redis Module 核心设计
 
-> 状态：设计结论已确认并完成书面自审，待使用者最终复核；之后继续 MySQL、Kafka 和 Blueprint 设计
+> 状态：已最终确认；之后继续 MySQL、Kafka 和 Blueprint 设计
 > 基线：Origin v3.0，目标版本：v3.2
 > 兼容性：项目尚未对外发布，不保留 Origin v2 Redis API、命名或行为兼容层
 > Driver 基线：实施前再次复核；截至 2026-08-11 固定为 `github.com/redis/go-redis/v9 v9.22.0`
