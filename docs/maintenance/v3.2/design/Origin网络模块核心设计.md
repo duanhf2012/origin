@@ -553,10 +553,8 @@ TCP、WebSocket 和 KCP 分别公开自己的 `ServerConfig`、`ClientConfig` �
 时再复用内部校验；传输专属字段只存在于自己的包中。配置对象只保存可序列化数据，`Handler`、
 `StateChange`、TLS、WebSocket Origin/Header 和 KCP `BlockCrypt` 继续由代码注入。
 
-本节冻结的是目标外观，不要求三个传输同时实现配置。TCP、WebSocket 可以基于已有稳定 Options 先接入
-Service 配置；KCP 必须先完成 Server/Client/Dialer、运行期 Options、公共契约测试和弱网验证，再实现
-KCP Config 到 Options 的映射。若底层验证证明某个 KCP 字段没有可靠语义，先修订本节再实现配置，禁止
-为了匹配文档而保留无效参数或建立兼容层。
+本节冻结的是目标外观。KCP 已按“先完成 Server/Client/Dialer 和运行期 Options，再通过公共契约与
+Ubuntu 弱网验证，最后实现 Config 到 Options 映射”的顺序完成；没有为匹配文档保留无效参数或兼容层。
 
 每个 Config 都提供完整默认值：
 
@@ -775,8 +773,9 @@ v2 的 `MinMsgLen` 被协议校验替代，分离的 `MaxReadMsgLen`/`MaxWriteMs
 `max_message_size`，`PendingWriteNum` 被消息数、字节数和总预算三层上限替代。废弃的 DUP、动态热更新、
 普通 YAML 中的静态加密密钥都不进入首批外观。
 
-KCP 上述数值是 Ubuntu 弱网与容量测试的候选起点；KCP Module 验收后才冻结发布默认值并实现 Config。
-底层验证可以调整默认数值；需要改变字段职责时必须先复核并更新本设计。
+KCP 上述数值已通过 Windows 回环及 Ubuntu `80±20ms` 延迟、`5%` 丢包、`10%` 乱序验证，现冻结为
+v3.2 默认值。该结果只证明默认值满足当前功能与弱网基线，不代表所有业务负载下的性能最优值；项目仍应
+按实际消息大小、在线数和链路质量压测后显式调整。
 WebSocket 默认不得允许任意 Origin；TLS、Origin 校验和 KCP 加密在代码中显式注入并单独测试，不能因
 YAML 未出现对应字段而省略安全能力。
 

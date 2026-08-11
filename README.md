@@ -56,7 +56,7 @@ go run ./examples/00-quickstart/01-hello-service
 
 | 序号 | 组件 | 学习目标 | 教程 | 示例目录 |
 | --- | --- | --- | --- | --- |
-| 13 | TCP 与 WebSocket 网络模块 | 使用统一 Session、Server、Client、Dialer 与 PB/JSON Router | [网络模块文档](./docs/maintenance/v3.2/README.md) | [13-network](./examples/13-network/) |
+| 13 | TCP、WebSocket 与 KCP 网络模块 | 使用统一 Session、Server、Client、Dialer 与 PB/JSON Router | [网络模块文档](./docs/maintenance/v3.2/README.md) | [13-network](./examples/13-network/) |
 
 ## 学习方式
 

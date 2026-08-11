@@ -1,0 +1,53 @@
+log:
+  mode: async
+  console:
+    enabled: true
+    level: info
+    format: text
+
+nodes:
+  - id: network-1
+    services:
+      - NetworkService
+
+services:
+  NetworkService:
+    kcp:
+      server:
+        # Server 和 Client 在同一进程回环；生产环境通常监听实际服务网卡。
+        address: "127.0.0.1:19092"
+        frame: {length_field_size: 4, byte_order: big}
+        # 修改 MTU 前需结合链路 MTU 测试；启用加密/FEC 时还要计入额外协议头。
+        mtu: 1400
+        # 窗口单位是 KCP Segment，不是字节。
+        send_window: 1024
+        receive_window: 1024
+        no_delay:
+          enabled: true
+          interval: 10ms
+          fast_resend: 2
+          disable_congestion_control: true
+        # 0/0 表示关闭 FEC；启用时 Client 必须使用相同组合。
+        fec: {data_shards: 0, parity_shards: 0}
+        # KCP 没有 FIN，依赖业务心跳和读空闲发现失活；该值必须大于心跳最大间隔。
+        read_idle_timeout: 60s
+      client:
+        address: "127.0.0.1:19092"
+        frame: {length_field_size: 4, byte_order: big}
+        mtu: 1400
+        send_window: 1024
+        receive_window: 1024
+        no_delay:
+          enabled: true
+          interval: 10ms
+          fast_resend: 2
+          disable_congestion_control: true
+        fec: {data_shards: 0, parity_shards: 0}
+        read_idle_timeout: 60s
+        reconnect:
+          # 示例只连接本进程 Server，不需要自动重连。
+          enabled: false
+          max_attempts: 10
+          initial_delay: 200ms
+          max_delay: 5s
+          jitter: 0.2
