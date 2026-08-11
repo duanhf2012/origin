@@ -40,6 +40,17 @@ MongoDB Module 不重复包装官方 CRUD。教程按三层说明：普通数据
 
 Example 包含配置、索引、CRUD、两类 Upsert、条件扣金币、乐观锁、有界多行查询、BulkWrite、幂等奖励、事务转账和安全删除，并明确每种调用和回调所在的 goroutine。
 
+## Redis 组件教程
+
+Redis Module 按三层使用：高频基础命令使用精确返回值的便利层；长尾命令、Pipeline、事务、Watch 和 Lua 使用官方 Client 组合层；
+Service 串行业务通过 `Await` 释放工作协程。Module 支持 Standalone、Sentinel、Cluster、有界连接池、TLS/ACL 和不自动续租的 Lease Lock。
+
+| 组件 | 适用场景 | 使用指南 | Example |
+| --- | --- | --- | --- |
+| Redis Module | 缓存、会话、在线集合、匹配队列、基础整数排行、位图、原子 Lua 与并发收敛 | [Redis Module 使用指南](guides/Redis%20Module使用指南.md) | [Redis 游戏场景示例](../../../examples/16-redis/README.md) |
+
+四个 Example 分别覆盖缓存与会话、集合与基础排行、Pipeline/Lua/乐观并发、分布式 Lease Lock；每个示例都把 Key、编解码和业务规则集中在业务 Module 中。
+
 ## 设计与实施资料
 
 本目录沿用 `../v3.1/README.md` 定义的文档分层：
@@ -86,6 +97,7 @@ KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB、Redis �
 - [`KCP 网络纵向切片实施计划`](plans/KCP网络纵向切片实施计划.md)
 - [`Gin 与 HTTP Client 纵向切片实施计划`](plans/Gin与HTTP%20Client纵向切片实施计划.md)：实施与双平台验收完成。
 - [`MongoDB Module 纵向切片实施计划`](plans/MongoDB%20Module纵向切片实施计划.md)
+- [`Redis Module 纵向切片实施计划`](plans/Redis%20Module纵向切片实施计划.md)
 
 当前变更与验收材料：
 
@@ -99,5 +111,7 @@ KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB、Redis �
 - [`Gin 与 HTTP Client 纵向切片验收报告`](reports/Gin与HTTP%20Client纵向切片验收报告.md)
 - [`MongoDB Module 纵向切片变更记录`](changes/MongoDB%20Module纵向切片变更记录.md)
 - [`MongoDB Module 纵向切片验收报告`](reports/MongoDB%20Module纵向切片验收报告.md)
+- [`Redis Module 纵向切片变更记录`](changes/Redis%20Module纵向切片变更记录.md)
+- [`Redis Module 纵向切片验收报告`](reports/Redis%20Module纵向切片验收报告.md)
 
 v3.1 的维护资料继续保留在 `../v3.1/`，不得混入本目录。

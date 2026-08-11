@@ -1,6 +1,6 @@
 # Origin Redis Module 核心设计
 
-> 状态：已最终确认；MySQL 暂缓，之后继续 Kafka 和 Blueprint 设计
+> 状态：已实施并完成设计回查；Redis 独立验收后继续实施 Kafka
 > 基线：Origin v3.0，目标版本：v3.2
 > 兼容性：项目尚未对外发布，不保留 Origin v2 Redis API、命名或行为兼容层
 > Driver 基线：实施前再次复核；截至 2026-08-11 固定为 `github.com/redis/go-redis/v9 v9.22.0`
@@ -864,7 +864,9 @@ func (module *Module) Watch(
 业务需要时必须在 Await Worker 中使用 Context、有界次数和退避自行组织幂等重试。
 
 Cluster 下普通 `Pipelined` 可以包含不同 Slot，go-redis 会按节点拆分执行，因此它既不是一次全局网络往返，
-也不保证跨节点顺序或原子性。`TxPipelined` 和 `Watch` 的全部 Key 必须使用相同 Hash Tag。v9.22.0 的
+也不保证跨节点顺序或原子性。`TxPipelined` 和 `Watch` 的全部 Key 必须使用相同 Hash Tag；通用 Pipeline
+回调无法安全推断每种命令的 Key 位置，因此 `TxPipelined` 的 CROSSSLOT 由 Redis/Driver 返回，`Watch`
+则可根据显式 `keys` 在发送前拒绝跨 Slot。v9.22.0 的
 Cluster Client 可能因 MOVED、ASK、TRYAGAIN、只读节点或可重试网络错误重新路由，并再次调用 `Watch`
 回调或把整个事务重新执行；Origin 不额外叠加重试，但回调仍必须幂等且不能包含发邮件、发奖励、写数据库
 等不可重复外部副作用。Pipeline 回调中使用官方类型是高级组合入口的有意例外，不要求 Origin 复制全部
@@ -1254,7 +1256,7 @@ GoDoc Example 证明单个接口如何调用，`examples/16-redis` 证明一个�
 - Sorted Set 最小/最大精确整数、小数读取、越界和 ZIncrBy 原子范围检查；
 - ZAddXX 只更新已有成员并返回 Score 实际变化数；
 - Scan Cursor、Count、Pattern、结果转换和 Cluster `ErrUnsupportedMode`；
-- Pipeline 回调错误不执行、Cluster 跨 Slot 拆批、TxPipeline/Watch 同 Slot 拒绝、Watch 回调可重入约束；
+- Pipeline 回调错误不执行、Cluster 跨 Slot 拆批、TxPipeline 由 Redis/Driver 返回 CROSSSLOT、Watch 在发送前拒绝跨 Slot、回调可重入约束；
 - TryLock 占用、Lock 等待边界、抖动退出、Refresh、Release、双错误 Join；
 - Cluster 启动/Ping 覆盖全部 Primary、单个 Primary 失败和拓扑变化；
 - 启动部分失败逆序清理、重复 Stop 和无 goroutine/连接所有权泄漏。
@@ -1286,8 +1288,8 @@ Ubuntu 使用真实 Redis 环境覆盖：
 - TryLock/Lock/WithLock、TTL、Refresh、进程退出后的到期释放；
 - 并发命令、锁竞争、`go test -race`、覆盖率和 Example 完整运行。
 
-真实地址和凭证只通过环境变量或受控测试配置传入，不写入仓库、文档、命令历史或测试日志。当前已提供
-的 Ubuntu 主机仅作为后续实施验收环境，不在设计阶段连接或修改。
+真实地址和凭证只通过环境变量或受控测试配置传入，不写入仓库、文档、命令历史或测试日志。实施验收在
+指定 Ubuntu 主机完成，并保留可复用的 Redis 7.2、8.10、Sentinel、Cluster 与 TLS/ACL 容器环境。
 
 ### 16.4 统一门禁
 
@@ -1355,8 +1357,7 @@ Redis 切片只有同时满足以下条件才算完成：
 8. `examples/16-redis` 的四组场景可独立构建、运行，并覆盖约定的成功和失败路径；
 9. Benchmark 没有发现便利层产生不合理的热路径分配或尾延迟；
 10. 根 README、v3.2 索引、设计、代码、测试、Example 和指南相互一致；
-11. Redis 完成后仍不单独实施；MySQL 暂缓，继续完成 Kafka 和 Blueprint 设计，最后对本轮已确认范围
-    统一制定实施计划。
+11. Redis 按独立纵向切片实施、验证和提交；完成后继续 Kafka，不把两个资源模块混入同一提交。
 
 ## 20. 参考资料
 

@@ -1,0 +1,35 @@
+log:
+  mode: async
+  console:
+    enabled: true
+    level: info
+    format: text
+
+nodes:
+  - id: redis-cache-1
+    services:
+      - CacheService
+
+services:
+  CacheService:
+    redis:
+      # 可选，默认 standalone。生产建议显式声明实际拓扑。
+      mode: standalone
+      # 必填。Standalone 只能配置一个 host:port 地址。
+      addresses:
+        - "${ORIGIN_REDIS_ADDRESS}"
+      # 可选，默认 RESP3；兼容代理不支持 RESP3 时再改为 2。
+      protocol: 3
+      # 可选，默认 0。Cluster 只能为 0。
+      database: 0
+      # 可选，默认 5s；业务 Context 应按请求 SLA 更早截止。
+      read_timeout: 5s
+      write_timeout: 5s
+      # 可选，默认 6s；在线游戏请求建议从 500ms～2s 起步并监控池等待。
+      pool_timeout: 500ms
+      # 可选，0 按 GOMAXPROCS 计算；示例固定 16，生产需按 QPS 与 P99 压测。
+      pool_size: 16
+      # 可选，0 取 pool_size；为每节点连接硬上限。
+      max_active_connections: 16
+      # 可选，默认 0，禁用命令自动重试，避免重复非幂等写。
+      max_retries: 0
