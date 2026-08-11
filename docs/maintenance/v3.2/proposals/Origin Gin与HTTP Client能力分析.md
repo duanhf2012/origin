@@ -66,11 +66,16 @@ v2 提供请求构造、Header 和读取响应 Body 的便捷能力，但生命�
 - TLS 证书与动态安全策略通过代码注入，不写入通用 YAML；
 - 默认不信任转发代理，具备 panic 边界、过载拒绝和最小固定统计；
 - 暴露真实监听地址，支持测试使用 `127.0.0.1:0`；
-- Gin Handler 按标准 `net/http` 并发模型执行，不假装运行在 Service 串行上下文。
+- 普通 Gin Handler 保持标准 `net/http` 并发模型；同时提供一个不跨 goroutine 传递 `*gin.Context` 的
+  `ServiceHandler`，让请求安全进入所属 Service 串行上下文。
 
-Gin Handler 如果需要读取或修改 Service 串行状态，应调用已生成的 `CallXxx` RPC 外观。Handler 本身运行
-在普通请求 goroutine，阻塞等待本地 RPC 不占用 Service 执行权，因此同一个 Service 的 HTTP 入口可以
-安全回调自身业务方法。首批不提供传递 `*gin.Context` 的 Safe Handler。
+`ServiceHandler` 采用“请求准备 → Service Task → 响应提交”三段式：准备阶段在请求 goroutine 使用 Gin
+完成参数读取、绑定和校验；返回的 Task 在 Service Scheduler 中安全访问业务状态并生成有界响应；最终
+响应只由原请求 goroutine 提交。请求取消后可以立即返回，排队或运行中的 Task 只能产生私有结果，不能
+继续写已经结束的 ResponseWriter。
+
+普通 Handler 如果只需调用已有 Service RPC，仍可直接使用生成的 `CallXxx`。框架不迁移 v2 把
+`*gin.Context` 投递进 Service 的 SafeGET/SafePOST 方法族，也不要求每个 HTTP 入口额外定义一个 RPC。
 
 ### 4.2 HTTP Client
 
@@ -94,7 +99,7 @@ Gin Handler 如果需要读取或修改 Service 串行状态，应调用已生�
 
 | 能力 | 不进入首批的原因 |
 | --- | --- |
-| Gin SafeGET/SafePOST 等方法族 | 重复 Gin API，且跨 goroutine 持有 Context 存在响应所有权问题 |
+| v2 Gin SafeGET/SafePOST 方法族 | 不原样迁移；改为单一三段式 `ServiceHandler`，继续使用 Gin 原生路由 |
 | HTTP Client Module/Service Config | Client 不拥有独立监听生命周期，地址与鉴权通常按调用目标变化 |
 | 自动重试、熔断、负载均衡 | 会引入幂等、发现和策略语义，应由后续独立能力证明需求 |
 | 自动 JSON/PB REST SDK | 标准库编码已足够；框架不应推断业务 Content-Type 和错误协议 |
@@ -120,13 +125,15 @@ Gin Handler 如果需要读取或修改 Service 串行状态，应调用已生�
 
 ## 6. 额外补充且有必要的能力
 
-相对 v2，首批增加四项必要能力：
+相对 v2，首批增加六项必要能力：
 
 1. 默认禁用代理 Header 信任，只有显式可信代理 IP/CIDR 才接受转发客户端地址；
 2. Server 请求并发、Header 和 Body 有界，Client 完整响应读取有界；
 3. Server 为请求 Context 建立总截止时间，使 RPC、数据库和 HTTP 下游能够随请求取消；
-4. Server 启动绑定失败同步返回，停止等待在途请求，超时后强制释放 Listener；
-5. 验证“Service 通过 Await 调 HTTP Client → 自身 Gin Handler → CallXxx 回到同一 Service”的完整自调用。
+4. `ServiceHandler` 在 Service 串行上下文安全访问业务数据，但 Gin Context 和 ResponseWriter 始终留在
+   请求 goroutine；
+5. Server 启动绑定失败同步返回，停止等待在途请求，超时后强制释放 Listener；
+6. 验证“Service 通过 Await 调 HTTP Client → 自身 Gin ServiceHandler → 同一 Service”的完整自调用。
 
 这些能力直接解决安全、过载、生命周期和死锁风险，不属于过度设计。
 
@@ -140,6 +147,7 @@ Gin Handler 如果需要读取或修改 Service 串行状态，应调用已生�
 参考：
 
 - [Gin Server 配置](https://gin-gonic.com/en/docs/server-config/)
+- [Gin Context 与取消](https://gin-gonic.com/en/docs/server-config/context/)
 - [Gin 可信代理配置](https://gin-gonic.com/en/docs/server-config/trusted-proxies/)
 - [Gin 安全指南](https://gin-gonic.com/en/docs/middleware/security-guide/)
 - [Go net/http 文档](https://pkg.go.dev/net/http)

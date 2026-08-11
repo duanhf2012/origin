@@ -19,7 +19,7 @@
 
 ### 阶段 0：外观冻结
 
-- [ ] 确认包名、Engine 所有权、Handler 并发模型和 HTTP Client 所有权；
+- [ ] 确认包名、Engine 所有权、普通 Handler/ServiceHandler 并发模型和 HTTP Client 所有权；
 - [ ] 确认 Server 配置字段、请求 Context 截止时间、默认值以及首批不做范围；
 - [ ] 把确认结果写回核心设计，之后实现不得自行扩大公开接口。
 
@@ -28,6 +28,8 @@
 - [ ] 加入当前 Go 基线支持的 Gin 依赖；
 - [ ] 先实现配置校验、Listener/Serve/Shutdown 状态与失败回滚；
 - [ ] 再实现请求容量、Body 上限、panic 边界、可信代理和统计；
+- [ ] 实现三段式 `ServiceHandler`、Context 合并、有界响应冻结和错误映射；
+- [ ] 覆盖排队取消、Task panic、响应所有权和 Service 串行数据访问；
 - [ ] 完成 Server 单元、并发、故障注入和生命周期测试；
 - [ ] Review 后冻结 Server 外观。
 
@@ -41,7 +43,7 @@
 ### 阶段 3：纵向集成与性能验证
 
 - [ ] 增加同 Service Gin + HTTP Client 自调用集成测试；
-- [ ] 验证 `Await` 与 `CallXxx` 组合不存在死锁、任务泄漏或停止悬挂；
+- [ ] 验证 `Await` 与 `ServiceHandler` 自调用组合不存在死锁、晚写、任务泄漏或停止悬挂；
 - [ ] 添加最小 Benchmark，确认没有每请求新建 Client/Transport 或框架辅助 goroutine；
 - [ ] 只处理测试或 Profile 证明的性能问题，不在本阶段扩展功能。
 

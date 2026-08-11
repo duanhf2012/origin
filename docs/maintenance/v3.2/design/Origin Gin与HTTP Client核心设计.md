@@ -26,32 +26,35 @@
 package ginmodule
 
 type ServerConfig struct {
-    Address            string
-    RequestTimeout     config.Duration
-    ReadHeaderTimeout  config.Duration
-    ReadTimeout        config.Duration
-    WriteTimeout       config.Duration
-    IdleTimeout        config.Duration
-    MaxHeaderBytes     config.ByteSize
-    MaxRequestBodySize config.ByteSize
-    MaxActiveRequests  int
-    TrustedProxies     []string
+    Address                    string
+    RequestTimeout             config.Duration
+    ReadHeaderTimeout          config.Duration
+    ReadTimeout                config.Duration
+    WriteTimeout               config.Duration
+    IdleTimeout                config.Duration
+    MaxHeaderBytes             config.ByteSize
+    MaxRequestBodySize         config.ByteSize
+    MaxServiceResponseBodySize config.ByteSize
+    MaxActiveRequests          int
+    TrustedProxies             []string
 }
 
 func DefaultServerConfig() ServerConfig
 func (ServerConfig) Options() (ServerOptions, error)
 
 type ServerOptions struct {
-    RequestTimeout     time.Duration
-    ReadHeaderTimeout  time.Duration
-    ReadTimeout        time.Duration
-    WriteTimeout       time.Duration
-    IdleTimeout        time.Duration
-    MaxHeaderBytes     int
-    MaxRequestBodySize int64
-    MaxActiveRequests  int
-    TrustedProxies     []string
-    TLSConfig          *tls.Config
+    RequestTimeout             time.Duration
+    ReadHeaderTimeout          time.Duration
+    ReadTimeout                time.Duration
+    WriteTimeout               time.Duration
+    IdleTimeout                time.Duration
+    MaxHeaderBytes             int
+    MaxRequestBodySize         int64
+    MaxServiceResponseBodySize int64
+    MaxActiveRequests          int
+    TrustedProxies             []string
+    TLSConfig                  *tls.Config
+    ServiceErrorMapper         ServiceErrorMapper
 }
 
 func DefaultServerOptions() ServerOptions
@@ -68,8 +71,9 @@ func DefaultServerOptions() ServerOptions
 | `read_timeout` | `15s` | 包含读取请求 Body；大上传应按实际业务调整 |
 | `write_timeout` | `20s` | 比请求预算稍长，为取消收敛和错误响应保留时间 |
 | `idle_timeout` | `60s` | Keep-Alive 空闲连接保留时间 |
-| `max_header_bytes` | `1MiB` | 与 Go Server 默认量级一致 |
+| `max_header_bytes` | `1MiB` | 请求 Header 上限，也作为 `ServiceHandler` 缓冲响应 Header 上限 |
 | `max_request_body_size` | `4MiB` | 普通 JSON/PB API 的安全起点，不代表上传接口最优值 |
+| `max_service_response_body_size` | `4MiB` | `ServiceHandler` 缓冲响应 Body 上限；普通流式 Handler 不适用 |
 | `max_active_requests` | `1024` | 当前 Server 的在途请求硬上限 |
 | `trusted_proxies` | `[]` | 默认不信任任何转发代理 |
 
@@ -128,10 +132,10 @@ type ServerStats struct {
 Serve 在运行中意外退出时记录根因和结构化错误。首批不为 Module 新增自动重启；Server 失败应由进程级
 健康检查和既有生命周期策略处理。
 
-### 2.4 Handler 并发与 Service 状态
+### 2.4 两种 Handler 模式
 
-Gin Handler 运行在 `net/http` 请求 goroutine，不在 Service Scheduler 内。Handler 可以直接处理参数、
-鉴权、编码和无共享状态的 I/O；需要访问 Service 串行状态时调用生成的 `CallXxx`：
+普通 Gin Handler 运行在 `net/http` 请求 goroutine，不在 Service Scheduler 内。它适合流式响应、文件
+上传、反向代理、无共享状态 I/O，或者通过生成的 `CallXxx` 调用已有 Service RPC：
 
 ```go
 func (module *HTTPModule) getPlayer(ctx *gin.Context) {
@@ -144,8 +148,82 @@ func (module *HTTPModule) getPlayer(ctx *gin.Context) {
 }
 ```
 
-不提供把 `*gin.Context` 投递到 Service 的方法。Gin Context、ResponseWriter 与请求 goroutine 同生共死；
-跨 goroutine 传递会使取消、超时和响应提交的所有权变得不可靠。
+需要直接访问当前 Service 业务数据时使用 `ServiceHandler`。它不把 `*gin.Context` 或 ResponseWriter
+传入 Service，而是明确拆分请求准备、串行业务和响应提交。
+
+### 2.5 ServiceHandler
+
+```go
+type Response struct {
+    StatusCode int
+    Header     http.Header
+    Body       []byte
+}
+
+type ServiceTask func(context.Context) (Response, error)
+type ServiceErrorMapper func(error) Response
+
+func (server *Server) ServiceHandler(
+    prepare func(*gin.Context) ServiceTask,
+) gin.HandlerFunc
+
+func JSONResponse(statusCode int, value any) (Response, error)
+```
+
+推荐使用方式：
+
+```go
+server.Engine().POST(
+    "/players",
+    server.ServiceHandler(module.prepareCreatePlayer),
+)
+
+// prepareCreatePlayer 在 HTTP 请求 goroutine 执行，只读取请求并生成独立 DTO。
+func (module *HTTPModule) prepareCreatePlayer(ctx *gin.Context) ginmodule.ServiceTask {
+    var request CreatePlayerRequest
+    if err := ctx.ShouldBindJSON(&request); err != nil {
+        ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+        return nil
+    }
+    return func(taskCtx context.Context) (ginmodule.Response, error) {
+        // 该闭包在所属 Service 的串行上下文执行，可以直接安全访问 module 业务数据。
+        player, err := module.createPlayer(taskCtx, request)
+        if err != nil {
+            return ginmodule.Response{}, err
+        }
+        // JSON 在 Service 执行权释放前编码，避免返回值引用随后会变化的业务数据。
+        return ginmodule.JSONResponse(http.StatusOK, player)
+    }
+}
+```
+
+固定执行契约：
+
+1. `prepare` 在请求 goroutine 执行，可以使用全部 Gin 绑定、参数、鉴权和 Middleware 数据，但不能读取
+   或修改需要 Service 串行保护的业务状态；
+2. 参数错误可由 `prepare` 直接写响应并返回 nil；返回 nil 且尚未提交响应视为 Handler 契约错误；
+3. `ServiceTask` 被投递到 Server 所属 Service 的有界 FIFO，只接收合并后的 Context；该 Context 保留
+   Service Task 执行令牌，同时继承 HTTP 请求的 Value、Deadline 和取消；
+4. `ServiceTask` 可以直接访问所属业务 Module 数据，可以调用同步 Event；等待数据库、HTTP 或其他异步
+   I/O 时仍须使用 `Await`，避免阻塞 Service；
+5. `ServiceTask` 不得捕获或使用 `*gin.Context`、ResponseWriter、原始 Request Body 等请求期可变对象；
+   只捕获已完成绑定且由当前请求独占的 DTO；
+6. Task 返回后，框架在释放 Service 执行权前验证并克隆 Header/Body。只允许最终状态码，响应 Header
+   总量受 `MaxHeaderBytes` 限制，并拒绝 `Connection`、`Keep-Alive`、`Proxy-Authenticate`、
+   `Proxy-Authorization`、`TE`、`Trailer`、`Transfer-Encoding`、`Upgrade`、`Content-Length`；
+7. 原请求 goroutine 只提交已经冻结的 `Response`。请求取消可以立即结束等待；排队 Task 开始前发现取消
+   会跳过业务处理，已运行 Task 只能完成私有结果，不能晚写响应；
+8. 每次调用只分配一个有界结果槽，不为请求创建辅助 goroutine。是否需要进一步减少闭包、Channel 或
+   Body 复制，必须由 Benchmark/Profile 决定。
+
+`ServiceErrorMapper` 是代码注入的纯错误映射函数，必须并发安全且不能访问可变 Service 数据。业务 Task
+错误在 Service 执行权释放前映射成 `Response`；调度拒绝和请求 Deadline 也使用同一映射。默认规则不返回
+错误详情：Deadline 为 `504`，Service 未就绪、停止中或队列满为 `503`，其余为 `500`。客户端主动取消
+不再写响应。
+
+Task panic 会先生成安全 `500` 结果，再重新交给 Service Scheduler 的 panic 边界记录和统计，不能让请求
+一直等待到超时。`Response` Body 超过 `MaxServiceResponseBodySize`、状态码非法或 Header 非法均按内部
+错误处理。
 
 ## 3. HTTP Client 外观
 
@@ -259,8 +337,9 @@ err := module.Await(ctx, func(waitCtx context.Context) error {
 })
 ```
 
-这会在等待 HTTP I/O 时释放 Service 执行权。若目标是同一个 Service 的 Gin Handler，Handler 可以通过
-`CallXxx` 回到该 Service，形成可完成的自调用链。禁止在 Service Task 中直接阻塞调用自身 HTTP 接口。
+这会在等待 HTTP I/O 时释放 Service 执行权。若目标是同一个 Service 的 Gin `ServiceHandler`，原 Task
+释放执行权后，HTTP 入口投递的新 ServiceTask 才能运行，形成可完成的自调用链。禁止在 Service Task 中
+直接阻塞调用自身 HTTP 接口。
 
 ## 4. 测试门禁
 
@@ -270,6 +349,8 @@ err := module.Await(ctx, func(waitCtx context.Context) error {
 - `127.0.0.1:0` 启动、真实地址、正常路由、404；
 - 端口占用同步失败和部分启动回滚；
 - Header/Body/活动请求上限及拒绝统计；
+- `ServiceHandler` 三阶段线程归属、串行数据访问、响应复制、非法 Header/状态/大小；
+- Prepare 返回 nil、调度拒绝、排队取消、运行中取消、Deadline、Task error 与 Task panic；
 - panic 前后响应提交边界，panic 后 Server 仍可用；
 - 客户端取消、读写超时、在途请求优雅停止、停止超时强制关闭；
 - 默认不信任转发代理，显式 CIDR 后行为正确；
@@ -287,8 +368,9 @@ err := module.Await(ctx, func(waitCtx context.Context) error {
 
 ### 4.3 纵向验收
 
-必须覆盖：Service Task → `Await` → HTTP Client → 自身 Gin Handler → 本地 `CallXxx` → 同一 Service
-业务方法 → HTTP 响应。测试需要证明成功、业务错误、请求取消和停止四条路径均能收敛。
+必须覆盖：Service Task → `Await` → HTTP Client → 自身 Gin `ServiceHandler` → 同一 ServiceTask → HTTP
+响应。测试需要证明成功、业务错误、请求取消、队列过载和停止路径均能收敛，且没有晚写响应或 Service
+自调用死锁。
 
 Windows 执行完整测试和 `go vet`；Ubuntu 执行完整测试、`go test -race`、覆盖率和 Example 启停。
 Gin Server 与 HTTP Client 属于重点新包，公开行为分支尽量达到 100% 覆盖；无法覆盖的系统错误分支必须在
@@ -300,6 +382,6 @@ Gin Server 与 HTTP Client 属于重点新包，公开行为分支尽量达到 1
 
 1. 包名采用 `sysmodule/ginmodule` 与 `sysmodule/httpclient`；
 2. Gin Server 创建并拥有 Engine，不接受外部 Engine；
-3. 不迁移 Safe Handler，Service 状态统一通过生成的 `CallXxx` 进入；
+3. 不迁移 v2 Safe Handler，实现三段式 `ServiceHandler`；普通 Handler 仍可通过生成的 `CallXxx` 进入；
 4. HTTP Client 无 YAML、无 Module、无自动重试，提供 `Do` 与有界 `DoBytes`；
 5. 默认限制普通 HTTP API，不为 SSE、超大上传或 HTTP/3 放宽边界。
