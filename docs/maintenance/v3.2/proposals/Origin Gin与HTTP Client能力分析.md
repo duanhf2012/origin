@@ -42,9 +42,9 @@ v2 已提供路由、中间件、自定义 Processor、HTTP/HTTPS 启停和所�
 - 代理 Header 信任逻辑不完整，可能接受伪造的客户端 IP；
 - 启动错误、异步 Serve 失败、优雅停止和请求耗尽没有形成一个可验证的生命周期状态机。
 
-v2 的 `IGinProcessor` 不原样保留。鉴权、限流、审计等请求前后处理统一采用 Gin 已验证的 Middleware 链，
-并由 HTTP Module 暴露全局、分组和单路由三个作用域。这样既允许插入自定义鉴权，也能直接复用 Gin
-生态，不再维护一套行为相近但组合规则不同的 Processor。
+v2 的 `IGinProcessor` 不原样保留。鉴权、限流、审计等请求前后处理采用 Middleware 链，并由 HTTP Module
+暴露全局、分组和单路由三个作用域。普通 Middleware 复用 Gin 生态并运行在请求 goroutine；只有必须读取
+Service 串行状态的授权才使用 Safe Middleware。这样不再维护一个用途只限于鉴权的 Processor。
 
 ### 3.2 HTTP Client Module
 
@@ -63,8 +63,10 @@ v2 提供请求构造、Header 和读取响应 Body 的便捷能力，但生命�
 - 由 `Service.AddModule` 托管，启动时同步绑定 Listener，停止时优雅耗尽请求；
 - 业务类型匿名嵌入 `ginmodule.Module`；配置、路由、分组、中间件、普通 Handler、Safe Handler、地址和统计
   全部从当前 HTTP Module 调用，不要求使用者取得 `*gin.Engine`；
-- Module 与其 `RouterGroup` 直接提供 `Use`、`Group`、`Handle`、`GET`、`POST` 等常用 Gin 风格接口；
-  各方法统一委托一个内部注册入口，不复制路由逻辑；
+- Module 与其 `RouterGroup`、`SafeRouterGroup` 直接提供 `Use`、`Group`、`Handle`、`GET`、`POST` 等常用
+  Gin 风格接口；各方法统一委托一个内部注册入口，不复制路由逻辑；
+- 普通与 Safe 路由统一使用 `METHOD(path, handler, middleware...)`，最终业务回调固定为第二个参数，后续
+  Middleware 可省略；不增加 `AuthPOST`、`SafeAuthPOST` 等按 Method 成倍增长的鉴权专用方法；
 - 提供严格 `ServerConfig`，包括监听地址、请求 Context/Header/读/写/空闲超时、Header/Body 上限、
   活动请求上限和可信代理；
 - TLS 证书与动态安全策略通过代码注入，不写入通用 YAML；
@@ -73,8 +75,10 @@ v2 提供请求构造、Header 和读取响应 Body 的便捷能力，但生命�
 - 普通 `POST` 等 Handler 保持标准 `net/http` 并发模型；`SafePOST` 等 Safe Handler 由框架自动投递到所属
   Service 工作协程，业务无需手写 Dispatch、闭包或响应提交；
 - 全局和分组鉴权使用 Gin Middleware；成功后的鉴权结果通过请求期 `Context.Keys` 快照带入
-  `SafeContext`。鉴权失败可以在投递前直接中止请求；需要访问 Service 串行状态的授权检查写在 Safe
-  Handler 内，不允许普通 Middleware 直接读写该状态。
+  `SafeContext`。鉴权失败可以在投递前直接中止请求；需要访问 Service 串行状态的授权使用可选
+  `SafeMiddlewareFunc`，单路由放在 Handler 后传入，多路由共享时使用 `SafeGroup`；
+- `Group` Middleware 永远运行在 Gin/HTTP 请求 goroutine；`SafeGroup` Middleware 与其 GET/POST Handler
+  永远运行在 Service 工作协程。两者允许嵌套，但执行位置不隐式变化。
 
 Safe Handler 内部仍采用“请求快照 → Service Task → 响应提交”三段式，但这是实现细节：请求 goroutine
 先复制有界 Body、Header、URL、Params、Query 和 Middleware Keys；Safe Handler 在 Service Scheduler
@@ -164,6 +168,7 @@ Service 的实现，也不要求每个 HTTP 入口额外定义一个 RPC。
 - [Gin Middleware](https://gin-gonic.com/en/docs/middleware/)
 - [Gin 路由分组](https://gin-gonic.com/en/docs/routing/grouping-routes/)
 - [Gin 在 goroutine 中使用 Context](https://gin-gonic.com/en/docs/middleware/goroutines-inside-a-middleware/)
+- [Echo 路由与可选单路由 Middleware](https://echo.labstack.com/docs/routing)
 - [Gin 可信代理配置](https://gin-gonic.com/en/docs/server-config/trusted-proxies/)
 - [Gin 安全指南](https://gin-gonic.com/en/docs/middleware/security-guide/)
 - [Hertz RequestContext](https://www.cloudwego.io/docs/hertz/tutorials/basic-feature/context/)

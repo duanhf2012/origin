@@ -50,7 +50,8 @@ func (module *PlayerHTTPModule) OnInit() error {
 
     module.GET("/health", module.health)
 
-    // Middleware 在请求 goroutine 完成鉴权；失败时可直接 Abort，成功结果通过 Keys 快照传入 SafeContext。
+    // Group Middleware 在请求 goroutine 完成统一鉴权；失败时可直接 Abort，成功结果通过 Keys 快照传入
+    // SafeContext。
     api := module.Group("/api", authenticate())
     api.SafePOST("/players", module.createPlayer)
     return nil
@@ -138,16 +139,16 @@ type Module struct {
 func (module *Module) Setup(address string, options ServerOptions) error
 func (module *Module) Use(middleware ...gin.HandlerFunc) gin.IRoutes
 func (module *Module) Group(path string, middleware ...gin.HandlerFunc) *RouterGroup
-func (module *Module) Handle(method, path string, handlers ...gin.HandlerFunc) gin.IRoutes
-func (module *Module) GET(path string, handlers ...gin.HandlerFunc) gin.IRoutes
-func (module *Module) POST(path string, handlers ...gin.HandlerFunc) gin.IRoutes
-func (module *Module) PUT(path string, handlers ...gin.HandlerFunc) gin.IRoutes
-func (module *Module) PATCH(path string, handlers ...gin.HandlerFunc) gin.IRoutes
-func (module *Module) DELETE(path string, handlers ...gin.HandlerFunc) gin.IRoutes
-func (module *Module) HEAD(path string, handlers ...gin.HandlerFunc) gin.IRoutes
-func (module *Module) OPTIONS(path string, handlers ...gin.HandlerFunc) gin.IRoutes
-func (module *Module) NoRoute(handlers ...gin.HandlerFunc)
-func (module *Module) NoMethod(handlers ...gin.HandlerFunc)
+func (module *Module) Handle(method, path string, handler gin.HandlerFunc, middleware ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) GET(path string, handler gin.HandlerFunc, middleware ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) POST(path string, handler gin.HandlerFunc, middleware ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) PUT(path string, handler gin.HandlerFunc, middleware ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) PATCH(path string, handler gin.HandlerFunc, middleware ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) DELETE(path string, handler gin.HandlerFunc, middleware ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) HEAD(path string, handler gin.HandlerFunc, middleware ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) OPTIONS(path string, handler gin.HandlerFunc, middleware ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) NoRoute(handler gin.HandlerFunc, middleware ...gin.HandlerFunc)
+func (module *Module) NoMethod(handler gin.HandlerFunc, middleware ...gin.HandlerFunc)
 func (module *Module) Addr() net.Addr
 func (module *Module) Stats() ServerStats
 
@@ -157,7 +158,17 @@ type RouterGroup struct {
 
 func (group *RouterGroup) Use(middleware ...gin.HandlerFunc)
 func (group *RouterGroup) Group(path string, middleware ...gin.HandlerFunc) *RouterGroup
-// RouterGroup 提供与 Module 相同的普通和 Safe 路由方法族。
+func (group *RouterGroup) SafeGroup(path string, middleware ...SafeMiddlewareFunc) *SafeRouterGroup
+// RouterGroup 提供与 Module 相同的普通路由和 SafeGET/SafePOST 方法族。
+
+type SafeRouterGroup struct {
+    // unexported request group and Service-side middleware chain
+}
+
+func (group *SafeRouterGroup) Group(path string, middleware ...SafeMiddlewareFunc) *SafeRouterGroup
+func (group *SafeRouterGroup) GET(path string, handler SafeHandlerFunc, middleware ...SafeMiddlewareFunc) gin.IRoutes
+func (group *SafeRouterGroup) POST(path string, handler SafeHandlerFunc, middleware ...SafeMiddlewareFunc) gin.IRoutes
+// SafeRouterGroup 的其他 HTTP Method 与 POST 具有相同参数顺序，且全部在 Service 工作协程执行。
 
 type ServerStats struct {
     ActiveRequests   int64
@@ -171,6 +182,14 @@ type ServerStats struct {
 `Setup` 创建私有 `gin.New()` Engine，并先安装框架拥有的全局安全边界。它只能在业务 Module 的
 `OnInit` 调用一次；`Use`、`Group` 和路由注册必须位于 `Setup` 之后、`OnInit` 返回之前。普通和 Safe 方法
 最终都委托内部 `handle`/`safeHandle`，每个 HTTP Method 仅保留薄包装，不重复生命周期或调度逻辑。
+
+普通与 Safe 路由统一采用 `METHOD(path, handler, middleware...)`：第二个参数始终是唯一最终业务回调，
+后续 Middleware 全部可省略，内部按声明顺序放到 Handler 之前执行。该形式与 Echo 等成熟框架一致，也避免
+把可变参数中的最后一项默认为业务 Handler。框架不增加 `AuthPOST`、`SafeAuthPOST` 等方法；鉴权只是
+Middleware 的一种用途，按 Method 乘倍增加接口会产生大量重复外观。
+
+例如 `POST(path, handler, auth, audit)` 和 `SafePOST(path, handler, auth, audit)` 都按
+`auth before → audit before → handler → audit after → auth after` 执行；不传可选参数时直接执行 Handler。
 
 首批不公开 `Engine()`，也不接受外部 Engine，避免使用者绕过 Module 外观或破坏框架 Middleware 顺序。
 `Use`、`Group`、常用 HTTP Method、`NoRoute` 和 `NoMethod` 已覆盖普通 JSON/PB API。模板渲染、静态目录或
@@ -227,14 +246,16 @@ type Response struct {
 }
 
 type SafeHandlerFunc func(*SafeContext)
+type SafeMiddlewareFunc func(*SafeContext)
 type SafeErrorMapper func(error) Response
 
-func (module *Module) SafeHandle(method, path string, handlers ...SafeHandlerFunc) gin.IRoutes
-func (module *Module) SafeGET(path string, handlers ...SafeHandlerFunc) gin.IRoutes
-func (module *Module) SafePOST(path string, handlers ...SafeHandlerFunc) gin.IRoutes
-func (module *Module) SafePUT(path string, handlers ...SafeHandlerFunc) gin.IRoutes
-func (module *Module) SafePATCH(path string, handlers ...SafeHandlerFunc) gin.IRoutes
-func (module *Module) SafeDELETE(path string, handlers ...SafeHandlerFunc) gin.IRoutes
+func (module *Module) SafeHandle(method, path string, handler SafeHandlerFunc, middleware ...SafeMiddlewareFunc) gin.IRoutes
+func (module *Module) SafeGET(path string, handler SafeHandlerFunc, middleware ...SafeMiddlewareFunc) gin.IRoutes
+func (module *Module) SafePOST(path string, handler SafeHandlerFunc, middleware ...SafeMiddlewareFunc) gin.IRoutes
+func (module *Module) SafePUT(path string, handler SafeHandlerFunc, middleware ...SafeMiddlewareFunc) gin.IRoutes
+func (module *Module) SafePATCH(path string, handler SafeHandlerFunc, middleware ...SafeMiddlewareFunc) gin.IRoutes
+func (module *Module) SafeDELETE(path string, handler SafeHandlerFunc, middleware ...SafeMiddlewareFunc) gin.IRoutes
+func (module *Module) SafeGroup(path string, middleware ...SafeMiddlewareFunc) *SafeRouterGroup
 
 func (ctx *SafeContext) Context() context.Context
 func (ctx *SafeContext) Request() *http.Request
@@ -253,6 +274,7 @@ func (ctx *SafeContext) Status(code int)
 func (ctx *SafeContext) JSON(code int, value any)
 func (ctx *SafeContext) String(code int, format string, values ...any)
 func (ctx *SafeContext) Data(code int, contentType string, data []byte)
+func (ctx *SafeContext) Next()
 func (ctx *SafeContext) Abort()
 func (ctx *SafeContext) AbortWithStatusJSON(code int, value any)
 func (ctx *SafeContext) IsAborted() bool
@@ -283,30 +305,53 @@ func (module *PlayerHTTPModule) createPlayer(ctx *ginmodule.SafeContext) {
 不新增 `IGinProcessor`。鉴权采用主流 Web 框架的 Middleware 链，并由 Module 外观提供三个作用域：
 
 ```go
-module.Use(requestIDMiddleware())                         // 全局
-private := module.Group("/api", authenticateToken())    // 分组
-private.POST("/upload", uploadPermission(), upload)     // 普通路由单独附加
-private.SafePOST("/players", module.createPlayer)       // 鉴权成功后自动进入 Service
+module.Use(requestIDMiddleware())                              // 请求协程：全局
+private := module.Group("/api", authenticateToken())         // 请求协程：分组鉴权
+private.POST("/upload", module.upload, uploadPermission())    // 请求协程：单路由鉴权，可省略
+private.SafePOST("/players", module.createPlayer)             // Service 协程：无额外 Safe 鉴权
 ```
 
 - Token、签名、mTLS、CORS、限流等不读取 Service 串行状态的逻辑写成 `gin.HandlerFunc`；失败时调用
   `AbortWithStatusJSON`，成功时通过 `ctx.Set("principal", Principal{...})` 放入只读的请求期结果；
 - Safe 适配器在 Middleware 前置逻辑完成后浅复制 `Context.Keys`，`SafeContext.Get` 可在 Service 中读取。
   放入 Keys 的值必须是本请求独占或不可变值，不能由 Middleware 的后置逻辑并发修改；
-- 如果授权判断必须读取玩家在线表等 Service 状态，把它写成 Safe Handler 链的第一个处理器；失败时调用
-  `SafeContext.AbortWithStatusJSON`。同一 `SafePOST` 的全部 Safe Handler 均在同一个 Service Task 中按顺序
-  执行，`Abort` 阻止后续处理：
+- 如果授权判断必须读取玩家在线表等 Service 状态，把它作为可选 `SafeMiddlewareFunc` 放在最终 Handler
+  后面；框架会先执行 Middleware，成功时由它调用 `Next()` 进入下一层，失败时调用
+  `AbortWithStatusJSON`。所有 Safe Middleware 和最终 Handler 都在同一个 Service Task 中执行：
 
 ```go
-private.SafePOST("/players", module.authorizePlayer, module.createPlayer)
+private.SafePOST("/players", module.createPlayer, module.authorizePlayer)
 
 func (module *PlayerHTTPModule) authorizePlayer(ctx *ginmodule.SafeContext) {
     principal := ctx.MustGet("principal").(Principal)
     if !module.permissions[principal.ID].CanCreatePlayer {
         ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+        return
     }
+    ctx.Next()
 }
 ```
+
+同一套 Service 状态授权被多个 Safe 路由复用时，使用 `SafeGroup`，不在每个路由重复传入：
+
+```go
+// authenticateToken 仍在请求 goroutine 执行，先拒绝无效 Token，避免占用 Service 队列。
+api := module.Group("/api", authenticateToken())
+
+// authorizePlayer 及 players.POST 的最终 Handler 都在 Service 工作协程执行。
+players := api.SafeGroup("/players", module.authorizePlayer)
+players.POST("", module.createPlayer)
+players.GET("/:id", module.getPlayer)
+```
+
+`Group` 的 Middleware 永远运行在 Gin/HTTP 请求 goroutine；即使其中注册 `SafePOST`，也只是在完成请求级
+Middleware 后，由内部适配器投递 Safe 回调。`SafeGroup` 返回独立 `SafeRouterGroup`，其 Middleware 与
+GET/POST 等最终 Handler 永远运行在 Service 工作协程。两者可以像上例嵌套，但不会隐式改变彼此的执行
+位置。
+
+完整执行顺序固定为：框架请求边界 → Module/Group Middleware 前置逻辑（请求 goroutine）→ 请求快照与
+投递 → SafeGroup/路由 Safe Middleware 前置逻辑（Service 工作协程）→ Safe Handler → Safe Middleware
+后置逻辑 → 冻结并提交响应 → Module/Group Middleware 后置逻辑（请求 goroutine）。
 
 这同时覆盖“插入自定义鉴权处理器”和“复用 Gin 生态”两个需求：常规鉴权不必重新发明接口，只有确实依赖
 Service 状态的授权才进入 Safe 链。首批不提供内置 JWT、Session 或 RBAC；这些策略与项目密钥、声明和
@@ -321,17 +366,19 @@ Service 状态的授权才进入 Safe 链。首批不提供内置 JWT、Session 
    反向代理或大文件下载；这些场景使用普通 Handler；
 3. Safe 链被投递到所属 Service 的有界 FIFO，合并 Context 保留 Service Task 执行令牌，并继承 HTTP
    请求的 Value、Deadline 和取消；
-4. Safe Handler 可以直接访问所属业务 Module 数据和调用同步 Event；等待数据库、HTTP 或其他异步 I/O
+4. Safe Middleware 按注册顺序形成洋葱链；必须调用 `Next` 才会进入下一层或最终 Handler，`Abort` 会阻止
+   后续执行。最终 Handler 不需要也不应调用 `Next`；
+5. Safe Handler 可以直接访问所属业务 Module 数据和调用同步 Event；等待数据库、HTTP 或其他异步 I/O
    时仍须使用 `Await`，避免阻塞 Service；
-5. `JSON`、`String` 和 `Data` 只写私有缓冲响应，不触碰真实 ResponseWriter；回调返回即自动完成，不提供
+6. `JSON`、`String` 和 `Data` 只写私有缓冲响应，不触碰真实 ResponseWriter；回调返回即自动完成，不提供
    v2 的 `Done`/`JSONAndDone` 方法。Header 和 Status 可在渲染前调整；一次 Safe 请求只允许一次最终
    `JSON`/`String`/`Data` 渲染，多次渲染属于 Handler 契约错误；没有显式渲染时返回 `200` 空响应；
-6. Safe 链返回后，框架在释放 Service 执行权前验证并冻结 Header/Body。只允许最终状态码，响应 Header
+7. Safe 链返回后，框架在释放 Service 执行权前验证并冻结 Header/Body。只允许最终状态码，响应 Header
    总量受 `MaxHeaderBytes` 限制，并拒绝 `Connection`、`Keep-Alive`、`Proxy-Authenticate`、
    `Proxy-Authorization`、`TE`、`Trailer`、`Transfer-Encoding`、`Upgrade`、`Content-Length`；
-7. 原请求 goroutine 只提交已经冻结的响应。请求取消可以立即结束等待；排队 Task 开始前发现取消
+8. 原请求 goroutine 只提交已经冻结的响应。请求取消可以立即结束等待；排队 Task 开始前发现取消
    会跳过业务处理，已运行 Task 只能完成私有结果，不能晚写响应；
-8. 每次调用只分配一个有界结果槽，不为请求创建辅助 goroutine。是否需要进一步减少闭包、Channel 或
+9. 每次调用只分配一个有界结果槽，不为请求创建辅助 goroutine。是否需要进一步减少闭包、Channel 或
    Body 复制，必须由 Benchmark/Profile 决定。
 
 `SafeErrorMapper` 只处理调度拒绝、Deadline、编码失败和内部契约错误，不替业务定义错误协议。它必须是
@@ -466,8 +513,8 @@ err := module.Await(ctx, func(waitCtx context.Context) error {
 - `127.0.0.1:0` 启动、真实地址、正常路由、404；
 - 端口占用同步失败和部分启动回滚；
 - Header/Body/活动请求上限及拒绝统计；
-- Module/RouterGroup 的普通与 Safe 路由、Middleware 继承和重复路由行为；
-- `SafeContext` 请求快照、JSON 绑定、Keys 鉴权结果、Safe 链 Abort、串行数据访问和响应冻结；
+- Module/RouterGroup/SafeRouterGroup 的普通与 Safe 路由、Middleware 继承、执行顺序和重复路由行为；
+- `SafeContext` 请求快照、JSON 绑定、Keys 鉴权结果、Safe Middleware Next/Abort、串行数据访问和响应冻结；
 - 调度拒绝、排队取消、运行中取消、Deadline、响应编码错误与 Safe Handler panic；
 - panic 前后响应提交边界，panic 后 Server 仍可用；
 - 客户端取消、读写超时、在途请求优雅停止、停止超时强制关闭；
@@ -503,6 +550,7 @@ Gin Server 与 HTTP Client 属于重点新包，公开行为分支尽量达到 1
    Engine 不作为主要入口，也不接受外部 Engine；
 3. 保留 `POST`/`SafePOST` 的直观区分；Safe 回调无感运行于 Service 工作协程，内部使用请求快照和缓冲
    响应，不传递原始 `*gin.Context`/ResponseWriter；
-4. 鉴权采用 Module 暴露的 Gin Middleware 链；必须访问 Service 状态的授权可作为 Safe 链处理器；
+4. 普通和 Safe 路由均采用 `METHOD(path, handler, middleware...)`；普通鉴权运行在请求 goroutine，必须
+   访问 Service 状态的授权使用 Safe Middleware 或 SafeGroup；不增加按 Method 区分的鉴权专用接口；
 5. HTTP Client 无 YAML、无 Module、无自动重试，提供 `Do` 与有界 `DoBytes`；
 6. 默认限制普通 HTTP API，不为 SSE、超大上传或 HTTP/3 放宽边界。

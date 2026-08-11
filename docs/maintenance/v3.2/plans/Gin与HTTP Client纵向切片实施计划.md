@@ -20,8 +20,8 @@
 
 ### 阶段 0：外观冻结
 
-- [ ] 确认包名、Module/RouterGroup 直接外观、私有 Engine、普通 Handler/Safe Handler 并发模型和 HTTP
-  Client 所有权；
+- [ ] 确认包名、Module/RouterGroup/SafeRouterGroup 直接外观、私有 Engine、普通 Handler/Safe Handler
+  并发模型和 HTTP Client 所有权；
 - [ ] 确认 Server 配置字段、请求 Context 截止时间、默认值以及首批不做范围；
 - [ ] 把确认结果写回核心设计，之后实现不得自行扩大公开接口。
 
@@ -30,10 +30,11 @@
 - [ ] 加入当前 Go 基线支持的 Gin 依赖；
 - [ ] 先实现配置校验、Listener/Serve/Shutdown 状态与失败回滚；
 - [ ] 再实现请求容量、Body 上限、panic 边界、可信代理和统计；
-- [ ] 实现 Module/RouterGroup 的 `Use`、`Group`、普通路由和 Safe 路由薄包装，不公开 Engine；
+- [ ] 实现 Module/RouterGroup/SafeRouterGroup 的普通路由、Safe 路由和
+  `METHOD(path, handler, middleware...)` 统一参数顺序，不公开 Engine；
 - [ ] 实现 Safe Handler 内部三阶段桥接、`SafeContext`、Context 合并、有界响应冻结和错误映射；
-- [ ] 覆盖 Middleware 鉴权结果快照、Safe 授权链、排队取消、Handler panic、响应所有权和 Service 串行
-  数据访问；
+- [ ] 覆盖 Group 请求协程 Middleware、SafeGroup Service 协程 Middleware、鉴权结果快照、Next/Abort、
+  排队取消、Handler panic、响应所有权和 Service 串行数据访问；
 - [ ] 完成 Module 单元、并发、故障注入和生命周期测试；
 - [ ] Review 后冻结 Gin Module 外观。
 
