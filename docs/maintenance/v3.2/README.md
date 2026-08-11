@@ -3,6 +3,22 @@
 v3.2 已进入纵向切片实施阶段。公共网络契约、TCP 和 WebSocket 已完成 Windows 与 Ubuntu 验收；
 KCP 仍须按独立计划实施和验收。
 
+## 网络模块教程
+
+TCP 与 WebSocket 使用相同的 `network.Session`、`Handler`、Server、Client、Dialer、容量和错误
+语义。建议先运行对应的 Raw 回环 Example，确认生命周期和服务自调用，再阅读使用指南接入 PB、
+JSON 或自定义 Codec。
+
+| 网络模块 | 适用场景 | 使用指南 | Example |
+| --- | --- | --- | --- |
+| TCP | 游戏客户端、自定义长度帧、直接二进制长连接 | [TCP 网络模块使用指南](guides/TCP网络模块使用指南.md) | [TCP Raw 服务自调用](../../../examples/13-network/01-tcp-raw-self-call/README.md) |
+| WebSocket | 浏览器、网关、HTTP Upgrade、WS/WSS 长连接 | [WebSocket 网络模块使用指南](guides/WebSocket网络模块使用指南.md) | [WebSocket Raw 服务自调用](../../../examples/13-network/02-websocket-raw-self-call/README.md) |
+
+全部网络 Example 见 [`examples/13-network`](../../../examples/13-network/README.md)。KCP 完成实现、
+双平台测试和教程验收后再加入本表，不提前提供未交付能力的使用入口。
+
+## 设计与实施资料
+
 本目录沿用 `../v3.1/README.md` 定义的文档分层：
 
 - `proposals/`：能力分析、问题定义和范围提案；
@@ -27,12 +43,10 @@ KCP 仍须按独立计划实施和验收。
 - [`TCP 网络首批纵向切片实施计划`](plans/TCP网络首批纵向切片实施计划.md)
 - [`WebSocket 网络纵向切片实施计划`](plans/WebSocket网络纵向切片实施计划.md)
 
-当前交付材料：
+当前变更与验收材料：
 
-- [`TCP 网络模块使用指南`](guides/TCP网络模块使用指南.md)
 - [`TCP 网络首批纵向切片变更记录`](changes/TCP网络首批纵向切片变更记录.md)
 - [`TCP 网络首批纵向切片验收报告`](reports/TCP网络首批纵向切片验收报告.md)
-- [`WebSocket 网络模块使用指南`](guides/WebSocket网络模块使用指南.md)
 - [`WebSocket 网络纵向切片变更记录`](changes/WebSocket网络纵向切片变更记录.md)
 - [`WebSocket 网络纵向切片验收报告`](reports/WebSocket网络纵向切片验收报告.md)
 
