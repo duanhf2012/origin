@@ -1,6 +1,6 @@
 # Origin MongoDB Module 核心设计
 
-> 状态：已确认，等待五个 sysmodule 设计全部完成后统一制定实施计划
+> 状态：已确认；MySQL 暂缓，等待 Kafka 和 Blueprint 设计完成后对本轮范围统一制定实施计划
 > 目标版本：v3.2
 > 设计基线：Origin v3 当前 `Service`、`Module`、严格配置和 `Await` 外观
 > Driver 基线：实施前复核并固定官方最新稳定版；2026-08-11 的最新稳定版为 `go.mongodb.org/mongo-driver/v2 v2.8.0`
@@ -797,8 +797,8 @@ MongoDB 切片只有同时满足以下条件才算完成：
 7. 标准 MongoDB、Atlas、AWS DocumentDB URI 和能力边界写入教程；
 8. 根 README 和 v3.2 扩展组件教程表完成入口更新；
 9. 设计、代码、测试、Example 和教程相互一致；
-10. MongoDB 完成后仍不单独开始实现，继续完成 Redis、MySQL、Kafka 和 Blueprint 设计，最后统一
-    制定实施计划。
+10. MongoDB 完成后仍不单独开始实现；Redis 设计已经确认，MySQL 暂缓，继续完成 Kafka 和 Blueprint
+    设计，最后对本轮已确认范围统一制定实施计划。
 
 ## 19. 参考资料
 

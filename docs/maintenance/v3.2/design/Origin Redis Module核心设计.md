@@ -1,6 +1,6 @@
 # Origin Redis Module 核心设计
 
-> 状态：已最终确认；之后继续 MySQL、Kafka 和 Blueprint 设计
+> 状态：已最终确认；MySQL 暂缓，之后继续 Kafka 和 Blueprint 设计
 > 基线：Origin v3.0，目标版本：v3.2
 > 兼容性：项目尚未对外发布，不保留 Origin v2 Redis API、命名或行为兼容层
 > Driver 基线：实施前再次复核；截至 2026-08-11 固定为 `github.com/redis/go-redis/v9 v9.22.0`
@@ -1355,7 +1355,8 @@ Redis 切片只有同时满足以下条件才算完成：
 8. `examples/16-redis` 的四组场景可独立构建、运行，并覆盖约定的成功和失败路径；
 9. Benchmark 没有发现便利层产生不合理的热路径分配或尾延迟；
 10. 根 README、v3.2 索引、设计、代码、测试、Example 和指南相互一致；
-11. Redis 完成后仍不单独实施，继续完成 MySQL、Kafka、Blueprint 设计，最后统一制定实施计划。
+11. Redis 完成后仍不单独实施；MySQL 暂缓，继续完成 Kafka 和 Blueprint 设计，最后对本轮已确认范围
+    统一制定实施计划。
 
 ## 20. 参考资料
 

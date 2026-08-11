@@ -61,8 +61,9 @@ Gin Server 与 HTTP Client 不加入长连接 Session 外观：前者使用请�
   以及 Client 扩展回调的实际执行协程。
 
 两份网络 Proposal 保存能力分析和调研依据，不单独授权实现。网络核心设计已允许按 TCP、WebSocket、
-KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB 与 Redis 核心设计已经确认；之后必须完成
-MySQL、Kafka 和 Blueprint 设计，再统一制定实施计划。每个实施切片都必须独立完成计划、测试、文档和验收。
+KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB 与 Redis 核心设计已经确认。MySQL 按当前
+项目优先级暂缓，不进入本轮设计与实现；之后完成 Kafka 和 Blueprint 设计，再对本轮已确认范围统一制定
+实施计划。每个实施切片都必须独立完成计划、测试、文档和验收。
 
 当前实施计划：
 
