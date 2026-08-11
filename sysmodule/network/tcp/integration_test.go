@@ -138,9 +138,18 @@ func TestSameServiceTCPClientCallsOwnServer(t *testing.T) {
 				clientSession.Cause() != nil {
 				t.Fatalf("client session 外观无效：id=%d stats=%+v", clientSession.ID(), clientSession.Stats())
 			}
-			if stats := clientSession.Stats(); stats.SentMessages < 1 || stats.ReceivedMessages < 1 ||
-				stats.SentBytes < uint64(len("self-call")) || stats.ReceivedBytes < uint64(len("self-call")) {
-				t.Fatalf("client session stats=%+v", stats)
+			statsDeadline := time.Now().Add(5 * time.Second)
+			for {
+				stats := clientSession.Stats()
+				if stats.SentMessages >= 1 && stats.ReceivedMessages >= 1 &&
+					stats.SentBytes >= uint64(len("self-call")) &&
+					stats.ReceivedBytes >= uint64(len("self-call")) {
+					break
+				}
+				if time.Now().After(statsDeadline) {
+					t.Fatalf("client session stats=%+v", stats)
+				}
+				time.Sleep(time.Millisecond)
 			}
 			serverID := network.SessionID(serverSessionID.Load())
 			serverSession, exists := server.Session(serverID)
@@ -158,8 +167,15 @@ func TestSameServiceTCPClientCallsOwnServer(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("CloseSession 后客户端未关闭")
 			}
+			deadline := time.Now().Add(5 * time.Second)
+			for server.SessionCount() != 0 && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+			if server.SessionCount() != 0 {
+				t.Fatal("Server Session 未完成关闭")
+			}
 			if clientSession.Cause() == nil || server.CloseSession(serverID, nil) {
-				t.Fatalf("关闭终态异常：cause=%v", clientSession.Cause())
+				t.Fatalf("关闭终态异常：cause=%v server_count=%d", clientSession.Cause(), server.SessionCount())
 			}
 			stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancelStop()

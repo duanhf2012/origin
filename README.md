@@ -46,7 +46,7 @@ go run ./examples/00-quickstart/01-hello-service
 | 10 | Admin 管理 HTTP、Diagnostics 与 pprof | 管理端点、诊断、动态 pprof 与监控适配 | [Admin 管理 HTTP、Diagnostics 与 pprof](./docs/maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md) | [10-admin-diagnostics-and-pprof](./examples/10-admin-diagnostics-and-pprof/) |
 | 11 | 性能测试与容量理解 | 运行并解读 RPC 性能测试 | [性能测试与容量理解](./docs/baseline/v3.0/guides/11.performance.md) | [11-performance](./examples/11-performance/) |
 | 12 | 故障排查 | 复现并排查常见故障 | [故障排查](./docs/baseline/v3.0/guides/12.troubleshooting.md) | [12-troubleshooting](./examples/12-troubleshooting/) |
-| 13 | TCP 网络模块 | 使用统一 Session、Server、Client、Dialer 与 PB/JSON Router | [TCP 网络模块使用指南](./docs/maintenance/v3.2/guides/TCP网络模块使用指南.md) | [13-network](./examples/13-network/) |
+| 13 | TCP 与 WebSocket 网络模块 | 使用统一 Session、Server、Client、Dialer 与 PB/JSON Router | [v3.2 网络模块文档](./docs/maintenance/v3.2/README.md) | [13-network](./examples/13-network/) |
 
 完整教程见 [v3.0 使用指南](./docs/baseline/v3.0/guides/README.md)，全部可运行示例见 [examples](./examples/README.md)。
 
@@ -77,10 +77,11 @@ v3.1 还新增 Node 级游戏逻辑时间：Service/Module 通过 `GetNode()` �
 
 ### v3.2 网络模块
 
-v3.2 首批提供面向自定义长连接协议的统一 Session/Handler、TCP Server/Client/Dialer，以及 Raw、
-Protobuf、JSON 和自定义 Codec。新使用者从
-[TCP 网络模块使用指南](./docs/maintenance/v3.2/guides/TCP网络模块使用指南.md) 和
-[`TCP Raw 回环示例`](./examples/13-network/01-tcp-raw-self-call/README.md) 开始。
+v3.2 已提供统一 Session/Handler、TCP 与 WebSocket 的 Server/Client/Dialer，以及 Raw、Protobuf、
+JSON 和自定义 Codec。自定义字节流协议从
+[TCP 网络模块使用指南](./docs/maintenance/v3.2/guides/TCP网络模块使用指南.md) 开始；浏览器或 HTTP
+Upgrade 场景从 [WebSocket 网络模块使用指南](./docs/maintenance/v3.2/guides/WebSocket网络模块使用指南.md)
+开始。两个可运行回环示例见 [`examples/13-network`](./examples/13-network/README.md)。
 
 ## 学习方式
 

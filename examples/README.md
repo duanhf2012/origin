@@ -18,7 +18,7 @@
 | [`10-admin-diagnostics-and-pprof`](./10-admin-diagnostics-and-pprof/README.md) | Admin 扩展、诊断快照、内置 Diagnostics 与动态 pprof |
 | `11-performance` | 可重复执行的性能测试 |
 | `12-troubleshooting` | 可控故障与修复练习 |
-| [`13-network`](./13-network/01-tcp-raw-self-call/README.md) | v3.2 TCP Session、Server、Client、Dialer 与协议 Router |
+| [`13-network`](./13-network/README.md) | v3.2 TCP/WebSocket Session、Server、Client、Dialer 与协议 Router |
 
 每个可直接运行的程序示例都包含 `run.bat` 和 `run.sh`。依赖 NATS 或 etcd 的示例提供其对应的 `deps-*` 检查、启动或停止脚本。脚本只包装 README 中公开的命令，不会隐藏后台进程或自动修改系统状态。
 

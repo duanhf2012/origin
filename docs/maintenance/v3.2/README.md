@@ -1,7 +1,7 @@
 # Origin v3.2 文档
 
-v3.2 已进入纵向切片实施阶段。公共网络契约和 TCP 首批切片已经完成本地与 Ubuntu 验收；
-WebSocket、KCP 仍须按各自计划实施和验收。
+v3.2 已进入纵向切片实施阶段。公共网络契约、TCP 和 WebSocket 已完成 Windows 与 Ubuntu 验收；
+KCP 仍须按独立计划实施和验收。
 
 本目录沿用 `../v3.1/README.md` 定义的文档分层：
 
@@ -25,11 +25,15 @@ WebSocket、KCP 仍须按各自计划实施和验收。
 当前实施计划：
 
 - [`TCP 网络首批纵向切片实施计划`](plans/TCP网络首批纵向切片实施计划.md)
+- [`WebSocket 网络纵向切片实施计划`](plans/WebSocket网络纵向切片实施计划.md)
 
 当前交付材料：
 
 - [`TCP 网络模块使用指南`](guides/TCP网络模块使用指南.md)
 - [`TCP 网络首批纵向切片变更记录`](changes/TCP网络首批纵向切片变更记录.md)
 - [`TCP 网络首批纵向切片验收报告`](reports/TCP网络首批纵向切片验收报告.md)
+- [`WebSocket 网络模块使用指南`](guides/WebSocket网络模块使用指南.md)
+- [`WebSocket 网络纵向切片变更记录`](changes/WebSocket网络纵向切片变更记录.md)
+- [`WebSocket 网络纵向切片验收报告`](reports/WebSocket网络纵向切片验收报告.md)
 
 v3.1 的维护资料继续保留在 `../v3.1/`，不得混入本目录。
