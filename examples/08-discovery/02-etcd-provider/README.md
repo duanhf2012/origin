@@ -4,8 +4,7 @@
 
 ## 前置条件与配置
 
-先运行 `deps-up.bat` 或 `./deps-up.sh`，再用 `check-deps` 验证本机 `2379` 端口。未配置
-`namespace` 时使用 `/origin`。
+先运行 `deps-up.bat` 或 `./deps-up.sh`，再用 `check-deps` 验证本机 `2379` 端口。未配置 `namespace` 时使用 `origin`。
 
 本示例配置为：
 
@@ -51,6 +50,8 @@ nodes:
     services: [Service]
 ```
 
+完整说明见[服务发现教程](../../../docs/baseline/v3.0/guides/08.discovery.md)。
+
 ## 运行与观察
 
 执行 `run.bat` 或 `./run.sh`，预期看到其他 Node 的 discovered 日志。结束后运行 `deps-down`，仅关闭本示例 compose 启动的依赖。
@@ -59,4 +60,4 @@ nodes:
 
 本示例为本地开发配置。生产应使用 HTTPS/TLS、最小权限账号及受控 endpoint，不应把认证信息提交到业务默认 YAML。
 
-对应教程：[使用 etcd 进行服务发现](../../../docs/extensions/etcd-discovery.md)。
+对应教程：[服务发现](../../../docs/baseline/v3.0/guides/08.discovery.md)。

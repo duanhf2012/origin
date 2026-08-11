@@ -1,8 +1,8 @@
 # Origin v3.0 使用指南
 
-本指南按“先会用、再深入”的顺序组织。每篇文档先给出一个能直接运行的例子，随后才说明对象关系、默认规则和边界。`00`～`06` 是框架基础；Origin 可选组件和需要独立部署的第三方基础设施从[组件与第三方扩展](../../../extensions/README.md)按需进入。
+本指南按“先会用、再深入”的顺序组织。每篇文档先给出一个能直接运行的例子，随后才说明对象关系、默认规则和边界。不要跳过 `00` 到 `06`：它们不依赖 NATS、etcd 或 Docker，是理解后续多节点能力的最短路径。
 
-## 框架基础
+## 学习路径
 
 | 顺序 | 主题 | 首要问题 |
 | --- | --- | --- |
@@ -13,20 +13,12 @@
 | 04 | [Service 与 Module](./04.service-and-module.md) | 怎样组织业务代码？ |
 | 05 | [Timer、Event 与执行](./05.timer-event-and-execution.md) | 怎样写定时任务、事件和安全后台工作？ |
 | 06 | [RPC 基础](./06.rpc-basics.md) | 怎样调用同一 Node 中的另一个 Service？ |
-
-## 进阶运行与工程实践
-
-| 顺序 | 主题 | 首要问题 |
-| --- | --- | --- |
-| 07 | [跨节点 RPC](./07.remote-rpc.md) | 怎样用内置 TCP 调用其他 Node，并完成路由与广播？ |
-| 08 | [服务发现](./08.discovery.md) | 怎样使用 Origin Provider、筛选目录、监听状态或替换 Provider？ |
+| 07 | [跨节点 RPC](./07.remote-rpc.md) | 怎样用 TCP 或 NATS 调用其他 Node？ |
+| 08 | [服务发现](./08.discovery.md) | 怎样发现服务、使用 etcd 或替换 Provider？ |
 | 09 | [Retire、Resume 与优雅停止](./09.retire-and-resume.md) | 怎样用命令在运行期退休和恢复整个 Application，并监听状态事件？ |
 | 10 | [Admin、Diagnostics 与 pprof](../../../maintenance/v3.1/guides/10.admin-diagnostics-and-pprof.md) | 怎样管理运行状态和按需诊断？ |
 | 11 | [性能](./11.performance.md) | 怎样运行和理解 RPC 基准测试？ |
 | 12 | [故障排查](./12.troubleshooting.md) | 怎样定位常见配置、RPC 和发现故障？ |
-
-NATS RPC、etcd 服务发现、TCP/WebSocket 系统模块及自定义适配器不混入基础顺序；根据项目依赖从
-[组件与第三方扩展](../../../extensions/README.md)选择。
 
 ## 参考资料
 
