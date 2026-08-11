@@ -92,10 +92,11 @@ func (client *Client) OnStart(ctx context.Context) error {
 	client.mu.Unlock()
 	client.notifyState(ctx, client.State())
 
-	conn, dialErr := tcpnet.Dial(
+	conn, dialErr := dialConnection(
 		clientCtx,
 		client.address,
-		connectionOptions(runtime, client.options.Dial),
+		runtime,
+		client.options.Dial,
 		handler,
 	)
 	if dialErr != nil && !client.options.Reconnect.Enabled {
@@ -289,10 +290,11 @@ func (client *Client) connectionLoop(initialError error) {
 				}
 				return
 			}
-			conn, err := tcpnet.Dial(
+			conn, err := dialConnection(
 				client.ctx,
 				client.address,
-				connectionOptions(client.runtime, client.options.Dial),
+				client.runtime,
+				client.options.Dial,
 				client.handler,
 			)
 			if err != nil {

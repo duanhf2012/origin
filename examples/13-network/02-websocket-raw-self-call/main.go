@@ -30,9 +30,17 @@ func (module *EchoWebSocketModule) OnInit() error {
 	serverHandler := network.HandlerFuncs{
 		Message: module.onServerMessage,
 	}
-	serverOptions := websocket.DefaultServerOptions(serverHandler)
-	// 默认 Path 是 /ws、消息类型是 Binary，并使用安全同源检查。
-	server, err := websocket.NewServer("127.0.0.1:19091", serverOptions)
+	// 从完整默认值开始严格覆盖当前 Service 的 websocket.server 配置。
+	serverConfig := websocket.DefaultServerConfig()
+	if err := module.GetServiceConfigStrict("websocket.server", &serverConfig); err != nil {
+		return err
+	}
+	serverOptions, err := serverConfig.Options(serverHandler)
+	if err != nil {
+		return err
+	}
+	// CheckOrigin、TLSConfig 等运行期安全对象应在这里按项目策略注入。
+	server, err := websocket.NewServer(serverConfig.Address, serverOptions)
 	if err != nil {
 		return err
 	}
@@ -42,9 +50,18 @@ func (module *EchoWebSocketModule) OnInit() error {
 		Open:    module.onClientOpen,
 		Message: module.onClientMessage,
 	}
+	// Client 使用包含完整路径的 URL，并保持与 Server 相同的消息类型和心跳契约。
+	clientConfig := websocket.DefaultClientConfig()
+	if err := module.GetServiceConfigStrict("websocket.client", &clientConfig); err != nil {
+		return err
+	}
+	clientOptions, err := clientConfig.Options(clientHandler)
+	if err != nil {
+		return err
+	}
 	client, err := websocket.NewClient(
-		"ws://127.0.0.1:19091/ws",
-		websocket.DefaultClientOptions(clientHandler),
+		clientConfig.URL,
+		clientOptions,
 	)
 	if err != nil {
 		return err

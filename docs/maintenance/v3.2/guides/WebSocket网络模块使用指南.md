@@ -16,10 +16,16 @@ type GatewayWebSocketModule struct {
 
 func (module *GatewayWebSocketModule) OnInit() error {
     handler := network.HandlerFuncs{Message: module.onMessage}
-    server, err := websocket.NewServer(
-        "127.0.0.1:19091",
-        websocket.DefaultServerOptions(handler),
-    )
+    cfg := websocket.DefaultServerConfig()
+    if err := module.GetServiceConfigStrict("websocket.server", &cfg); err != nil {
+        return err
+    }
+    options, err := cfg.Options(handler)
+    if err != nil {
+        return err
+    }
+    // TLSConfig 和 CheckOrigin 等运行期安全策略在这里注入。
+    server, err := websocket.NewServer(cfg.Address, options)
     if err != nil {
         return err
     }
@@ -42,6 +48,25 @@ func (target *GatewayService) OnInit() error {
     return target.AddModule(&GatewayWebSocketModule{})
 }
 ```
+
+`address` 决定监听 Socket，`path` 决定 HTTP Upgrade 路由，因此保持两个字段；YAML 中可以按需要写成
+同一行：
+
+```yaml
+services:
+  GatewayService:
+    websocket:
+      server:
+        address: "0.0.0.0:19091"
+        path: "/ws"
+        message_type: binary
+        handshake_timeout: 10s
+        ping_interval: 30s # WebSocket 协议控制帧，不进入业务 OnMessage
+        pong_timeout: 60s
+```
+
+未出现的字段使用 `DefaultServerConfig` 的默认值；严格读取会拒绝未知字段。TLS、Origin 回调和 Header
+保存运行期对象或安全策略，不进入普通 YAML。
 
 这种结构把协议路由、连接状态和网络事件集中在业务 Module，避免业务代码散落到 Service。默认 Path
 是 `/ws`，消息类型是 Binary。完整程序见
@@ -79,11 +104,17 @@ options.CheckOrigin = func(request *http.Request) bool {
 长期连接使用由 Module 托管的 Client：
 
 ```go
-options := websocket.DefaultClientOptions(handler)
+cfg := websocket.DefaultClientConfig()
+if err := module.GetServiceConfigStrict("websocket.client", &cfg); err != nil {
+    return err
+}
+options, err := cfg.Options(handler)
+if err != nil {
+    return err
+}
 options.Dial.Header = http.Header{"Authorization": []string{"Bearer ..."}}
-options.Reconnect.Enabled = true // 默认 false
 
-client, err := websocket.NewClient("wss://gateway.example.com/ws", options)
+client, err := websocket.NewClient(cfg.URL, options)
 if err != nil {
     return err
 }

@@ -33,16 +33,26 @@ const (
 
 // ServerOptions 配置 WebSocket Server 的公共网络语义和 Upgrade 专属参数。
 type ServerOptions struct {
-	Network          network.EndpointOptions
-	Path             string
-	MessageType      MessageType
+	// Network 保存 Handler、容量、超时和背压等三个传输真正共有的语义。
+	Network network.EndpointOptions
+	// Path 是执行 WebSocket Upgrade 的 HTTP 路由，必须以斜杠开头。
+	Path string
+	// MessageType 固定当前端点收发的 Binary 或 Text Data Message 类型。
+	MessageType MessageType
+	// HandshakeTimeout 是读取 HTTP Upgrade 请求头和完成握手的最长时间。
 	HandshakeTimeout time.Duration
-	PingInterval     time.Duration
-	PongTimeout      time.Duration
-	CheckOrigin      func(*http.Request) bool
-	Subprotocols     []string
-	ResponseHeader   http.Header
-	TLSConfig        *tls.Config
+	// PingInterval 是发送 WebSocket 协议 Ping 控制帧的间隔；与 PongTimeout 同为零时关闭。
+	PingInterval time.Duration
+	// PongTimeout 是等待协议 Pong 的上限，启用时必须大于 PingInterval。
+	PongTimeout time.Duration
+	// CheckOrigin 决定 Upgrade 是否接受请求 Origin；nil 使用 Gorilla 的安全同源策略。
+	CheckOrigin func(*http.Request) bool
+	// Subprotocols 按顺序列出服务端允许协商的应用子协议。
+	Subprotocols []string
+	// ResponseHeader 是 Upgrade 成功响应附带的非保留 Header。
+	ResponseHeader http.Header
+	// TLSConfig 非 nil 时启用 WSS；构造器会克隆配置，且服务端必须提供证书。
+	TLSConfig *tls.Config
 }
 
 // DefaultServerOptions 返回安全同源、Binary Message 和有界心跳的默认配置。
@@ -59,14 +69,22 @@ func DefaultServerOptions(handler network.Handler) ServerOptions {
 
 // DialOptions 配置一次 WebSocket 拨号及其连接语义。
 type DialOptions struct {
-	Network          network.EndpointOptions
-	MessageType      MessageType
+	// Network 保存单 Session 的 Handler、容量、超时和背压语义；MaxSessions 必须为 1。
+	Network network.EndpointOptions
+	// MessageType 固定当前连接收发的 Binary 或 Text Data Message 类型。
+	MessageType MessageType
+	// HandshakeTimeout 限制 DNS、TCP、TLS 和 HTTP Upgrade 的整体握手时间。
 	HandshakeTimeout time.Duration
-	PingInterval     time.Duration
-	PongTimeout      time.Duration
-	Header           http.Header
-	Subprotocols     []string
-	TLSConfig        *tls.Config
+	// PingInterval 是发送 WebSocket 协议 Ping 控制帧的间隔；与 PongTimeout 同为零时关闭。
+	PingInterval time.Duration
+	// PongTimeout 是等待协议 Pong 的上限，启用时必须大于 PingInterval。
+	PongTimeout time.Duration
+	// Header 是 Upgrade 请求附带的非保留 Header，可用于项目自己的鉴权信息。
+	Header http.Header
+	// Subprotocols 按顺序列出客户端提议的应用子协议。
+	Subprotocols []string
+	// TLSConfig 配置 wss 客户端；ws URL 不允许同时设置该字段。
+	TLSConfig *tls.Config
 }
 
 // DefaultDialOptions 返回单 Session、Binary Message 的拨号默认配置。
@@ -84,17 +102,25 @@ func DefaultDialOptions(handler network.Handler) DialOptions {
 
 // ReconnectOptions 配置 Client 的有界指数退避。
 type ReconnectOptions struct {
-	Enabled      bool
-	MaxAttempts  int
+	// Enabled 控制初始连接失败或活动连接关闭后是否自动重试。
+	Enabled bool
+	// MaxAttempts 是每轮连续失败允许执行的最大重试次数。
+	MaxAttempts int
+	// InitialDelay 是第一次重试前的等待时间。
 	InitialDelay time.Duration
-	MaxDelay     time.Duration
-	Jitter       float64
+	// MaxDelay 是指数退避单次等待时间的上限。
+	MaxDelay time.Duration
+	// Jitter 是退避随机抖动比例，范围为 0 到 1。
+	Jitter float64
 }
 
 // ClientOptions 配置托管 WebSocket Client。
 type ClientOptions struct {
-	Dial        DialOptions
-	Reconnect   ReconnectOptions
+	// Dial 配置每次 WebSocket 握手和连接建立后的 Session 语义。
+	Dial DialOptions
+	// Reconnect 配置 Client 唯一重连 Worker 的有界退避。
+	Reconnect ReconnectOptions
+	// StateChange 在所属 Service 串行上下文中接收不可变状态快照；nil 表示不通知。
 	StateChange func(context.Context, network.ClientStateSnapshot)
 }
 

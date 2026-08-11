@@ -16,7 +16,7 @@ go run ./examples/13-network/02-websocket-raw-self-call start \
 ```
 
 Windows 可执行 `run.bat`，Linux/macOS 可执行 `./run.sh`。预期依次看到 Server 和 Client 收到
-`hello through websocket`。示例使用 `127.0.0.1:19091` 和默认 `/ws` Path；端口被占用时同时修改
-Server 地址与 Client URL。
+`hello through websocket`。示例从 `services.NetworkService.websocket` 严格读取配置；端口或 Path
+需要改变时，同时修改 `config/application.yaml` 中的 Server 字段与 Client URL。
 
 完整说明见 [WebSocket 网络模块使用指南](../../../docs/maintenance/v3.2/guides/WebSocket网络模块使用指南.md)。

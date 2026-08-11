@@ -30,9 +30,18 @@ func (module *EchoTCPModule) OnInit() error {
 	serverHandler := network.HandlerFuncs{
 		Message: module.onServerMessage,
 	}
+	// 从完整默认值开始严格覆盖当前 Service 的 tcp.server 配置，拼错字段会阻止启动。
+	serverConfig := tcp.DefaultServerConfig()
+	if err := module.GetServiceConfigStrict("tcp.server", &serverConfig); err != nil {
+		return err
+	}
+	serverOptions, err := serverConfig.Options(serverHandler)
+	if err != nil {
+		return err
+	}
 	server, err := tcp.NewServer(
-		"127.0.0.1:19090",
-		tcp.DefaultServerOptions(serverHandler),
+		serverConfig.Address,
+		serverOptions,
 	)
 	if err != nil {
 		return err
@@ -43,9 +52,18 @@ func (module *EchoTCPModule) OnInit() error {
 		Open:    module.onClientOpen,
 		Message: module.onClientMessage,
 	}
+	// Client 使用独立配置；即使连接同一个 Server，也不复用 Server 的传输参数对象。
+	clientConfig := tcp.DefaultClientConfig()
+	if err := module.GetServiceConfigStrict("tcp.client", &clientConfig); err != nil {
+		return err
+	}
+	clientOptions, err := clientConfig.Options(clientHandler)
+	if err != nil {
+		return err
+	}
 	client, err := tcp.NewClient(
-		"127.0.0.1:19090",
-		tcp.DefaultClientOptions(clientHandler),
+		clientConfig.Address,
+		clientOptions,
 	)
 	if err != nil {
 		return err

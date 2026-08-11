@@ -23,3 +23,12 @@ Codec，以及 TCP Server、Client、Dialer。WebSocket、KCP 和 Gin 不在本�
 
 最终 Race 门禁还发现 Listener 的拒绝计数晚于 socket 关闭发布：客户端可能先观察到断开，却仍读到
 旧统计值。实现已调整为先提交 `RejectedConnections`、再关闭 socket，并通过 100 次重复测试固定。
+
+## 2026-08-11 Service 配置补充
+
+- 新增独立 `ServerConfig`、`ClientConfig`、`DialerConfig` 和完整默认值；
+- 配置使用带单位 `Duration`/`ByteSize`，通过 `Options(handler)` 在启动冷路径转换并复用原校验；
+- Client/Dialer 固定单 Session，不公开冗余连接数和端点总预算；
+- 新增默认 10s 的单次 TCP `DialTimeout`，调用方 Context 更早到期时仍优先生效；
+- 自调用 Example 改为从所属 Service 严格读取 `tcp.server`/`tcp.client`，未知字段直接阻止启动；
+- 补全 TCP Config、Options 和 Example 的中文字段及执行步骤注释。

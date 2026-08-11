@@ -12,18 +12,26 @@ import (
 	"github.com/duanhf2012/origin/v3/sysmodule/network"
 )
 
-const defaultKeepAlive = 30 * time.Second
+const (
+	defaultKeepAlive   = 30 * time.Second
+	defaultDialTimeout = 10 * time.Second
+)
 
 // FrameOptions 配置 TCP Payload 前的无符号长度字段。
 type FrameOptions struct {
+	// LengthFieldSize 是 Payload 前无符号长度字段的字节数，只允许 1、2、4。
 	LengthFieldSize int
-	ByteOrder       network.ByteOrder
+	// ByteOrder 是长度字段使用的 Big/Little Endian；通信双方必须一致。
+	ByteOrder network.ByteOrder
 }
 
 // ServerOptions 配置 TCP Server 的公共网络语义和 TCP 专属参数。
 type ServerOptions struct {
-	Network   network.EndpointOptions
-	Frame     FrameOptions
+	// Network 保存 Handler、容量、超时和背压等三个传输真正共有的语义。
+	Network network.EndpointOptions
+	// Frame 配置 TCP 字节流中的逻辑消息边界。
+	Frame FrameOptions
+	// KeepAlive 是空闲到 OS 开始发送 TCP KeepAlive 探测前的时间；零表示关闭。
 	KeepAlive time.Duration
 }
 
@@ -41,31 +49,49 @@ func DefaultServerOptions(handler network.Handler) ServerOptions {
 
 // DialOptions 配置一次 TCP 拨号及其连接语义。
 type DialOptions struct {
-	Network   network.EndpointOptions
-	Frame     FrameOptions
+	// Network 保存单 Session 的 Handler、容量、超时和背压语义；MaxSessions 必须为 1。
+	Network network.EndpointOptions
+	// Frame 配置 TCP 字节流中的逻辑消息边界。
+	Frame FrameOptions
+	// KeepAlive 是空闲到 OS 开始发送 TCP KeepAlive 探测前的时间；零表示关闭。
 	KeepAlive time.Duration
+	// DialTimeout 是一次 TCP 建连尝试的最长时间；调用方 Context 更早到期时优先生效。
+	DialTimeout time.Duration
 }
 
 // DefaultDialOptions 返回单 Session 拨号默认配置。
 func DefaultDialOptions(handler network.Handler) DialOptions {
 	options := DefaultServerOptions(handler)
 	options.Network.MaxSessions = 1
-	return DialOptions(options)
+	return DialOptions{
+		Network:     options.Network,
+		Frame:       options.Frame,
+		KeepAlive:   options.KeepAlive,
+		DialTimeout: defaultDialTimeout,
+	}
 }
 
 // ReconnectOptions 配置 Client 的有界指数退避。
 type ReconnectOptions struct {
-	Enabled      bool
-	MaxAttempts  int
+	// Enabled 控制初始连接失败或活动连接关闭后是否自动重试。
+	Enabled bool
+	// MaxAttempts 是每轮连续失败允许执行的最大重试次数。
+	MaxAttempts int
+	// InitialDelay 是第一次重试前的等待时间。
 	InitialDelay time.Duration
-	MaxDelay     time.Duration
-	Jitter       float64
+	// MaxDelay 是指数退避单次等待时间的上限。
+	MaxDelay time.Duration
+	// Jitter 是退避随机抖动比例，范围为 0 到 1。
+	Jitter float64
 }
 
 // ClientOptions 配置托管 TCP Client。
 type ClientOptions struct {
-	Dial        DialOptions
-	Reconnect   ReconnectOptions
+	// Dial 配置每次连接建立后 Session 使用的传输语义。
+	Dial DialOptions
+	// Reconnect 配置 Client 唯一重连 Worker 的有界退避。
+	Reconnect ReconnectOptions
+	// StateChange 在所属 Service 串行上下文中接收不可变状态快照；nil 表示不通知。
 	StateChange func(context.Context, network.ClientStateSnapshot)
 }
 
@@ -107,7 +133,14 @@ func validateDialOptions(options DialOptions) error {
 	if options.Network.MaxSessions != 1 {
 		return errs.NewMessage(errs.CodeInvalidConfig, "tcp Dial/Client 的 max_sessions 必须为 1")
 	}
-	return validateServerOptions(ServerOptions(options))
+	if options.DialTimeout <= 0 {
+		return errs.NewMessage(errs.CodeInvalidConfig, "tcp.dial_timeout 必须大于零")
+	}
+	return validateServerOptions(ServerOptions{
+		Network:   options.Network,
+		Frame:     options.Frame,
+		KeepAlive: options.KeepAlive,
+	})
 }
 
 func validateClientOptions(options ClientOptions) error {

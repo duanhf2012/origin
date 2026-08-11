@@ -32,6 +32,11 @@ func TestOptionsValidation(t *testing.T) {
 	if err := validateDialOptions(dial); !errors.Is(err, errs.ErrInvalidConfig) {
 		t.Fatalf("dial sessions error=%v", err)
 	}
+	dial = DefaultDialOptions(handler)
+	dial.DialTimeout = 0
+	if err := validateDialOptions(dial); !errors.Is(err, errs.ErrInvalidConfig) {
+		t.Fatalf("dial timeout error=%v", err)
+	}
 	client.Reconnect.Jitter = 1.1
 	if err := validateClientOptions(client); !errors.Is(err, errs.ErrInvalidConfig) {
 		t.Fatalf("jitter error=%v", err)

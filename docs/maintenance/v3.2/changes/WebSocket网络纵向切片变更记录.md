@@ -28,3 +28,12 @@ Race 在 Windows 连续 50 轮、Ubuntu 连续 100 轮复验，Buffer 全部配�
 
 本切片没有加入公共握手元数据、动态 Middleware、代理抽象、实验性压缩或公开内存池；这些能力
 没有当前必要性，避免扩大设计和测试面。
+
+## 2026-08-11 Service 配置补充
+
+- 新增独立 `ServerConfig`、`ClientConfig`、`DialerConfig` 和完整默认值；
+- `address`/`path`、完整 Client URL、Binary/Text、握手、协议 Ping/Pong、子协议及容量均可严格配置；
+- TLS、Origin、请求/响应 Header 和 Handler 保持代码注入，不把安全对象或凭证写入普通 YAML；
+- Client/Dialer 固定单 Session，不公开冗余连接数和端点总预算；
+- 自调用 Example 改为从所属 Service 严格读取 `websocket.server`/`websocket.client`；
+- 补全 WebSocket Config、Options 和 Example 的中文字段及执行步骤注释。

@@ -9,3 +9,28 @@ nodes:
   - id: network-1
     services:
       - NetworkService
+
+services:
+  NetworkService:
+    tcp:
+      server:
+        # Server 和 Client 在同一进程回环；生产环境通常监听 0.0.0.0。
+        address: "127.0.0.1:19090"
+        frame: {length_field_size: 4, byte_order: big}
+        # OS TCP KeepAlive，不是业务心跳；0s 可以关闭。
+        keep_alive: 30s
+        # 0s 表示不按业务消息空闲时间断开连接。
+        read_idle_timeout: 0s
+      client:
+        address: "127.0.0.1:19090"
+        # 限制每次建连尝试，避免启动或重连永久等待。
+        dial_timeout: 10s
+        frame: {length_field_size: 4, byte_order: big}
+        keep_alive: 30s
+        reconnect:
+          # 示例只连接本进程 Server，不需要自动重连。
+          enabled: false
+          max_attempts: 10
+          initial_delay: 200ms
+          max_delay: 5s
+          jitter: 0.2

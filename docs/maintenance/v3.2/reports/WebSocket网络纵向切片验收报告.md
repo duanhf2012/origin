@@ -96,3 +96,13 @@ goroutine 的统计/注销已在同一时刻发布。测试改为有界等待公
 - Ubuntu 全仓 Race 再次通过。
 
 没有忽略 Race 失败，也没有通过延长无界 Sleep 掩盖问题。
+
+## 2026-08-11 Config 增量验收
+
+Windows 通过全仓 `go test ./...`、全仓 `go vet ./...`、`service` 与全部网络包 Race；WebSocket
+Config 转换函数覆盖率为 85.7%～100%，配置字符串、容量、心跳、URL、重连和 Slice 所有权均有
+专门断言。配置驱动 WebSocket 自调用真实启动成功，Client 收到 `hello through websocket`。
+
+同一代码快照上传到独立 Ubuntu 目录 `/home/boyce/origin_v3_tcp_ws_config_20260811`，相关包普通测试
+与 Race 全部通过；配置驱动 WebSocket Example 使用真实回环 socket 收发成功。测试没有修改远端
+既有仓库，也没有把连接 Header、证书、Origin 策略或其他运行期安全对象写入 YAML。

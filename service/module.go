@@ -222,6 +222,17 @@ func (module *Module) GetServiceConfig(path string, destination any) error {
 	return owner.GetServiceConfig(path, destination)
 }
 
+// GetServiceConfigStrict 委托所属 Service 严格读取业务配置的显式相对路径。
+//
+// 严格模式会拒绝目标结构体未声明的字段，适合网络、RPC 等不能容忍配置拼写错误的基础设施 Module。
+func (module *Module) GetServiceConfigStrict(path string, destination any) error {
+	owner := module.ownerService()
+	if owner == nil {
+		return errs.ErrInvalidArgument
+	}
+	return owner.GetServiceConfigStrict(path, destination)
+}
+
 // ParseServiceConfig 委托所属 Service 宽松解析完整有效业务配置。
 func (module *Module) ParseServiceConfig(destination any) error {
 	owner := module.ownerService()

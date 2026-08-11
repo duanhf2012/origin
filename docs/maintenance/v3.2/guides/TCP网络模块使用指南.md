@@ -24,10 +24,15 @@ type GatewayTCPModule struct {
 
 func (module *GatewayTCPModule) OnInit() error {
     handler := network.HandlerFuncs{Message: module.onMessage}
-    server, err := tcp.NewServer(
-        "127.0.0.1:19090",
-        tcp.DefaultServerOptions(handler),
-    )
+    cfg := tcp.DefaultServerConfig()
+    if err := module.GetServiceConfigStrict("tcp.server", &cfg); err != nil {
+        return err
+    }
+    options, err := cfg.Options(handler)
+    if err != nil {
+        return err
+    }
+    server, err := tcp.NewServer(cfg.Address, options)
     if err != nil {
         return err
     }
@@ -51,6 +56,23 @@ func (target *GatewayService) OnInit() error {
 }
 ```
 
+对应配置放在当前 Service 下；未出现的字段继续使用 `DefaultServerConfig` 的完整默认值：
+
+```yaml
+services:
+  GatewayService:
+    tcp:
+      server:
+        address: "0.0.0.0:19090"
+        frame: {length_field_size: 4, byte_order: big}
+        keep_alive: 30s       # OS TCP KeepAlive；0s 关闭，不等同业务心跳
+        read_idle_timeout: 0s # 业务消息读空闲检查；0s 关闭
+        write_timeout: 15s    # 单条完整消息写出上限，不能关闭
+```
+
+严格读取会拒绝未知字段，避免字段拼错后静默使用默认值。`Handler` 等运行期对象不写入 YAML，继续在
+业务 Module 中显式注入。
+
 这种结构把协议路由、连接状态和网络事件集中在业务 Module，避免业务代码散落到 Service。完整程序见
 [`01-tcp-raw-self-call`](../../../../examples/13-network/01-tcp-raw-self-call/)。
 
@@ -62,9 +84,15 @@ func (target *GatewayService) OnInit() error {
 长期连接使用 `tcp.Client`，它由 Module 自动停止：
 
 ```go
-options := tcp.DefaultClientOptions(handler)
-options.Reconnect.Enabled = true // 默认 false；只有业务允许时才开启
-client, err := tcp.NewClient(address, options)
+cfg := tcp.DefaultClientConfig()
+if err := module.GetServiceConfigStrict("tcp.client", &cfg); err != nil {
+    return err
+}
+options, err := cfg.Options(handler)
+if err != nil {
+    return err
+}
+client, err := tcp.NewClient(cfg.Address, options)
 if err != nil {
     return err
 }
@@ -74,7 +102,8 @@ return module.AddModule(client)
 这里的 `module` 是项目自己的业务 Module。需要同时提供 Server 和 Client 时，先加入 Server、再加入
 Client，使 Client 启动连接前监听端已经就绪；停止时框架会按相反顺序清理。
 
-开启重连后，默认最多尝试 10 次，退避从 200ms 增长到 5s，并带 20% 抖动。每次重连都会产生
+`ClientConfig` 默认关闭重连；开启后每轮最多重试 10 次，退避从 200ms 增长到 5s，并带 20% 抖动。
+每次重连都会产生
 新的 Session 和 SessionID；不要把旧 Session 当作恢复后的连接。
 
 `tcp.Dialer` 只尝试一次，不重连。它要求 owner Service 已经处于 Running/Retired，调用方必须在
@@ -116,7 +145,8 @@ TCP 每条消息前有 1、2 或 4 字节无符号长度。默认 4 字节 Big E
 options.Frame.ByteOrder = network.LittleEndian
 ```
 
-从 `DefaultServerOptions`/`DefaultClientOptions` 开始，只修改需要的字段。默认限制包括 64KiB 单消息、
+使用配置时从 `DefaultServerConfig`/`DefaultClientConfig` 开始；直接使用 Go Options 时仍从对应
+`Default*Options` 开始，只修改需要的字段。默认限制包括 64KiB 单消息、
 每 Session 64 条/256KiB 入站待处理、256 条/256KiB 出站队列，以及 Module 级总字节预算。容量按
 Buffer 保留容量记账，不是只看 payload 长度。
 

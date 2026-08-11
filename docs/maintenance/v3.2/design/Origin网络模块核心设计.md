@@ -546,7 +546,239 @@ Service 的全局后备上限，不再建立网络专属全局数据队列。Mod
 JSON/YAML 中的容量和时间继续遵守 Origin 统一配置规则，分别使用 `64KB`、`15s` 等带单位字符串；
 Go Options 校验完成后保存为整数 Byte 和 `time.Duration`，热路径不解析文本。
 
-WebSocket 默认不得允许任意 Origin；KCP 依赖、加密默认和弱网参数必须在 KCP 切片前单独确认。
+### 9.1 Service 配置的最终外观
+
+TCP、WebSocket 和 KCP 分别公开自己的 `ServerConfig`、`ClientConfig` 与 `DialerConfig`，不公开一个
+包含三种传输全部字段的总 Config。三套 Config 对真正同义的容量和超时使用相同字段名，转换到运行期
+时再复用内部校验；传输专属字段只存在于自己的包中。配置对象只保存可序列化数据，`Handler`、
+`StateChange`、TLS、WebSocket Origin/Header 和 KCP `BlockCrypt` 继续由代码注入。
+
+本节冻结的是目标外观，不要求三个传输同时实现配置。TCP、WebSocket 可以基于已有稳定 Options 先接入
+Service 配置；KCP 必须先完成 Server/Client/Dialer、运行期 Options、公共契约测试和弱网验证，再实现
+KCP Config 到 Options 的映射。若底层验证证明某个 KCP 字段没有可靠语义，先修订本节再实现配置，禁止
+为了匹配文档而保留无效参数或建立兼容层。
+
+每个 Config 都提供完整默认值：
+
+```go
+func DefaultServerConfig() ServerConfig
+func DefaultClientConfig() ClientConfig
+func DefaultDialerConfig() DialerConfig
+```
+
+使用者先取得默认值，再从所属 Service 的相对路径严格覆盖，最后转换为现有 Options。严格读取必须拒绝
+未知字段，避免把 `write_timeout` 拼错后静默使用默认值；配置切片实现时同步为 `IServiceConfig` 增加
+`GetServiceConfigStrict`，不在网络包复制一套配置解析器。
+
+```go
+cfg := tcp.DefaultServerConfig()
+if err := module.GetServiceConfigStrict("tcp.server", &cfg); err != nil {
+	return err
+}
+options, err := cfg.Options(handler)
+if err != nil {
+	return err
+}
+server, err := tcp.NewServer(cfg.Address, options)
+```
+
+推荐的 Service 配置外观如下。这里只列出通常需要确认的字段；省略的容量字段仍由对应
+`Default*Config` 补齐，不要求使用者复制整份默认值：
+
+```yaml
+services:
+  GatewayService:
+    tcp:
+      server:
+        # TCP 监听地址；必须包含端口。生产环境按实际网卡配置，不应照抄回环地址。
+        address: "0.0.0.0:19090"
+        frame:
+          # Payload 前无符号长度字段的字节数；只允许 1、2、4。
+          length_field_size: 4
+          # 长度字段端序；允许 big、little，双方必须一致。
+          byte_order: big
+        # OS TCP KeepAlive 首次探测前的空闲时间；0s 关闭。它不是业务心跳。
+        keep_alive: 30s
+        # 完整业务消息的最大长度，入站和出站同时生效。
+        max_message_size: 64KB
+        # 只统计完整业务消息；0s 关闭读空闲检查。
+        read_idle_timeout: 0s
+        # 一条完整消息写出的最长时间，必须大于 0s。
+        write_timeout: 15s
+
+      client:
+        # 托管 Client 的远端 TCP 地址。
+        address: "127.0.0.1:19090"
+        # 每次建连尝试的最长时间，避免 DNS 或握手长期阻塞 Module 启动/重连。
+        dial_timeout: 10s
+        frame: {length_field_size: 4, byte_order: big}
+        keep_alive: 30s
+        reconnect:
+          # 默认不自动重连；开启后仍受最大尝试次数限制。
+          enabled: false
+          # 每轮初始失败或断线后的重试上限；达到上限后进入 Stopped。
+          max_attempts: 10
+          # 第一次重试的等待时间。
+          initial_delay: 200ms
+          # 指数退避的单次等待上限。
+          max_delay: 5s
+          # 退避随机抖动比例；0.2 表示在基准值附近加入最多 20% 抖动。
+          jitter: 0.2
+
+      dialer:
+        # 单次拨号的默认远端地址；Dialer 不创建重连 goroutine。
+        address: "127.0.0.1:19090"
+        # 单次拨号自身的上限；调用方 Context 更早到期时以 Context 为准。
+        dial_timeout: 10s
+        frame: {length_field_size: 4, byte_order: big}
+        keep_alive: 30s
+
+    websocket:
+      server:
+        # HTTP/WebSocket 监听地址。
+        address: "0.0.0.0:19091"
+        # Upgrade 路由；与监听地址语义不同，因此保留为独立字段。
+        path: "/ws"
+        # binary 适合 Raw/PB；text 适合浏览器直接处理 JSON，且 Payload 必须是 UTF-8。
+        message_type: binary
+        # HTTP Upgrade 握手最长时间。
+        handshake_timeout: 10s
+        # WebSocket 协议控制帧心跳；二者同时为 0s 时关闭。
+        ping_interval: 30s
+        # 发出协议 Ping 后等待协议 Pong 的上限，必须大于 ping_interval。
+        pong_timeout: 60s
+        # 可接受的 WebSocket 子协议；空列表表示不协商子协议。
+        subprotocols: []
+        max_message_size: 64KB
+        # 只统计业务 Data Message；协议 Ping/Pong 不刷新该时间。
+        read_idle_timeout: 0s
+        write_timeout: 15s
+
+      client:
+        # Client 使用完整 ws/wss URL，路径直接包含在 URL 中。
+        url: "ws://127.0.0.1:19091/ws"
+        message_type: binary
+        handshake_timeout: 10s
+        ping_interval: 30s
+        pong_timeout: 60s
+        subprotocols: []
+        reconnect: {enabled: false, max_attempts: 10, initial_delay: 200ms, max_delay: 5s, jitter: 0.2}
+
+      dialer:
+        # 单次拨号 URL；超时由调用方 Context 与 handshake_timeout 共同约束。
+        url: "ws://127.0.0.1:19091/ws"
+        message_type: binary
+        handshake_timeout: 10s
+        ping_interval: 30s
+        pong_timeout: 60s
+        subprotocols: []
+
+    kcp:
+      server:
+        # UDP/KCP 监听地址。
+        address: "0.0.0.0:19092"
+        frame: {length_field_size: 4, byte_order: big}
+        # UDP 数据报使用的 KCP MTU；默认 1400，修改前必须结合链路 MTU 测试分片。
+        mtu: 1400
+        # KCP 发送/接收窗口，单位为 Segment；首轮默认均为 1024。
+        send_window: 1024
+        receive_window: 1024
+        no_delay:
+          # 开启 KCP 低延迟模式。
+          enabled: true
+          # KCP 内部更新间隔；默认 10ms，不是业务 Tick。
+          interval: 10ms
+          # 累计多少次跨越 ACK 后快速重传；0 关闭，低延迟默认 2。
+          fast_resend: 2
+          # true 关闭 KCP 拥塞控制，以时延优先；公网弱网发布前必须压测带宽代价。
+          disable_congestion_control: true
+        # true 会立即发送 ACK、降低确认时延但增加小包；默认 false。
+        ack_no_delay: false
+        # true 将 Write 延迟到下个更新周期以利批量传输；实时消息默认 false。
+        write_delay: false
+        fec:
+          # 0/0 表示关闭 FEC；启用时服务端与客户端必须使用相同组合。
+          data_shards: 0
+          parity_shards: 0
+        # DSCP 0 表示不标记；非零值依赖操作系统权限和网络设备策略。
+        dscp: 0
+        # 0B 表示保留操作系统 Socket Buffer 默认值；只在容量测试后调大。
+        socket_read_buffer: 0B
+        socket_write_buffer: 0B
+        max_message_size: 64KB
+        # KCP 没有可靠的无流量断线通知；默认 60s，必须大于业务心跳最大间隔。
+        read_idle_timeout: 60s
+        write_timeout: 15s
+
+      client:
+        # 托管 KCP Client 的远端 UDP 地址。
+        address: "127.0.0.1:19092"
+        frame: {length_field_size: 4, byte_order: big}
+        mtu: 1400
+        send_window: 1024
+        receive_window: 1024
+        no_delay: {enabled: true, interval: 10ms, fast_resend: 2, disable_congestion_control: true}
+        ack_no_delay: false
+        write_delay: false
+        fec: {data_shards: 0, parity_shards: 0}
+        dscp: 0
+        socket_read_buffer: 0B
+        socket_write_buffer: 0B
+        read_idle_timeout: 60s
+        reconnect: {enabled: false, max_attempts: 10, initial_delay: 200ms, max_delay: 5s, jitter: 0.2}
+
+      dialer:
+        # 单次建立本地 KCP Session；它不证明远端业务已经应答，不自动重连。
+        address: "127.0.0.1:19092"
+        frame: {length_field_size: 4, byte_order: big}
+        mtu: 1400
+        send_window: 1024
+        receive_window: 1024
+        no_delay: {enabled: true, interval: 10ms, fast_resend: 2, disable_congestion_control: true}
+        ack_no_delay: false
+        write_delay: false
+        fec: {data_shards: 0, parity_shards: 0}
+        dscp: 0
+        socket_read_buffer: 0B
+        socket_write_buffer: 0B
+        read_idle_timeout: 60s
+```
+
+YAML 允许把 WebSocket `address` 与 `path` 写成一行，例如
+`server: {address: "0.0.0.0:19091", path: "/ws"}`，但 Go Config 仍保留两个字段：`address`
+决定监听 Socket，`path` 决定 HTTP Upgrade 路由；反向代理可能分别改写它们，合成一个 URL 会混淆
+监听地址和对外访问地址。WebSocket Ping/Pong 是 RFC 6455 控制帧，由传输层消费，不进入
+`Handler.OnMessage`；业务层仍可另行定义自己的心跳消息。协议语义见
+[RFC 6455 §5.5.2](https://datatracker.ietf.org/doc/html/rfc6455.html#section-5.5.2)，TCP KeepAlive
+字段对应 Go 的 [`TCPConn.SetKeepAlivePeriod`](https://pkg.go.dev/net#TCPConn.SetKeepAlivePeriod)。
+
+完整公共容量字段及默认值如下；Server 暴露总预算，单 Session 的 Client/Dialer 不暴露冗余的
+`max_sessions` 和总预算字段，转换时令总预算等于对应单 Session 上限：
+
+| 字段 | Server 默认值 | Client/Dialer 默认值 | 语义 |
+| --- | ---: | ---: | --- |
+| `max_sessions` | `4096` | 不公开，固定 `1` | 当前端点同时活动的 Session 上限 |
+| `max_message_size` | `64KB` | `64KB` | 入站和出站完整逻辑消息上限 |
+| `receive_pending_messages` | `64` | `64` | 单 Session 已投递但业务尚未处理完的消息数上限 |
+| `receive_pending_size` | `256KB` | `256KB` | 单 Session 待处理 Buffer 保留容量上限 |
+| `receive_pending_total_size` | `64M` | 不公开，等于单 Session 上限 | 当前 Server 全部待处理 Buffer 总预算 |
+| `send_queue_messages` | `256` | `256` | 单 Session 等待写出的完整消息数上限 |
+| `send_queue_size` | `256KB` | `256KB` | 单 Session 排队 Payload 保留容量上限 |
+| `send_queue_total_size` | `128M` | 不公开，等于单 Session 上限 | 当前 Server 排队及正在写出的 Payload 总预算 |
+| `read_idle_timeout` | TCP/WS `0s`；KCP `60s` | 同对应传输 | 完整业务消息读空闲上限；`0s` 表示关闭 |
+| `write_timeout` | `15s` | `15s` | 一条完整消息写出的强制上限，不允许关闭 |
+| `slow_client_timeout` | `10s` | `10s` | 发送队列连续处于高水位的最长时间 |
+
+范围控制结论：TCP `NoDelay` 固定开启，不增加一个几乎不会正确修改的配置字段；KeepAlive 只公开
+首次探测空闲时间，不提前暴露平台相关的探测间隔和次数；KCP Stream Mode 因统一长度帧固定开启；
+v2 的 `MinMsgLen` 被协议校验替代，分离的 `MaxReadMsgLen`/`MaxWriteMsgLen` 合并为
+`max_message_size`，`PendingWriteNum` 被消息数、字节数和总预算三层上限替代。废弃的 DUP、动态热更新、
+普通 YAML 中的静态加密密钥都不进入首批外观。
+
+KCP 上述数值是 Ubuntu 弱网与容量测试的候选起点；KCP Module 验收后才冻结发布默认值并实现 Config。
+底层验证可以调整默认数值；需要改变字段职责时必须先复核并更新本设计。
+WebSocket 默认不得允许任意 Origin；TLS、Origin 校验和 KCP 加密在代码中显式注入并单独测试，不能因
+YAML 未出现对应字段而省略安全能力。
 
 ## 10. 生命周期、错误和可观测性
 
@@ -607,10 +839,13 @@ Module 当前/峰值 pending 与发送 Payload 字节、过载拒绝、水位转
 2. **公共基础 + TCP**：Session/Handler、Router/Codec、Raw/PB/JSON、Server/Client/Dialer、队列与
    回环，先验证全部公共风险；Ubuntu 容量数据要求调整默认值时先更新设计；
 3. **WebSocket**：复用公共契约，只增加 Upgrade、安全和 WS 生命周期；
-4. **KCP**：最后引入依赖并完成 UDP/KCP 专属安全、弱网和容量测试；
-5. **整体收口**：共同契约、覆盖率、Ubuntu 稳定性、教程和带完整中文注释的 Example；
-6. **性能优化**：根据 Benchmark/Profile 只处理已证明热点，随后完整回归功能、Race、Fuzz 和稳定性；
-7. **Gin/HTTP**：单独提案，不加入长连接接口。
+4. **KCP Module**：先引入依赖，完成 Server/Client/Dialer、运行期 Options、UDP/KCP 专属安全、公共
+   契约、弱网和容量测试；本阶段不实现 KCP Service Config；
+5. **KCP Config**：以上一步已经验收的 Options 和实测默认值为唯一输入，实现独立 Config、严格读取、
+   默认值、转换校验和配置驱动 Example，不反向修改底层能力来迁就预设配置；
+6. **整体收口**：共同契约、覆盖率、Ubuntu 稳定性、教程和带完整中文注释的 Example；
+7. **性能优化**：根据 Benchmark/Profile 只处理已证明热点，随后完整回归功能、Race、Fuzz 和稳定性；
+8. **Gin/HTTP**：单独提案，不加入长连接接口。
 
 每个切片同时完成实现、测试、Benchmark、文档和验收后再进入下一个。TCP 证明公共契约不成立时
 先修订设计，不建立临时兼容层后继续复制到 WebSocket/KCP。

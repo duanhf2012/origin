@@ -91,6 +91,72 @@ services:
 	}
 }
 
+// TestServiceStrictBusinessConfigFacade 验证基础设施配置可以在保留默认值的同时拒绝未知字段，
+// 并且失败不会把已经解码的前置字段写回调用方。
+func TestServiceStrictBusinessConfigFacade(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "runtime.yaml"), []byte(`
+services:
+  ActualPlayer:
+    network:
+      timeout: 9
+      misspelled_timeout: 10
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := originconfig.LoadSnapshot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := snapshot.Root().Lookup("services.ActualPlayer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := &Service{}
+	if err := BindRuntime(target, &configTestRuntime{
+		testRuntime: &testRuntime{nodeID: "player-1", name: "ActualPlayer"},
+		root:        snapshot.Root(),
+		service:     view,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 目标预填默认值；严格解码失败后必须保持原值，避免使用半份基础设施配置。
+	configured := struct{ Timeout int }{Timeout: 3}
+	err = target.GetServiceConfigStrict("network", &configured)
+	if !errs.IsCode(err, errs.CodeInvalidConfig) {
+		t.Fatalf("GetServiceConfigStrict() error = %v", err)
+	}
+	if configured.Timeout != 3 {
+		t.Fatalf("失败后 Timeout = %d", configured.Timeout)
+	}
+
+	// Module 外观必须委托同一严格语义，不能建立第二套解析规则。
+	module := &testModule{}
+	module.owner = target
+	err = module.GetServiceConfigStrict("network", &configured)
+	if !errs.IsCode(err, errs.CodeInvalidConfig) {
+		t.Fatalf("Module.GetServiceConfigStrict() error = %v", err)
+	}
+
+	// 严格读取仍遵守统一路径规则，并对不存在节点返回稳定 ConfigNotFound。
+	if err := target.GetServiceConfigStrict("", &configured); !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("empty GetServiceConfigStrict() error = %v", err)
+	}
+	if err := target.GetServiceConfigStrict("missing", &configured); !errors.Is(err, errs.ErrConfigNotFound) {
+		t.Fatalf("missing GetServiceConfigStrict() error = %v", err)
+	}
+
+	// 没有未知字段时严格模式提交覆盖值。
+	var exact struct{ Timeout int }
+	if err := target.GetServiceConfigStrict("network.timeout", &exact.Timeout); err != nil {
+		t.Fatalf("scalar GetServiceConfigStrict() error = %v", err)
+	}
+	if exact.Timeout != 9 {
+		t.Fatalf("strict Timeout = %d", exact.Timeout)
+	}
+}
+
 // TestModuleBusinessConfigFacade 验证 Module 不建立第二套配置语义，而是读取所属
 // Service 已冻结的根配置和有效业务配置。
 func TestModuleBusinessConfigFacade(t *testing.T) {

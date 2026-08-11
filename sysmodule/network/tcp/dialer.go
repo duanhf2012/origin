@@ -75,10 +75,11 @@ func (dialer *Dialer) Dial(
 	handler.closed = func(_ *core.Session, _ *tcpnet.Conn, _ error) {
 		runtime.CancelIfIdle()
 	}
-	conn, err := tcpnet.Dial(
+	conn, err := dialConnection(
 		ctx,
 		dialer.address,
-		connectionOptions(runtime, dialer.options),
+		runtime,
+		dialer.options,
 		handler,
 	)
 	if err != nil {

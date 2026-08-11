@@ -51,3 +51,16 @@ BenchmarkSendQueue：约 44～45 ns/op，0 B/op，0 allocs/op
 
 WebSocket/KCP 将复用本切片契约，但必须分别完成握手、消息边界、停止、Race、Fuzz 和 Ubuntu
 验收后才能进入下一阶段。
+
+## 2026-08-11 Config 增量验收
+
+Windows 通过全仓 `go test ./...`、全仓 `go vet ./...`、`service` 与全部网络包 Race；TCP Config
+转换函数覆盖率为 85.7%～100%，未覆盖分支主要是 64 位环境无法制造的 `int` 溢出保护。配置驱动
+TCP 自调用真实启动成功，Client 收到 `hello from the same service`。
+
+同一代码快照上传到独立 Ubuntu 目录 `/home/boyce/origin_v3_tcp_ws_config_20260811`，相关包普通测试
+与 Race 全部通过；配置驱动 TCP Example 使用真实回环 socket 收发成功。测试没有修改远端既有仓库。
+
+覆盖率运行同时暴露 `TestCompletedContextDoesNotCreateExecutionFrame` 的测试时序不完整：WaitGroup 在
+回调返回前完成，不能证明 Scheduler 已清除最后一个执行帧。测试现在额外等待 `CompletedTotal`，连续
+100 轮通过；生产调度代码和语义没有因此修改。

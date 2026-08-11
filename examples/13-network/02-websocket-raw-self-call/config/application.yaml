@@ -9,3 +9,30 @@ nodes:
   - id: network-1
     services:
       - NetworkService
+
+services:
+  NetworkService:
+    websocket:
+      server:
+        # address 决定监听 Socket，path 决定 HTTP Upgrade 路由。
+        address: "127.0.0.1:19091"
+        path: "/ws"
+        # Raw 示例使用 Binary Data Message。
+        message_type: binary
+        handshake_timeout: 10s
+        # 这里是 WebSocket 协议 Ping/Pong，不会进入业务 OnMessage。
+        ping_interval: 30s
+        pong_timeout: 60s
+      client:
+        # Client 使用包含 ws Scheme 和 path 的完整 URL。
+        url: "ws://127.0.0.1:19091/ws"
+        message_type: binary
+        handshake_timeout: 10s
+        ping_interval: 30s
+        pong_timeout: 60s
+        reconnect:
+          enabled: false
+          max_attempts: 10
+          initial_delay: 200ms
+          max_delay: 5s
+          jitter: 0.2

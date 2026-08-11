@@ -1792,6 +1792,12 @@ func TestCompletedContextDoesNotCreateExecutionFrame(t *testing.T) {
 		}
 	}
 	waitGroup(t, &completed)
+	// Done 在测试回调返回前执行，仅等待 WaitGroup 不能证明 Scheduler 已经清除最后一个
+	// runningTask。继续等待完成统计，确保下面确实测试“没有活动执行帧”，而不是与最后
+	// 一个复用任务尾部发生竞争。
+	waitForStats(t, fixture.service, func(stats ExecutionStats) bool {
+		return stats.CompletedTotal == 1001
+	})
 
 	for attempt := 0; attempt < 1000; attempt++ {
 		called := false

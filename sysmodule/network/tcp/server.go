@@ -58,7 +58,12 @@ func (server *Server) OnStart(ctx context.Context) error {
 	handler := newRuntimeHandler(runtime)
 	listenOptions := tcpnet.DefaultListenOptions(runtime.Pool())
 	listenOptions.MaxConnections = server.options.Network.MaxSessions
-	listenOptions.Connection = connectionOptions(runtime, DialOptions(server.options))
+	// Listener 连接与拨号连接共享帧、容量和 Socket 配置；DialTimeout 只作用于主动建连。
+	listenOptions.Connection = connectionOptions(runtime, DialOptions{
+		Network:   server.options.Network,
+		Frame:     server.options.Frame,
+		KeepAlive: server.options.KeepAlive,
+	})
 	listener, err := tcpnet.Listen(server.address, listenOptions, handler)
 	if err != nil {
 		runtime.BeginStop()

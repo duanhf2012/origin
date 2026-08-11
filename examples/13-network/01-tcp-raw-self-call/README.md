@@ -16,7 +16,7 @@ go run ./examples/13-network/01-tcp-raw-self-call start \
 ```
 
 Windows 可执行 `run.bat`，Linux/macOS 可执行 `./run.sh`。预期依次看到 Server 和 Client 收到
-`hello from the same service`。示例使用 `127.0.0.1:19090`；端口被占用时先修改 `main.go` 中的
-Server 与 Client 地址，并保持两处一致。
+`hello from the same service`。示例从 `services.NetworkService.tcp` 严格读取配置；端口被占用时
+修改 `config/application.yaml` 中 Server 与 Client 的地址，并保持两处一致。
 
 完整说明见 [TCP 网络模块使用指南](../../../docs/maintenance/v3.2/guides/TCP网络模块使用指南.md)。
