@@ -38,12 +38,13 @@ v2 已提供路由、中间件、自定义 Processor、HTTP/HTTPS 启停和所�
 
 - `gin.Default()` 隐式安装全局日志和恢复中间件，无法自然接入 Origin 结构化日志；
 - Safe Handler 把 `*gin.Context` 投递到 Service 后阻塞请求 goroutine，超时返回后任务仍可能继续写响应；
-- 为每个 HTTP Method 重复一组 Safe/普通包装函数，公开面过大；
+- Safe/普通方法虽然直观，但 v2 分别实现每个 Method，内部逻辑重复且命名不统一；
 - 代理 Header 信任逻辑不完整，可能接受伪造的客户端 IP；
 - 启动错误、异步 Serve 失败、优雅停止和请求耗尽没有形成一个可验证的生命周期状态机。
 
-v2 的 `IGinProcessor` 不再保留。Gin 原生 Middleware 与 Handler 已经分别覆盖通用前后处理和路由业务
-处理，再增加一层 Processor 只会产生两套注册方式。
+v2 的 `IGinProcessor` 不原样保留。鉴权、限流、审计等请求前后处理统一采用 Gin 已验证的 Middleware 链，
+并由 HTTP Module 暴露全局、分组和单路由三个作用域。这样既允许插入自定义鉴权，也能直接复用 Gin
+生态，不再维护一套行为相近但组合规则不同的 Processor。
 
 ### 3.2 HTTP Client Module
 
@@ -60,22 +61,30 @@ v2 提供请求构造、Header 和读取响应 Body 的便捷能力，但生命�
 ### 4.1 Gin Server Module
 
 - 由 `Service.AddModule` 托管，启动时同步绑定 Listener，停止时优雅耗尽请求；
-- 使用者通过原生 `*gin.Engine` 注册路由和中间件，不重复包装 GET、POST 等 Gin API；
+- 业务类型匿名嵌入 `ginmodule.Module`；配置、路由、分组、中间件、普通 Handler、Safe Handler、地址和统计
+  全部从当前 HTTP Module 调用，不要求使用者取得 `*gin.Engine`；
+- Module 与其 `RouterGroup` 直接提供 `Use`、`Group`、`Handle`、`GET`、`POST` 等常用 Gin 风格接口；
+  各方法统一委托一个内部注册入口，不复制路由逻辑；
 - 提供严格 `ServerConfig`，包括监听地址、请求 Context/Header/读/写/空闲超时、Header/Body 上限、
   活动请求上限和可信代理；
 - TLS 证书与动态安全策略通过代码注入，不写入通用 YAML；
 - 默认不信任转发代理，具备 panic 边界、过载拒绝和最小固定统计；
 - 暴露真实监听地址，支持测试使用 `127.0.0.1:0`；
-- 普通 Gin Handler 保持标准 `net/http` 并发模型；同时提供一个不跨 goroutine 传递 `*gin.Context` 的
-  `ServiceHandler`，让请求安全进入所属 Service 串行上下文。
+- 普通 `POST` 等 Handler 保持标准 `net/http` 并发模型；`SafePOST` 等 Safe Handler 由框架自动投递到所属
+  Service 工作协程，业务无需手写 Dispatch、闭包或响应提交；
+- 全局和分组鉴权使用 Gin Middleware；成功后的鉴权结果通过请求期 `Context.Keys` 快照带入
+  `SafeContext`。鉴权失败可以在投递前直接中止请求；需要访问 Service 串行状态的授权检查写在 Safe
+  Handler 内，不允许普通 Middleware 直接读写该状态。
 
-`ServiceHandler` 采用“请求准备 → Service Task → 响应提交”三段式：准备阶段在请求 goroutine 使用 Gin
-完成参数读取、绑定和校验；返回的 Task 在 Service Scheduler 中安全访问业务状态并生成有界响应；最终
-响应只由原请求 goroutine 提交。请求取消后可以立即返回，排队或运行中的 Task 只能产生私有结果，不能
-继续写已经结束的 ResponseWriter。
+Safe Handler 内部仍采用“请求快照 → Service Task → 响应提交”三段式，但这是实现细节：请求 goroutine
+先复制有界 Body、Header、URL、Params、Query 和 Middleware Keys；Safe Handler 在 Service Scheduler
+中通过私有 `SafeContext` 读取快照、绑定参数、访问业务状态并生成缓冲响应；最后仅由原请求 goroutine
+提交冻结后的响应。请求取消后可以立即返回，排队或运行中的 Task 只能产生私有结果，不能继续写已经结束
+的 ResponseWriter。
 
-普通 Handler 如果只需调用已有 Service RPC，仍可直接使用生成的 `CallXxx`。框架不迁移 v2 把
-`*gin.Context` 投递进 Service 的 SafeGET/SafePOST 方法族，也不要求每个 HTTP 入口额外定义一个 RPC。
+普通 Handler 如果只需调用已有 Service RPC，仍可直接使用生成的 `CallXxx`。框架保留 v2 中
+`POST`/`SafePOST` 易于区分执行位置的外观意图，但不迁移其把 `*gin.Context` 与 ResponseWriter 投递进
+Service 的实现，也不要求每个 HTTP 入口额外定义一个 RPC。
 
 ### 4.2 HTTP Client
 
@@ -99,7 +108,8 @@ v2 提供请求构造、Header 和读取响应 Body 的便捷能力，但生命�
 
 | 能力 | 不进入首批的原因 |
 | --- | --- |
-| v2 Gin SafeGET/SafePOST 方法族 | 不原样迁移；改为单一三段式 `ServiceHandler`，继续使用 Gin 原生路由 |
+| v2 Safe Handler 的 Context/等待实现 | 保留 `SafePOST` 等直观外观；内部改为请求快照、Service 串行执行和冻结响应 |
+| 对外暴露 `Engine()` 作为主要入口 | 常用路由、分组和 Middleware 由 Module 包装；有真实缺口时再增加受控扩展点 |
 | HTTP Client Module/Service Config | Client 不拥有独立监听生命周期，地址与鉴权通常按调用目标变化 |
 | 自动重试、熔断、负载均衡 | 会引入幂等、发现和策略语义，应由后续独立能力证明需求 |
 | 自动 JSON/PB REST SDK | 标准库编码已足够；框架不应推断业务 Content-Type 和错误协议 |
@@ -130,10 +140,10 @@ v2 提供请求构造、Header 和读取响应 Body 的便捷能力，但生命�
 1. 默认禁用代理 Header 信任，只有显式可信代理 IP/CIDR 才接受转发客户端地址；
 2. Server 请求并发、Header 和 Body 有界，Client 完整响应读取有界；
 3. Server 为请求 Context 建立总截止时间，使 RPC、数据库和 HTTP 下游能够随请求取消；
-4. `ServiceHandler` 在 Service 串行上下文安全访问业务数据，但 Gin Context 和 ResponseWriter 始终留在
-   请求 goroutine；
+4. `SafePOST` 等回调无感运行在 Service 串行上下文；原始 Gin Context 和 ResponseWriter 始终留在请求
+   goroutine，Safe Handler 只接触请求快照和私有缓冲响应；
 5. Server 启动绑定失败同步返回，停止等待在途请求，超时后强制释放 Listener；
-6. 验证“Service 通过 Await 调 HTTP Client → 自身 Gin ServiceHandler → 同一 Service”的完整自调用。
+6. 验证“Service 通过 Await 调 HTTP Client → 自身 Gin Safe Handler → 同一 Service”的完整自调用。
 
 这些能力直接解决安全、过载、生命周期和死锁风险，不属于过度设计。
 
@@ -141,6 +151,9 @@ v2 提供请求构造、Header 和读取响应 Body 的便捷能力，但生命�
 
 - Gin 官方推荐使用自定义 `http.Server` 配置超时，并通过 `Shutdown` 优雅停止；
 - Gin 默认信任所有代理，公开部署必须禁用或显式设置可信代理；
+- Gin 的 Middleware 原生支持全局、分组和单路由三个作用域，适合作为鉴权等横切逻辑的唯一扩展方式；
+- Gin Context 会被复用，不能把原始对象交给异步 goroutine；Hertz 与 fasthttp 也都明确限制请求 Context
+  生命周期，因此 Safe Handler 必须使用框架独立拥有的快照与缓冲响应；
 - Go `http.Transport` 会缓存连接，应该复用且可以并发使用；请求 Context 是取消网络请求的标准边界；
 - 当前 Gin v1.12.0 要求 Go 1.24，满足 Origin v3 当前 Go 1.26.5 基线。
 
@@ -148,8 +161,13 @@ v2 提供请求构造、Header 和读取响应 Body 的便捷能力，但生命�
 
 - [Gin Server 配置](https://gin-gonic.com/en/docs/server-config/)
 - [Gin Context 与取消](https://gin-gonic.com/en/docs/server-config/context/)
+- [Gin Middleware](https://gin-gonic.com/en/docs/middleware/)
+- [Gin 路由分组](https://gin-gonic.com/en/docs/routing/grouping-routes/)
+- [Gin 在 goroutine 中使用 Context](https://gin-gonic.com/en/docs/middleware/goroutines-inside-a-middleware/)
 - [Gin 可信代理配置](https://gin-gonic.com/en/docs/server-config/trusted-proxies/)
 - [Gin 安全指南](https://gin-gonic.com/en/docs/middleware/security-guide/)
+- [Hertz RequestContext](https://www.cloudwego.io/docs/hertz/tutorials/basic-feature/context/)
+- [fasthttp RequestCtx](https://github.com/valyala/fasthttp)
 - [Go net/http 文档](https://pkg.go.dev/net/http)
 - [Gin Releases](https://github.com/gin-gonic/gin/releases)
 

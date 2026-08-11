@@ -4,21 +4,64 @@
 > 状态：待公开外观确认后实施  
 > 能力依据：[Origin Gin 与 HTTP Client 能力分析](../proposals/Origin%20Gin与HTTP%20Client能力分析.md)
 
-## 1. 包与所有权
+## 1. 包、组合与所有权
 
 ```text
 业务 Service
-└── 业务 HTTP Module
-    ├── ginmodule.Server       Service 托管，拥有 Listener、http.Server 和 gin.Engine
-    └── httpclient.Client      普通字段，业务代码持有并跨请求复用
+└── 业务 HTTP Module（匿名嵌入 ginmodule.Module）
+    ├── 私有 gin.Engine / http.Server / Listener
+    ├── 普通与 Safe 路由及业务 Handler
+    └── httpclient.Client（普通字段，跨请求复用）
 ```
 
 - `sysmodule/ginmodule` 使用 Gin，但不加入 `sysmodule/network`；
+- `ginmodule.Module` 是 HTTP Server 的唯一公开入口，同时拥有 Service Module 生命周期、路由和运行资源；
+- 使用者不需要先取得 `Server` 或 `Engine`，配置、路由、分组、中间件、监听地址和统计都从当前业务
+  HTTP Module 调用；
 - `sysmodule/httpclient` 只依赖 Go 标准库，不依赖 Gin，也不嵌入 `service.Module`；
-- 业务路由、HTTP Client 和 Handler 集中放在业务 Module，Service 只负责装配；
 - 一个 `httpclient.Client` 应按调用目标或公共传输策略长期复用，不能按请求创建。
 
-## 2. Gin Server 外观
+推荐的业务结构：
+
+```go
+type PlayerHTTPModule struct {
+    ginmodule.Module
+
+    // client 按调用目标长期复用；它不是子 Module，也不读取 Service YAML。
+    client *httpclient.Client
+    // players 只在 Service 工作协程访问。
+    players map[int64]Player
+}
+
+func (module *PlayerHTTPModule) OnInit() error {
+    config := ginmodule.DefaultServerConfig()
+    // 从完整默认值开始严格覆盖；配置字段拼写错误会阻止 Service 启动。
+    if err := module.GetServiceConfigStrict("http.server", &config); err != nil {
+        return err
+    }
+    options, err := config.Options()
+    if err != nil {
+        return err
+    }
+    // Setup 只允许在当前 Module.OnInit 中调用一次，并且必须先于路由注册。
+    if err := module.Setup(config.Address, options); err != nil {
+        return err
+    }
+
+    module.GET("/health", module.health)
+
+    // Middleware 在请求 goroutine 完成鉴权；失败时可直接 Abort，成功结果通过 Keys 快照传入 SafeContext。
+    api := module.Group("/api", authenticate())
+    api.SafePOST("/players", module.createPlayer)
+    return nil
+}
+```
+
+业务 Module 通常只覆盖 `OnInit`；被提升的 `ginmodule.Module.OnStart` 和 `OnStop` 负责监听与停止。若业务
+确需覆盖 `OnStart` 或 `OnStop`，必须分别调用嵌入 Module 的同名方法，测试正常、失败和取消顺序。首批不为
+这一罕见场景再增加一套生命周期 Hook 抽象。
+
+## 2. Gin Module 外观
 
 ### 2.1 配置与运行期选项
 
@@ -34,7 +77,7 @@ type ServerConfig struct {
     IdleTimeout                config.Duration
     MaxHeaderBytes             config.ByteSize
     MaxRequestBodySize         config.ByteSize
-    MaxServiceResponseBodySize config.ByteSize
+    MaxSafeResponseBodySize    config.ByteSize
     MaxActiveRequests          int
     TrustedProxies             []string
 }
@@ -50,11 +93,11 @@ type ServerOptions struct {
     IdleTimeout                time.Duration
     MaxHeaderBytes             int
     MaxRequestBodySize         int64
-    MaxServiceResponseBodySize int64
+    MaxSafeResponseBodySize    int64
     MaxActiveRequests          int
     TrustedProxies             []string
     TLSConfig                  *tls.Config
-    ServiceErrorMapper         ServiceErrorMapper
+    SafeErrorMapper            SafeErrorMapper
 }
 
 func DefaultServerOptions() ServerOptions
@@ -71,9 +114,9 @@ func DefaultServerOptions() ServerOptions
 | `read_timeout` | `15s` | 包含读取请求 Body；大上传应按实际业务调整 |
 | `write_timeout` | `20s` | 比请求预算稍长，为取消收敛和错误响应保留时间 |
 | `idle_timeout` | `60s` | Keep-Alive 空闲连接保留时间 |
-| `max_header_bytes` | `1MiB` | 请求 Header 上限，也作为 `ServiceHandler` 缓冲响应 Header 上限 |
+| `max_header_bytes` | `1MiB` | 请求 Header 上限，也作为 Safe Handler 缓冲响应 Header 上限 |
 | `max_request_body_size` | `4MiB` | 普通 JSON/PB API 的安全起点，不代表上传接口最优值 |
-| `max_service_response_body_size` | `4MiB` | `ServiceHandler` 缓冲响应 Body 上限；普通流式 Handler 不适用 |
+| `max_safe_response_body_size` | `4MiB` | Safe Handler 缓冲响应 Body 上限；普通流式 Handler 不适用 |
 | `max_active_requests` | `1024` | 当前 Server 的在途请求硬上限 |
 | `trusted_proxies` | `[]` | 默认不信任任何转发代理 |
 
@@ -84,18 +127,37 @@ func DefaultServerOptions() ServerOptions
 goroutine，也不承诺强制中断忽略 Context 的业务代码。Handler 应把 `ctx.Request.Context()` 传给生成的
 `CallXxx`、数据库和下游客户端；业务错误响应格式仍由项目定义。
 
-### 2.2 Server
+### 2.2 Module、路由与分组
 
 ```go
-type Server struct {
+type Module struct {
     service.Module
     // unexported runtime fields
 }
 
-func NewServer(address string, options ServerOptions) (*Server, error)
-func (server *Server) Engine() *gin.Engine
-func (server *Server) Addr() net.Addr
-func (server *Server) Stats() ServerStats
+func (module *Module) Setup(address string, options ServerOptions) error
+func (module *Module) Use(middleware ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) Group(path string, middleware ...gin.HandlerFunc) *RouterGroup
+func (module *Module) Handle(method, path string, handlers ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) GET(path string, handlers ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) POST(path string, handlers ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) PUT(path string, handlers ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) PATCH(path string, handlers ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) DELETE(path string, handlers ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) HEAD(path string, handlers ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) OPTIONS(path string, handlers ...gin.HandlerFunc) gin.IRoutes
+func (module *Module) NoRoute(handlers ...gin.HandlerFunc)
+func (module *Module) NoMethod(handlers ...gin.HandlerFunc)
+func (module *Module) Addr() net.Addr
+func (module *Module) Stats() ServerStats
+
+type RouterGroup struct {
+    // unexported module and Gin group references
+}
+
+func (group *RouterGroup) Use(middleware ...gin.HandlerFunc)
+func (group *RouterGroup) Group(path string, middleware ...gin.HandlerFunc) *RouterGroup
+// RouterGroup 提供与 Module 相同的普通和 Safe 路由方法族。
 
 type ServerStats struct {
     ActiveRequests   int64
@@ -106,9 +168,13 @@ type ServerStats struct {
 }
 ```
 
-`NewServer` 创建私有 `gin.New()` Engine，并在返回前安装框架拥有的第一个全局 Middleware 边界。使用者通过
-`Engine()` 注册 Gin 中间件和路由，注册必须在 `AddModule` 前完成。首批不接受外部 Engine，避免框架
-边界因中间件注册顺序而失效；Gin 的路由、Render、Validator 等能力仍可通过返回的 Engine 配置。
+`Setup` 创建私有 `gin.New()` Engine，并先安装框架拥有的全局安全边界。它只能在业务 Module 的
+`OnInit` 调用一次；`Use`、`Group` 和路由注册必须位于 `Setup` 之后、`OnInit` 返回之前。普通和 Safe 方法
+最终都委托内部 `handle`/`safeHandle`，每个 HTTP Method 仅保留薄包装，不重复生命周期或调度逻辑。
+
+首批不公开 `Engine()`，也不接受外部 Engine，避免使用者绕过 Module 外观或破坏框架 Middleware 顺序。
+`Use`、`Group`、常用 HTTP Method、`NoRoute` 和 `NoMethod` 已覆盖普通 JSON/PB API。模板渲染、静态目录或
+自定义 Validator 等能力只有出现真实用例后，才按最小接口补充；不预先暴露整个 Engine 作为万能逃生口。
 
 框架边界只负责：
 
@@ -122,7 +188,7 @@ type ServerStats struct {
 
 ### 2.3 生命周期
 
-1. `OnInit` 冻结配置和代理列表；
+1. 业务 `OnInit` 调用 `Setup`，校验并冻结配置、代理列表和私有 Engine；`OnInit` 返回后禁止继续注册路由；
 2. `OnStart` 同步执行 `net.Listen`，成功后才启动 Serve goroutine；绑定失败直接使 Service 启动失败；
 3. TLS 使用构造期克隆后的 `tls.Config` 和标准 `ServeTLS` 路径，保留 Go 的 HTTP/2 自动协商；
 4. `OnStop` 先停止新连接，再用传入 Context 执行 `http.Server.Shutdown`；
@@ -138,8 +204,8 @@ Serve 在运行中意外退出时记录根因和结构化错误。首批不为 M
 上传、反向代理、无共享状态 I/O，或者通过生成的 `CallXxx` 调用已有 Service RPC：
 
 ```go
-func (module *HTTPModule) getPlayer(ctx *gin.Context) {
-    name, err := module.players.CallGetPlayer(ctx.Request.Context(), playerID)
+func (module *PlayerHTTPModule) getPlayer(ctx *gin.Context) {
+    name, err := module.playerRPC.CallGetPlayer(ctx.Request.Context(), playerID)
     if err != nil {
         // 由项目自己的 HTTP 错误映射统一响应。
         return
@@ -148,10 +214,10 @@ func (module *HTTPModule) getPlayer(ctx *gin.Context) {
 }
 ```
 
-需要直接访问当前 Service 业务数据时使用 `ServiceHandler`。它不把 `*gin.Context` 或 ResponseWriter
-传入 Service，而是明确拆分请求准备、串行业务和响应提交。
+需要直接访问当前 Service 业务数据时使用 `SafePOST` 等 Safe 路由。框架自动完成投递，使用者无需编写
+Dispatch、RPC、Task 闭包、等待 Channel 或响应提交代码。
 
-### 2.5 ServiceHandler
+### 2.5 Safe Handler 与 SafeContext
 
 ```go
 type Response struct {
@@ -160,69 +226,120 @@ type Response struct {
     Body       []byte
 }
 
-type ServiceTask func(context.Context) (Response, error)
-type ServiceErrorMapper func(error) Response
+type SafeHandlerFunc func(*SafeContext)
+type SafeErrorMapper func(error) Response
 
-func (server *Server) ServiceHandler(
-    prepare func(*gin.Context) ServiceTask,
-) gin.HandlerFunc
+func (module *Module) SafeHandle(method, path string, handlers ...SafeHandlerFunc) gin.IRoutes
+func (module *Module) SafeGET(path string, handlers ...SafeHandlerFunc) gin.IRoutes
+func (module *Module) SafePOST(path string, handlers ...SafeHandlerFunc) gin.IRoutes
+func (module *Module) SafePUT(path string, handlers ...SafeHandlerFunc) gin.IRoutes
+func (module *Module) SafePATCH(path string, handlers ...SafeHandlerFunc) gin.IRoutes
+func (module *Module) SafeDELETE(path string, handlers ...SafeHandlerFunc) gin.IRoutes
 
-func JSONResponse(statusCode int, value any) (Response, error)
+func (ctx *SafeContext) Context() context.Context
+func (ctx *SafeContext) Request() *http.Request
+func (ctx *SafeContext) Param(key string) string
+func (ctx *SafeContext) Query(key string) string
+func (ctx *SafeContext) GetQuery(key string) (string, bool)
+func (ctx *SafeContext) GetHeader(key string) string
+func (ctx *SafeContext) ClientIP() string
+func (ctx *SafeContext) FullPath() string
+func (ctx *SafeContext) Get(key string) (any, bool)
+func (ctx *SafeContext) MustGet(key string) any
+func (ctx *SafeContext) GetRawData() ([]byte, error)
+func (ctx *SafeContext) ShouldBindJSON(value any) error
+func (ctx *SafeContext) Header(key, value string)
+func (ctx *SafeContext) Status(code int)
+func (ctx *SafeContext) JSON(code int, value any)
+func (ctx *SafeContext) String(code int, format string, values ...any)
+func (ctx *SafeContext) Data(code int, contentType string, data []byte)
+func (ctx *SafeContext) Abort()
+func (ctx *SafeContext) AbortWithStatusJSON(code int, value any)
+func (ctx *SafeContext) IsAborted() bool
 ```
 
 推荐使用方式：
 
 ```go
-server.Engine().POST(
-    "/players",
-    server.ServiceHandler(module.prepareCreatePlayer),
-)
-
-// prepareCreatePlayer 在 HTTP 请求 goroutine 执行，只读取请求并生成独立 DTO。
-func (module *HTTPModule) prepareCreatePlayer(ctx *gin.Context) ginmodule.ServiceTask {
+// createPlayer 由 SafePOST 自动安排到当前 Service 工作协程。
+func (module *PlayerHTTPModule) createPlayer(ctx *ginmodule.SafeContext) {
     var request CreatePlayerRequest
     if err := ctx.ShouldBindJSON(&request); err != nil {
         ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-        return nil
+        return
     }
-    return func(taskCtx context.Context) (ginmodule.Response, error) {
-        // 该闭包在所属 Service 的串行上下文执行，可以直接安全访问 module 业务数据。
-        player, err := module.createPlayer(taskCtx, request)
-        if err != nil {
-            return ginmodule.Response{}, err
-        }
-        // JSON 在 Service 执行权释放前编码，避免返回值引用随后会变化的业务数据。
-        return ginmodule.JSONResponse(http.StatusOK, player)
+
+    // 当前回调拥有 Service 执行权，可以直接安全读写业务状态。
+    player := Player{ID: request.ID, Name: request.Name}
+    module.players[player.ID] = player
+
+    // JSON 在释放 Service 执行权前编码进私有缓冲区，不需要 Done 或手动通知请求 goroutine。
+    ctx.JSON(http.StatusCreated, player)
+}
+```
+
+#### 鉴权与自定义处理器
+
+不新增 `IGinProcessor`。鉴权采用主流 Web 框架的 Middleware 链，并由 Module 外观提供三个作用域：
+
+```go
+module.Use(requestIDMiddleware())                         // 全局
+private := module.Group("/api", authenticateToken())    // 分组
+private.POST("/upload", uploadPermission(), upload)     // 普通路由单独附加
+private.SafePOST("/players", module.createPlayer)       // 鉴权成功后自动进入 Service
+```
+
+- Token、签名、mTLS、CORS、限流等不读取 Service 串行状态的逻辑写成 `gin.HandlerFunc`；失败时调用
+  `AbortWithStatusJSON`，成功时通过 `ctx.Set("principal", Principal{...})` 放入只读的请求期结果；
+- Safe 适配器在 Middleware 前置逻辑完成后浅复制 `Context.Keys`，`SafeContext.Get` 可在 Service 中读取。
+  放入 Keys 的值必须是本请求独占或不可变值，不能由 Middleware 的后置逻辑并发修改；
+- 如果授权判断必须读取玩家在线表等 Service 状态，把它写成 Safe Handler 链的第一个处理器；失败时调用
+  `SafeContext.AbortWithStatusJSON`。同一 `SafePOST` 的全部 Safe Handler 均在同一个 Service Task 中按顺序
+  执行，`Abort` 阻止后续处理：
+
+```go
+private.SafePOST("/players", module.authorizePlayer, module.createPlayer)
+
+func (module *PlayerHTTPModule) authorizePlayer(ctx *ginmodule.SafeContext) {
+    principal := ctx.MustGet("principal").(Principal)
+    if !module.permissions[principal.ID].CanCreatePlayer {
+        ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
     }
 }
 ```
 
+这同时覆盖“插入自定义鉴权处理器”和“复用 Gin 生态”两个需求：常规鉴权不必重新发明接口，只有确实依赖
+Service 状态的授权才进入 Safe 链。首批不提供内置 JWT、Session 或 RBAC；这些策略与项目密钥、声明和
+存储强相关，强行统一会扩大安全责任和配置面。
+
 固定执行契约：
 
-1. `prepare` 在请求 goroutine 执行，可以使用全部 Gin 绑定、参数、鉴权和 Middleware 数据，但不能读取
-   或修改需要 Service 串行保护的业务状态；
-2. 参数错误可由 `prepare` 直接写响应并返回 nil；返回 nil 且尚未提交响应视为 Handler 契约错误；
-3. `ServiceTask` 被投递到 Server 所属 Service 的有界 FIFO，只接收合并后的 Context；该 Context 保留
-   Service Task 执行令牌，同时继承 HTTP 请求的 Value、Deadline 和取消；
-4. `ServiceTask` 可以直接访问所属业务 Module 数据，可以调用同步 Event；等待数据库、HTTP 或其他异步
-   I/O 时仍须使用 `Await`，避免阻塞 Service；
-5. `ServiceTask` 不得捕获或使用 `*gin.Context`、ResponseWriter、原始 Request Body 等请求期可变对象；
-   只捕获已完成绑定且由当前请求独占的 DTO；
-6. Task 返回后，框架在释放 Service 执行权前验证并克隆 Header/Body。只允许最终状态码，响应 Header
+1. 原始 `*gin.Context`、ResponseWriter 和 Body Reader 永不离开请求 goroutine；Safe 适配器只投递独立
+   请求快照，`SafeContext.Request()` 返回的也是绑定合并 Context 的私有克隆；
+2. 请求 Body 在投递前读取并受 `MaxRequestBodySize` 限制；Params、URL、Header、Trailer、Keys 和 Body
+   均在请求 goroutine 冻结。首批只做普通 JSON/PB API，不把 Safe Handler 用于流式上传、SSE、Hijack、
+   反向代理或大文件下载；这些场景使用普通 Handler；
+3. Safe 链被投递到所属 Service 的有界 FIFO，合并 Context 保留 Service Task 执行令牌，并继承 HTTP
+   请求的 Value、Deadline 和取消；
+4. Safe Handler 可以直接访问所属业务 Module 数据和调用同步 Event；等待数据库、HTTP 或其他异步 I/O
+   时仍须使用 `Await`，避免阻塞 Service；
+5. `JSON`、`String` 和 `Data` 只写私有缓冲响应，不触碰真实 ResponseWriter；回调返回即自动完成，不提供
+   v2 的 `Done`/`JSONAndDone` 方法。Header 和 Status 可在渲染前调整；一次 Safe 请求只允许一次最终
+   `JSON`/`String`/`Data` 渲染，多次渲染属于 Handler 契约错误；没有显式渲染时返回 `200` 空响应；
+6. Safe 链返回后，框架在释放 Service 执行权前验证并冻结 Header/Body。只允许最终状态码，响应 Header
    总量受 `MaxHeaderBytes` 限制，并拒绝 `Connection`、`Keep-Alive`、`Proxy-Authenticate`、
    `Proxy-Authorization`、`TE`、`Trailer`、`Transfer-Encoding`、`Upgrade`、`Content-Length`；
-7. 原请求 goroutine 只提交已经冻结的 `Response`。请求取消可以立即结束等待；排队 Task 开始前发现取消
+7. 原请求 goroutine 只提交已经冻结的响应。请求取消可以立即结束等待；排队 Task 开始前发现取消
    会跳过业务处理，已运行 Task 只能完成私有结果，不能晚写响应；
 8. 每次调用只分配一个有界结果槽，不为请求创建辅助 goroutine。是否需要进一步减少闭包、Channel 或
    Body 复制，必须由 Benchmark/Profile 决定。
 
-`ServiceErrorMapper` 是代码注入的纯错误映射函数，必须并发安全且不能访问可变 Service 数据。业务 Task
-错误在 Service 执行权释放前映射成 `Response`；调度拒绝和请求 Deadline 也使用同一映射。默认规则不返回
-错误详情：Deadline 为 `504`，Service 未就绪、停止中或队列满为 `503`，其余为 `500`。客户端主动取消
-不再写响应。
+`SafeErrorMapper` 只处理调度拒绝、Deadline、编码失败和内部契约错误，不替业务定义错误协议。它必须是
+并发安全的纯函数，不能访问可变 Service 数据。默认规则不返回错误详情：Deadline 为 `504`，Service
+未就绪、停止中或队列满为 `503`，其余为 `500`。客户端主动取消不再写响应。
 
-Task panic 会先生成安全 `500` 结果，再重新交给 Service Scheduler 的 panic 边界记录和统计，不能让请求
-一直等待到超时。`Response` Body 超过 `MaxServiceResponseBodySize`、状态码非法或 Header 非法均按内部
+Safe Handler panic 会先生成安全 `500` 结果，再重新交给 Service Scheduler 的 panic 边界记录和统计，
+不能让请求一直等待到超时。响应 Body 超过 `MaxSafeResponseBodySize`、状态码非法或 Header 非法均按内部
 错误处理。
 
 ## 3. HTTP Client 外观
@@ -337,8 +454,8 @@ err := module.Await(ctx, func(waitCtx context.Context) error {
 })
 ```
 
-这会在等待 HTTP I/O 时释放 Service 执行权。若目标是同一个 Service 的 Gin `ServiceHandler`，原 Task
-释放执行权后，HTTP 入口投递的新 ServiceTask 才能运行，形成可完成的自调用链。禁止在 Service Task 中
+这会在等待 HTTP I/O 时释放 Service 执行权。若目标是同一个 Service 的 Gin Safe Handler，原 Task
+释放执行权后，HTTP 入口投递的新 Safe Task 才能运行，形成可完成的自调用链。禁止在 Service Task 中
 直接阻塞调用自身 HTTP 接口。
 
 ## 4. 测试门禁
@@ -349,8 +466,9 @@ err := module.Await(ctx, func(waitCtx context.Context) error {
 - `127.0.0.1:0` 启动、真实地址、正常路由、404；
 - 端口占用同步失败和部分启动回滚；
 - Header/Body/活动请求上限及拒绝统计；
-- `ServiceHandler` 三阶段线程归属、串行数据访问、响应复制、非法 Header/状态/大小；
-- Prepare 返回 nil、调度拒绝、排队取消、运行中取消、Deadline、Task error 与 Task panic；
+- Module/RouterGroup 的普通与 Safe 路由、Middleware 继承和重复路由行为；
+- `SafeContext` 请求快照、JSON 绑定、Keys 鉴权结果、Safe 链 Abort、串行数据访问和响应冻结；
+- 调度拒绝、排队取消、运行中取消、Deadline、响应编码错误与 Safe Handler panic；
 - panic 前后响应提交边界，panic 后 Server 仍可用；
 - 客户端取消、读写超时、在途请求优雅停止、停止超时强制关闭；
 - 默认不信任转发代理，显式 CIDR 后行为正确；
@@ -368,7 +486,7 @@ err := module.Await(ctx, func(waitCtx context.Context) error {
 
 ### 4.3 纵向验收
 
-必须覆盖：Service Task → `Await` → HTTP Client → 自身 Gin `ServiceHandler` → 同一 ServiceTask → HTTP
+必须覆盖：Service Task → `Await` → HTTP Client → 自身 Gin `SafePOST` → 同一 Service Task → HTTP
 响应。测试需要证明成功、业务错误、请求取消、队列过载和停止路径均能收敛，且没有晚写响应或 Service
 自调用死锁。
 
@@ -381,7 +499,10 @@ Gin Server 与 HTTP Client 属于重点新包，公开行为分支尽量达到 1
 实施前只需确认以下公开结论：
 
 1. 包名采用 `sysmodule/ginmodule` 与 `sysmodule/httpclient`；
-2. Gin Server 创建并拥有 Engine，不接受外部 Engine；
-3. 不迁移 v2 Safe Handler，实现三段式 `ServiceHandler`；普通 Handler 仍可通过生成的 `CallXxx` 进入；
-4. HTTP Client 无 YAML、无 Module、无自动重试，提供 `Do` 与有界 `DoBytes`；
-5. 默认限制普通 HTTP API，不为 SSE、超大上传或 HTTP/3 放宽边界。
+2. 业务类型匿名嵌入 `ginmodule.Module`，常用路由、中间件、分组和运行信息只从当前 Module 调用；私有
+   Engine 不作为主要入口，也不接受外部 Engine；
+3. 保留 `POST`/`SafePOST` 的直观区分；Safe 回调无感运行于 Service 工作协程，内部使用请求快照和缓冲
+   响应，不传递原始 `*gin.Context`/ResponseWriter；
+4. 鉴权采用 Module 暴露的 Gin Middleware 链；必须访问 Service 状态的授权可作为 Safe 链处理器；
+5. HTTP Client 无 YAML、无 Module、无自动重试，提供 `Do` 与有界 `DoBytes`；
+6. 默认限制普通 HTTP API，不为 SSE、超大上传或 HTTP/3 放宽边界。
