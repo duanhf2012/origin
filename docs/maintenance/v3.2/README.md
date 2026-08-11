@@ -36,15 +36,21 @@ Server 起始配置；教程说明字段关系和调整依据，避免把默认�
 - [`Origin 网络事件与自定义协议扩展调研`](proposals/Origin网络事件与自定义协议扩展调研.md)
 - [`Origin 网络模块核心设计`](design/Origin网络模块核心设计.md)：已经确认的单一实现依据，包含
   公共 API、内存池、消息队列、所有权、背压、协议和实施门禁。
+- [`Origin Gin 与 HTTP Client 能力分析`](proposals/Origin%20Gin与HTTP%20Client能力分析.md)
+- [`Origin Gin 与 HTTP Client 核心设计`](design/Origin%20Gin与HTTP%20Client核心设计.md)：下一批 HTTP
+  服务端 Module 与代码持有 Client 的候选公开外观。
 
-前两份文档保存能力分析和调研依据，不单独授权实现。核心设计已允许按 TCP、WebSocket、KCP
-纵向切片实施；每个切片仍须独立完成计划、测试、文档和验收。
+两份网络 Proposal 保存能力分析和调研依据，不单独授权实现。网络核心设计已允许按 TCP、WebSocket、
+KCP 纵向切片实施；Gin 与 HTTP Client 核心设计仍需确认公开外观。每个切片都必须独立完成计划、测试、
+文档和验收。
 
 当前实施计划：
 
 - [`TCP 网络首批纵向切片实施计划`](plans/TCP网络首批纵向切片实施计划.md)
 - [`WebSocket 网络纵向切片实施计划`](plans/WebSocket网络纵向切片实施计划.md)
 - [`KCP 网络纵向切片实施计划`](plans/KCP网络纵向切片实施计划.md)
+- [`Gin 与 HTTP Client 纵向切片实施计划`](plans/Gin与HTTP%20Client纵向切片实施计划.md)：等待核心
+  设计外观确认后实施。
 
 当前变更与验收材料：
 

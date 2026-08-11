@@ -111,6 +111,10 @@ Gin Module 的核心是单次请求/响应、路由、中间件、状态码和�
 等问题。该模块后续单独决定继续使用 Gin，还是基于 v3 已有 `net/http` 生命周期能力建立业务
 HTTP Module；不加入本提案的统一 Session 外观。
 
+该独立决策现已形成 [`Origin Gin 与 HTTP Client 能力分析`](Origin%20Gin与HTTP%20Client能力分析.md)：
+保留 Gin 作为业务 HTTP Server Module 的路由外观，同时增加不属于 Module、按 Dialer 原则由代码持有的
+HTTP Client；二者仍不加入长连接 Session 外观。
+
 ## 3. v2 不能直接迁移的边界
 
 1. `IRawProcessor` 同时承担编解码、注册、路由和生命周期回调，接口过大；v3 不原样迁移；
