@@ -19,4 +19,18 @@ Windows 可执行 `run.bat`，Linux/macOS 可执行 `./run.sh`。预期依次看
 `hello from the same service`。示例从 `services.NetworkService.tcp` 严格读取配置；端口被占用时
 修改 `config/application.yaml` 中 Server 与 Client 的地址，并保持两处一致。
 
+## 配置怎么改
+
+示例 YAML 有意列出完整 Server 起始值，可直接复制到自己的 Service；没有准备调整的字段也可以删除，
+由 `DefaultServerConfig` 补齐。第一次接入通常只需要确认：
+
+- `address`：`127.0.0.1` 只允许本机访问；对外监听时选择实际网卡并配置防火墙；
+- `frame`：必须与客户端一致；没有既有协议时保留 4 字节 Big Endian；
+- `max_sessions`：默认 `4096` 只是首轮容量，按文件描述符、内存和压测结果调整；
+- `max_message_size`：默认 `64KB`，建议按真实最大业务消息收紧；
+- `read_idle_timeout`：默认关闭；项目有业务心跳时可设为大于最大心跳间隔的值。
+
+不要为了提高吞吐同时放大每连接队列和 Server 总预算。队列满时 `Send` 会返回过载错误，应先根据监控
+确认瓶颈在业务处理、客户端写入还是容量配置，再只调整对应边界。
+
 完整说明见 [TCP 网络模块使用指南](../../../docs/maintenance/v3.2/guides/TCP网络模块使用指南.md)。

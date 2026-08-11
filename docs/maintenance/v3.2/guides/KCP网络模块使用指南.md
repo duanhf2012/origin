@@ -49,24 +49,73 @@ func (module *GatewayKCPModule) onMessage(
 `Default*Config` 开始，再用 `GetServiceConfigStrict` 覆盖；这样可以省略不需要修改的字段，同时让
 拼错的字段在启动期直接失败。
 
-常用配置如下：
+以下是可以直接运行的完整起始值。KCP 参数对链路较敏感，默认值已经过本项目双平台与弱网验收；
+在自己的延迟、丢包率和消息分布下取得数据前，不建议同时修改多个参数：
 
 ```yaml
-kcp:
-  server:
-    address: "0.0.0.0:19092"
-    frame: {length_field_size: 4, byte_order: big}
-    mtu: 1400
-    send_window: 1024
-    receive_window: 1024
-    no_delay: {enabled: true, interval: 10ms, fast_resend: 2, disable_congestion_control: true}
-    fec: {data_shards: 0, parity_shards: 0}
-    read_idle_timeout: 60s
+services:
+  GatewayService:
+    kcp:
+      server:
+        # UDP/KCP 监听地址；0.0.0.0 暴露全部 IPv4 网卡，需同时配置防火墙和 UDP 放行规则。
+        address: "0.0.0.0:19092"
+        frame:
+          # KCP Stream 中的长度字段；双方必须一致，无既有协议时建议保留 4 字节 Big Endian。
+          length_field_size: 4
+          byte_order: big
+        # 不含 UDP/IP 头；建议先用 1400，修改前实测链路分片并计入加密/FEC 额外头。
+        mtu: 1400
+        # 单位为 Segment；1024/1024 是低延迟起始值，调大前评估带宽与内存。
+        send_window: 1024
+        receive_window: 1024
+        no_delay:
+          # 实时消息建议开启；10ms 是允许的最小更新间隔。
+          enabled: true
+          interval: 10ms
+          # 2 是快速重传的低延迟起始值；0 表示关闭。
+          fast_resend: 2
+          # true 以带宽换时延，公网发布前必须压测带宽代价。
+          disable_congestion_control: true
+        # 立即 ACK 会增加小包；没有测试依据时保持 false。
+        ack_no_delay: false
+        # 延迟写有利于批量但增加等待；实时消息保持 false。
+        write_delay: false
+        fec:
+          # 0/0 关闭 FEC；只有确认丢包收益后才启用，且通信双方必须使用相同组合。
+          data_shards: 0
+          parity_shards: 0
+        # 0 不设置 DSCP；非零值依赖操作系统权限和网络设备策略。
+        dscp: 0
+        # 0B 保留 OS Socket Buffer 默认值；监控到丢包并完成容量测试后再调大。
+        socket_read_buffer: 0B
+        socket_write_buffer: 0B
+        # 首轮 Session 容量；按内存、带宽和压测结果调整。
+        max_sessions: 4096
+        # 完整业务消息上限；建议按真实协议收紧。
+        max_message_size: 64KB
+        # 单 Session 与整个 Server 的入站积压边界。
+        receive_pending_messages: 64
+        receive_pending_size: 256KB
+        receive_pending_total_size: 64M
+        # 单 Session 与整个 Server 的出站积压边界。
+        send_queue_messages: 256
+        send_queue_size: 256KB
+        send_queue_total_size: 128M
+        # KCP 无 FIN；必须大于业务心跳最大间隔，且不能设为 0s。
+        read_idle_timeout: 60s
+        # 单条完整消息写出上限，必须大于 0s。
+        write_timeout: 15s
+        # 发送队列连续高水位上限，超时关闭慢连接。
+        slow_client_timeout: 10s
 ```
 
 `ServerConfig` 与 `ClientConfig` 相互独立。共同容量字段与 TCP/WebSocket 同名，KCP 专属字段不会
 出现在其他模块中。Dialer 不读取 YAML：从 `DefaultDialOptions` 开始在代码中覆盖，并调用
 `NewDialer`。`BlockCrypt` 不进入 YAML，必须在 Config/Options 准备完成后由代码注入。
+
+生产接入时先确认 UDP 端口可达、业务心跳和 `read_idle_timeout`，再按一项参数一轮压测的方式调整
+MTU、窗口、NoDelay 或 FEC。不要把 FEC、Socket Buffer 和窗口一起调大后只观察平均延迟；至少同时
+记录 P99 延迟、丢包/重传、带宽、CPU 和内存。
 
 ## 2. KCP 与 TCP 不同的连接语义
 
@@ -164,6 +213,17 @@ options.BlockCrypt = block
 
 KCP 复用公共端点容量：单消息、入站待处理消息/字节、出站队列消息/字节和 Module 总预算全部有界。
 `Session.Send` 非阻塞提交；过载返回 `ErrTransportOverloaded`，不会静默丢弃可靠消息。
+
+| Server 字段 | 默认起始值 | 调整建议 |
+| --- | ---: | --- |
+| `max_sessions` | `4096` | 按实际并发、内存和带宽压测；不要只为预留而调大 |
+| `max_message_size` | `64KB` | 按真实最大消息收紧；调大时同步检查帧宽度和单 Session 字节预算 |
+| `receive_pending_messages` / `receive_pending_size` | `64 / 256KB` | 限制单 Session 占用的业务任务和入站 Buffer |
+| `receive_pending_total_size` | `64M` | 限制全部 Session 的入站积压，必须不小于单 Session 上限 |
+| `send_queue_messages` / `send_queue_size` | `256 / 256KB` | 限制单 Session 出站积压；满时由业务处理过载错误 |
+| `send_queue_total_size` | `128M` | 限制全部 Session 排队及正在写出的 Payload |
+| `read_idle_timeout` | `60s` | 必须为正并大于业务心跳最大间隔 |
+| `write_timeout` / `slow_client_timeout` | `15s / 10s` | 两者必须为正；先保留默认值，再依据尾延迟和慢连接率调整 |
 
 - Raw `Send([]byte)` 会复制，调用返回后可复用原 Slice；
 - `OnMessage` 的 payload 是借用视图，保存或异步使用前必须复制；

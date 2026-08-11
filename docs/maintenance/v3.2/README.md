@@ -16,7 +16,8 @@ JSON 或自定义 Codec。
 | KCP | UDP 弱网、低时延游戏长连接 | [KCP 网络模块使用指南](guides/KCP网络模块使用指南.md) | [KCP Raw 服务自调用](../../../examples/13-network/03-kcp-raw-self-call/README.md) |
 
 全部网络 Example 见 [`examples/13-network`](../../../examples/13-network/README.md)。三个示例都从完整
-默认配置开始，通过所属 Service 的严格配置覆盖启动。
+默认配置开始，通过所属 Service 的严格配置覆盖启动。每份 Example YAML 都给出完整、带注释的
+Server 起始配置；教程说明字段关系和调整依据，避免把默认值误当成所有部署的最优值。
 
 ## 设计与实施资料
 

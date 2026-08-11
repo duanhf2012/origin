@@ -56,22 +56,51 @@ func (target *GatewayService) OnInit() error {
 }
 ```
 
-对应配置放在当前 Service 下；未出现的字段继续使用 `DefaultServerConfig` 的完整默认值：
+对应配置放在当前 Service 下。以下是可以直接运行的完整起始值，不是所有部署都应达到的容量目标：
 
 ```yaml
 services:
   GatewayService:
     tcp:
       server:
+        # 监听地址；0.0.0.0 暴露全部 IPv4 网卡，生产环境需同时配置网络访问控制。
         address: "0.0.0.0:19090"
-        frame: {length_field_size: 4, byte_order: big}
-        keep_alive: 30s       # OS TCP KeepAlive；0s 关闭，不等同业务心跳
-        read_idle_timeout: 0s # 业务消息读空闲检查；0s 关闭
-        write_timeout: 15s    # 单条完整消息写出上限，不能关闭
+        frame:
+          # 长度字段建议保留 4 字节 Big Endian；使用 1/2 字节时必须同步降低消息上限。
+          length_field_size: 4
+          byte_order: big
+        # OS TCP KeepAlive 首次探测前的空闲时间；不是业务心跳，0s 表示关闭。
+        keep_alive: 30s
+        # 首轮连接容量；按文件描述符、内存和压测结果调整，不要仅为“预留”而调大。
+        max_sessions: 4096
+        # 完整业务消息上限；建议按真实协议收紧。
+        max_message_size: 64KB
+        # 单连接入站积压：消息数上限与 Buffer 保留容量上限。
+        receive_pending_messages: 64
+        receive_pending_size: 256KB
+        # 全部连接的入站 Buffer 总预算。
+        receive_pending_total_size: 64M
+        # 单连接出站积压：消息数上限与 Payload 保留容量上限。
+        send_queue_messages: 256
+        send_queue_size: 256KB
+        # 全部连接排队及正在写出 Payload 的总预算。
+        send_queue_total_size: 128M
+        # 业务消息读空闲检查；0s 关闭。启用时应大于业务心跳最大间隔。
+        read_idle_timeout: 0s
+        # 单条完整消息写出上限，必须大于 0s。
+        write_timeout: 15s
+        # 发送队列连续高水位上限，超时关闭慢连接。
+        slow_client_timeout: 10s
 ```
 
 严格读取会拒绝未知字段，避免字段拼错后静默使用默认值。`Handler` 等运行期对象不写入 YAML，继续在
-业务 Module 中显式注入。
+业务 Module 中显式注入。实际项目可以保留完整配置，也可以删掉不准备调整的字段，让
+`DefaultServerConfig` 补齐；建议先只确认监听地址、帧格式、消息上限和连接上限。
+
+调整容量时遵守三个关系：`max_message_size` 不得超过长度字段表达范围；
+`receive_pending_size`/`send_queue_size` 不得小于该消息上限对应的池化容量；两个 `*_total_size`
+不得小于对应的单连接字节上限。总预算是真正限制整个 Server 内存积压的边界，不能用
+`max_sessions × 单连接上限` 直接替代。
 
 这种结构把协议路由、连接状态和网络事件集中在业务 Module，避免业务代码散落到 Service。完整程序见
 [`01-tcp-raw-self-call`](../../../../examples/13-network/01-tcp-raw-self-call/)。

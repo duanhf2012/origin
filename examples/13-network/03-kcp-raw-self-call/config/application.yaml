@@ -14,23 +14,63 @@ services:
   NetworkService:
     kcp:
       server:
-        # Server 和 Client 在同一进程回环；生产环境通常监听实际服务网卡。
+        # 示例只允许本机连接。生产环境按部署网卡选择地址；0.0.0.0 会监听全部 IPv4 网卡，需配合防火墙。
         address: "127.0.0.1:19092"
-        frame: {length_field_size: 4, byte_order: big}
-        # 修改 MTU 前需结合链路 MTU 测试；启用加密/FEC 时还要计入额外协议头。
+        frame:
+          # KCP Stream 中 Payload 前长度字段的字节数；建议保留 4，通信双方必须相同。
+          length_field_size: 4
+          # 长度字段端序；无既有协议时建议保留 big，通信双方必须相同。
+          byte_order: big
+        # 不含 UDP/IP 头的 KCP 报文上限。建议先用 1400；修改前需实测分片并计入加密/FEC 额外头。
         mtu: 1400
-        # 窗口单位是 KCP Segment，不是字节。
+        # 发送窗口，单位是 Segment。1024 是低延迟起始值；调大前应评估带宽与内存。
         send_window: 1024
+        # 接收窗口，单位是 Segment。建议先与发送窗口同为 1024，再按吞吐和 RTT 实测调整。
         receive_window: 1024
         no_delay:
+          # 开启低延迟模式；游戏实时消息建议保持 true。
           enabled: true
+          # KCP 内部更新间隔，只允许 10ms..5s 的整毫秒值；实时场景建议从 10ms 开始。
           interval: 10ms
+          # 累计跨越 ACK 次数达到该值后快速重传；2 是低延迟起始值，0 表示关闭。
           fast_resend: 2
+          # true 关闭拥塞控制以降低延迟，但会增加弱网带宽；公网发布前必须压测。
           disable_congestion_control: true
-        # 0/0 表示关闭 FEC；启用时 Client 必须使用相同组合。
-        fec: {data_shards: 0, parity_shards: 0}
+        # true 立即发送 ACK，可降低确认延迟但会增加小包；没有测试依据时保持 false。
+        ack_no_delay: false
+        # true 将写入延迟到下一更新周期以利批量发送，但会增加等待；实时消息保持 false。
+        write_delay: false
+        fec:
+          # 0/0 表示关闭 FEC。只有确认丢包收益高于冗余带宽后才启用，且 Client 必须使用相同组合。
+          data_shards: 0
+          parity_shards: 0
+        # 六位 DSCP/Traffic Class，0 表示不设置；非零值需操作系统权限和网络设备共同支持。
+        dscp: 0
+        # UDP Socket 缓冲，0B 表示保留 OS 默认值；只有监控到丢包且完成容量测试后再调大。
+        socket_read_buffer: 0B
+        socket_write_buffer: 0B
+        # 同时活动的 Session 上限。4096 是起始值，应按内存、带宽和压测结果调整。
+        max_sessions: 4096
+        # 单条完整业务消息上限。建议按真实协议尽量收紧；调大时要同步检查帧宽度和下列字节预算。
+        max_message_size: 64KB
+        # 每个 Session 已投递到 Service、但业务回调尚未完成的消息数上限。
+        receive_pending_messages: 64
+        # 每个 Session 待处理消息 Buffer 的保留容量，不能小于 max_message_size 对应的池化容量。
+        receive_pending_size: 256KB
+        # 当前 Server 全部待处理消息 Buffer 的总预算。
+        receive_pending_total_size: 64M
+        # 每个 Session 等待发送的完整消息数上限；Send 达到上限时返回过载错误。
+        send_queue_messages: 256
+        # 每个 Session 排队 Payload 的保留容量，不能小于 max_message_size 对应的池化容量。
+        send_queue_size: 256KB
+        # 当前 Server 排队及正在写出 Payload 的总预算。
+        send_queue_total_size: 128M
         # KCP 没有 FIN，依赖业务心跳和读空闲发现失活；该值必须大于心跳最大间隔。
         read_idle_timeout: 60s
+        # 写出一条完整消息的强制上限，必须大于 0s；通常先保留 15s。
+        write_timeout: 15s
+        # 发送队列连续处于高水位的最长时间，超时关闭慢连接；通常先保留 10s。
+        slow_client_timeout: 10s
       client:
         address: "127.0.0.1:19092"
         frame: {length_field_size: 4, byte_order: big}

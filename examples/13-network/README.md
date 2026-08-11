@@ -11,3 +11,7 @@
 三个示例都采用“薄 Service + 业务网络 Module + Server/Client 子 Module”的结构，并调用自己的
 网络入口，用最小程序验证父子生命周期、串行回调和回环通信。PB、JSON 与自定义 Codec 可在三种
 传输上复用。
+
+每个 Example 的 `config/application.yaml` 都列出带中文注释的完整 Server 起始配置，可直接复制到
+自己的 Service。数值是有界默认基线，不是所有部署的性能最优值；先运行默认值，再根据并发、消息
+大小、业务心跳和压测数据逐项调整。未准备调整的字段可以删除，由对应 `DefaultServerConfig` 补齐。

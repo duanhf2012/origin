@@ -14,15 +14,42 @@ services:
   NetworkService:
     websocket:
       server:
-        # address 决定监听 Socket，path 决定 HTTP Upgrade 路由。
+        # 示例只允许本机连接。生产环境按部署网卡选择地址；0.0.0.0 会监听全部 IPv4 网卡，需配合防火墙。
         address: "127.0.0.1:19091"
+        # HTTP Upgrade 路由，必须以 / 开头且不含查询参数；反向代理转发路径必须与它一致。
         path: "/ws"
-        # Raw 示例使用 Binary Data Message。
+        # binary 适合 Raw/PB；浏览器直接发送 JSON 文本时选 text，且 Payload 必须是有效 UTF-8。
         message_type: binary
+        # 完成 HTTP Upgrade 的最长时间，必须大于 0s；通常先保留 10s。
         handshake_timeout: 10s
-        # 这里是 WebSocket 协议 Ping/Pong，不会进入业务 OnMessage。
+        # WebSocket 协议 Ping 控制帧间隔，不进入业务 OnMessage；与 pong_timeout 同为 0s 时关闭协议心跳。
         ping_interval: 30s
+        # 发出协议 Ping 后等待 Pong 的上限，启用时必须大于 ping_interval；通常建议至少为其 2 倍。
         pong_timeout: 60s
+        # 服务端允许协商的应用子协议；没有明确协商需求时保持空列表。
+        subprotocols: []
+        # 同时活动的连接上限。4096 是起始值，应按文件描述符、内存和压测结果调整。
+        max_sessions: 4096
+        # 单条完整 Data Message 上限。建议按真实协议尽量收紧，避免异常大消息占用内存。
+        max_message_size: 64KB
+        # 每个连接已投递到 Service、但业务回调尚未完成的 Data Message 数上限。
+        receive_pending_messages: 64
+        # 每个连接待处理消息 Buffer 的保留容量，不能小于 max_message_size 对应的池化容量。
+        receive_pending_size: 256KB
+        # 当前 Server 全部待处理消息 Buffer 的总预算。
+        receive_pending_total_size: 64M
+        # 每个连接等待发送的完整 Data Message 数上限；Send 达到上限时返回过载错误。
+        send_queue_messages: 256
+        # 每个连接排队 Payload 的保留容量，不能小于 max_message_size 对应的池化容量。
+        send_queue_size: 256KB
+        # 当前 Server 排队及正在写出 Payload 的总预算。
+        send_queue_total_size: 128M
+        # 两条业务 Data Message 之间允许的最大空闲；协议 Ping/Pong 不刷新它，0s 表示关闭。
+        read_idle_timeout: 0s
+        # 写出一条完整 Data Message 的强制上限，必须大于 0s；通常先保留 15s。
+        write_timeout: 15s
+        # 发送队列连续处于高水位的最长时间，超时关闭慢连接；通常先保留 10s。
+        slow_client_timeout: 10s
       client:
         # Client 使用包含 ws Scheme 和 path 的完整 URL。
         url: "ws://127.0.0.1:19091/ws"

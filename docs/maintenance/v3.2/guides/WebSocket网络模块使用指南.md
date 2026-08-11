@@ -49,24 +49,52 @@ func (target *GatewayService) OnInit() error {
 }
 ```
 
-`address` 决定监听 Socket，`path` 决定 HTTP Upgrade 路由，因此保持两个字段；YAML 中可以按需要写成
-同一行：
+`address` 决定监听 Socket，`path` 决定 HTTP Upgrade 路由，因此保持两个字段。以下是完整起始值；
+生产部署应按实际入口、协议和容量收紧：
 
 ```yaml
 services:
   GatewayService:
     websocket:
       server:
+        # 监听地址；0.0.0.0 暴露全部 IPv4 网卡，生产环境需同时配置网络访问控制。
         address: "0.0.0.0:19091"
+        # Upgrade 路由，必须以 / 开头且不含查询或片段；反向代理转发路径必须与它一致。
         path: "/ws"
+        # Raw/PB 使用 binary；浏览器直接发送 JSON 文本时使用 text。
         message_type: binary
+        # HTTP Upgrade 最长时间，必须大于 0s。
         handshake_timeout: 10s
-        ping_interval: 30s # WebSocket 协议控制帧，不进入业务 OnMessage
+        # WebSocket 协议控制帧心跳，不进入业务 OnMessage；两项同为 0s 时关闭。
+        ping_interval: 30s
+        # 启用时必须大于 ping_interval，建议先取其 2 倍。
         pong_timeout: 60s
+        # 允许协商的应用子协议；没有明确需求时保持为空。
+        subprotocols: []
+        # 首轮连接容量；按文件描述符、内存和压测结果调整。
+        max_sessions: 4096
+        # 单条完整 Data Message 上限；建议按真实协议收紧。
+        max_message_size: 64KB
+        # 单连接与整个 Server 的入站积压边界。
+        receive_pending_messages: 64
+        receive_pending_size: 256KB
+        receive_pending_total_size: 64M
+        # 单连接与整个 Server 的出站积压边界。
+        send_queue_messages: 256
+        send_queue_size: 256KB
+        send_queue_total_size: 128M
+        # 业务 Data Message 读空闲；Ping/Pong 不刷新它，0s 表示关闭。
+        read_idle_timeout: 0s
+        # 单条完整 Data Message 写出上限，必须大于 0s。
+        write_timeout: 15s
+        # 发送队列连续高水位上限，超时关闭慢连接。
+        slow_client_timeout: 10s
 ```
 
 未出现的字段使用 `DefaultServerConfig` 的默认值；严格读取会拒绝未知字段。TLS、Origin 回调和 Header
-保存运行期对象或安全策略，不进入普通 YAML。
+保存运行期对象或安全策略，不进入普通 YAML。生产环境通常先确认 `address`、`path`、
+`message_type`、Origin/TLS 策略和 `max_sessions`，其余容量从默认值开始压测；不要因为最大连接数较大
+就同步放大每连接队列，端点总预算才是限制整体积压内存的边界。
 
 这种结构把协议路由、连接状态和网络事件集中在业务 Module，避免业务代码散落到 Service。默认 Path
 是 `/ws`，消息类型是 Binary。完整程序见

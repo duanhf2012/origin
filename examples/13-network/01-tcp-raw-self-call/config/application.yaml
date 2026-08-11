@@ -14,13 +14,37 @@ services:
   NetworkService:
     tcp:
       server:
-        # Server 和 Client 在同一进程回环；生产环境通常监听 0.0.0.0。
+        # 示例只允许本机连接。生产环境按部署网卡选择地址；0.0.0.0 会监听全部 IPv4 网卡，需配合防火墙。
         address: "127.0.0.1:19090"
-        frame: {length_field_size: 4, byte_order: big}
-        # OS TCP KeepAlive，不是业务心跳；0s 可以关闭。
+        frame:
+          # Payload 前长度字段的字节数。建议保留 4；使用 1/2 时还要相应降低 max_message_size。
+          length_field_size: 4
+          # 长度字段端序，通信双方必须一致；无既有协议时建议保留 big。
+          byte_order: big
+        # 连接空闲多久后由 OS 开始 TCP KeepAlive 探测；它不是业务心跳，通常保留 30s，0s 表示关闭。
         keep_alive: 30s
-        # 0s 表示不按业务消息空闲时间断开连接。
+        # 同时活动的连接上限。4096 是起始值，应按文件描述符、内存和压测结果调整。
+        max_sessions: 4096
+        # 单条完整业务消息上限。建议按真实协议尽量收紧；调大时要同步检查帧宽度和下列字节预算。
+        max_message_size: 64KB
+        # 每个连接已投递到 Service、但业务回调尚未完成的消息数上限。
+        receive_pending_messages: 64
+        # 每个连接待处理消息 Buffer 的保留容量，不能小于 max_message_size 对应的池化容量。
+        receive_pending_size: 256KB
+        # 当前 Server 全部待处理消息 Buffer 的总预算；它限制真实占用，不等于 max_sessions 乘单连接上限。
+        receive_pending_total_size: 64M
+        # 每个连接等待发送的完整消息数上限；Send 达到上限时返回过载错误。
+        send_queue_messages: 256
+        # 每个连接排队 Payload 的保留容量，不能小于 max_message_size 对应的池化容量。
+        send_queue_size: 256KB
+        # 当前 Server 排队及正在写出 Payload 的总预算。
+        send_queue_total_size: 128M
+        # 两条完整业务消息之间允许的最大空闲；0s 关闭。启用时建议大于业务心跳最大间隔。
         read_idle_timeout: 0s
+        # 写出一条完整消息的强制上限，必须大于 0s；通常先保留 15s。
+        write_timeout: 15s
+        # 发送队列连续处于高水位的最长时间，超时关闭慢连接；通常先保留 10s。
+        slow_client_timeout: 10s
       client:
         address: "127.0.0.1:19090"
         # 限制每次建连尝试，避免启动或重连永久等待。

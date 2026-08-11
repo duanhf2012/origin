@@ -19,4 +19,18 @@ Windows 可执行 `run.bat`，Linux/macOS 可执行 `./run.sh`。预期依次看
 `hello through websocket`。示例从 `services.NetworkService.websocket` 严格读取配置；端口或 Path
 需要改变时，同时修改 `config/application.yaml` 中的 Server 字段与 Client URL。
 
+## 配置怎么改
+
+示例 YAML 列出完整 Server 起始值；没有准备调整的字段可以删除，由 `DefaultServerConfig` 补齐。
+第一次接入优先确认：
+
+- `address` 与 `path`：前者决定监听 Socket，后者决定 Upgrade 路由；反向代理路径必须一致；
+- `message_type`：Raw/PB 使用 `binary`；浏览器直接发送 JSON 文本才使用 `text`；
+- `ping_interval`/`pong_timeout`：默认 `30s/60s`，是协议控制帧；必须同时关闭或同时启用；
+- `max_sessions` 与 `max_message_size`：默认 `4096/64KB`，按连接规模和真实消息上限压测；
+- TLS、Origin 白名单和响应 Header：属于运行期安全策略，在代码中注入，不写普通 YAML。
+
+`read_idle_timeout` 只观察业务 Data Message，Ping/Pong 不刷新它。没有业务空闲断开需求时保持 `0s`；
+需要该策略时应大于正常业务消息或业务心跳的最大间隔。
+
 完整说明见 [WebSocket 网络模块使用指南](../../../docs/maintenance/v3.2/guides/WebSocket网络模块使用指南.md)。
