@@ -23,6 +23,7 @@
 | [`15-mongodb`](./15-mongodb/README.md) | v3.2 MongoDB 生命周期、官方 CRUD、索引/事务便利层与 Origin Await |
 | [`16-redis`](./16-redis/README.md) | v3.2 Redis 三种拓扑、基础命令、Pipeline/Lua、Lease Lock 与 Origin Await |
 | [`17-kafka`](./17-kafka/README.md) | v3.2 Kafka Managed Producer/Consumer、Raw/JSON/PB、Service Handler 与 Native Sarama |
+| [`18-blueprint`](./18-blueprint/README.md) | v3.2 蓝图业务 Module、一次性/长期执行、异步恢复、完成回调与热加载 |
 
 每个可直接运行的程序示例都包含 `run.bat` 和 `run.sh`。依赖 NATS 或 etcd 的示例提供其对应的 `deps-*` 检查、启动或停止脚本。脚本只包装 README 中公开的命令，不会隐藏后台进程或自动修改系统状态。
 

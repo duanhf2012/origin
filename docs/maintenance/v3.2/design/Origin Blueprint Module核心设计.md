@@ -1,9 +1,9 @@
 # Origin Blueprint Module 核心设计
 
-> 状态：已确认，允许实施（依赖 `OriginBlueprint v0.1.6` 发布后）
+> 状态：已实施并通过双平台验收
 > 基线：Origin v3.0，目标版本：v3.2
 > 引擎基线：`github.com/duanhf2012/OriginBlueprint/engine/go/blueprint`
-> 版本门禁：当前已验证提交为 `14f0d1a`；实施前由维护者发布并固定 `v0.1.6`
+> 版本门禁：`v0.1.6` 发布提交 `e932de3` 的 Go 引擎与已验证提交 `14f0d1a` 零差异
 > 兼容性：不兼容 Origin v2 Blueprint API、文件格式或运行时行为
 
 ## 1. 文档定位
@@ -97,10 +97,10 @@ github.com/duanhf2012/OriginBlueprint v0.1.6
 ```go
 type Config struct {
     // NodeDir 是节点定义 JSON 根目录；引擎按自身规则递归加载。
-    NodeDir string `yaml:"node_dir"`
+    NodeDir string
 
     // GraphDir 是 .vgf、.obp、.obpf 蓝图根目录；引擎按自身规则递归加载。
-    GraphDir string `yaml:"graph_dir"`
+    GraphDir string
 }
 ```
 
@@ -380,8 +380,8 @@ func (m *Module) Reload(ctx context.Context) (ReloadResult, error)
 
 ```go
 type Config struct {
-    NodeDir  string `yaml:"node_dir"`
-    GraphDir string `yaml:"graph_dir"`
+    NodeDir  string
+    GraphDir string
 }
 
 func New(config Config, options ...Option) (*Module, error)
@@ -449,6 +449,8 @@ type ArrayData = blueprint.ArrayData
 type ExecutionState = blueprint.ExecutionState
 type BlueprintError = blueprint.BlueprintError
 type BlueprintTraceLogger = blueprint.BlueprintTraceLogger
+type BlueprintTraceEvent = blueprint.BlueprintTraceEvent
+type BlueprintTracePortValue = blueprint.BlueprintTracePortValue
 type BlueprintDiagnosticSink = blueprint.BlueprintDiagnosticSink
 
 var (
@@ -457,6 +459,7 @@ var (
     ErrExecutionCanceled       = blueprint.ErrExecutionCanceled
     ErrExecutionCompleted      = blueprint.ErrExecutionCompleted
     ErrExecutionBudgetExceeded = blueprint.ErrExecutionBudgetExceeded
+    ErrBlueprintClosed         = blueprint.ErrBlueprintClosed
     ErrEntranceNotFound        = blueprint.ErrEntranceNotFound
     ErrGraphReleased           = blueprint.ErrGraphReleased
     ErrYieldResumed            = blueprint.ErrYieldResumed

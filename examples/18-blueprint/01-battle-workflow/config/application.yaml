@@ -1,0 +1,13 @@
+log:
+  mode: async
+  console: {enabled: true, level: info, format: text}
+nodes:
+  - id: blueprint-1
+    services: [BattleService]
+services:
+  BattleService:
+    blueprint:
+      # 必填。相对路径以进程工作目录为基准；生产建议使用随发布包固定的只读目录。
+      node_dir: "./examples/18-blueprint/01-battle-workflow/blueprints/nodes"
+      # 必填。支持 .vgf、.obp 和 .obpf；热加载始终重新检查整个目录。
+      graph_dir: "./examples/18-blueprint/01-battle-workflow/blueprints/graphs"

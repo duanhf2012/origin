@@ -1,0 +1,16 @@
+{
+  "graph_name": "battle",
+  "nodes": [
+    {"id": "entry", "class": "BattleEntrance_1"},
+    {"id": "damage", "class": "ApplyDamage", "port_defaultv": {"1": 1001, "2": 10}},
+    {"id": "reward", "class": "AwaitReward"},
+    {"id": "result", "class": "ReturnHP", "port_defaultv": {"1": 1001}}
+  ],
+  "edges": [
+    {"source_node_id": "entry", "source_port_id": 0, "des_node_id": "damage", "des_port_id": 0},
+    {"source_node_id": "damage", "source_port_id": 0, "des_node_id": "reward", "des_port_id": 0},
+    {"source_node_id": "reward", "source_port_id": 0, "des_node_id": "result", "des_port_id": 0}
+  ],
+  "groups": [],
+  "variables": []
+}

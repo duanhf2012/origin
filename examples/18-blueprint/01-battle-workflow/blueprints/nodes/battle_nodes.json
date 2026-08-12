@@ -1,0 +1,29 @@
+[
+  {
+    "name": "BattleEntrance",
+    "inputs": [],
+    "outputs": [{"type": "exec", "port_id": 0}]
+  },
+  {
+    "name": "ApplyDamage",
+    "inputs": [
+      {"type": "exec", "port_id": 0},
+      {"type": "data", "data_type": "int", "port_id": 1},
+      {"type": "data", "data_type": "int", "port_id": 2}
+    ],
+    "outputs": [{"type": "exec", "port_id": 0}]
+  },
+  {
+    "name": "AwaitReward",
+    "inputs": [{"type": "exec", "port_id": 0}],
+    "outputs": [{"type": "exec", "port_id": 0}]
+  },
+  {
+    "name": "ReturnHP",
+    "inputs": [
+      {"type": "exec", "port_id": 0},
+      {"type": "data", "data_type": "int", "port_id": 1}
+    ],
+    "outputs": []
+  }
+]

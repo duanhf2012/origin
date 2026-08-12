@@ -61,6 +61,16 @@ Kafka Module 分为 Managed Producer、Managed Consumer 与 Native Sarama 三层
 
 三个 Example 分别覆盖 RPC 风格生产工作流、单条/批量 Service Handler、Managed 与 Native 生命周期。Ubuntu 保留 Apache Kafka 4.3.1 KRaft 环境，Windows 与 Ubuntu 共用同一套真实协议测试。
 
+## Blueprint 组件教程
+
+Blueprint Module 把新版 OriginBlueprint Go 引擎适配到 Origin Service 工作协程。业务节点在 Service 串行
+环境中访问状态，外部 RPC 回调只恢复 Yield 句柄；长期 Instance 有明确所有权，热加载不改变活动 Execution
+的编译快照。
+
+| 组件 | 适用场景 | 使用指南 | Example |
+| --- | --- | --- | --- |
+| Blueprint Module | 战斗、副本、AI、任务流程、异步 RPC 节点与运行期蓝图更新 | [Blueprint Module 使用指南](guides/Blueprint%20Module使用指南.md) | [战斗蓝图工作流](../../../examples/18-blueprint/README.md) |
+
 ## 设计与实施资料
 
 本目录沿用 `../v3.1/README.md` 定义的文档分层：
@@ -91,7 +101,7 @@ Kafka Module 分为 Managed Producer、Managed Consumer 与 Native Sarama 三层
   实现依据。
 - [`Origin Blueprint Module 核心设计`](design/Origin%20Blueprint%20Module核心设计.md)：基于新版
   OriginBlueprint Go 引擎的 Service 工作协程适配、Instance 所有权、执行快照热加载、诊断、测试与教程
-  实现依据；设计已确认，等待 `OriginBlueprint v0.1.6` 依赖门禁后实施。
+  实现依据；`OriginBlueprint v0.1.6` 依赖门禁与双平台验收均已通过。
 - [`Blueprint Module纵向切片实施计划`](plans/Blueprint%20Module纵向切片实施计划.md)：依赖固定、TDD 实现、
   Service 协程集成、热加载、Example、教程及 Windows/Ubuntu 验收顺序。
 - [`Gin HTTP Module 使用指南`](guides/Gin%20HTTP%20Module使用指南.md)：普通/Safe 路由选择、配置、所有权，
@@ -100,6 +110,10 @@ Kafka Module 分为 Managed Producer、Managed Consumer 与 Native Sarama 三层
   以及 Client 扩展回调的实际执行协程。
 - [`Kafka Module 使用指南`](guides/Kafka%20Module使用指南.md)：三层外观、完整配置、API 参数与执行协程、
   所有权、可靠性、游戏场景、排错和双平台测试。
+- [`Blueprint Module 使用指南`](guides/Blueprint%20Module使用指南.md)：一次性与长期执行、异步节点、完成回调、
+  热加载快照、协程边界、所有权和排错。
+- [`Blueprint Module纵向切片变更记录`](changes/Blueprint%20Module纵向切片变更记录.md)
+- [`Blueprint Module纵向切片验收报告`](reports/Blueprint%20Module纵向切片验收报告.md)
 
 两份网络 Proposal 保存能力分析和调研依据，不单独授权实现。网络核心设计已允许按 TCP、WebSocket、
 KCP 纵向切片实施；Gin、HTTP Client、MongoDB、Redis 与 Kafka 已完成实现、测试、教程和 Example。MySQL

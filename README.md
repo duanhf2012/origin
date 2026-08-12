@@ -61,6 +61,7 @@ go run ./examples/00-quickstart/01-hello-service
 | 15 | MongoDB Module | 使用官方 Collection、索引/事务便利层与 Origin Await 完成游戏数据访问 | [MongoDB Module 使用指南](./docs/maintenance/v3.2/guides/MongoDB%20Module使用指南.md) | [15-mongodb](./examples/15-mongodb/) |
 | 16 | Redis Module | 使用三种拓扑、高频基础命令、Pipeline/Lua、Lease Lock 与 Origin Await | [Redis Module 使用指南](./docs/maintenance/v3.2/guides/Redis%20Module使用指南.md) | [16-redis](./examples/16-redis/) |
 | 17 | Kafka Module | 使用 Managed Producer/Consumer、Raw/JSON/PB、Service Handler 与 Native Sarama | [Kafka Module 使用指南](./docs/maintenance/v3.2/guides/Kafka%20Module使用指南.md) | [17-kafka](./examples/17-kafka/) |
+| 18 | Blueprint Module | 在 Service 工作协程运行蓝图业务节点，管理 Instance、异步恢复与热加载 | [Blueprint Module 使用指南](./docs/maintenance/v3.2/guides/Blueprint%20Module使用指南.md) | [18-blueprint](./examples/18-blueprint/) |
 
 ## 学习方式
 
