@@ -1,6 +1,10 @@
 package kafkamodule
 
-import "github.com/IBM/sarama"
+import (
+	"context"
+
+	"github.com/IBM/sarama"
+)
 
 // SaramaConfigHook 在 Origin 配置映射完成后、最终校验前定制 Sarama 配置。
 // Hook 在调用 Builder 或 Module 启动的 goroutine 中执行，不在 Service 业务工作协程中执行。
@@ -12,12 +16,21 @@ type producerOptionFunc func(*producerOptions)
 
 func (option producerOptionFunc) applyProducer(target *producerOptions) { option(target) }
 
-type producerOptions struct{ hooks []SaramaConfigHook }
+type producerOptions struct {
+	hooks   []SaramaConfigHook
+	factory producerRuntimeFactory
+}
 
 // WithProducerSaramaConfig 添加 Producer Sarama Hook；Hook 不能破坏受管模式不变量。
 func WithProducerSaramaConfig(hook SaramaConfigHook) ProducerOption {
 	return producerOptionFunc(func(target *producerOptions) { target.hooks = append(target.hooks, hook) })
 }
+
+func withProducerRuntimeFactory(factory producerRuntimeFactory) ProducerOption {
+	return producerOptionFunc(func(target *producerOptions) { target.factory = factory })
+}
+
+type producerRuntimeFactory func(context.Context, []string, *sarama.Config) (producerRuntime, error)
 
 // ConsumerOption 定制受管 Consumer 的低频 Sarama 能力。
 type ConsumerOption interface{ applyConsumer(*consumerOptions) }
