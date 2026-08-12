@@ -98,6 +98,7 @@ KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB、Redis �
 - [`Gin 与 HTTP Client 纵向切片实施计划`](plans/Gin与HTTP%20Client纵向切片实施计划.md)：实施与双平台验收完成。
 - [`MongoDB Module 纵向切片实施计划`](plans/MongoDB%20Module纵向切片实施计划.md)
 - [`Redis Module 纵向切片实施计划`](plans/Redis%20Module纵向切片实施计划.md)
+- [`Kafka Module 纵向切片实施计划`](plans/Kafka%20Module纵向切片实施计划.md)
 
 当前变更与验收材料：
 
