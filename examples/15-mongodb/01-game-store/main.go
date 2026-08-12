@@ -200,15 +200,26 @@ func (module *GameMongoModule) GrantRewardOnce(
 	playerID string,
 	amount int64,
 ) (bool, error) {
+	return grantRewardOnce(ctx, &module.Module, rewardID, playerID, amount)
+}
+
+// grantRewardOnce 保留在示例内部，使真实集成测试可以使用 New 构造的独立 Module 验证
+// 事务语义，而不复制包含锁和 Driver Handle 的 mongodbmodule.Module。
+func grantRewardOnce(
+	ctx context.Context,
+	module *mongodbmodule.Module,
+	rewardID string,
+	playerID string,
+	amount int64,
+) (bool, error) {
 	granted := false
 	err := module.WithTransaction(ctx, func(transactionCtx context.Context) error {
 		_, err := module.Collection("reward_ledgers").InsertOne(transactionCtx, RewardLedger{
 			ID: rewardID, PlayerID: playerID, Amount: amount, CreatedAt: time.Now().UTC(),
 		})
-		if mongo.IsDuplicateKeyError(err) {
-			return nil
-		}
 		if err != nil {
+			// 重复键已经使当前 MongoDB 事务中止，必须把错误带出事务，让 Driver Abort；
+			// 不能在回调内吞掉后继续 Commit，否则重复执行会一直重试到 Context 超时。
 			return err
 		}
 		result, err := module.Collection("players").UpdateOne(
@@ -225,6 +236,11 @@ func (module *GameMongoModule) GrantRewardOnce(
 		granted = true
 		return nil
 	})
+	// 唯一奖励 ID 冲突表示同一业务奖励已经发放。事务已在 WithTransaction 内正确结束，
+	// 此处再把 Driver 错误映射成幂等成功，保证玩家金币不会重复增加。
+	if mongo.IsDuplicateKeyError(err) {
+		return false, nil
+	}
 	return granted, err
 }
 
@@ -278,12 +294,12 @@ func (module *GameMongoModule) RunDemo(ctx context.Context) error {
 		{ID: "player-2", ServerID: "s1", Name: "Bob", Level: 8, Gold: 500},
 	} {
 		if err := module.UpsertPlayer(ctx, player); err != nil {
-			return err
+			return fmt.Errorf("upsert player %s: %w", player.ID, err)
 		}
 	}
 	updated, err := module.UpsertAndGet(ctx, "player-1", "Alice-Origin")
 	if err != nil {
-		return err
+		return fmt.Errorf("upsert and read player-1: %w", err)
 	}
 	renamed, err := module.RenameWithVersion(ctx, updated.ID, updated.Version, "Alice-v2")
 	if err != nil || !renamed {
@@ -294,17 +310,17 @@ func (module *GameMongoModule) RunDemo(ctx context.Context) error {
 		return fmt.Errorf("spend gold: spent=%v: %w", spent, err)
 	}
 	if err := module.RaiseLevels(ctx, []string{"player-1", "player-2"}); err != nil {
-		return err
+		return fmt.Errorf("raise player levels: %w", err)
 	}
 	if _, err := module.GrantRewardOnce(ctx, "reward-demo-1", "player-1", 50); err != nil {
-		return err
+		return fmt.Errorf("grant idempotent reward: %w", err)
 	}
 	if err := module.TransferGold(ctx, "player-1", "player-2", 20); err != nil {
-		return err
+		return fmt.Errorf("transfer player gold: %w", err)
 	}
 	players, err := module.ListPlayers(ctx, "s1", 20)
 	if err != nil {
-		return err
+		return fmt.Errorf("list players: %w", err)
 	}
 	module.Logger().Info(fmt.Sprintf("MongoDB demo completed: players=%d", len(players)))
 	return nil
@@ -317,6 +333,11 @@ type GameStoreService struct {
 }
 
 func (target *GameStoreService) OnInit() error {
+	// 该教程在一个 Await 中串联索引后的多组 CRUD 与两次事务；显式使用 60 秒预算，
+	// 不依赖框架 15 秒默认值。生产接口应按各自 SLO 拆分并设置更短的独立 Context。
+	if err := target.SetDefaultAwaitTimeout(time.Minute); err != nil {
+		return err
+	}
 	target.mongo = &GameMongoModule{}
 	return target.AddModule(target.mongo)
 }

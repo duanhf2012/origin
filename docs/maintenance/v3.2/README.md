@@ -149,5 +149,7 @@ KCP 纵向切片，以及 Gin、HTTP Client、MongoDB、Redis、Kafka、Blueprin
 - [`Blueprint Module纵向切片变更记录`](changes/Blueprint%20Module纵向切片变更记录.md)
 - [`Blueprint Module纵向切片验收报告`](reports/Blueprint%20Module纵向切片验收报告.md)
 - [`v3.2 扩展组件收口报告`](reports/v3.2扩展组件收口报告.md)
+- [`v3.2 发布候选整体复审报告`](reports/v3.2发布候选整体复审报告.md)：v3.2 增量深审、全仓双平台门禁、
+  真实依赖覆盖、教程实跑、安全与许可证审计，以及正式发布前待确认项。
 
 v3.1 的维护资料继续保留在 `../v3.1/`，不得混入本目录。

@@ -84,3 +84,13 @@ Review 对照核心设计逐项核对公共签名、配置来源、TLS 冲突、
 - TLS 单元测试覆盖有效/无效 PEM、冲突和安全拒绝，但未建立真实双向 TLS MongoDB 集群；
 - `x509.SystemCertPool` 的操作系统失败分支无法稳定注入，已保留创建空 Pool 再追加私有 CA 的确定性回退；
 - 覆盖率与当前测试通过只表示已验证范围内没有已知缺陷，不代表数学意义上的绝对无 Bug。
+
+## 发布候选复验补充
+
+2026-08-12 发布候选教程实跑发现：重复执行游戏存储 Example 时，幂等奖励的重复键错误曾在事务回调内
+被映射成 `nil`，导致已中止事务继续提交并耗尽默认 Await Deadline。现已改为先退出并结束事务，再在事务
+外映射为幂等成功；Example 同时显式使用 60 秒完整演示预算并补充步骤错误上下文。
+
+新增真实 Replica Set 回归测试连续执行两次，验证同一奖励只增加一次金币；完整 Example 也连续运行两次
+并输出 `MongoDB demo completed: players=2`。修复后的 Ubuntu 全仓 Test/Race/Vet/Build 与 Windows 全仓
+Test/Vet/Build 均通过。

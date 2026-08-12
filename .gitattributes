@@ -1,1 +1,2 @@
 *.sh text eol=lf
+*.rpc.gen.go text eol=lf
