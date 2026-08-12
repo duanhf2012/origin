@@ -157,6 +157,32 @@ func TestConsumerBatchHonorsMessageBoundaryAndMarksWholeBatch(t *testing.T) {
 	}
 }
 
+func TestConsumerBatchDeliversOversizedSingleAsOneBatch(t *testing.T) {
+	_, owner := startConsumerHandlerService(t)
+	input := validConsumerConfig()
+	input.Batch = BatchConfig{MaxMessages: 100, MaxSize: 4, MaxWait: configDuration(50 * time.Millisecond)}
+	current, err := normalizeConsumerConfig(input, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := &Consumer{}
+	var sizes []int
+	handler := newManagedGroupHandler(owner, current, nil, func(_ context.Context, batch Batch) error {
+		sizes = append(sizes, len(batch.Messages))
+		return nil
+	}, consumer)
+	claim := &fakeConsumerClaim{topic: "events", partition: 0, messages: make(chan *sarama.ConsumerMessage, 1)}
+	claim.messages <- &sarama.ConsumerMessage{Topic: "events", Partition: 0, Offset: 9, Value: []byte("larger-than-batch-threshold")}
+	close(claim.messages)
+	session := &fakeConsumerSession{ctx: context.Background()}
+	if err = handler.ConsumeClaim(session, claim); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(sizes, []int{1}) || !reflect.DeepEqual(session.markedOffsets(), []int64{9}) {
+		t.Fatalf("sizes=%v marked=%v", sizes, session.markedOffsets())
+	}
+}
+
 func TestConsumerHandlerRetriesWithServiceAwait(t *testing.T) {
 	_, owner := startConsumerHandlerService(t)
 	input := validConsumerConfig()

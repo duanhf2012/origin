@@ -1,0 +1,30 @@
+log:
+  mode: async
+  console: {enabled: true, level: info, format: text}
+nodes:
+  - id: kafka-tools-1
+    services: [KafkaToolsService]
+services:
+  KafkaToolsService:
+    kafka:
+      # Native Admin 使用公共 Cluster 配置；业务 Module 明确拥有并关闭 Admin。
+      cluster:
+        brokers: ["${ORIGIN_KAFKA_BROKERS}"]
+        version: "4.0.0"
+        client_id: "origin-example-native-admin"
+        metadata_timeout: 10s
+        allow_auto_topic_creation: false
+      # Managed Producer 有自己的完整配置和生命周期。
+      producer:
+        cluster:
+          brokers: ["${ORIGIN_KAFKA_BROKERS}"]
+          version: "4.0.0"
+          client_id: "origin-example-managed-producer"
+          allow_auto_topic_creation: false
+        required_acks: all
+        # 可选，默认 true；Managed 模式可显式设 false，事务骨架仍需自行开启。
+        idempotent: true
+        compression: snappy
+        max_message_size: 1M
+        submit_queue_messages: 1024
+        submit_queue_size: 64M

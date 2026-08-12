@@ -19,9 +19,12 @@ type Handler func(context.Context, *Message) error
 
 // Batch 是同一 Topic、同一 Partition 的连续消息批次。
 type Batch struct {
-	Topic     string
+	// Topic 是该批次中所有消息共同的 Topic。
+	Topic string
+	// Partition 是该批次中所有消息共同的分区。
 	Partition int32
-	Messages  []*Message
+	// Messages 按 Offset 递增排列，仅在 Handler 返回前保证底层字节有效。
+	Messages []*Message
 }
 
 // BatchHandler 在 Consumer 所属 Service 的串行工作协程中处理一个批次。

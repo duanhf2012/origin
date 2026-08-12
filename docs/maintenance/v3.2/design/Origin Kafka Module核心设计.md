@@ -194,10 +194,12 @@ Managed 模式覆盖大多数游戏业务，负责 Origin 生命周期、Service
 ```go
 func BuildProducerSaramaConfig(config ProducerConfig, options ...ProducerOption) (*sarama.Config, error)
 func BuildConsumerSaramaConfig(config ConsumerConfig, options ...ConsumerOption) (*sarama.Config, error)
+func BuildSaramaConfig(config ClusterConfig, options ...SaramaConfigOption) (*sarama.Config, error)
 func BuildAdminSaramaConfig(config ClusterConfig, options ...SaramaConfigOption) (*sarama.Config, error)
 ```
 
-特殊业务可以用返回的 Config 直接创建并拥有 Sarama Client、事务 Producer、Consumer Group、Partition
+Producer/Consumer Builder 保留 Managed 不变量；需要事务、手工 Offset 等不同所有权时使用
+`BuildSaramaConfig`。特殊业务可以用返回的 Config 直接创建并拥有 Sarama Client、事务 Producer、Consumer Group、Partition
 Consumer 或 ClusterAdmin。自由模式不自动接入 Origin 生命周期；教程必须明确要求业务 Module 在
 `OnStart/OnStop` 中创建、取消、关闭和等待全部资源。
 
@@ -564,7 +566,7 @@ TLS 使用系统 Root CA，并可追加 `ca_file`；同时提供 Cert/Key 时启
 type ProducerConfig struct {
     Cluster                 ClusterConfig
     RequiredAcks            string
-    Idempotent              bool
+    Idempotent              *bool
     Compression             string
     MaxMessageSize          config.ByteSize
     DeliveryTimeout         config.Duration
@@ -606,7 +608,7 @@ type ProducerConfig struct {
 | `sasl.mechanism` | 否 | `plain` | 普通层支持 plain、scram_sha_256、scram_sha_512 |
 | `sasl.username/password` | 启用 SASL 时 | 无 | 密码使用环境变量，PLAIN 应配合 TLS |
 | `required_acks` | 否 | `all` | 游戏关键事件优先可靠性；`none` 无可靠 Delivery |
-| `idempotent` | 否 | `true` | 减少 Producer 重试导致的重复，仍不等于业务 Exactly Once |
+| `idempotent` | 否 | `true` | 可显式设 `false`；开启可减少 Producer 重试重复，仍不等于业务 Exactly Once |
 | `compression` | 否 | `snappy` | 小消息吞吐与 CPU 的稳健起点；实测后可选 lz4/zstd |
 | `max_message_size` | 否 | `1M` | 必须不大于 Broker/Topic 上限，并与 Consumer Fetch 对齐 |
 | `delivery_timeout` | 否 | `10s` | Broker 等待 Ack 的上限，不是完整业务 Deadline |
@@ -688,7 +690,7 @@ type BatchConfig struct {
 | `handler_retry_max` | 否 | `0` | 默认不自动重复业务；需要时显式配置并保证幂等 |
 | `handler_retry_backoff` | 否 | `1s` | Handler 有界重试间隔 |
 | `batch.max_messages` | 批量模式 | `100` | 数量硬上限 |
-| `batch.max_size` | 批量模式 | `1M` | Payload 总量硬上限，不含全部 Go 对象开销 |
+| `batch.max_size` | 批量模式 | `1M` | 聚合目标上限；合法的更大单条消息会作为单元素批次交付 |
 | `batch.max_wait` | 批量模式 | `50ms` | 从第一条进入开始计时，延迟与吞吐的起点 |
 
 `AutoCommit` 固定启用，内部只有 Handler 成功才 Mark。普通配置不提供“收到即提交”或“自动提交未处理
@@ -744,11 +746,11 @@ Hook 在 Origin 配置完成映射、TLS/SASL 建立后执行，在最终 `Valid
 
 Raw 消息以尽量零拷贝为目标：Produce 接受后，Key、Value 和 Header Value 的只读所有权转移到 Producer，
 调用方在 Delivery 完成前不得修改或复用底层数组。模块不会为了防御未知误用默认复制全部 Payload。
-容量计费至少包含 Key、Value、全部 Header Key/Value 和稳定的每消息结构开销；单条超过
+容量计费包含 Key、Value 和全部 Header Key/Value；消息数上限约束每消息结构开销。单条超过
 `submit_queue_size` 或 `max_message_size` 在接管所有权前直接拒绝。
 
-JSON/PB 产生的新编码 Buffer 由 Module 持有到 Delivery 完成，调用方仍拥有原始 Go 对象。序列化完成后
-修改原始对象不会改变已提交 Payload。
+JSON/PB 产生的新编码 Buffer、Key 和 Header Value 副本由 Module 持有到 Delivery 完成，调用方仍拥有
+全部原始输入。序列化完成后修改原始对象或切片不会改变已提交消息。
 
 发送失败、过载拒绝或编码失败时，未接受消息的所有权仍属于调用方。批量部分接受时按返回的 Delivery
 数量区分所有权，错误必须包含已接受数量但不能包含 Payload。
@@ -1121,16 +1123,19 @@ Kafka Module 完成。
 - 压缩算法、Flush 和 Fetch 参数必须用真实小消息/普通消息/最大消息压测，不能照搬通用“最佳配置”；
 - 日志、Interceptor 和指标不得在热路径同步执行慢 I/O。
 
-Benchmark 至少保存：
+首批实现保存可重复的包装层微基准；需要真实 Broker 压力、完整 P50/P95/P99 或 Profile 时，另建独立性能
+验收，不把局域网单节点延迟当作生产容量结论。当前微基准至少覆盖：
 
 - Raw 单条异步入队；
 - Raw/JSON/PB 单条编码与提交；
 - 10、100、1000 条批量；
-- Sonic、标准库、goccy 的游戏消息 Marshal/Unmarshal；
+- Sonic 与标准库的游戏消息 Marshal；goccy 只作为选型调研候选，不因比较而引入运行时依赖；
 - Delivery 创建/完成/等待；
-- Consumer Claim 到 Service Handler 的调度开销；
-- 小消息、普通消息和最大允许消息的吞吐、`ns/op`、`B/op`、`allocs/op`；
-- 普通负载、峰值积压、过载拒绝和 Broker 恢复的 P50/P95/P99。
+- 提交队列消息/字节预算的准入与释放；
+- `ns/op`、`B/op`、`allocs/op`。
+
+Consumer Claim 到 Service Handler、不同消息尺寸、峰值积压、过载和 Broker 恢复的 P50/P95/P99 必须使用
+专用性能环境、固定数据集与采样工具测试，不在功能集成测试中伪造结论。
 
 性能优化必须由 Benchmark/Profile/Trace 支持。若对象池或更少复制会显著增加所有权和错误风险，先保留
 简单安全实现并记录数据，再单独讨论。
@@ -1180,7 +1185,7 @@ Benchmark 至少保存：
 
 ## 20. 实施顺序与完成条件
 
-Kafka 不立即实施。按已经确认的 v3.2 顺序：
+Kafka 已按确认的 v3.2 顺序完成实施：
 
 1. 本文完成并 Review；
 2. 实现并验收 MongoDB Module；

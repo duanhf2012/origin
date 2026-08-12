@@ -10,6 +10,7 @@ import (
 
 	"github.com/IBM/sarama"
 	"github.com/duanhf2012/origin/v3/errs"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 type fakeProducerRuntime struct {
@@ -128,6 +129,93 @@ func TestProducerBatchAsyncReportsPartialAcceptance(t *testing.T) {
 	}
 	if stopErr := producer.OnStop(context.Background()); stopErr != nil {
 		t.Fatal(stopErr)
+	}
+}
+
+func TestProducerCodecAndBatchPublicSurface(t *testing.T) {
+	producer, _ := newStartedTestProducer(t, nil)
+	defer func() {
+		if err := producer.OnStop(context.Background()); err != nil {
+			t.Errorf("stop producer: %v", err)
+		}
+	}()
+
+	delivery, err := producer.ProduceJSONAsync(JSONMessage{Topic: "events", Value: map[string]int64{"player_id": 1001}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = delivery.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	delivery, err = producer.ProducePBAsync(PBMessage{Topic: "events", Value: wrapperspb.Int64(1001)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = delivery.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = producer.ProducePBSync(context.Background(), PBMessage{Topic: "events", Value: wrapperspb.Int64(1002)}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw := []ProducerMessage{{Topic: "events", Value: []byte("one")}, {Topic: "events", Value: []byte("two")}}
+	jsonMessages := []JSONMessage{{Topic: "events", Value: map[string]int64{"value": 1}}, {Topic: "events", Value: map[string]int64{"value": 2}}}
+	pbMessages := []PBMessage{{Topic: "events", Value: wrapperspb.Int64(1)}, {Topic: "events", Value: wrapperspb.Int64(2)}}
+	for name, start := range map[string]func() ([]*Delivery, error){
+		"raw":  func() ([]*Delivery, error) { return producer.ProduceBatchAsync(raw) },
+		"json": func() ([]*Delivery, error) { return producer.ProduceJSONBatchAsync(jsonMessages) },
+		"pb":   func() ([]*Delivery, error) { return producer.ProducePBBatchAsync(pbMessages) },
+	} {
+		t.Run(name+"-async", func(t *testing.T) {
+			deliveries, startErr := start()
+			if startErr != nil || len(deliveries) != 2 {
+				t.Fatalf("deliveries=%d err=%v", len(deliveries), startErr)
+			}
+			for _, current := range deliveries {
+				if _, waitErr := current.Wait(context.Background()); waitErr != nil {
+					t.Fatal(waitErr)
+				}
+			}
+		})
+	}
+	for name, start := range map[string]func() ([]DeliveryResult, error){
+		"raw": func() ([]DeliveryResult, error) { return producer.ProduceBatchSync(context.Background(), raw) },
+		"json": func() ([]DeliveryResult, error) {
+			return producer.ProduceJSONBatchSync(context.Background(), jsonMessages)
+		},
+		"pb": func() ([]DeliveryResult, error) { return producer.ProducePBBatchSync(context.Background(), pbMessages) },
+	} {
+		t.Run(name+"-sync", func(t *testing.T) {
+			results, startErr := start()
+			if startErr != nil || len(results) != 2 {
+				t.Fatalf("results=%d err=%v", len(results), startErr)
+			}
+			for _, result := range results {
+				if result.Err != nil || result.Metadata.Offset != 11 {
+					t.Fatalf("unexpected result: %+v", result)
+				}
+			}
+		})
+	}
+	if _, err = producer.ProduceBatchAsync(nil); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("empty async batch: %v", err)
+	}
+	if _, err = producer.ProduceBatchSync(nil, raw); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("nil sync context: %v", err)
+	}
+	invalidJSON := []JSONMessage{{Topic: "events", Value: func() {}}}
+	if _, err = producer.ProduceJSONBatchAsync(invalidJSON); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("invalid async JSON batch: %v", err)
+	}
+	if results, syncErr := producer.ProduceJSONBatchSync(context.Background(), invalidJSON); len(results) != 1 || !errors.Is(syncErr, ErrInvalidArgument) || !errors.Is(results[0].Err, ErrInvalidArgument) {
+		t.Fatalf("invalid sync JSON batch: results=%+v err=%v", results, syncErr)
+	}
+	invalidPB := []PBMessage{{Topic: "events"}}
+	if _, err = producer.ProducePBBatchAsync(invalidPB); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("invalid async PB batch: %v", err)
+	}
+	if results, syncErr := producer.ProducePBBatchSync(context.Background(), invalidPB); len(results) != 1 || !errors.Is(syncErr, ErrInvalidArgument) || !errors.Is(results[0].Err, ErrInvalidArgument) {
+		t.Fatalf("invalid sync PB batch: results=%+v err=%v", results, syncErr)
 	}
 }
 

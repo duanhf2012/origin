@@ -3,7 +3,6 @@ package kafkamodule
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"math"
 	"os"
 
@@ -24,7 +23,7 @@ func BuildProducerSaramaConfig(input ProducerConfig, options ...ProducerOption) 
 	acks := map[string]sarama.RequiredAcks{"none": sarama.NoResponse, "one": sarama.WaitForLocal, "all": sarama.WaitForAll}
 	compression := map[string]sarama.CompressionCodec{"none": sarama.CompressionNone, "gzip": sarama.CompressionGZIP, "snappy": sarama.CompressionSnappy, "lz4": sarama.CompressionLZ4, "zstd": sarama.CompressionZSTD}
 	result.Producer.RequiredAcks = acks[current.RequiredAcks]
-	result.Producer.Idempotent = current.Idempotent
+	result.Producer.Idempotent = *current.Idempotent
 	result.Producer.Compression = compression[current.Compression]
 	result.Producer.MaxMessageBytes = int(current.MaxMessageSize.Bytes())
 	result.Producer.Timeout = current.DeliveryTimeout.Duration()
@@ -39,7 +38,7 @@ func BuildProducerSaramaConfig(input ProducerConfig, options ...ProducerOption) 
 	result.Producer.Return.Successes = true
 	result.Producer.Return.Errors = true
 	result.ChannelBufferSize = current.ChannelBufferMessages
-	if current.Idempotent {
+	if *current.Idempotent {
 		result.Net.MaxOpenRequests = 1
 	}
 	selected := producerOptions{}
@@ -124,8 +123,12 @@ func buildConsumerSaramaConfig(current ConsumerConfig, options []ConsumerOption)
 	return result, nil
 }
 
-// BuildAdminSaramaConfig 构建自由模式 Admin 基础配置；返回配置不创建网络连接。
-func BuildAdminSaramaConfig(input ClusterConfig, options ...SaramaConfigOption) (*sarama.Config, error) {
+// BuildSaramaConfig 构建自由模式的公共 Sarama 基础配置；返回配置不创建网络连接。
+//
+// 使用者可以在 Hook 中配置事务、手工 Offset、OAuth、Rack 和 Interceptor，并自行创建、取消、
+// 关闭 Sarama Client/Producer/Consumer/Admin。自由模式不接入 Origin 生命周期或 Service 协程，
+// 但仍禁止 InsecureSkipVerify。常规业务优先使用 Managed Producer/Consumer Builder。
+func BuildSaramaConfig(input ClusterConfig, options ...SaramaConfigOption) (*sarama.Config, error) {
 	current, err := normalizeClusterConfig(input)
 	if err != nil {
 		return nil, err
@@ -148,9 +151,14 @@ func BuildAdminSaramaConfig(input ClusterConfig, options ...SaramaConfigOption) 
 		return nil, invalidConfig("kafkamodule 禁止跳过 TLS 服务端证书校验")
 	}
 	if err = result.Validate(); err != nil {
-		return nil, invalidConfig("kafkamodule Sarama Admin 配置无效: " + err.Error())
+		return nil, invalidConfig("kafkamodule 自由 Sarama 配置无效: " + err.Error())
 	}
 	return result, nil
+}
+
+// BuildAdminSaramaConfig 构建自由模式 Admin 基础配置；它是语义明确的 BuildSaramaConfig 别名。
+func BuildAdminSaramaConfig(input ClusterConfig, options ...SaramaConfigOption) (*sarama.Config, error) {
+	return BuildSaramaConfig(input, options...)
 }
 
 func buildClusterSaramaConfig(current ClusterConfig) (*sarama.Config, error) {
@@ -224,8 +232,8 @@ func loadTLSConfig(current TLSConfig) (*tls.Config, error) {
 
 func applyHooks(target *sarama.Config, hooks []SaramaConfigHook) (err error) {
 	defer func() {
-		if value := recover(); value != nil {
-			err = invalidConfig(fmt.Sprintf("kafkamodule Sarama Hook panic: %v", value))
+		if recover() != nil {
+			err = invalidConfig("kafkamodule Sarama Hook panic")
 		}
 	}()
 	for _, hook := range hooks {

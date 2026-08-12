@@ -22,7 +22,7 @@ func encodeJSON(input JSONMessage) (*encodedMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &encodedMessage{topic: strings.TrimSpace(input.Topic), key: input.Key, value: value, headers: input.Headers, timestamp: input.Timestamp, payloadBytes: size}, nil
+	return &encodedMessage{topic: strings.TrimSpace(input.Topic), key: cloneBytes(input.Key), value: value, headers: cloneHeaders(input.Headers), timestamp: input.Timestamp, payloadBytes: size}, nil
 }
 
 func encodePB(input PBMessage) (*encodedMessage, error) {
@@ -40,7 +40,20 @@ func encodePB(input PBMessage) (*encodedMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &encodedMessage{topic: strings.TrimSpace(input.Topic), key: input.Key, value: value, headers: input.Headers, timestamp: input.Timestamp, payloadBytes: size}, nil
+	return &encodedMessage{topic: strings.TrimSpace(input.Topic), key: cloneBytes(input.Key), value: value, headers: cloneHeaders(input.Headers), timestamp: input.Timestamp, payloadBytes: size}, nil
+}
+
+func cloneBytes(input []byte) []byte { return append([]byte(nil), input...) }
+
+func cloneHeaders(input []Header) []Header {
+	if input == nil {
+		return nil
+	}
+	result := make([]Header, len(input))
+	for index, header := range input {
+		result[index] = Header{Key: header.Key, Value: cloneBytes(header.Value)}
+	}
+	return result
 }
 
 // DecodeJSON 使用 Sonic 将 Value 解码到非 nil 指针 destination。

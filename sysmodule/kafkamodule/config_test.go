@@ -2,6 +2,7 @@ package kafkamodule
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,8 @@ func validClusterConfig() ClusterConfig {
 
 func validProducerConfig() ProducerConfig { return ProducerConfig{Cluster: validClusterConfig()} }
 
+func boolPointer(value bool) *bool { return &value }
+
 func validConsumerConfig() ConsumerConfig {
 	return ConsumerConfig{Cluster: validClusterConfig(), GroupID: "player-events", Topics: []string{"player-events"}}
 }
@@ -24,7 +27,7 @@ func TestProducerConfigDefaultsAndManagedInvariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.RequiredAcks != "all" || !current.Idempotent || current.Compression != "snappy" {
+	if current.RequiredAcks != "all" || current.Idempotent == nil || !*current.Idempotent || current.Compression != "snappy" {
 		t.Fatalf("unexpected producer defaults: %+v", current)
 	}
 	if current.SubmitQueueMessages != 1024 || current.SubmitQueueSize.Bytes() != 64<<20 {
@@ -45,7 +48,7 @@ func TestProducerConfigRejectsInvalidCombinations(t *testing.T) {
 		{Cluster: ClusterConfig{Brokers: []string{"missing-port"}, Version: "4.0.0"}},
 		{Cluster: ClusterConfig{Brokers: []string{"127.0.0.1:9092", "127.0.0.1:9092"}, Version: "4.0.0"}},
 		{Cluster: ClusterConfig{Brokers: []string{"127.0.0.1:9092"}, Version: "future"}},
-		{Cluster: validClusterConfig(), RequiredAcks: "one", Idempotent: true},
+		{Cluster: validClusterConfig(), RequiredAcks: "one", Idempotent: boolPointer(true)},
 		{Cluster: validClusterConfig(), RequiredAcks: "invalid"},
 		{Cluster: validClusterConfig(), Compression: "invalid"},
 		{Cluster: validClusterConfig(), MaxMessageSize: config.ByteSize(-1)},
@@ -57,6 +60,19 @@ func TestProducerConfigRejectsInvalidCombinations(t *testing.T) {
 		if _, err := normalizeProducerConfig(input); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("case %d: %v", index, err)
 		}
+	}
+}
+
+func TestProducerConfigHonorsExplicitIdempotentFalse(t *testing.T) {
+	current := validProducerConfig()
+	current.Idempotent = boolPointer(false)
+	normalized, err := normalizeProducerConfig(current)
+	if err != nil || normalized.Idempotent == nil || *normalized.Idempotent {
+		t.Fatalf("explicit false was not preserved: config=%+v err=%v", normalized, err)
+	}
+	saramaConfig, err := BuildProducerSaramaConfig(current)
+	if err != nil || saramaConfig.Producer.Idempotent {
+		t.Fatalf("Sarama idempotence was not disabled: config=%+v err=%v", saramaConfig, err)
 	}
 }
 
@@ -105,6 +121,32 @@ func TestSaramaHookCannotBreakManagedInvariants(t *testing.T) {
 	}
 }
 
+func TestSaramaHookPanicIsSanitized(t *testing.T) {
+	_, err := BuildSaramaConfig(validClusterConfig(), WithSaramaConfig(func(*sarama.Config) error {
+		panic("secret-password")
+	}))
+	if !errors.Is(err, ErrInvalidConfig) || strings.Contains(err.Error(), "secret-password") {
+		t.Fatalf("hook panic was not sanitized: %v", err)
+	}
+}
+
+func TestBuildSaramaConfigAllowsNativeOwnershipChoices(t *testing.T) {
+	current, err := BuildSaramaConfig(validClusterConfig(), WithSaramaConfig(func(current *sarama.Config) error {
+		current.Producer.Transaction.ID = "native-transaction"
+		current.Producer.Idempotent = true
+		current.Producer.RequiredAcks = sarama.WaitForAll
+		current.Net.MaxOpenRequests = 1
+		current.Consumer.Offsets.AutoCommit.Enable = false
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Producer.Transaction.ID != "native-transaction" || current.Consumer.Offsets.AutoCommit.Enable {
+		t.Fatalf("native choices were overwritten: %+v", current)
+	}
+}
+
 func TestClusterTLSAndSASLValidation(t *testing.T) {
 	invalid := []ClusterConfig{
 		{Brokers: []string{"127.0.0.1:9092"}, Version: "4.0.0", TLS: TLSConfig{CAFile: "ca.pem"}},
@@ -116,5 +158,24 @@ func TestClusterTLSAndSASLValidation(t *testing.T) {
 		if _, err := BuildAdminSaramaConfig(current); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("case %d: %v", index, err)
 		}
+	}
+}
+
+func TestClusterTLSAndSASLBuilders(t *testing.T) {
+	tlsCluster := validClusterConfig()
+	tlsCluster.TLS.Enable = true
+	current, err := BuildAdminSaramaConfig(tlsCluster)
+	if err != nil || !current.Net.TLS.Enable || current.Net.TLS.Config == nil || current.Net.TLS.Config.InsecureSkipVerify {
+		t.Fatalf("TLS config=%+v err=%v", current, err)
+	}
+	for _, mechanism := range []string{"plain", "scram_sha_256", "scram_sha_512"} {
+		t.Run(mechanism, func(t *testing.T) {
+			cluster := validClusterConfig()
+			cluster.SASL = SASLConfig{Enable: true, Mechanism: mechanism, Username: "origin", Password: "secret"}
+			result, buildErr := BuildAdminSaramaConfig(cluster)
+			if buildErr != nil || !result.Net.SASL.Enable || result.Net.SASL.User != "origin" {
+				t.Fatalf("SASL config=%+v err=%v", result, buildErr)
+			}
+		})
 	}
 }

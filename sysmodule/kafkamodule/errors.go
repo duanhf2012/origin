@@ -25,15 +25,21 @@ var (
 
 // BatchFailure 描述批量输入中一个失败项，不包含消息 Payload。
 type BatchFailure struct {
-	Index     int
-	Topic     string
+	// Index 是失败项在调用方输入切片中的位置。
+	Index int
+	// Topic 是失败项的目标 Topic；输入校验失败时也可能为空。
+	Topic string
+	// Partition 是 Broker 返回的分区；尚未投递时通常为 -1。
 	Partition int32
-	Err       error
+	// Err 是该项未被接受或投递失败的原因。
+	Err error
 }
 
 // BatchError 汇总批量操作的部分接受数量和逐项错误。
 type BatchError struct {
+	// Accepted 是本次调用中已经被 Producer 接受并取得所有权的消息数。
 	Accepted int
+	// Failures 按输入位置记录未被接受或最终发送失败的项。
 	Failures []BatchFailure
 }
 

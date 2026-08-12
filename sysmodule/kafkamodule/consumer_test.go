@@ -21,6 +21,7 @@ type fakeConsumerRuntimeDriver struct {
 	closed         atomic.Int32
 	pauseAllCalls  atomic.Int32
 	resumeAllCalls atomic.Int32
+	resumeCalls    atomic.Int32
 	pauseMu        sync.Mutex
 	paused         map[string][]int32
 }
@@ -52,6 +53,7 @@ func (runtime *fakeConsumerRuntimeDriver) pause(partitions map[string][]int32) {
 	runtime.pauseMu.Unlock()
 }
 func (runtime *fakeConsumerRuntimeDriver) resume(partitions map[string][]int32) {
+	runtime.resumeCalls.Add(1)
 	runtime.pause(partitions)
 }
 func (runtime *fakeConsumerRuntimeDriver) pauseAll()  { runtime.pauseAllCalls.Add(1) }
@@ -67,6 +69,24 @@ func (owner *managedConsumerTestService) OnInit() error { return owner.AddModule
 type managedConsumerTestModule struct {
 	Consumer
 	runtime *fakeConsumerRuntimeDriver
+}
+
+type managedBatchConsumerTestService struct {
+	service.Service
+	module *managedBatchConsumerTestModule
+}
+
+func (owner *managedBatchConsumerTestService) OnInit() error { return owner.AddModule(owner.module) }
+
+type managedBatchConsumerTestModule struct {
+	Consumer
+	runtime *fakeConsumerRuntimeDriver
+}
+
+func (module *managedBatchConsumerTestModule) OnInit() error {
+	return module.SetupBatch(validConsumerConfig(), func(context.Context, Batch) error { return nil }, withConsumerRuntimeFactory(func(context.Context, []string, string, *sarama.Config) (consumerRuntime, error) {
+		return module.runtime, nil
+	}))
 }
 
 func (module *managedConsumerTestModule) OnInit() error {
@@ -139,6 +159,12 @@ func TestConsumerOnStartWaitsForFirstSessionAndPauseResume(t *testing.T) {
 	if captured != 0 {
 		t.Fatalf("Pause did not copy caller map: %d", captured)
 	}
+	if err := module.Resume(map[string][]int32{"events": {0}}); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.resumeCalls.Load() != 1 {
+		t.Fatalf("resume calls=%d", runtime.resumeCalls.Load())
+	}
 	if runtime.pauseAllCalls.Load() != 2 || runtime.resumeAllCalls.Load() != 1 {
 		t.Fatalf("pause calls=%d resume calls=%d", runtime.pauseAllCalls.Load(), runtime.resumeAllCalls.Load())
 	}
@@ -149,6 +175,54 @@ func TestConsumerOnStartWaitsForFirstSessionAndPauseResume(t *testing.T) {
 	}
 	if runtime.closed.Load() != 1 || module.Stats().Running {
 		t.Fatalf("closed=%d stats=%+v", runtime.closed.Load(), module.Stats())
+	}
+}
+
+func TestNewBatchConsumerAndBatchErrorSurface(t *testing.T) {
+	consumer, err := NewBatchConsumer(validConsumerConfig(), func(context.Context, Batch) error { return nil })
+	if err != nil || consumer == nil {
+		t.Fatalf("consumer=%v err=%v", consumer, err)
+	}
+	batchErr := &BatchError{Accepted: 1, Failures: []BatchFailure{{Index: 1, Topic: "events", Partition: -1, Err: ErrInvalidArgument}}}
+	if !errors.Is(batchErr, ErrInvalidArgument) || batchErr.Error() == "" {
+		t.Fatalf("batch error surface: %v", batchErr)
+	}
+}
+
+func TestConsumerSetupBatchStartsAndStops(t *testing.T) {
+	runtime := newFakeConsumerRuntimeDriver()
+	module := &managedBatchConsumerTestModule{runtime: runtime}
+	owner := &managedBatchConsumerTestService{module: module}
+	current, err := node.New(node.Config{ID: "kafka-batch-consumer-test", Services: []string{"KafkaBatchConsumer"}, Scheduler: service.DefaultSchedulerConfig()}, []node.ServiceBinding{{Name: "KafkaBatchConsumer", Template: "KafkaBatchConsumer", Service: owner}}, originlog.NewNop(), node.Options{MaxTimersPerNode: 32, TimerLocation: time.UTC})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(runtime.setupGate)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err = current.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !module.Stats().Running {
+		t.Fatal("batch consumer did not start")
+	}
+	if err = current.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConsumerErrorClassificationAndBackoffBounds(t *testing.T) {
+	if !isFatalConsumerError(sarama.ErrSASLAuthenticationFailed) || isFatalConsumerError(errors.New("temporary")) {
+		t.Fatal("consumer error classification is incorrect")
+	}
+	if jitteredBackoff(0, time.Second) != 0 {
+		t.Fatal("zero backoff should remain zero")
+	}
+	for range 100 {
+		current := jitteredBackoff(time.Second, 1100*time.Millisecond)
+		if current < 800*time.Millisecond || current > 1100*time.Millisecond {
+			t.Fatalf("backoff outside bounds: %v", current)
+		}
 	}
 }
 

@@ -54,7 +54,7 @@ func withConsumerRuntimeFactory(factory consumerRuntimeFactory) ConsumerOption {
 	return consumerOptionFunc(func(target *consumerOptions) { target.factory = factory })
 }
 
-// SaramaConfigOption 定制自由模式 Admin Sarama 配置。
+// SaramaConfigOption 定制 BuildSaramaConfig 或 BuildAdminSaramaConfig 生成的自由模式配置。
 type SaramaConfigOption interface{ applySarama(*saramaOptions) }
 type saramaConfigOptionFunc func(*saramaOptions)
 
@@ -62,7 +62,7 @@ func (option saramaConfigOptionFunc) applySarama(target *saramaOptions) { option
 
 type saramaOptions struct{ hooks []SaramaConfigHook }
 
-// WithSaramaConfig 添加自由模式 Sarama Hook。
+// WithSaramaConfig 添加自由模式 Sarama Hook；hook 不能为空，并在 Builder 调用 goroutine 中执行。
 func WithSaramaConfig(hook SaramaConfigHook) SaramaConfigOption {
 	return saramaConfigOptionFunc(func(target *saramaOptions) { target.hooks = append(target.hooks, hook) })
 }

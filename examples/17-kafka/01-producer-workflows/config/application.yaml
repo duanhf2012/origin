@@ -1,0 +1,32 @@
+log:
+  mode: async
+  console: {enabled: true, level: info, format: text}
+nodes:
+  - id: kafka-producer-1
+    services: [PlayerService]
+services:
+  PlayerService:
+    kafka:
+      producer:
+        cluster:
+          # 必填；生产建议至少两个不同 Broker Seed。示例通过环境变量覆盖。
+          brokers: ["${ORIGIN_KAFKA_BROKERS}"]
+          # 必填；填集群中最低 Broker 版本，不能高于实际集群。
+          version: "4.0.0"
+          # 可选；建议使用稳定的服务/环境标识，便于 Broker 审计。
+          client_id: "origin-example-producer"
+          # 可选，默认 false；生产由运维显式创建 Topic。
+          allow_auto_topic_creation: false
+        # 默认 all + 幂等；关键游戏事件建议保持。
+        required_acks: all
+        # 可选，默认 true；显式 false 可关闭，但关键游戏事件建议保持 true。
+        idempotent: true
+        # 默认 snappy；按真实消息和 CPU 压测后再改 lz4/zstd。
+        compression: snappy
+        # 默认 1M；必须与 Broker/Topic/Consumer Fetch 上限对齐。
+        max_message_size: 1M
+        # 默认 10s；业务 Context 可以更早截止，但取消等待不代表消息未发送。
+        delivery_timeout: 10s
+        # Origin 提交队列的消息数/字节数双硬上限，满时立即返回过载。
+        submit_queue_messages: 1024
+        submit_queue_size: 64M

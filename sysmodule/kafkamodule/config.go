@@ -73,8 +73,8 @@ type ProducerConfig struct {
 	Cluster ClusterConfig
 	// RequiredAcks 支持 none、one 和 all；省略时为 all。
 	RequiredAcks string
-	// Idempotent 启用 Kafka 幂等 Producer；默认配置下为 true。
-	Idempotent bool
+	// Idempotent 启用 Kafka 幂等 Producer；nil 表示使用默认 true，显式 false 表示关闭。
+	Idempotent *bool
 	// Compression 支持 none、gzip、snappy、lz4 和 zstd；省略时为 snappy。
 	Compression string
 	// MaxMessageSize 是单条消息最大编码字节数；省略时为 1M。
@@ -265,12 +265,12 @@ func normalizeProducerConfig(input ProducerConfig) (ProducerConfig, error) {
 	}
 	result.Cluster = cluster
 	result.RequiredAcks = strings.ToLower(strings.TrimSpace(input.RequiredAcks))
-	defaultAcks := result.RequiredAcks == ""
-	if defaultAcks {
+	if result.RequiredAcks == "" {
 		result.RequiredAcks = "all"
 	}
-	if defaultAcks && !result.Idempotent {
-		result.Idempotent = true
+	if result.Idempotent == nil {
+		enabled := true
+		result.Idempotent = &enabled
 	}
 	result.Compression = strings.ToLower(strings.TrimSpace(input.Compression))
 	if result.Compression == "" {
@@ -306,7 +306,7 @@ func normalizeProducerConfig(input ProducerConfig) (ProducerConfig, error) {
 	if result.RequiredAcks != "none" && result.RequiredAcks != "one" && result.RequiredAcks != "all" {
 		return ProducerConfig{}, invalidConfig("kafkamodule required_acks 无效")
 	}
-	if result.Idempotent && result.RequiredAcks != "all" {
+	if *result.Idempotent && result.RequiredAcks != "all" {
 		return ProducerConfig{}, invalidConfig("kafkamodule 幂等 Producer 必须使用 required_acks=all")
 	}
 	switch result.Compression {

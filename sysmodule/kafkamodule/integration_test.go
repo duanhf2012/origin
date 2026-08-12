@@ -204,6 +204,77 @@ func TestIntegrationManagedProducerConsumerCodecsAndPause(t *testing.T) {
 	}
 }
 
+func TestIntegrationServiceSelfKafkaWorkflow(t *testing.T) {
+	cluster, prefix := integrationCluster(t)
+	topic := prefix + "-json"
+	key := fmt.Sprintf("self-workflow-%d", time.Now().UnixNano())
+	processed := make(map[string]int64)
+	handled := make(chan struct{}, 1)
+	var consumer *Consumer
+	// 新 Group 使用 oldest 并按唯一 Key 过滤，避免“Session Setup 已完成但 newest 初始位置仍在建立”的测试时序竞态。
+	consumer, err := NewConsumer(ConsumerConfig{Cluster: cluster, GroupID: fmt.Sprintf("origin-self-workflow-%d", time.Now().UnixNano()), Topics: []string{topic}, InitialOffset: "oldest"}, func(ctx context.Context, message *Message) error {
+		if string(message.Key) != key {
+			return nil
+		}
+		var event map[string]any
+		if decodeErr := message.DecodeJSON(&event); decodeErr != nil {
+			return decodeErr
+		}
+		// 模拟数据库等待：Await 的 wait 函数不占用 Service 工作协程，返回后再安全更新串行业务状态。
+		if awaitErr := consumer.Await(ctx, func(waitCtx context.Context) error {
+			select {
+			case <-time.After(5 * time.Millisecond):
+				return nil
+			case <-waitCtx.Done():
+				return waitCtx.Err()
+			}
+		}); awaitErr != nil {
+			return awaitErr
+		}
+		processed[string(message.Key)] = event["player_id"].(int64)
+		handled <- struct{}{}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, err := NewProducer(ProducerConfig{Cluster: cluster})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, owner := newIntegrationNode(t, producer, consumer)
+	ctx, cancel := context.WithTimeout(context.Background(), kafkaIntegrationTimeout)
+	defer cancel()
+	sent := make(chan error, 1)
+	if err = owner.DispatchAsync(func(taskCtx context.Context) {
+		sent <- owner.Await(taskCtx, func(waitCtx context.Context) error {
+			_, produceErr := producer.ProduceJSONSync(waitCtx, JSONMessage{Topic: topic, Key: []byte(key), Value: map[string]int64{"player_id": 9007199254740991}})
+			return produceErr
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-sent:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("Service self workflow did not finish producing")
+	}
+	select {
+	case <-handled:
+		if processed[key] != int64(9007199254740991) {
+			t.Fatalf("Service state was not updated: %#v", processed)
+		}
+	case <-ctx.Done():
+		t.Fatal("Service self workflow did not consume")
+	}
+	if err = current.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIntegrationAutoTopicCreationRemainsDisabled(t *testing.T) {
 	cluster, prefix := integrationCluster(t)
 	unknown := fmt.Sprintf("%s-missing-%d", prefix, time.Now().UnixNano())
@@ -268,7 +339,7 @@ func TestIntegrationConsumerFailureRedeliversUnmarkedMessage(t *testing.T) {
 	if _, err = producer.ProduceSync(ctx, ProducerMessage{Topic: topic, Key: []byte(key), Value: []byte("retry-me")}); err != nil {
 		t.Fatal(err)
 	}
-	defer producer.OnStop(context.Background())
+	defer stopIntegrationProducer(t, producer)
 
 	businessErr := errors.New("intentional handler failure")
 	failed := make(chan struct{}, 1)
@@ -322,6 +393,46 @@ func TestIntegrationConsumerFailureRedeliversUnmarkedMessage(t *testing.T) {
 	}
 }
 
+func TestIntegrationCooperativeRebalanceAndClaimRecovery(t *testing.T) {
+	cluster, prefix := integrationCluster(t)
+	topic := prefix + "-consumer"
+	groupID := fmt.Sprintf("origin-rebalance-%d", time.Now().UnixNano())
+	config := ConsumerConfig{Cluster: cluster, GroupID: groupID, Topics: []string{topic}, InitialOffset: "newest", BalanceStrategy: "cooperative_sticky"}
+	first, err := NewConsumer(config, func(context.Context, *Message) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstNode, _ := newIntegrationNode(t, nil, first)
+	second, err := NewConsumer(config, func(context.Context, *Message) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondNode, _ := newIntegrationNode(t, nil, second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), kafkaIntegrationTimeout)
+	defer cancel()
+	for first.Stats().Rebalances < 2 || second.Stats().Rebalances < 1 {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("join rebalance did not finish: first=%+v second=%+v", first.Stats(), second.Stats())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+	if err = secondNode.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for first.Stats().Rebalances < 3 {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("leave rebalance did not recover first consumer: %+v", first.Stats())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+	if err = firstNode.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIntegrationRecovery(t *testing.T) {
 	cluster, prefix := integrationCluster(t)
 	producer, err := NewProducer(ProducerConfig{Cluster: cluster})
@@ -333,7 +444,7 @@ func TestIntegrationRecovery(t *testing.T) {
 	if err = producer.OnStart(ctx); err != nil {
 		t.Fatal(err)
 	}
-	defer producer.OnStop(context.Background())
+	defer stopIntegrationProducer(t, producer)
 	topic := prefix + "-recovery"
 	if _, err = producer.ProduceSync(ctx, ProducerMessage{Topic: topic, Key: []byte("before-restart"), Value: []byte("ok")}); err != nil {
 		t.Fatal(err)
@@ -353,5 +464,14 @@ func TestIntegrationRecovery(t *testing.T) {
 			t.Fatalf("producer did not recover: %v", err)
 		}
 		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func stopIntegrationProducer(t *testing.T, producer *Producer) {
+	t.Helper()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), kafkaIntegrationTimeout)
+	defer stopCancel()
+	if err := producer.OnStop(stopCtx); err != nil {
+		t.Errorf("stop integration producer: %v", err)
 	}
 }

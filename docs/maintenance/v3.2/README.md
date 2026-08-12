@@ -51,6 +51,16 @@ Service 串行业务通过 `Await` 释放工作协程。Module 支持 Standalone
 
 四个 Example 分别覆盖缓存与会话、集合与基础排行、Pipeline/Lua/乐观并发、分布式 Lease Lock；每个示例都把 Key、编解码和业务规则集中在业务 Module 中。
 
+## Kafka 组件教程
+
+Kafka Module 分为 Managed Producer、Managed Consumer 与 Native Sarama 三层。Managed 层负责 Origin 生命周期、有界容量、Delivery、Service 串行 Handler 和成功后 Mark；事务、手工 Offset、Admin 等特殊能力使用自由配置层并由业务显式拥有资源。
+
+| 组件 | 适用场景 | 使用指南 | Example |
+| --- | --- | --- | --- |
+| Kafka Module | RPC 事件、玩家数据流水、异步审计、Consumer Group、批量消费与特殊 Sarama 组合 | [Kafka Module 使用指南](guides/Kafka%20Module使用指南.md) | [Kafka 三层示例](../../../examples/17-kafka/README.md) |
+
+三个 Example 分别覆盖 RPC 风格生产工作流、单条/批量 Service Handler、Managed 与 Native 生命周期。Ubuntu 保留 Apache Kafka 4.3.1 KRaft 环境，Windows 与 Ubuntu 共用同一套真实协议测试。
+
 ## 设计与实施资料
 
 本目录沿用 `../v3.1/README.md` 定义的文档分层：
@@ -83,12 +93,12 @@ Service 串行业务通过 `Await` 释放工作协程。Module 支持 Standalone
   以及每组公开函数和函数参数的实际执行协程。
 - [`HTTP Client 使用指南`](guides/HTTP%20Client使用指南.md)：连接池、请求/响应所有权、Service Await，
   以及 Client 扩展回调的实际执行协程。
+- [`Kafka Module 使用指南`](guides/Kafka%20Module使用指南.md)：三层外观、完整配置、API 参数与执行协程、
+  所有权、可靠性、游戏场景、排错和双平台测试。
 
 两份网络 Proposal 保存能力分析和调研依据，不单独授权实现。网络核心设计已允许按 TCP、WebSocket、
-KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB、Redis 与 Kafka 核心设计已经确认。MySQL
-按当前项目优先级暂缓，不进入本轮设计与实现。接下来严格按 MongoDB、Redis、Kafka 的顺序分别制定计划、
-实现、测试、补齐教程与 Example并验收；Kafka 的 Ubuntu Docker 环境只在 Kafka 实施阶段安装并保留。
-每个实施切片都必须独立完成计划、测试、文档和验收。
+KCP 纵向切片实施；Gin、HTTP Client、MongoDB、Redis 与 Kafka 已完成实现、测试、教程和 Example。MySQL
+按当前项目优先级暂缓，不进入本轮实施。Kafka 的 Ubuntu Docker 环境已在实施阶段安装并保留。
 
 当前实施计划：
 
@@ -114,5 +124,7 @@ KCP 纵向切片实施；Gin 与 HTTP Client 已完成实施；MongoDB、Redis �
 - [`MongoDB Module 纵向切片验收报告`](reports/MongoDB%20Module纵向切片验收报告.md)
 - [`Redis Module 纵向切片变更记录`](changes/Redis%20Module纵向切片变更记录.md)
 - [`Redis Module 纵向切片验收报告`](reports/Redis%20Module纵向切片验收报告.md)
+- [`Kafka Module 纵向切片变更记录`](changes/Kafka%20Module纵向切片变更记录.md)
+- [`Kafka Module 纵向切片验收报告`](reports/Kafka%20Module纵向切片验收报告.md)
 
 v3.1 的维护资料继续保留在 `../v3.1/`，不得混入本目录。

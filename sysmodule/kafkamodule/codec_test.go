@@ -10,17 +10,23 @@ import (
 
 func TestJSONEncodingCreatesStableSnapshot(t *testing.T) {
 	value := map[string]any{"player_id": int64(9), "level": int64(12)}
-	message, err := encodeJSON(JSONMessage{Topic: "player-events", Value: value})
+	key := []byte("player-9")
+	header := []byte("v1")
+	message, err := encodeJSON(JSONMessage{Topic: "player-events", Key: key, Value: value, Headers: []Header{{Key: "schema", Value: header}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	value["level"] = int64(99)
+	key[0], header[0] = 'X', 'X'
 	var decoded map[string]any
 	if err = (&Message{Value: message.value}).DecodeJSON(&decoded); err != nil {
 		t.Fatal(err)
 	}
 	if level, ok := decoded["level"].(int64); !ok || level != 12 {
 		t.Fatalf("integer precision/type or snapshot lost: %#v", decoded)
+	}
+	if string(message.key) != "player-9" || string(message.headers[0].Value) != "v1" {
+		t.Fatalf("key/header snapshot lost: key=%q headers=%+v", message.key, message.headers)
 	}
 }
 
@@ -33,17 +39,23 @@ func TestJSONNilEncodesNull(t *testing.T) {
 
 func TestPBEncodingAndDecode(t *testing.T) {
 	source := wrapperspb.String("player-9")
-	message, err := encodePB(PBMessage{Topic: "player-events", Value: source})
+	key := []byte("player-9")
+	header := []byte("v1")
+	message, err := encodePB(PBMessage{Topic: "player-events", Key: key, Value: source, Headers: []Header{{Key: "schema", Value: header}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	source.Value = "mutated"
+	key[0], header[0] = 'X', 'X'
 	decoded := &wrapperspb.StringValue{}
 	if err = (&Message{Value: message.value}).DecodePB(decoded); err != nil {
 		t.Fatal(err)
 	}
 	if decoded.Value != "player-9" {
 		t.Fatalf("PB snapshot lost: %q", decoded.Value)
+	}
+	if string(message.key) != "player-9" || string(message.headers[0].Value) != "v1" {
+		t.Fatalf("key/header snapshot lost: key=%q headers=%+v", message.key, message.headers)
 	}
 }
 

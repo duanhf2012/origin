@@ -1,0 +1,45 @@
+log:
+  mode: async
+  console: {enabled: true, level: info, format: text}
+nodes:
+  - id: kafka-consumer-1
+    services: [EventService]
+services:
+  EventService:
+    kafka:
+      player_consumer:
+        cluster:
+          brokers: ["${ORIGIN_KAFKA_BROKERS}"]
+          version: "4.0.0"
+          client_id: "origin-example-player-consumer"
+          allow_auto_topic_creation: false
+        # 必填；用途、环境和业务版本应进入 Group ID，发布后不要随意改变。
+        group_id: "origin-example-player-events-v1"
+        topics: ["origin-kafka-json"]
+        # 只在 Group 没有已提交 Offset 时生效；在线业务通常使用 newest。
+        initial_offset: newest
+        # 默认 cooperative_sticky；同组全部实例必须使用兼容策略。
+        balance_strategy: cooperative_sticky
+        session_timeout: 10s
+        heartbeat_interval: 3s
+        rebalance_timeout: 60s
+        # 只提交 Handler 成功后已 Mark 的 Offset。
+        auto_commit_interval: 1s
+        isolation_level: read_committed
+        # 默认 0，不自动重试业务。开启前必须保证 Handler 幂等。
+        handler_retry_max: 0
+        handler_retry_backoff: 1s
+      audit_consumer:
+        cluster:
+          brokers: ["${ORIGIN_KAFKA_BROKERS}"]
+          version: "4.0.0"
+          client_id: "origin-example-audit-consumer"
+          allow_auto_topic_creation: false
+        group_id: "origin-example-audit-v1"
+        topics: ["origin-kafka-raw"]
+        initial_offset: newest
+        # 批次只聚合同一 Partition；任一边界到达即派发。
+        batch:
+          max_messages: 100
+          max_size: 1M
+          max_wait: 50ms

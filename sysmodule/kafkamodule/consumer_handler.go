@@ -155,12 +155,6 @@ func (handler *managedGroupHandler) consumeBatch(session sarama.ConsumerGroupSes
 					messageSize += int64(len(header.Key)) + int64(len(header.Value))
 				}
 			}
-			if messageSize > handler.config.Batch.MaxSize.Bytes() {
-				err := invalidArgument("kafkamodule 单条消费消息超过 batch.max_size")
-				handler.consumer.failed.Add(1)
-				handler.consumer.stopWithError(err)
-				return err
-			}
 			if len(items) > 0 && (len(items) >= handler.config.Batch.MaxMessages || bytes > handler.config.Batch.MaxSize.Bytes()-messageSize) {
 				if err := flush(); err != nil {
 					return err
