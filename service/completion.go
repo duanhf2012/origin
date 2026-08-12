@@ -16,6 +16,42 @@ type completionContext struct {
 	caller    context.Context
 }
 
+// DispatchAsyncCompletion reserves a completion task for this Service. wait runs
+// after releasing the Service execution slot; callback runs after reacquiring the
+// same Service's serialized execution context.
+//
+// The typed result only flows from wait to callback. If wait is not called,
+// callback receives T's zero value and the corresponding error. Scheduling,
+// cancellation, timeout, and panic behavior are delegated to the package-level
+// DispatchAsyncCompletion compatibility function below.
+//
+// This method cannot be part of IService: Go 1.27 does not support type
+// parameters declared by interface methods. Business Services call it through
+// their embedded Service; framework code may continue to use the package API.
+func (service *Service) DispatchAsyncCompletion[T any](
+	ctx context.Context,
+	wait func(context.Context) (T, error),
+	callback func(context.Context, T, error),
+) error {
+	if service == nil || ctx == nil || wait == nil || callback == nil {
+		return errs.ErrInvalidArgument
+	}
+
+	var result T
+	return DispatchAsyncCompletion(
+		service,
+		ctx,
+		func(waitCtx context.Context) error {
+			var err error
+			result, err = wait(waitCtx)
+			return err
+		},
+		func(callbackCtx context.Context, completionErr error) {
+			callback(callbackCtx, result, completionErr)
+		},
+	)
+}
+
 // Deadline 实现 context.Context，并保留调用方唯一显式 Deadline。
 func (ctx *completionContext) Deadline() (deadline time.Time, ok bool) {
 	return ctx.caller.Deadline()
