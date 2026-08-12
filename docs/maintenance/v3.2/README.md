@@ -91,7 +91,9 @@ Kafka Module 分为 Managed Producer、Managed Consumer 与 Native Sarama 三层
   实现依据。
 - [`Origin Blueprint Module 核心设计`](design/Origin%20Blueprint%20Module核心设计.md)：基于新版
   OriginBlueprint Go 引擎的 Service 工作协程适配、Instance 所有权、执行快照热加载、诊断、测试与教程
-  实现依据；已完成内部自审，等待维护者最终 Review。
+  实现依据；设计已确认，等待 `OriginBlueprint v0.1.6` 依赖门禁后实施。
+- [`Blueprint Module纵向切片实施计划`](plans/Blueprint%20Module纵向切片实施计划.md)：依赖固定、TDD 实现、
+  Service 协程集成、热加载、Example、教程及 Windows/Ubuntu 验收顺序。
 - [`Gin HTTP Module 使用指南`](guides/Gin%20HTTP%20Module使用指南.md)：普通/Safe 路由选择、配置、所有权，
   以及每组公开函数和函数参数的实际执行协程。
 - [`HTTP Client 使用指南`](guides/HTTP%20Client使用指南.md)：连接池、请求/响应所有权、Service Await，

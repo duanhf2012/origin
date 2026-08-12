@@ -1,6 +1,6 @@
 # Origin Blueprint Module 核心设计
 
-> 状态：已完成讨论，等待最终 Review
+> 状态：已确认，允许实施（依赖 `OriginBlueprint v0.1.6` 发布后）
 > 基线：Origin v3.0，目标版本：v3.2
 > 引擎基线：`github.com/duanhf2012/OriginBlueprint/engine/go/blueprint`
 > 版本门禁：当前已验证提交为 `14f0d1a`；实施前由维护者发布并固定 `v0.1.6`
