@@ -38,11 +38,20 @@ type consumerOptionFunc func(*consumerOptions)
 
 func (option consumerOptionFunc) applyConsumer(target *consumerOptions) { option(target) }
 
-type consumerOptions struct{ hooks []SaramaConfigHook }
+type consumerOptions struct {
+	hooks   []SaramaConfigHook
+	factory consumerRuntimeFactory
+}
 
 // WithConsumerSaramaConfig 添加 Consumer Sarama Hook；Hook 不能破坏受管模式不变量。
 func WithConsumerSaramaConfig(hook SaramaConfigHook) ConsumerOption {
 	return consumerOptionFunc(func(target *consumerOptions) { target.hooks = append(target.hooks, hook) })
+}
+
+type consumerRuntimeFactory func(context.Context, []string, string, *sarama.Config) (consumerRuntime, error)
+
+func withConsumerRuntimeFactory(factory consumerRuntimeFactory) ConsumerOption {
+	return consumerOptionFunc(func(target *consumerOptions) { target.factory = factory })
 }
 
 // SaramaConfigOption 定制自由模式 Admin Sarama 配置。
