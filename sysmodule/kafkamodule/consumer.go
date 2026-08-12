@@ -53,28 +53,32 @@ type consumerHolder struct {
 // Consumer 是一个逻辑 Kafka 集群的受管 Consumer Group Module。
 type Consumer struct {
 	service.Module
-	mu               sync.Mutex
-	state            consumerState
-	config           ConsumerConfig
-	handler          Handler
-	batchHandler     BatchHandler
-	options          []ConsumerOption
-	factory          consumerRuntimeFactory
-	current          atomic.Pointer[consumerHolder]
-	transitionDone   chan struct{}
-	transitionErr    error
-	startCancel      context.CancelFunc
-	errorMu          sync.RWMutex
-	lastError        error
-	cancelMu         sync.Mutex
-	failureCancel    context.CancelCauseFunc
-	received         atomic.Uint64
-	handled          atomic.Uint64
-	failed           atomic.Uint64
-	batches          atomic.Uint64
-	rebalances       atomic.Uint64
-	dispatchRejected atomic.Uint64
-	runningFlag      atomic.Bool
+	mu                sync.Mutex
+	state             consumerState
+	config            ConsumerConfig
+	handler           Handler
+	batchHandler      BatchHandler
+	options           []ConsumerOption
+	factory           consumerRuntimeFactory
+	current           atomic.Pointer[consumerHolder]
+	transitionDone    chan struct{}
+	transitionErr     error
+	startCancel       context.CancelFunc
+	pauseMu           sync.Mutex
+	pauseAllDesired   bool
+	pausedDesired     map[string]map[int32]struct{}
+	resumedExceptions map[string]map[int32]struct{}
+	errorMu           sync.RWMutex
+	lastError         error
+	cancelMu          sync.Mutex
+	failureCancel     context.CancelCauseFunc
+	received          atomic.Uint64
+	handled           atomic.Uint64
+	failed            atomic.Uint64
+	batches           atomic.Uint64
+	rebalances        atomic.Uint64
+	dispatchRejected  atomic.Uint64
+	runningFlag       atomic.Bool
 }
 
 // NewConsumer 校验并冻结单条消费配置与 Handler，不连接 Kafka。
@@ -444,6 +448,11 @@ func (consumer *Consumer) PauseAll() error {
 	if err != nil {
 		return err
 	}
+	consumer.pauseMu.Lock()
+	consumer.pauseAllDesired = true
+	consumer.pausedDesired = nil
+	consumer.resumedExceptions = nil
+	consumer.pauseMu.Unlock()
 	holder.runtime.pauseAll()
 	return nil
 }
@@ -454,6 +463,11 @@ func (consumer *Consumer) ResumeAll() error {
 	if err != nil {
 		return err
 	}
+	consumer.pauseMu.Lock()
+	consumer.pauseAllDesired = false
+	consumer.pausedDesired = nil
+	consumer.resumedExceptions = nil
+	consumer.pauseMu.Unlock()
 	holder.runtime.resumeAll()
 	return nil
 }
@@ -468,6 +482,16 @@ func (consumer *Consumer) Pause(partitions map[string][]int32) error {
 	if err != nil {
 		return err
 	}
+	consumer.pauseMu.Lock()
+	if consumer.pauseAllDesired {
+		removePartitionSet(consumer.resumedExceptions, current)
+	} else {
+		if consumer.pausedDesired == nil {
+			consumer.pausedDesired = make(map[string]map[int32]struct{})
+		}
+		addPartitionSet(consumer.pausedDesired, current)
+	}
+	consumer.pauseMu.Unlock()
 	holder.runtime.pause(current)
 	return nil
 }
@@ -482,8 +506,79 @@ func (consumer *Consumer) Resume(partitions map[string][]int32) error {
 	if err != nil {
 		return err
 	}
+	consumer.pauseMu.Lock()
+	if consumer.pauseAllDesired {
+		if consumer.resumedExceptions == nil {
+			consumer.resumedExceptions = make(map[string]map[int32]struct{})
+		}
+		addPartitionSet(consumer.resumedExceptions, current)
+	} else {
+		removePartitionSet(consumer.pausedDesired, current)
+	}
+	consumer.pauseMu.Unlock()
 	holder.runtime.resume(current)
 	return nil
+}
+
+func addPartitionSet(target map[string]map[int32]struct{}, partitions map[string][]int32) {
+	for topic, values := range partitions {
+		set := target[topic]
+		if set == nil {
+			set = make(map[int32]struct{}, len(values))
+			target[topic] = set
+		}
+		for _, partition := range values {
+			set[partition] = struct{}{}
+		}
+	}
+}
+
+func removePartitionSet(target map[string]map[int32]struct{}, partitions map[string][]int32) {
+	for topic, values := range partitions {
+		set := target[topic]
+		for _, partition := range values {
+			delete(set, partition)
+		}
+		if len(set) == 0 {
+			delete(target, topic)
+		}
+	}
+}
+
+func snapshotPartitionSet(source map[string]map[int32]struct{}) map[string][]int32 {
+	result := make(map[string][]int32, len(source))
+	for topic, set := range source {
+		result[topic] = make([]int32, 0, len(set))
+		for partition := range set {
+			result[topic] = append(result[topic], partition)
+		}
+	}
+	return result
+}
+
+func (consumer *Consumer) applyDesiredPause() {
+	if consumer == nil {
+		return
+	}
+	holder := consumer.current.Load()
+	if holder == nil {
+		return
+	}
+	consumer.pauseMu.Lock()
+	pauseAll := consumer.pauseAllDesired
+	paused := snapshotPartitionSet(consumer.pausedDesired)
+	resumed := snapshotPartitionSet(consumer.resumedExceptions)
+	consumer.pauseMu.Unlock()
+	if pauseAll {
+		holder.runtime.pauseAll()
+		if len(resumed) > 0 {
+			holder.runtime.resume(resumed)
+		}
+		return
+	}
+	if len(paused) > 0 {
+		holder.runtime.pause(paused)
+	}
 }
 
 func normalizePartitions(input map[string][]int32) (map[string][]int32, error) {

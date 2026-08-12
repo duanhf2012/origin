@@ -115,6 +115,16 @@ func TestConsumerOnStartWaitsForFirstSessionAndPauseResume(t *testing.T) {
 	if err := module.PauseAll(); err != nil {
 		t.Fatal(err)
 	}
+	holder := module.current.Load()
+	if holder == nil {
+		t.Fatal("consumer holder missing")
+	}
+	if err := holder.handler.ConsumeClaim(&fakeConsumerSession{ctx: context.Background()}, claimWithOffsets()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.pauseAllCalls.Load() != 2 {
+		t.Fatalf("PauseAll intent was not replayed for a new Claim: %d", runtime.pauseAllCalls.Load())
+	}
 	if err := module.ResumeAll(); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +139,7 @@ func TestConsumerOnStartWaitsForFirstSessionAndPauseResume(t *testing.T) {
 	if captured != 0 {
 		t.Fatalf("Pause did not copy caller map: %d", captured)
 	}
-	if runtime.pauseAllCalls.Load() != 1 || runtime.resumeAllCalls.Load() != 1 {
+	if runtime.pauseAllCalls.Load() != 2 || runtime.resumeAllCalls.Load() != 1 {
 		t.Fatalf("pause calls=%d resume calls=%d", runtime.pauseAllCalls.Load(), runtime.resumeAllCalls.Load())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

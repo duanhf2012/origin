@@ -39,6 +39,9 @@ func (handler *managedGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSes
 	if session == nil || claim == nil || handler.owner == nil || handler.consumer == nil {
 		return ErrInvalidArgument
 	}
+	// Sarama 的 Pause 状态只作用于当前已经创建的 Partition Consumer。Claim 在 Setup 后才创建，
+	// 因此必须在每个 Claim 入口重放 Module 保存的暂停意图，覆盖启动与 Rebalance 窗口。
+	handler.consumer.applyDesiredPause()
 	if handler.batchHandler != nil {
 		return handler.consumeBatch(session, claim)
 	}

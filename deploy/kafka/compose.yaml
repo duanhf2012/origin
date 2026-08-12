@@ -1,0 +1,48 @@
+name: origin-kafka
+
+services:
+  broker:
+    image: ${KAFKA_IMAGE:-apache/kafka:4.3.1}
+    container_name: origin-kafka
+    hostname: origin-kafka
+    restart: unless-stopped
+    ports:
+      - "${KAFKA_HOST_PORT:-9092}:9092"
+    environment:
+      # 单节点 KRaft combined 模式只用于开发、教程和协议验收，不代表生产集群拓扑。
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@origin-kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: CONTROLLER://:29093,PLAINTEXT://:19092,PLAINTEXT_HOST://:9092
+      # 外部地址必须是 Windows/局域网客户端真正可达的 Ubuntu 地址，不能写 localhost。
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://origin-kafka:19092,PLAINTEXT_HOST://${KAFKA_ADVERTISED_HOST:-192.168.8.3}:${KAFKA_HOST_PORT:-9092}
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      # 测试 Broker 允许 8M Record；Module 默认仍限制单条编码消息为 1M。
+      KAFKA_MESSAGE_MAX_BYTES: 8388608
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 8388608
+      # 当前双机验收环境存在约 26h 时钟偏差；开发环境放宽 CreateTime 的未来容差。
+      # 生产不应照搬，应通过 NTP 同步所有 Producer/Broker 时钟并使用 Kafka 默认 1h 边界。
+      KAFKA_LOG_MESSAGE_TIMESTAMP_AFTER_MAX_MS: 172800000
+    volumes:
+      - origin-kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+volumes:
+  origin-kafka-data:
+    name: origin-kafka-data

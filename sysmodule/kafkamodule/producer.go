@@ -281,7 +281,10 @@ func (producer *Producer) completeEnvelope(holder *producerHolder, envelope *pro
 
 func toSaramaProducerMessage(envelope *producerEnvelope) *sarama.ProducerMessage {
 	current := envelope.encoded
-	message := &sarama.ProducerMessage{Topic: current.topic, Timestamp: current.timestamp, Metadata: envelope}
+	message := &sarama.ProducerMessage{Topic: current.topic, Metadata: envelope}
+	if !current.timestamp.IsZero() {
+		message.Timestamp = current.timestamp
+	}
 	if current.key != nil {
 		message.Key = sarama.ByteEncoder(current.key)
 	}

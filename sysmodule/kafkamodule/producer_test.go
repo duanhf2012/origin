@@ -131,6 +131,20 @@ func TestProducerBatchAsyncReportsPartialAcceptance(t *testing.T) {
 	}
 }
 
+func TestProducerDoesNotEncodeZeroTimestamp(t *testing.T) {
+	envelope := testEnvelope(1)
+	message := toSaramaProducerMessage(envelope)
+	if !message.Timestamp.IsZero() {
+		t.Fatalf("zero timestamp was encoded: %v", message.Timestamp)
+	}
+	expected := time.Now().UTC().Truncate(time.Millisecond)
+	envelope.encoded.timestamp = expected
+	message = toSaramaProducerMessage(envelope)
+	if !message.Timestamp.Equal(expected) {
+		t.Fatalf("explicit timestamp lost: %v", message.Timestamp)
+	}
+}
+
 func TestProducerStartFailureCleansRuntimeAndStopDuringStart(t *testing.T) {
 	created := newFakeProducerRuntime(nil)
 	gate := make(chan struct{})
