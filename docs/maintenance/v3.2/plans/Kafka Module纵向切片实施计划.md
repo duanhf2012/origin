@@ -1,5 +1,7 @@
 ﻿# Kafka Module 纵向切片实施计划
 
+> 状态：已完成实现、真实 Kafka 集成与 Windows/Ubuntu 验收
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在 Origin v3.2 交付生产可用的 IBM Sarama Producer/Consumer Module、Raw/JSON/PB 外观、Origin Service 协程集成、自由 Sarama 配置层、完整教程与双平台真实 Kafka 验收。

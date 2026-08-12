@@ -1,6 +1,6 @@
 # Origin Kafka Module 核心设计
 
-> 状态：已确认，允许在 MongoDB、Redis 完成后实施
+> 状态：已实施并通过 Windows/Ubuntu 真实 Kafka 验收
 > 基线：Origin v3.0，目标版本：v3.2
 > 兼容性：项目尚未对外发布，不保留 Origin v2 Kafka API、命名或行为兼容层
 > Kafka Client 基线：实施前再次复核；截至 2026-08-11 固定为 `github.com/IBM/sarama v1.60.1`

@@ -1,6 +1,6 @@
 # Origin Redis Module 核心设计
 
-> 状态：已实施并完成设计回查；Redis 独立验收后继续实施 Kafka
+> 状态：已实施并通过双平台验收；后续 Kafka 与 Blueprint 切片也已完成
 > 基线：Origin v3.0，目标版本：v3.2
 > 兼容性：项目尚未对外发布，不保留 Origin v2 Redis API、命名或行为兼容层
 > Driver 基线：实施前再次复核；截至 2026-08-11 固定为 `github.com/redis/go-redis/v9 v9.22.0`

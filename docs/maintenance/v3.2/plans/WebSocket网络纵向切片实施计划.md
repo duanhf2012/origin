@@ -1,5 +1,6 @@
 # WebSocket 网络纵向切片实施计划
 
+> 状态：已完成实现与 Windows/Ubuntu 验收
 > 目标版本：Origin v3.2
 > 实施顺序：公共基础与 TCP 验收之后、KCP 之前
 > 设计依据：[`Origin 网络模块核心设计`](../design/Origin网络模块核心设计.md)

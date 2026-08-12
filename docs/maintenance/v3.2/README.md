@@ -1,7 +1,8 @@
 # Origin v3.2 文档
 
-v3.2 已进入纵向切片实施阶段。公共网络契约、TCP、WebSocket、KCP、Gin HTTP Module 与 HTTP Client
-已完成对应纵向切片；KCP 运行时默认值经过 Windows 与 Ubuntu 弱网验证后，已提供严格 Service Config。
+v3.2 当前规划的公共网络契约、TCP、WebSocket、KCP、Gin HTTP、HTTP Client、MongoDB、Redis、Kafka
+与 Blueprint 纵向切片均已完成实现、教程和 Windows/Ubuntu 验收。MySQL 按当前优先级继续暂缓；本目录
+作为各扩展组件设计、实施记录和使用指南的统一入口。
 
 ## 网络模块教程
 
@@ -86,17 +87,19 @@ Blueprint Module 把新版 OriginBlueprint Go 引擎适配到 Origin Service 工
 
 - [`Origin 网络系统模块能力分析与设计提案`](proposals/Origin网络系统模块能力分析与设计提案.md)
 - [`Origin 网络事件与自定义协议扩展调研`](proposals/Origin网络事件与自定义协议扩展调研.md)
-- [`Origin 网络模块核心设计`](design/Origin网络模块核心设计.md)：已经确认的单一实现依据，包含
+- [`Origin 网络模块核心设计`](design/Origin网络模块核心设计.md)：已实施并通过 TCP、WebSocket、KCP
+  双平台验收的单一设计依据，包含
   公共 API、内存池、消息队列、所有权、背压、协议和实施门禁。
 - [`Origin Gin 与 HTTP Client 能力分析`](proposals/Origin%20Gin与HTTP%20Client能力分析.md)
-- [`Origin Gin 与 HTTP Client 核心设计`](design/Origin%20Gin与HTTP%20Client核心设计.md)：已确认的 HTTP
+- [`Origin Gin 与 HTTP Client 核心设计`](design/Origin%20Gin与HTTP%20Client核心设计.md)：已实施并通过双平台验收的 HTTP
   服务端 Module 与代码持有 Client 实现依据。
-- [`Origin MongoDB Module 核心设计`](design/Origin%20MongoDB%20Module核心设计.md)：已确认的 MongoDB
+- [`Origin MongoDB Module 核心设计`](design/Origin%20MongoDB%20Module核心设计.md)：已实施并通过双平台验收的 MongoDB
   生命周期、多集群、配置、便利层、原子操作、测试和游戏场景 Example 实现依据。
-- [`Origin Redis Module 核心设计`](design/Origin%20Redis%20Module核心设计.md)：已最终确认的 Redis
+- [`Origin Redis Module 核心设计`](design/Origin%20Redis%20Module核心设计.md)：已实施并通过双平台验收的 Redis
   Standalone/Sentinel/Cluster、生产配置、高频便利层、Pipeline/Lua、分布式锁、测试和游戏场景 Example
   实现依据。
-- [`Origin Kafka Module 核心设计`](design/Origin%20Kafka%20Module核心设计.md)：已确认的 Producer/Consumer
+- [`Origin Kafka Module 核心设计`](design/Origin%20Kafka%20Module核心设计.md)：已实施并通过真实 Kafka
+  双平台验收的 Producer/Consumer
   分离外观、Raw/JSON/PB、Origin Service 协程集成、自由 Sarama 模式、可靠性、测试和完整 Example
   实现依据。
 - [`Origin Blueprint Module 核心设计`](design/Origin%20Blueprint%20Module核心设计.md)：基于新版
@@ -112,14 +115,11 @@ Blueprint Module 把新版 OriginBlueprint Go 引擎适配到 Origin Service 工
   所有权、可靠性、游戏场景、排错和双平台测试。
 - [`Blueprint Module 使用指南`](guides/Blueprint%20Module使用指南.md)：一次性与长期执行、异步节点、完成回调、
   热加载快照、协程边界、所有权和排错。
-- [`Blueprint Module纵向切片变更记录`](changes/Blueprint%20Module纵向切片变更记录.md)
-- [`Blueprint Module纵向切片验收报告`](reports/Blueprint%20Module纵向切片验收报告.md)
-
-两份网络 Proposal 保存能力分析和调研依据，不单独授权实现。网络核心设计已允许按 TCP、WebSocket、
-KCP 纵向切片实施；Gin、HTTP Client、MongoDB、Redis 与 Kafka 已完成实现、测试、教程和 Example。MySQL
+两份网络 Proposal 保存能力分析和调研依据，不单独授权实现。网络核心设计对应的 TCP、WebSocket、
+KCP 纵向切片，以及 Gin、HTTP Client、MongoDB、Redis、Kafka、Blueprint 均已完成实现、测试、教程和 Example。MySQL
 按当前项目优先级暂缓，不进入本轮实施。Kafka 的 Ubuntu Docker 环境已在实施阶段安装并保留。
 
-当前实施计划：
+已完成实施计划：
 
 - [`TCP 网络首批纵向切片实施计划`](plans/TCP网络首批纵向切片实施计划.md)
 - [`WebSocket 网络纵向切片实施计划`](plans/WebSocket网络纵向切片实施计划.md)
@@ -128,8 +128,9 @@ KCP 纵向切片实施；Gin、HTTP Client、MongoDB、Redis 与 Kafka 已完成
 - [`MongoDB Module 纵向切片实施计划`](plans/MongoDB%20Module纵向切片实施计划.md)
 - [`Redis Module 纵向切片实施计划`](plans/Redis%20Module纵向切片实施计划.md)
 - [`Kafka Module 纵向切片实施计划`](plans/Kafka%20Module纵向切片实施计划.md)
+- [`Blueprint Module纵向切片实施计划`](plans/Blueprint%20Module纵向切片实施计划.md)
 
-当前变更与验收材料：
+变更与验收材料：
 
 - [`TCP 网络首批纵向切片变更记录`](changes/TCP网络首批纵向切片变更记录.md)
 - [`TCP 网络首批纵向切片验收报告`](reports/TCP网络首批纵向切片验收报告.md)
@@ -145,5 +146,8 @@ KCP 纵向切片实施；Gin、HTTP Client、MongoDB、Redis 与 Kafka 已完成
 - [`Redis Module 纵向切片验收报告`](reports/Redis%20Module纵向切片验收报告.md)
 - [`Kafka Module 纵向切片变更记录`](changes/Kafka%20Module纵向切片变更记录.md)
 - [`Kafka Module 纵向切片验收报告`](reports/Kafka%20Module纵向切片验收报告.md)
+- [`Blueprint Module纵向切片变更记录`](changes/Blueprint%20Module纵向切片变更记录.md)
+- [`Blueprint Module纵向切片验收报告`](reports/Blueprint%20Module纵向切片验收报告.md)
+- [`v3.2 扩展组件收口报告`](reports/v3.2扩展组件收口报告.md)
 
 v3.1 的维护资料继续保留在 `../v3.1/`，不得混入本目录。
