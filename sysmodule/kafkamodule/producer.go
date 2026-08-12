@@ -29,6 +29,9 @@ type producerHolder struct {
 	completionDone chan struct{}
 }
 
+// DeliveryHandler 在 Producer 所属 Service 的串行工作协程中处理一个异步 Delivery 结果。
+type DeliveryHandler func(context.Context, DeliveryResult)
+
 // Producer 是一个逻辑 Kafka 集群的受管异步 Producer Module。
 // 它使用一个 Sarama Client、一个 AsyncProducer 和一层消息数/字节双有界提交队列。
 type Producer struct {
@@ -530,6 +533,66 @@ func (producer *Producer) ProducePBBatchAsync(messages []PBMessage) ([]*Delivery
 // ProducePBBatchSync 编码、提交并等待 Protobuf 批量结果。
 func (producer *Producer) ProducePBBatchSync(ctx context.Context, messages []PBMessage) ([]DeliveryResult, error) {
 	return batchSync(ctx, messages, producer.ProducePBAsync, func(message PBMessage) string { return message.Topic })
+}
+
+// DispatchDelivery 预留一个所属 Service 根任务，异步等待 Delivery 后在 Service 串行工作协程执行 handler。
+//
+// wait 在 Service.Await 已释放执行权后运行；handler 恢复执行权后运行。返回错误表示任务未能预留，
+// Delivery 本身仍然有效，调用方可以自行 Wait 或交给其他有所有者的流程。
+func (producer *Producer) DispatchDelivery(ctx context.Context, delivery *Delivery, handler DeliveryHandler) error {
+	if producer == nil || producer.Service() == nil || ctx == nil || delivery == nil || handler == nil {
+		return ErrInvalidArgument
+	}
+	var result DeliveryResult
+	return service.DispatchAsyncCompletion(
+		producer.Service(),
+		ctx,
+		func(waitCtx context.Context) error {
+			metadata, err := delivery.Wait(waitCtx)
+			result = DeliveryResult{Metadata: metadata, Err: err}
+			return nil
+		},
+		func(taskCtx context.Context, completionErr error) {
+			if completionErr != nil && result.Err == nil {
+				result.Err = completionErr
+			}
+			handler(taskCtx, result)
+		},
+	)
+}
+
+// DispatchDeliveries 只预留一个所属 Service 根任务，按输入顺序等待全部 Delivery，随后一次回调。
+func (producer *Producer) DispatchDeliveries(ctx context.Context, deliveries []*Delivery, handler func(context.Context, []DeliveryResult)) error {
+	if producer == nil || producer.Service() == nil || ctx == nil || len(deliveries) == 0 || handler == nil {
+		return ErrInvalidArgument
+	}
+	for _, delivery := range deliveries {
+		if delivery == nil {
+			return ErrInvalidArgument
+		}
+	}
+	results := make([]DeliveryResult, len(deliveries))
+	return service.DispatchAsyncCompletion(
+		producer.Service(),
+		ctx,
+		func(waitCtx context.Context) error {
+			for index, delivery := range deliveries {
+				metadata, err := delivery.Wait(waitCtx)
+				results[index] = DeliveryResult{Metadata: metadata, Err: err}
+			}
+			return nil
+		},
+		func(taskCtx context.Context, completionErr error) {
+			if completionErr != nil {
+				for index := range results {
+					if results[index].Err == nil {
+						results[index].Err = completionErr
+					}
+				}
+			}
+			handler(taskCtx, results)
+		},
+	)
 }
 
 // Stats 返回当前累计计数和在途数量的原子快照。
