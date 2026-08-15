@@ -93,6 +93,7 @@ func (render *renderer) emitSize(
 			index,
 			expression,
 		)
+		fmt.Fprintf(render.body, "%s\t_ = %s\n", indent, index)
 		render.emitSize(
 			fmt.Sprintf("%s[%s]", expression, index),
 			value.Elem(),
@@ -124,6 +125,7 @@ func (render *renderer) emitSize(
 			index,
 			expression,
 		)
+		fmt.Fprintf(render.body, "%s\t_ = %s\n", indent, index)
 		render.emitSize(
 			fmt.Sprintf("%s[%s]", expression, index),
 			value.Elem(),
@@ -150,6 +152,8 @@ func (render *renderer) emitSize(
 			item,
 			expression,
 		)
+		fmt.Fprintf(render.body, "%s\t_ = %s\n", indent, key)
+		fmt.Fprintf(render.body, "%s\t_ = %s\n", indent, item)
 		render.emitSize(key, value.Key(), false, indent+"\t")
 		render.emitSize(item, value.Elem(), false, indent+"\t")
 		fmt.Fprintf(render.body, "%s}\n", indent)

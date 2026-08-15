@@ -280,6 +280,7 @@ func encodePlayerRPCGetPlayerRequest(client rpc.Client, kind rpc.CallKind, arg1 
 		return nil, err
 	}
 	for index1 := range arg2.Tags {
+		_ = index1
 		if err := sizer.AddString(string(arg2.Tags[index1])); err != nil {
 			return nil, err
 		}
@@ -288,6 +289,8 @@ func encodePlayerRPCGetPlayerRequest(client rpc.Client, kind rpc.CallKind, arg1 
 		return nil, err
 	}
 	for key2, value3 := range arg2.Metadata {
+		_ = key2
+		_ = value3
 		if err := sizer.AddString(string(key2)); err != nil {
 			return nil, err
 		}
@@ -533,6 +536,7 @@ func encodePlayerRPCGetPlayerResponse(response *rpc.ResponseWriter, result1 Play
 		return err
 	}
 	for index1 := range result1.Tags {
+		_ = index1
 		if err := sizer.AddString(string(result1.Tags[index1])); err != nil {
 			return err
 		}
@@ -541,6 +545,8 @@ func encodePlayerRPCGetPlayerResponse(response *rpc.ResponseWriter, result1 Play
 		return err
 	}
 	for key2, value3 := range result1.Metadata {
+		_ = key2
+		_ = value3
 		if err := sizer.AddString(string(key2)); err != nil {
 			return err
 		}
@@ -1323,6 +1329,7 @@ func encodePlayerRPCRoundTripTimeRequest(client rpc.Client, kind rpc.CallKind, a
 		return nil, err
 	}
 	for index5 := range arg1.History {
+		_ = index5
 		customSize6, customErr7 := TimeCodec{}.Size(&(arg1.History[index5]))
 		if customErr7 != nil {
 			return nil, errs.ErrRPCEncodeFailed
@@ -1335,6 +1342,8 @@ func encodePlayerRPCRoundTripTimeRequest(client rpc.Client, kind rpc.CallKind, a
 		return nil, err
 	}
 	for key8, value9 := range arg1.ByTime {
+		_ = key8
+		_ = value9
 		customSize10, customErr11 := TimeCodec{}.Size(&(key8))
 		if customErr11 != nil {
 			return nil, errs.ErrRPCEncodeFailed
@@ -1596,6 +1605,7 @@ func encodePlayerRPCRoundTripTimeResponse(response *rpc.ResponseWriter, result1 
 		return err
 	}
 	for index5 := range result1.History {
+		_ = index5
 		customSize6, customErr7 := TimeCodec{}.Size(&(result1.History[index5]))
 		if customErr7 != nil {
 			return errs.ErrRPCEncodeFailed
@@ -1608,6 +1618,8 @@ func encodePlayerRPCRoundTripTimeResponse(response *rpc.ResponseWriter, result1 
 		return err
 	}
 	for key8, value9 := range result1.ByTime {
+		_ = key8
+		_ = value9
 		customSize10, customErr11 := TimeCodec{}.Size(&(key8))
 		if customErr11 != nil {
 			return errs.ErrRPCEncodeFailed
@@ -1921,6 +1933,7 @@ func encodePlayerRPCSavePlayerRequest(client rpc.Client, kind rpc.CallKind, arg1
 		return nil, err
 	}
 	for index1 := range arg1.Tags {
+		_ = index1
 		if err := sizer.AddString(string(arg1.Tags[index1])); err != nil {
 			return nil, err
 		}
@@ -1929,6 +1942,8 @@ func encodePlayerRPCSavePlayerRequest(client rpc.Client, kind rpc.CallKind, arg1
 		return nil, err
 	}
 	for key2, value3 := range arg1.Metadata {
+		_ = key2
+		_ = value3
 		if err := sizer.AddString(string(key2)); err != nil {
 			return nil, err
 		}
