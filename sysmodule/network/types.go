@@ -11,8 +11,8 @@ import (
 
 // SessionID 是跨传输、跨 Module 和跨进程生命周期工程上实际唯一的连接标识。
 //
-// 每个新 Session 使用独立的 128 位安全随机数，外观是固定 22 字符的无填充 Base64URL 文本；
-// 空字符串表示未绑定或无效 Session。
+// 每个新 Session 使用 32 位秒级循环时间域和独立的 128 位安全随机数，外观是固定
+// 27 字符的无填充 Base64URL 文本；空字符串表示未绑定或无效 Session。
 type SessionID string
 
 // Transport 标识 Session 使用的底层长连接传输。

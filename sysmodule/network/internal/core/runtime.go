@@ -36,8 +36,10 @@ type Runtime struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	// sessionIDSource 固定为系统安全随机源；字段仅用于在不替换包级状态的情况下验证失败路径。
+	// sessionIDSource 固定为系统安全随机源，sessionIDNow 固定为系统时钟；字段仅用于在不替换
+	// 包级状态的情况下验证失败、回绕与碰撞路径。
 	sessionIDSource io.Reader
+	sessionIDNow    func() time.Time
 
 	mu           sync.Mutex
 	sessions     map[public.SessionID]*Session
@@ -90,6 +92,7 @@ func NewRuntime(
 		ctx:             ctx,
 		cancel:          cancel,
 		sessionIDSource: rand.Reader,
+		sessionIDNow:    time.Now,
 		sessions:        make(map[public.SessionID]*Session),
 	}, nil
 }
@@ -133,7 +136,7 @@ func (runtime *Runtime) NewSession(conn TransportConn) (*Session, error) {
 	runtime.mu.Unlock()
 
 	for attempt := 0; attempt < maxSessionIDGenerationAttempts; attempt++ {
-		id, err := newSessionID(runtime.sessionIDSource)
+		id, err := newSessionID(runtime.sessionIDSource, sessionIDTimestamp(runtime.sessionIDNow()))
 		if err != nil {
 			return nil, errs.Wrap(
 				errs.CodeInternal,

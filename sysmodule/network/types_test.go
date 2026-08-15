@@ -7,8 +7,8 @@ import (
 )
 
 func TestSessionIDUsesStandaloneStringIdentity(t *testing.T) {
-	const id network.SessionID = "AAECAwQFBgcICQoLDA0ODw"
-	if string(id) != "AAECAwQFBgcICQoLDA0ODw" {
+	const id network.SessionID = "AQIDBAABAgMEBQYHCAkKCwwNDg8"
+	if string(id) != "AQIDBAABAgMEBQYHCAkKCwwNDg8" {
 		t.Fatalf("SessionID string conversion = %q", id)
 	}
 	var zero network.SessionID

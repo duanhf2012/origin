@@ -31,7 +31,7 @@ func (server *Server) Session(id SessionID) (Session, bool)
 func (server *Server) CloseSession(id SessionID, cause error) bool
 ```
 
-空字符串是无效 ID。每次建立新的逻辑 Session 都生成新的固定 22 字符、无填充 Base64URL 文本；
+空字符串是无效 ID。每次建立新的逻辑 Session 都生成新的固定 27 字符、无填充 Base64URL 文本；
 Client 重连不得复用旧 ID。TCP、WebSocket 和 KCP 通过公共 Core 使用同一生成逻辑，不在 ID
 中编码 Transport、地址、ServiceName 或业务玩家身份。
 
@@ -40,17 +40,20 @@ Client 重连不得复用旧 ID。TCP、WebSocket 和 KCP 通过公共 Core 使�
 
 ## 3. 生成与失败语义
 
-实现使用标准库 `crypto/rand` 读取 128 位随机数，不改写任何位，直接通过标准库
-`base64.RawURLEncoding` 编码为 22 字符字符串。生成不依赖时间、机器信息、地址、PID、
-包级计数器或全局可变状态。
+实现把相对 `2026-01-01T00:00:00Z` 的秒数投影到 32 位无符号整数，作为大端序的前 4 字节；
+后 16 字节由标准库 `crypto/rand` 提供完整 128 位随机数。20 字节整体通过标准库
+`base64.RawURLEncoding` 编码为 27 字符字符串。生成不依赖机器信息、地址、PID、包级计数器
+或全局可变状态。
 
-ID 提供完整 128 位随机空间，是工程意义上的全局唯一，而不是依赖中心协调的数学绝对唯一。
+32 位时间域约 136 年循环一次，满足约 100 年的区分需求。时钟回拨、多机器同秒或时间域回绕只会让多个
+ID 共享时间域，每个 ID 仍保留完整 128 位随机空间。因此最差情况只退化为纯 128 位随机方案，
+不依赖时钟正确性才能保持工程上实际唯一。
 Runtime 在登记前仍检查自己的活动 Map；极端碰撞时重新生成，连续多次碰撞返回 `ErrInternal`。
 随机源失败同样返回 `ErrInternal`，不得退化为时间戳、弱随机或局部递增值。
 
 ## 4. 性能与内存
 
-随机读取和字符串编码只发生在连接建立冷路径。接收和发送热路径继续直接持有 `*Session`，
+时钟读取、随机读取和字符串编码只发生在连接建立冷路径。接收和发送热路径继续直接持有 `*Session`，
 不会逐消息生成、解析或复制 ID；业务显式调用 `Server.Session`/`CloseSession` 时才执行字符串
 Map 查询。
 
@@ -66,4 +69,5 @@ Map 查询。
 框架没有把该 SessionID 写入 TCP、WebSocket 或 KCP Wire，所以不存在协议迁移、灰度互通或
 历史数据解析。若业务自行持久化旧数值 ID，需要在升级时清空这些仅对旧进程有效的瞬时连接
 索引，不能把旧数值转换成新 SessionID。Base64URL 文本区分大小写，业务如果存入数据库，
-对应字段和索引也必须使用区分大小写的比较规则。
+对应字段和索引也必须使用区分大小写的比较规则。ID 包含可推导的约略建连秒数，不得把
+SessionID 当作不可猜测的认证凭证或保密字段。
