@@ -17,11 +17,13 @@ import (
 	originlog "github.com/duanhf2012/origin/v3/log"
 	"github.com/duanhf2012/origin/v3/service"
 	public "github.com/duanhf2012/origin/v3/sysmodule/network"
+	"github.com/duanhf2012/origin/v3/util/identifier"
 )
 
 const (
-	initialDispatchRetry = time.Millisecond
-	maxDispatchRetry     = 100 * time.Millisecond
+	initialDispatchRetry           = time.Millisecond
+	maxDispatchRetry               = 100 * time.Millisecond
+	maxSessionIDGenerationAttempts = 4
 )
 
 // Runtime 管理一个 Server、Client 或 Dialer 的全部公共 Session 状态。
@@ -136,13 +138,14 @@ func (runtime *Runtime) NewSession(conn TransportConn) (*Session, error) {
 	runtime.mu.Unlock()
 
 	for attempt := 0; attempt < maxSessionIDGenerationAttempts; attempt++ {
-		id, err := newSessionID(runtime.sessionIDSource, sessionIDTimestamp(runtime.sessionIDNow()))
+		value, err := identifier.NewTimeRandomWith(runtime.sessionIDNow(), runtime.sessionIDSource)
 		if err != nil {
 			return nil, errs.Wrap(
 				errs.CodeInternal,
 				fmt.Errorf("network SessionID 生成失败: %w", err),
 			)
 		}
+		id := public.SessionID(value)
 
 		runtime.mu.Lock()
 		// 生成期间停止或其他连接可能改变容量，登记前必须在线性化锁内重新检查。

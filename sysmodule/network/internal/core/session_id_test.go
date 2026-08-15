@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"context"
-	cryptorand "crypto/rand"
 	"errors"
 	"io"
 	"net"
@@ -13,97 +12,8 @@ import (
 	"github.com/duanhf2012/origin/v3/errs"
 	"github.com/duanhf2012/origin/v3/internal/bufferpool"
 	public "github.com/duanhf2012/origin/v3/sysmodule/network"
+	"github.com/duanhf2012/origin/v3/util/identifier"
 )
-
-func TestNewSessionIDEncodesTimestampAndRandomBytes(t *testing.T) {
-	source := []byte{
-		0x00, 0x01, 0x02, 0x03,
-		0x04, 0x05,
-		0x06, 0x07,
-		0x08, 0x09,
-		0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-	}
-	id, err := newSessionID(bytes.NewReader(source), 0x01020304)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const want public.SessionID = "AQIDBAABAgMEBQYHCAkKCwwNDg8"
-	if id != want {
-		t.Fatalf("newSessionID() = %q, want %q", id, want)
-	}
-}
-
-func TestSessionIDTimestampUsesFixedEpochAndUint32Cycle(t *testing.T) {
-	tests := []struct {
-		name string
-		unix int64
-		want uint32
-	}{
-		{name: "before epoch", unix: sessionIDEpochUnixSeconds - 1, want: ^uint32(0)},
-		{name: "at epoch", unix: sessionIDEpochUnixSeconds, want: 0},
-		{name: "last second", unix: sessionIDEpochUnixSeconds + 1<<32 - 1, want: ^uint32(0)},
-		{name: "cycle", unix: sessionIDEpochUnixSeconds + 1<<32, want: 0},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := sessionIDTimestamp(time.Unix(test.unix, 0)); got != test.want {
-				t.Fatalf("sessionIDTimestamp(%d) = %d, want %d", test.unix, got, test.want)
-			}
-		})
-	}
-}
-
-func TestNewSessionIDSeparatesTimestampDomains(t *testing.T) {
-	// 固定全部随机字节，只改变时间域，确认跨秒 ID 不会因随机部分相同而重复。
-	first, err := newSessionID(bytes.NewReader(make([]byte, 16)), 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := newSessionID(bytes.NewReader(make([]byte, 16)), 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first == second {
-		t.Fatalf("different timestamp domains produced the same SessionID %q", first)
-	}
-}
-
-func TestNewSessionIDRejectsUnavailableRandomSource(t *testing.T) {
-	tests := []struct {
-		name   string
-		source io.Reader
-	}{
-		{name: "nil"},
-		{name: "short", source: bytes.NewReader(make([]byte, 15))},
-		{name: "error", source: errorSessionIDReader{}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			id, err := newSessionID(test.source, 0)
-			if err == nil || id != "" {
-				t.Fatalf("newSessionID() = %q, %v", id, err)
-			}
-		})
-	}
-}
-
-func TestNewSessionIDDoesNotCollideAcrossIndependentCalls(t *testing.T) {
-	const count = 16_384
-	seen := make(map[public.SessionID]struct{}, count)
-	for index := 0; index < count; index++ {
-		id, err := newSessionID(cryptorand.Reader, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if id == "" {
-			t.Fatal("newSessionID() returned empty ID")
-		}
-		if _, exists := seen[id]; exists {
-			t.Fatalf("duplicate SessionID %q", id)
-		}
-		seen[id] = struct{}{}
-	}
-}
 
 func TestRuntimeNewSessionRejectsRandomFailureAndRepeatedCollision(t *testing.T) {
 	t.Run("random failure", func(t *testing.T) {
@@ -175,7 +85,9 @@ func TestRuntimeNewSessionAdmissionAndCollisionRetry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if first.id == "" || second.id == "" || first.id == second.id || len(runtime.sessions) != 2 {
+		if first.id == "" || second.id == "" || first.id == second.id ||
+			len(first.id) != identifier.TimeRandomLength || len(second.id) != identifier.TimeRandomLength ||
+			len(runtime.sessions) != 2 {
 			t.Fatalf("first=%q second=%q sessions=%d", first.id, second.id, len(runtime.sessions))
 		}
 		if session, ok := runtime.Session(""); session != nil || ok {
@@ -190,24 +102,11 @@ func TestRuntimeNewSessionAdmissionAndCollisionRetry(t *testing.T) {
 	})
 }
 
-func BenchmarkNewSessionID(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		id, err := newSessionID(cryptorand.Reader, sessionIDTimestamp(time.Now()))
-		if err != nil {
-			b.Fatal(err)
-		}
-		benchmarkSessionIDSink = id
-	}
-}
-
 type errorSessionIDReader struct{}
 
 func (errorSessionIDReader) Read([]byte) (int, error) {
 	return 0, errors.New("random source unavailable")
 }
-
-var benchmarkSessionIDSink public.SessionID
 
 func newSessionIDTestRuntime(source io.Reader, maxSessions int) *Runtime {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -216,7 +115,7 @@ func newSessionIDTestRuntime(source io.Reader, maxSessions int) *Runtime {
 		cancel:          cancel,
 		sessionIDSource: source,
 		sessionIDNow: func() time.Time {
-			return time.Unix(sessionIDEpochUnixSeconds+0x01020304, 0)
+			return time.Unix(1_800_000_000, 0)
 		},
 		options: public.EndpointOptions{
 			MaxSessions: maxSessions,
