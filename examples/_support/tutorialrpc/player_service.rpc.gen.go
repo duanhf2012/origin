@@ -47,6 +47,12 @@ func (client PlayerServiceClient) OnNode(nodeID string) PlayerServiceClient {
 	return client
 }
 
+// WhereLabels 派生按 Node Labels 精确筛选候选的客户端。
+func (client PlayerServiceClient) WhereLabels(labels map[string]string) PlayerServiceClient {
+	client.client = client.client.WhereLabels(labels)
+	return client
+}
+
 // RouteRoundRobin 派生显式轮询路由客户端。
 func (client PlayerServiceClient) RouteRoundRobin() PlayerServiceClient {
 	client.client = client.client.RouteRoundRobin()

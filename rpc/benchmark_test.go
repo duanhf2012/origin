@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"testing"
@@ -42,6 +43,19 @@ func BenchmarkClientIncludeRetired(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		benchmarkClientSink = client.IncludeRetired()
+	}
+}
+
+// BenchmarkClientWhereLabels 记录调用方 Map 冻结为有界条件 Slice 的派生成本。
+func BenchmarkClientWhereLabels(b *testing.B) {
+	client := Client{target: ToService("PlayerService")}
+	labels := map[string]string{
+		"scope":        "area",
+		"real_area_id": "1",
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		benchmarkClientSink = client.WhereLabels(labels)
 	}
 }
 
@@ -191,6 +205,7 @@ func (resolver *prepareBenchmarkResolver) ResolveRemote(
 func newRemotePrepareBenchmarkClient(
 	b *testing.B,
 	count int,
+	labelCount int,
 ) Client {
 	b.Helper()
 	runtime, err := NewRuntime(
@@ -212,6 +227,10 @@ func newRemotePrepareBenchmarkClient(
 	snapshot := &prepareBenchmarkSnapshot{
 		candidates: make([]RemoteCandidate, count),
 	}
+	labels := make(map[string]string, labelCount)
+	for index := 0; index < labelCount; index++ {
+		labels[fmt.Sprintf("label_%02d", index)] = fmt.Sprintf("value_%02d", index)
+	}
 	for index := 0; index < count; index++ {
 		nodeID := "player-" + strconv.Itoa(index)
 		sessionID := uint64(index + 1)
@@ -220,6 +239,7 @@ func newRemotePrepareBenchmarkClient(
 			SessionID:   sessionID,
 			ServiceName: "PlayerService",
 			State:       publicdiscovery.StateRunning,
+			Labels:      labels,
 			Transport:   TransportTCP,
 			Address:     "127.0.0.1:24001",
 			ContractID:  1,
@@ -243,10 +263,14 @@ func newRemotePrepareBenchmarkClient(
 	if err := runtime.Freeze(); err != nil {
 		b.Fatalf("Freeze() error = %v", err)
 	}
-	return prepareTestClient(
+	client := prepareTestClient(
 		runtime,
 		ToService("PlayerService"),
 	).Route(uint64(count / 2))
+	if labelCount != 0 {
+		client = client.WhereLabels(labels)
+	}
+	return client
 }
 
 func newBroadcastPrepareBenchmarkClient(
@@ -421,7 +445,7 @@ func BenchmarkBroadcastFanoutNATS(b *testing.B) {
 func BenchmarkPrepareCandidateScale(b *testing.B) {
 	for _, count := range []int{100, 1000, 8192} {
 		b.Run(strconv.Itoa(count), func(b *testing.B) {
-			client := newRemotePrepareBenchmarkClient(b, count)
+			client := newRemotePrepareBenchmarkClient(b, count, 0)
 			ctx := context.Background()
 			if _, err := client.PrepareNotify(ctx, 1); err != nil {
 				b.Fatalf("warm PrepareNotify() error = %v", err)
@@ -437,6 +461,45 @@ func BenchmarkPrepareCandidateScale(b *testing.B) {
 			}
 		})
 	}
+}
+
+// BenchmarkPrepareWhereLabels 比较无条件、常见双条件、最大 32 条件和无匹配失败扫描。
+func BenchmarkPrepareWhereLabels(b *testing.B) {
+	const candidateCount = 1000
+	ctx := context.Background()
+	for _, labelCount := range []int{0, 2, 32} {
+		b.Run(strconv.Itoa(labelCount), func(b *testing.B) {
+			client := newRemotePrepareBenchmarkClient(b, candidateCount, labelCount)
+			if _, err := client.PrepareNotify(ctx, 1); err != nil {
+				b.Fatalf("warm PrepareNotify() error = %v", err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				prepared, err := client.PrepareNotify(ctx, 1)
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkClientSink = prepared
+			}
+		})
+	}
+
+	b.Run("no-match", func(b *testing.B) {
+		client := newRemotePrepareBenchmarkClient(b, candidateCount, 2).
+			WhereLabels(map[string]string{"missing": "value"})
+		if _, err := client.PrepareNotify(ctx, 1); !errors.Is(err, errs.ErrRPCNoRoute) {
+			b.Fatalf("warm PrepareNotify() error = %v", err)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			_, err := client.PrepareNotify(ctx, 1)
+			if !errors.Is(err, errs.ErrRPCNoRoute) {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 func BenchmarkPrimitiveCodec(b *testing.B) {

@@ -102,6 +102,7 @@ type commandRunnerFacade interface {
 // generatedPlayerClientFacade 使用教程真实生成物固定 RPC 客户端的调用和派生外观。
 type generatedPlayerClientFacade interface {
 	OnNode(string) tutorialrpc.PlayerServiceClient
+	WhereLabels(map[string]string) tutorialrpc.PlayerServiceClient
 	RouteRoundRobin() tutorialrpc.PlayerServiceClient
 	RouteRandom() tutorialrpc.PlayerServiceClient
 	Route(any) tutorialrpc.PlayerServiceClient

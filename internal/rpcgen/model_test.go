@@ -511,6 +511,7 @@ func TestRenderContractIncludesM19BindingRoutingAndPrepare(t *testing.T) {
 		`rpc.ToService("PlayerService")`,
 		"func BindPlayerRPCTo(owner service.IService, serviceName string) PlayerRPCClient",
 		"func (client PlayerRPCClient) OnNode(nodeID string) PlayerRPCClient",
+		"func (client PlayerRPCClient) WhereLabels(labels map[string]string) PlayerRPCClient",
 		"func (client PlayerRPCClient) IncludeRetired() PlayerRPCClient",
 		"func (client PlayerRPCClient) RouteRoundRobin() PlayerRPCClient",
 		"func (client PlayerRPCClient) RouteRandom() PlayerRPCClient",

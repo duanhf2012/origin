@@ -58,6 +58,7 @@ type candidateScan struct {
 	sameName  bool
 	contract  bool
 	lifecycle bool
+	labels    bool
 	transport bool
 	connected bool
 }
@@ -78,6 +79,7 @@ type candidateSet struct {
 	remoteLen      int
 	exact          bool
 	includeRetired bool
+	labels         routeLabelFilter
 
 	count int
 	scan  candidateScan
@@ -266,11 +268,13 @@ func (runtime *Runtime) prepareOnce(
 		client.contractID,
 		client.fingerprint,
 		client.includeRetired,
+		client.labels,
 	)
 	set.scanEligible()
 	if set.count == 0 {
 		waitable := set.scan.contract &&
 			set.scan.lifecycle &&
+			set.scan.labels &&
 			set.scan.transport &&
 			!set.scan.connected
 		return preparedTarget{}, set.routeError(), waitable
@@ -303,6 +307,7 @@ func (runtime *Runtime) buildCandidateSet(
 	contractID ContractID,
 	fingerprint ContractFingerprint,
 	includeRetired bool,
+	labels routeLabelFilter,
 ) candidateSet {
 	result := candidateSet{
 		runtime:        runtime,
@@ -311,6 +316,7 @@ func (runtime *Runtime) buildCandidateSet(
 		fingerprint:    fingerprint,
 		exact:          target.mode == targetServiceOnNode,
 		includeRetired: includeRetired,
+		labels:         labels,
 	}
 	if resolver, ok := runtime.remoteResolver.(RemoteSnapshotResolver); ok {
 		result.snapshot = resolver.Snapshot()
@@ -371,6 +377,10 @@ func (set *candidateSet) scanEligible() {
 			continue
 		}
 		set.scan.lifecycle = true
+		if !set.labels.matches(candidate.labels) {
+			continue
+		}
+		set.scan.labels = true
 		candidate, compatible := set.transportCandidate(candidate)
 		if !compatible {
 			continue
@@ -570,7 +580,8 @@ func (set *candidateSet) eligibleAt(want int) (routeCandidate, bool) {
 		candidate, exists := set.rawAt(index)
 		if !exists ||
 			!set.contractMatches(candidate) ||
-			!set.lifecycleMatches(candidate) {
+			!set.lifecycleMatches(candidate) ||
+			!set.labels.matches(candidate.labels) {
 			continue
 		}
 		candidate, compatible := set.transportCandidate(candidate)
@@ -592,6 +603,8 @@ func (set *candidateSet) routeError() error {
 	case !set.scan.contract:
 		return errs.ErrRPCContractMismatch
 	case !set.scan.lifecycle:
+		return errs.ErrRPCNoRoute
+	case !set.scan.labels:
 		return errs.ErrRPCNoRoute
 	default:
 		return errs.ErrTransportUnavailable

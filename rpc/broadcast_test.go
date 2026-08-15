@@ -254,6 +254,34 @@ func TestPrepareBroadcastFreezesFullIntentSet(t *testing.T) {
 	}
 }
 
+// TestPrepareBroadcastRejectsWhereLabels 锁定首期标签过滤不会被 Broadcast 静默忽略。
+func TestPrepareBroadcastRejectsWhereLabels(t *testing.T) {
+	runtime, _, _, _ := newBroadcastLocalRuntime(
+		t,
+		&broadcastTestSnapshot{},
+		DefaultMaxBroadcastSize,
+	)
+	_, err := prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).WhereLabels(map[string]string{"scope": "area"}).
+		PrepareBroadcast(context.Background(), 1)
+	if !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("PrepareBroadcast() error = %v", err)
+	}
+
+	// 不可满足条件同样是有效过滤意图，不能退化为原范围广播。
+	_, err = prepareTestClient(
+		runtime,
+		ToService("PlayerService"),
+	).WhereLabels(map[string]string{"scope": "area"}).
+		WhereLabels(map[string]string{"scope": "public"}).
+		PrepareBroadcast(context.Background(), 1)
+	if !errors.Is(err, errs.ErrInvalidArgument) {
+		t.Fatalf("conflicting PrepareBroadcast() error = %v", err)
+	}
+}
+
 // TestPrepareBroadcastUsesSingleTargetFastPath 验证精确或唯一目标继续复用 M19 prepared target。
 func TestPrepareBroadcastUsesSingleTargetFastPath(t *testing.T) {
 	candidate := newBroadcastTestCandidate("player-1", 11, publicdiscovery.StateRetired)

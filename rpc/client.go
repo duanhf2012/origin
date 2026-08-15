@@ -20,6 +20,7 @@ type Client struct {
 	contractID     ContractID
 	fingerprint    ContractFingerprint
 	route          routeSpec
+	labels         routeLabelFilter
 	includeRetired bool
 	prepared       preparedTarget
 	broadcast      *broadcastPlan

@@ -38,6 +38,11 @@ func (runtime *Runtime) prepareBroadcast(
 	if runtime.closed.Load() {
 		return preparedTarget{}, nil, errs.ErrServiceStopped
 	}
+	// Labels 是单目标候选过滤条件；首期明确拒绝与 Broadcast 组合，避免静默扩大为原有
+	// 全实例范围。标签子集广播需要单独设计意图计数、容量和部分失败语义。
+	if client.labels.active() {
+		return preparedTarget{}, nil, errs.ErrInvalidArgument
+	}
 
 	// 一次构造同时捕获 Discovery、本地 endpoint、TCP 分片表和 NATS connection 视图。
 	// Broadcast 明确忽略单目标 routeSpec，包括无效 Key 和自定义 Selector。
@@ -46,6 +51,7 @@ func (runtime *Runtime) prepareBroadcast(
 		client.contractID,
 		client.fingerprint,
 		client.includeRetired,
+		routeLabelFilter{},
 	)
 	intentCount := 0
 	sendableCount := 0

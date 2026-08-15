@@ -97,6 +97,11 @@ func renderContract(
 			"\tclient.client = client.client.OnNode(nodeID)\n"+
 			"\treturn client\n"+
 			"}\n\n"+
+			"// WhereLabels 派生按 Node Labels 精确筛选候选的客户端。\n"+
+			"func (client %s) WhereLabels(labels map[string]string) %s {\n"+
+			"\tclient.client = client.client.WhereLabels(labels)\n"+
+			"\treturn client\n"+
+			"}\n\n"+
 			"// RouteRoundRobin 派生显式轮询路由客户端。\n"+
 			"func (client %s) RouteRoundRobin() %s {\n"+
 			"\tclient.client = client.client.RouteRoundRobin()\n"+
@@ -131,6 +136,8 @@ func renderContract(
 		clientName,
 		clientName,
 		rpcAlias,
+		clientName,
+		clientName,
 		clientName,
 		clientName,
 		clientName,

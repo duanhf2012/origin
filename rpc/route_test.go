@@ -2,10 +2,85 @@ package rpc
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/duanhf2012/origin/v3/errs"
 )
+
+// TestClientWhereLabelsFreezesAndMerges 锁定调用方 Map 所有权、稳定顺序和多次 AND 派生。
+func TestClientWhereLabelsFreezesAndMerges(t *testing.T) {
+	base := Client{target: ToService("PlayerService")}
+	source := map[string]string{
+		"scope":        "area",
+		"real_area_id": "1",
+	}
+	filtered := base.WhereLabels(source)
+
+	// 派生完成后修改调用方 Map，已经冻结的条件必须保持原值且按 Key 稳定排序。
+	source["scope"] = "public"
+	delete(source, "real_area_id")
+	if base.labels.active() {
+		t.Fatal("WhereLabels 修改了基础客户端")
+	}
+	if len(filtered.labels.required) != 2 ||
+		filtered.labels.required[0] != (routeLabel{name: "real_area_id", value: "1"}) ||
+		filtered.labels.required[1] != (routeLabel{name: "scope", value: "area"}) {
+		t.Fatalf("frozen labels = %+v", filtered.labels)
+	}
+
+	// 空条件和完全重复条件都是幂等无操作；新增条件继续与旧条件合并。
+	if got := filtered.WhereLabels(nil); len(got.labels.required) != 2 {
+		t.Fatalf("nil labels changed filter: %+v", got.labels)
+	}
+	if got := filtered.WhereLabels(map[string]string{"scope": "area"}); len(got.labels.required) != 2 {
+		t.Fatalf("duplicate labels changed filter: %+v", got.labels)
+	}
+	merged := filtered.WhereLabels(map[string]string{"game_type": "world"})
+	if len(merged.labels.required) != 3 ||
+		merged.labels.required[0].name != "game_type" ||
+		merged.labels.required[1].name != "real_area_id" ||
+		merged.labels.required[2].name != "scope" {
+		t.Fatalf("merged labels = %+v", merged.labels)
+	}
+
+	// OnNode 和所有第二阶段策略只改变各自职责，不能清除已经冻结的候选条件。
+	selector := fixedPrepareTestSelector{index: 0, ok: true}
+	derived := []Client{
+		merged.OnNode("game-1"),
+		merged.IncludeRetired(),
+		merged.RouteRoundRobin(),
+		merged.RouteRandom(),
+		merged.Route(uint64(1)),
+		merged.RouteBy(selector),
+		base.OnNode("game-1").WhereLabels(map[string]string{"scope": "area"}),
+	}
+	for index, client := range derived {
+		if !client.labels.active() {
+			t.Fatalf("派生 %d 丢失 Labels", index)
+		}
+	}
+}
+
+// TestClientWhereLabelsMarksUnsatisfiableConditions 锁定冲突和超发现容量条件的无路由状态。
+func TestClientWhereLabelsMarksUnsatisfiableConditions(t *testing.T) {
+	base := Client{target: ToService("PlayerService")}
+	conflict := base.
+		WhereLabels(map[string]string{"scope": "area"}).
+		WhereLabels(map[string]string{"scope": "public"})
+	if !conflict.labels.impossible || len(conflict.labels.required) != 0 {
+		t.Fatalf("conflicting labels = %+v", conflict.labels)
+	}
+
+	overCapacity := make(map[string]string, 33)
+	for index := 0; index < 33; index++ {
+		overCapacity["label_"+strconv.Itoa(index)] = "value"
+	}
+	tooMany := base.WhereLabels(overCapacity)
+	if !tooMany.labels.impossible || len(tooMany.labels.required) != 0 {
+		t.Fatalf("over-capacity labels = %+v", tooMany.labels)
+	}
+}
 
 type namedRouteInt int64
 

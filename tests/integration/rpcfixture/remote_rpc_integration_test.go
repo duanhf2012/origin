@@ -167,12 +167,59 @@ func newRemoteFixtureNodeWithScheduler(
 	discoverySource *internaldiscovery.Source,
 	binding node.ServiceBinding,
 ) *node.Node {
+	return newRemoteFixtureNodeConfigured(
+		t,
+		nodeID,
+		rpcConfig,
+		scheduler,
+		nil,
+		pool,
+		discoverySource,
+		binding,
+	)
+}
+
+// newRemoteFixtureNodeWithLabels 为真实发现路由测试冻结当前 Node 的业务 Labels。
+func newRemoteFixtureNodeWithLabels(
+	t testing.TB,
+	nodeID string,
+	rpcConfig rpc.Config,
+	labels map[string]string,
+	pool *bufferpool.Pool,
+	discoverySource *internaldiscovery.Source,
+	binding node.ServiceBinding,
+) *node.Node {
+	t.Helper()
+	return newRemoteFixtureNodeConfigured(
+		t,
+		nodeID,
+		rpcConfig,
+		service.DefaultSchedulerConfig(),
+		labels,
+		pool,
+		discoverySource,
+		binding,
+	)
+}
+
+// newRemoteFixtureNodeConfigured 集中装配远端 RPC 测试共享的 Node 配置和所有权选项。
+func newRemoteFixtureNodeConfigured(
+	t testing.TB,
+	nodeID string,
+	rpcConfig rpc.Config,
+	scheduler service.SchedulerConfig,
+	labels map[string]string,
+	pool *bufferpool.Pool,
+	discoverySource *internaldiscovery.Source,
+	binding node.ServiceBinding,
+) *node.Node {
 	t.Helper()
 	instance, err := node.New(
 		node.Config{
 			ID:        nodeID,
 			Scheduler: scheduler,
 			RPC:       &rpcConfig,
+			Labels:    labels,
 		},
 		[]node.ServiceBinding{binding},
 		originlog.NewNop(),
@@ -559,20 +606,22 @@ func TestM19TCPGeneratedBindingRoutesAcrossRunningInstances(t *testing.T) {
 	secondPlayer := &PlayerService{EchoSuffix: "player-2"}
 	caller := &CallerService{}
 	nodes := []*node.Node{
-		newRemoteFixtureNode(
+		newRemoteFixtureNodeWithLabels(
 			t,
 			"player-1",
 			testRPCConfig(t),
+			map[string]string{"scope": "area", "real_area_id": "1"},
 			pool,
 			discoverySource,
 			node.ServiceBinding{
 				Name: "PlayerService", Template: "PlayerService", Service: firstPlayer,
 			},
 		),
-		newRemoteFixtureNode(
+		newRemoteFixtureNodeWithLabels(
 			t,
 			"player-2",
 			testRPCConfig(t),
+			map[string]string{"scope": "area", "real_area_id": "2"},
 			pool,
 			discoverySource,
 			node.ServiceBinding{
@@ -678,6 +727,28 @@ func TestM19TCPGeneratedBindingRoutesAcrossRunningInstances(t *testing.T) {
 	})
 	if values[0] != "key-player-2" {
 		t.Fatalf("Route(1) = %v", values)
+	}
+
+	// WhereLabels 读取真实发现快照中的 Node Labels，再由稳定 Key 在过滤结果中单选。
+	values = call(func(
+		ctx context.Context,
+		client PlayerRPCClient,
+	) ([]string, error) {
+		areaOne, err := client.WhereLabels(map[string]string{
+			"scope": "area", "real_area_id": "1",
+		}).AwaitEchoName(ctx, "labels-one")
+		if err != nil {
+			return nil, err
+		}
+		areaTwo, err := client.WhereLabels(map[string]string{
+			"scope": "area", "real_area_id": "2",
+		}).Route(uint64(0)).AwaitEchoName(ctx, "labels-two")
+		return []string{areaOne, areaTwo}, err
+	})
+	if len(values) != 2 ||
+		values[0] != "labels-one-player-1" ||
+		values[1] != "labels-two-player-2" {
+		t.Fatalf("WhereLabels route = %v", values)
 	}
 
 	firstRecord := discoveryNodeRecord(t, discoverySource, "player-1")

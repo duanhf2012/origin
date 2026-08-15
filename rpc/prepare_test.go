@@ -497,6 +497,21 @@ type inspectingPrepareTestSelector struct {
 	labelOK     bool
 }
 
+// filteredPrepareTestSelector 记录 WhereLabels 之后交给自定义策略的完整候选顺序。
+type filteredPrepareTestSelector struct {
+	nodeIDs []string
+}
+
+func (selector *filteredPrepareTestSelector) Select(
+	candidates RouteCandidates,
+) (int, bool) {
+	selector.nodeIDs = selector.nodeIDs[:0]
+	for index := 0; index < candidates.Len(); index++ {
+		selector.nodeIDs = append(selector.nodeIDs, candidates.NodeID(index))
+	}
+	return 0, candidates.Len() != 0
+}
+
 func (selector *inspectingPrepareTestSelector) Select(
 	candidates RouteCandidates,
 ) (int, bool) {
@@ -692,6 +707,247 @@ func TestPrepareNotifyCustomSelectorReadsImmutableCandidateView(t *testing.T) {
 	).RouteBy(nil).PrepareNotify(context.Background(), 1)
 	if !errors.Is(err, errs.ErrRPCRouteSelectorFailed) {
 		t.Fatalf("nil selector error = %v", err)
+	}
+}
+
+// TestPrepareNotifyWhereLabelsFiltersBeforeAllRouteStrategies 验证 Labels 只负责候选范围，
+// 默认、显式内置策略和自定义 Selector 继续负责最终单选。
+func TestPrepareNotifyWhereLabelsFiltersBeforeAllRouteStrategies(t *testing.T) {
+	snapshot := &prepareTestSnapshot{candidates: []RemoteCandidate{
+		{
+			NodeID: "game-1", SessionID: 101, ServiceName: "PlayerService",
+			State: publicdiscovery.StateRunning,
+			Labels: map[string]string{
+				"scope": "area", "real_area_id": "1",
+			},
+			Transport: TransportTCP, Address: "127.0.0.1:26101",
+			ContractID: 1, Fingerprint: runtimeTestFingerprint,
+		},
+		{
+			NodeID: "game-2", SessionID: 102, ServiceName: "PlayerService",
+			State: publicdiscovery.StateRunning,
+			Labels: map[string]string{
+				"scope": "area", "real_area_id": "2",
+			},
+			Transport: TransportTCP, Address: "127.0.0.1:26102",
+			ContractID: 1, Fingerprint: runtimeTestFingerprint,
+		},
+		{
+			NodeID: "game-3", SessionID: 103, ServiceName: "PlayerService",
+			State: publicdiscovery.StateRunning,
+			Labels: map[string]string{
+				"scope": "area", "real_area_id": "1",
+			},
+			Transport: TransportTCP, Address: "127.0.0.1:26103",
+			ContractID: 1, Fingerprint: runtimeTestFingerprint,
+		},
+	}}
+	runtime := newPrepareTestRuntime(t, "gateway-1", TransportTCP, snapshot)
+	for _, candidate := range snapshot.candidates {
+		addPrepareTestTCPConnection(
+			t,
+			runtime,
+			candidate.NodeID,
+			candidate.SessionID,
+			candidate.Address,
+		)
+	}
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	base := prepareTestClient(runtime, ToService("PlayerService")).WhereLabels(
+		map[string]string{"scope": "area", "real_area_id": "1"},
+	)
+
+	// 稳定 Key 只对 game-1、game-3 两个候选取模，不能选中标签不同的 game-2。
+	keyed, err := base.Route(uint64(1)).PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("key PrepareNotify() error = %v", err)
+	}
+	if keyed.prepared.nodeID != "game-3" {
+		t.Fatalf("key selected %q", keyed.prepared.nodeID)
+	}
+
+	// 显式 RoundRobin 在同一 Runtime 计数器上继续选择过滤结果中的合法下标。
+	roundRobin, err := base.RouteRoundRobin().PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("round-robin PrepareNotify() error = %v", err)
+	}
+	if roundRobin.prepared.nodeID != "game-1" && roundRobin.prepared.nodeID != "game-3" {
+		t.Fatalf("round-robin selected %q", roundRobin.prepared.nodeID)
+	}
+
+	// Random 的具体下标不是契约，但每次结果都必须留在过滤后的范围。
+	for index := 0; index < 32; index++ {
+		random, randomErr := base.RouteRandom().PrepareNotify(context.Background(), 1)
+		if randomErr != nil {
+			t.Fatalf("random PrepareNotify() error = %v", randomErr)
+		}
+		if random.prepared.nodeID != "game-1" && random.prepared.nodeID != "game-3" {
+			t.Fatalf("random selected %q", random.prepared.nodeID)
+		}
+	}
+
+	// 自定义 Selector 收到的 Len、NodeID 和顺序都是已经过滤后的只读候选。
+	selector := &filteredPrepareTestSelector{}
+	custom, err := base.RouteBy(selector).PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("custom PrepareNotify() error = %v", err)
+	}
+	if custom.prepared.nodeID != "game-1" ||
+		len(selector.nodeIDs) != 2 ||
+		selector.nodeIDs[0] != "game-1" || selector.nodeIDs[1] != "game-3" {
+		t.Fatalf("filtered selector nodes = %v, selected %q", selector.nodeIDs, custom.prepared.nodeID)
+	}
+
+	// 默认策略仍是 RoundRobin，并且同样不能越过 Labels 范围。
+	defaulted, err := base.PrepareNotify(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("default PrepareNotify() error = %v", err)
+	}
+	if defaulted.prepared.nodeID != "game-1" && defaulted.prepared.nodeID != "game-3" {
+		t.Fatalf("default selected %q", defaulted.prepared.nodeID)
+	}
+}
+
+// TestPrepareNotifyWhereLabelsNoRouteAndOnNodeIntersection 锁定缺失、冲突和精确节点交集。
+func TestPrepareNotifyWhereLabelsNoRouteAndOnNodeIntersection(t *testing.T) {
+	candidate := RemoteCandidate{
+		NodeID: "game-1", SessionID: 111, ServiceName: "PlayerService",
+		State:     publicdiscovery.StateRunning,
+		Labels:    map[string]string{"scope": "area", "real_area_id": "1"},
+		Transport: TransportTCP, Address: "127.0.0.1:26201",
+		ContractID: 1, Fingerprint: runtimeTestFingerprint,
+	}
+	runtime := newPrepareTestRuntime(
+		t,
+		"gateway-1",
+		TransportTCP,
+		&prepareTestSnapshot{candidates: []RemoteCandidate{candidate}},
+	)
+	addPrepareTestTCPConnection(
+		t,
+		runtime,
+		candidate.NodeID,
+		candidate.SessionID,
+		candidate.Address,
+	)
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	base := prepareTestClient(runtime, ToService("PlayerService"))
+
+	tests := []struct {
+		name   string
+		client Client
+		want   error
+	}{
+		{
+			name: "missing label",
+			client: base.WhereLabels(
+				map[string]string{"scope": "area", "game_type": "world"},
+			),
+			want: errs.ErrRPCNoRoute,
+		},
+		{
+			name: "wrong value",
+			client: base.WhereLabels(
+				map[string]string{"real_area_id": "2"},
+			),
+			want: errs.ErrRPCNoRoute,
+		},
+		{
+			name: "conflicting derivations",
+			client: base.WhereLabels(map[string]string{"scope": "area"}).
+				WhereLabels(map[string]string{"scope": "public"}),
+			want: errs.ErrRPCNoRoute,
+		},
+		{
+			name: "exact mismatch",
+			client: base.OnNode("game-1").WhereLabels(
+				map[string]string{"real_area_id": "2"},
+			),
+			want: errs.ErrRPCNoRoute,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := test.client.PrepareNotify(context.Background(), 1)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("PrepareNotify() error = %v, want %v", err, test.want)
+			}
+		})
+	}
+
+	// 两种链式顺序都保留精确 Node 与 Labels，匹配时只能选择该唯一实例。
+	matching := []Client{
+		base.OnNode("game-1").WhereLabels(map[string]string{"real_area_id": "1"}),
+		base.WhereLabels(map[string]string{"real_area_id": "1"}).OnNode("game-1"),
+	}
+	for index, client := range matching {
+		prepared, err := client.PrepareNotify(context.Background(), 1)
+		if err != nil {
+			t.Fatalf("matching order %d error = %v", index, err)
+		}
+		if prepared.prepared.nodeID != "game-1" {
+			t.Fatalf("matching order %d selected %q", index, prepared.prepared.nodeID)
+		}
+	}
+}
+
+// TestPrepareOnceWhereLabelsPreservesDisconnectedWaitClassification 验证非匹配的已连接节点不能
+// 掩盖标签匹配节点的断开状态，Await 仍可按原有信号等待恢复。
+func TestPrepareOnceWhereLabelsPreservesDisconnectedWaitClassification(t *testing.T) {
+	candidates := []RemoteCandidate{
+		{
+			NodeID: "game-1", SessionID: 121, ServiceName: "PlayerService",
+			State:     publicdiscovery.StateRunning,
+			Labels:    map[string]string{"real_area_id": "1"},
+			Transport: TransportTCP, Address: "127.0.0.1:26301",
+			ContractID: 1, Fingerprint: runtimeTestFingerprint,
+		},
+		{
+			NodeID: "game-2", SessionID: 122, ServiceName: "PlayerService",
+			State:     publicdiscovery.StateRunning,
+			Labels:    map[string]string{"real_area_id": "2"},
+			Transport: TransportTCP, Address: "127.0.0.1:26302",
+			ContractID: 1, Fingerprint: runtimeTestFingerprint,
+		},
+	}
+	runtime := newPrepareTestRuntime(
+		t,
+		"gateway-1",
+		TransportTCP,
+		&prepareTestSnapshot{candidates: candidates},
+	)
+	addPrepareTestDisconnectedTCP(
+		runtime,
+		candidates[0].NodeID,
+		candidates[0].SessionID,
+		candidates[0].Address,
+	)
+	addPrepareTestTCPConnection(
+		t,
+		runtime,
+		candidates[1].NodeID,
+		candidates[1].SessionID,
+		candidates[1].Address,
+	)
+	if err := runtime.Freeze(); err != nil {
+		t.Fatalf("Freeze() error = %v", err)
+	}
+	client := prepareTestClient(runtime, ToService("PlayerService")).WhereLabels(
+		map[string]string{"real_area_id": "1"},
+	)
+
+	_, err, waitable := runtime.prepareOnce(
+		context.Background(),
+		client,
+		1,
+		CallRequest,
+	)
+	if !errors.Is(err, errs.ErrTransportUnavailable) || !waitable {
+		t.Fatalf("prepareOnce() error = %v, waitable = %v", err, waitable)
 	}
 }
 
@@ -1223,6 +1479,9 @@ func TestPrepareConcurrentSnapshotAndConnectionChanges(t *testing.T) {
 
 func TestPrepareNotifyRunningLocalDoesNotAllocate(t *testing.T) {
 	runtime := newPrepareTestRuntime(t, "gateway-1", "", nil)
+	if err := runtime.BindLocalLabels(map[string]string{"region": "local"}); err != nil {
+		t.Fatalf("BindLocalLabels() error = %v", err)
+	}
 	addPrepareTestLocal(
 		t,
 		runtime,
@@ -1248,6 +1507,12 @@ func TestPrepareNotifyRunningLocalDoesNotAllocate(t *testing.T) {
 			client: base.RouteBy(
 				fixedPrepareTestSelector{index: 0, ok: true},
 			),
+		},
+		{
+			name: "labels-key",
+			client: base.WhereLabels(
+				map[string]string{"region": "local"},
+			).Route(uint64(0)),
 		},
 	}
 	for _, test := range tests {

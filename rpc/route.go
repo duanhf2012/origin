@@ -2,6 +2,7 @@ package rpc
 
 import (
 	publicdiscovery "github.com/duanhf2012/origin/v3/discovery"
+	publicprovider "github.com/duanhf2012/origin/v3/discovery/provider"
 	"github.com/duanhf2012/origin/v3/errs"
 )
 
@@ -20,6 +21,56 @@ type routeSpec struct {
 	hash     uint64
 	selector RouteSelector
 	err      error
+}
+
+// routeLabel 保存一个已经从调用方 Map 冻结的精确匹配条件。
+//
+// string 赋值只复制不可变字符串头；Client 不保留调用方 Map，因此调用方在 WhereLabels
+// 返回后替换或删除 Map 项不会影响已经派生的客户端。
+type routeLabel struct {
+	name  string
+	value string
+}
+
+// routeLabelFilter 保存按名称稳定排序的 AND 条件。
+//
+// impossible 表示多次派生为同一个 Key 指定了不同 Value，或条件数量超过单 Node Labels
+// 容量；该状态不需要保存原始条件，后续 Prepare 稳定返回无路由。
+type routeLabelFilter struct {
+	required   []routeLabel
+	impossible bool
+}
+
+// active 报告客户端是否携带需要影响调用语义的 Labels 条件。
+func (filter routeLabelFilter) active() bool {
+	return filter.impossible || len(filter.required) != 0
+}
+
+// find 按最多 32 项的有界条件执行线性查询。
+//
+// WhereLabels 是派生冷路径；小型线性扫描比额外索引 Map 更紧凑，并避免给每个客户端建立
+// 第二套可变标签结构。
+func (filter routeLabelFilter) find(name string) (string, bool) {
+	for _, current := range filter.required {
+		if current.name == name {
+			return current.value, true
+		}
+	}
+	return "", false
+}
+
+// matches 对候选已有的不可变 Labels Map 执行精确 AND 匹配。
+func (filter routeLabelFilter) matches(labels map[string]string) bool {
+	if filter.impossible {
+		return false
+	}
+	for _, required := range filter.required {
+		value, exists := labels[required.name]
+		if !exists || value != required.value {
+			return false
+		}
+	}
+	return true
 }
 
 // RouteSelector 从 Runtime 已经筛选的只读候选中选择一个下标。
@@ -100,6 +151,79 @@ func (client Client) OnNode(nodeID string) Client {
 	client.prepared = preparedTarget{}
 	client.broadcast = nil
 	return client
+}
+
+// WhereLabels 派生按 Node Labels 精确筛选候选的值客户端。
+//
+// 多次调用把条件按 AND 合并；同 Key 同 Value 幂等，同 Key 不同 Value 形成稳定的无路由
+// 条件。nil 或空 Map 是无操作。OnNode 与 Labels 不互斥，精确目标仍必须满足全部条件。
+func (client Client) WhereLabels(labels map[string]string) Client {
+	// 空条件不改变范围，也不清除客户端此前已经冻结的过滤条件。
+	if len(labels) == 0 || client.labels.impossible {
+		return client
+	}
+	if len(labels) > publicprovider.MaxLabelsPerNode {
+		return client.withImpossibleLabels()
+	}
+
+	// 第一遍只计算真正新增的条件并识别冲突，避免幂等派生产生新 Slice。
+	additions := 0
+	for name, value := range labels {
+		current, exists := client.labels.find(name)
+		if exists {
+			if current != value {
+				return client.withImpossibleLabels()
+			}
+			continue
+		}
+		additions++
+	}
+	if additions == 0 {
+		return client
+	}
+	if len(client.labels.required)+additions > publicprovider.MaxLabelsPerNode {
+		return client.withImpossibleLabels()
+	}
+
+	// 冻结调用方 Map，之后候选热路径只读取这一份有界、不可变条件。
+	required := make(
+		[]routeLabel,
+		len(client.labels.required),
+		len(client.labels.required)+additions,
+	)
+	copy(required, client.labels.required)
+	for name, value := range labels {
+		if _, exists := client.labels.find(name); exists {
+			continue
+		}
+		required = append(required, routeLabel{name: name, value: value})
+	}
+	sortRouteLabels(required)
+	client.labels = routeLabelFilter{required: required}
+	client.prepared = preparedTarget{}
+	client.broadcast = nil
+	return client
+}
+
+// withImpossibleLabels 丢弃不再需要的条件引用，并保留其他客户端派生维度。
+func (client Client) withImpossibleLabels() Client {
+	client.labels = routeLabelFilter{impossible: true}
+	client.prepared = preparedTarget{}
+	client.broadcast = nil
+	return client
+}
+
+// sortRouteLabels 使用有界插入排序固定条件顺序，不为最多 32 项的派生冷路径建立闭包或索引。
+func sortRouteLabels(labels []routeLabel) {
+	for index := 1; index < len(labels); index++ {
+		current := labels[index]
+		position := index
+		for position > 0 && labels[position-1].name > current.name {
+			labels[position] = labels[position-1]
+			position--
+		}
+		labels[position] = current
+	}
 }
 
 // IncludeRetired 派生一个在自动选择范围中同时接受 Running 和 Retired 的值客户端。
