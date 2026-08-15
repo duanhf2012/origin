@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	// 默认单消息上限为 4M，与已经确认的 Origin RPC 上限保持一致。
+	// 通用 NATS 默认单消息上限为 4M；RPC Adapter 会按自己的固定上限显式覆盖。
 	defaultMaxMessageSize = 4 * 1024 * 1024
 	// 默认连接超时只约束一次 Server TCP 连接和协议握手。
 	defaultConnectTimeout = 2 * time.Second

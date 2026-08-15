@@ -523,7 +523,7 @@ func BenchmarkPrimitiveCodec(b *testing.B) {
 	}
 }
 
-// BenchmarkBytePayloadCodec 保存小消息、普通消息和接近 4M 上限消息的编解码基线。
+// BenchmarkBytePayloadCodec 保存小消息、普通消息和接近 32M 上限消息的编解码基线。
 //
 // ReadBytes 按已确认所有权规则复制业务结果，因此 B/op 会真实包含业务独立 Slice；该
 // Benchmark 不是零复制 Transport 测试，不能用来推断 M13 网络帧的复制次数。
@@ -611,7 +611,7 @@ func (benchmarkBlobCodec) Unmarshal(
 // 编译期断言锁定 Benchmark 与公开 StaticCodec 形状一致。
 var _ StaticCodec[benchmarkBlob] = benchmarkBlobCodec{}
 
-// BenchmarkCustomPayloadCodec 保存 16B、1KB 和接近 4M 自定义 payload 的完整边界基线。
+// BenchmarkCustomPayloadCodec 保存 16B、1KB 和接近 32M 自定义 payload 的完整边界基线。
 func BenchmarkCustomPayloadCodec(b *testing.B) {
 	for _, payloadSize := range []int{
 		16,

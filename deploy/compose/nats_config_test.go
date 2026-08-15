@@ -10,16 +10,18 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 )
 
-func TestNATSMaxPayloadCoversOriginSystemMessages(t *testing.T) {
+func TestNATSMaxPayloadCoversOriginMessages(t *testing.T) {
 	options, err := natsserver.ProcessConfigFile(filepath.Join(".", "nats.conf"))
 	if err != nil {
 		t.Fatalf("parse nats.conf: %v", err)
 	}
-	if options.MaxPayload < int32(rpc.MaxSystemMessageSize) {
+	// 额外 1K 覆盖当前最坏 549B RPC 包络，并避免部署配置只等于业务 payload。
+	want := int32(rpc.DefaultMaxPayloadSize + 1024)
+	if options.MaxPayload < want {
 		t.Fatalf(
 			"nats max_payload = %d, want at least %d",
 			options.MaxPayload,
-			rpc.MaxSystemMessageSize,
+			want,
 		)
 	}
 }

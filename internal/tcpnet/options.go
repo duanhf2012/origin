@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	// 默认长度字段使用四字节，能够直接承载 RPC 的 4M 消息上限。
+	// 默认长度字段使用四字节，允许上层按协议需要覆盖单帧上限。
 	defaultLengthFieldSize = 4
-	// 默认单帧上限为 4M，与已经确认的 RPC 配置保持一致。
+	// 通用 TCP 默认单帧上限为 4M；RPC Adapter 会按自己的固定上限显式覆盖。
 	defaultMaxMessageSize = 4 * 1024 * 1024
 	// 通用 TCP 默认预留 4096 个发送槽位；RPC 会显式覆盖为 16384。
 	defaultSendQueueFrames = 4096

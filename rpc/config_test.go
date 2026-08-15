@@ -18,6 +18,9 @@ func TestTCPConfigDefaults(t *testing.T) {
 	if err := config.Validate(); err != nil {
 		t.Fatalf("默认 TCP 配置应有效: %v", err)
 	}
+	if DefaultMaxPayloadSize != 32*1024*1024 {
+		t.Fatalf("DefaultMaxPayloadSize = %d，期望 32M", DefaultMaxPayloadSize)
+	}
 	if config.MaxPayloadSize != DefaultMaxPayloadSize ||
 		config.MaxBroadcastSize != DefaultMaxBroadcastSize ||
 		config.TCP.SendQueueMessages != 16_384 ||
@@ -66,6 +69,11 @@ func TestConfigRejectsInvalidValues(t *testing.T) {
 	cases := []Config{
 		func() Config { value := tcpConfig; value.Transport = "udp"; return value }(),
 		func() Config { value := tcpConfig; value.MaxPayloadSize = 0; return value }(),
+		func() Config {
+			value := tcpConfig
+			value.MaxPayloadSize = DefaultMaxPayloadSize + 1
+			return value
+		}(),
 		func() Config { value := tcpConfig; value.MaxBroadcastSize = 0; return value }(),
 		func() Config {
 			value := tcpConfig

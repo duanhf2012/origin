@@ -13,7 +13,7 @@ const nilLength = math.MaxUint32
 
 // Sizer 在生成代码中计算单条方法载荷的准确大小。
 //
-// Sizer 是栈上小值，不需要池化。任一部分超过默认 4M 上限或发生整数溢出后，后续调用
+// Sizer 是栈上小值，不需要池化。任一部分超过默认 32M 上限或发生整数溢出后，后续调用
 // 保持返回同一个稳定编码错误。
 type Sizer struct {
 	size int
@@ -44,7 +44,7 @@ func (sizer *Sizer) Add(n int) error {
 
 // AddString 增加四字节长度和字符串原始字节。
 func (sizer *Sizer) AddString(value string) error {
-	// 字符串长度不能使用 nil 标记，最大合法内容仍受整条消息 4M 限制。
+	// 字符串长度不能使用 nil 标记，最大合法内容仍受整条消息 32M 限制。
 	if uint64(len(value)) >= uint64(nilLength) {
 		return sizer.fail()
 	}

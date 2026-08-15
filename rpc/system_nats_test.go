@@ -421,7 +421,7 @@ func startSystemNATSServer(t *testing.T) *server.Server {
 	running, err := server.NewServer(&server.Options{
 		Host:       "127.0.0.1",
 		Port:       -1,
-		MaxPayload: MaxSystemMessageSize,
+		MaxPayload: DefaultMaxPayloadSize + 1024,
 		NoLog:      true,
 		NoSigs:     true,
 	})

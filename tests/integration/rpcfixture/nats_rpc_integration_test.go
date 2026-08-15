@@ -320,8 +320,8 @@ func TestExternalNATSRPCThreeNodeCluster(t *testing.T) {
 		config.NATS.Namespace = "game-external-test"
 		config.NATS.Auth.Username = os.Getenv("ORIGIN_NATS_USERNAME")
 		config.NATS.Auth.Password = os.Getenv("ORIGIN_NATS_PASSWORD")
-		// 已部署集群使用 4M Broker max_payload；业务上限需要给最大 NATS 包头预留空间。
-		config.MaxPayloadSize = rpc.DefaultMaxPayloadSize - 1024
+		// 外部集群的 Broker 上限由部署方管理；测试使用 4M-1K 保持兼容并预留包络。
+		config.MaxPayloadSize = 4*1024*1024 - 1024
 		return config
 	}
 
@@ -593,7 +593,7 @@ func TestNATSRPCRejectsInsufficientServerPayloadAndBadAuth(t *testing.T) {
 		running := startRPCNATSServerWithOptions(t, &server.Options{
 			Host:       "127.0.0.1",
 			Port:       -1,
-			MaxPayload: 8 * 1024 * 1024,
+			MaxPayload: rpc.DefaultMaxPayloadSize + 1024,
 			Username:   "origin-test",
 			Password:   "secret",
 			NoLog:      true,
@@ -1003,7 +1003,7 @@ func startRPCNATSServer(t testing.TB) *server.Server {
 	return startRPCNATSServerWithOptions(t, &server.Options{
 		Host:       "127.0.0.1",
 		Port:       -1,
-		MaxPayload: 8 * 1024 * 1024,
+		MaxPayload: rpc.DefaultMaxPayloadSize + 1024,
 		NoLog:      true,
 		NoSigs:     true,
 	})
@@ -1041,7 +1041,7 @@ func startRPCNATSCluster(t testing.TB, count int) []*server.Server {
 	first := startRPCNATSServerWithOptions(t, &server.Options{
 		Host:       "127.0.0.1",
 		Port:       -1,
-		MaxPayload: 8 * 1024 * 1024,
+		MaxPayload: rpc.DefaultMaxPayloadSize + 1024,
 		NoLog:      true,
 		NoSigs:     true,
 		Cluster: server.ClusterOpts{
@@ -1056,7 +1056,7 @@ func startRPCNATSCluster(t testing.TB, count int) []*server.Server {
 		result = append(result, startRPCNATSServerWithOptions(t, &server.Options{
 			Host:       "127.0.0.1",
 			Port:       -1,
-			MaxPayload: 8 * 1024 * 1024,
+			MaxPayload: rpc.DefaultMaxPayloadSize + 1024,
 			NoLog:      true,
 			NoSigs:     true,
 			Cluster: server.ClusterOpts{

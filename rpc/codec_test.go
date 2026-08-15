@@ -273,7 +273,7 @@ func TestReaderChecksElementMinimumBeforeAllocation(t *testing.T) {
 	}
 }
 
-// TestCodecMessageSizeBoundary 锁定包含四字节长度前缀后的准确 4M 上限。
+// TestCodecMessageSizeBoundary 锁定包含四字节长度前缀后的准确 32M 上限。
 func TestCodecMessageSizeBoundary(t *testing.T) {
 	t.Parallel()
 	maximumPayload := make([]byte, DefaultMaxPayloadSize-4)

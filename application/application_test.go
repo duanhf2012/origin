@@ -497,7 +497,7 @@ func startApplicationNATSServer(t *testing.T) *server.Server {
 	running, err := server.NewServer(&server.Options{
 		Host:       "127.0.0.1",
 		Port:       -1,
-		MaxPayload: rpc.MaxSystemMessageSize,
+		MaxPayload: rpc.DefaultMaxPayloadSize + 1024,
 		NoLog:      true,
 		NoSigs:     true,
 	})

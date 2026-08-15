@@ -143,11 +143,9 @@ func DefaultConfig() Config {
 
 // Validate 在创建 Connection、Listener 或 goroutine 前验证完整 RPC 配置。
 func (config Config) Validate() error {
-	// 所有传输共享同一个业务 payload 上限；外层包络由各 Adapter 单独预留。
-	if config.MaxPayloadSize <= 0 ||
-		config.MaxPayloadSize > math.MaxInt-wireEnvelopeSize ||
-		uint64(config.MaxPayloadSize) > uint64(math.MaxUint32-wireEnvelopeSize) {
-		return invalidRPCConfig("rpc.max_payload_size 超出四字节帧可表达范围")
+	// 所有传输共享同一个业务 payload 硬上限；外层包络由各 Adapter 单独预留。
+	if config.MaxPayloadSize <= 0 || config.MaxPayloadSize > DefaultMaxPayloadSize {
+		return invalidRPCConfig("rpc.max_payload_size 必须位于 1B～32M")
 	}
 	// 广播放大上限必须为正且不得超过已经确认的 1G 硬边界。
 	if config.MaxBroadcastSize <= 0 || config.MaxBroadcastSize > MaxBroadcastSize {
