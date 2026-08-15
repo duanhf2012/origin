@@ -9,10 +9,10 @@ import (
 	"net"
 )
 
-// SessionID 是一个网络 Module 实例内稳定、非零的连接标识。
+// SessionID 是跨传输、跨 Module 和跨进程生命周期实际唯一的连接标识。
 //
-// 不同 Module 可以产生相同数值；业务跨 Module 保存 ID 时必须同时保存所属端点身份。
-type SessionID uint64
+// 每个新 Session 使用独立 UUID v4 字符串；空字符串表示未绑定或无效 Session。
+type SessionID string
 
 // Transport 标识 Session 使用的底层长连接传输。
 type Transport uint8
@@ -41,7 +41,7 @@ const (
 // Handler 回调在所属 Service 串行上下文执行；Send、Close、Writable、Cause 和 Stats 可以由
 // 其他 goroutine 并发调用。Session 关闭后永不恢复，Client 重连会产生新 Session。
 type Session interface {
-	// ID 返回当前 Module 内稳定且非零的连接标识。
+	// ID 返回当前连接稳定且非空的全局唯一标识。
 	ID() SessionID
 	// Transport 返回底层传输类型。
 	Transport() Transport

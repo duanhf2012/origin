@@ -83,11 +83,11 @@ func TestSameServiceWebSocketClientCallsOwnServer(t *testing.T) {
 			response := make(chan string, 1)
 			var serverClosed atomic.Int32
 			var clientClosed atomic.Int32
-			var serverSessionID atomic.Uint64
+			serverSessionID := make(chan network.SessionID, 1)
 
 			serverHandler := network.HandlerFuncs{
 				Open: func(_ context.Context, session network.Session) error {
-					serverSessionID.Store(uint64(session.ID()))
+					serverSessionID <- session.ID()
 					return nil
 				},
 				Message: func(_ context.Context, session network.Session, payload []byte) error {
@@ -135,7 +135,7 @@ func TestSameServiceWebSocketClientCallsOwnServer(t *testing.T) {
 
 			clientSession, ok := client.Session()
 			if !ok || clientSession.Transport() != network.TransportWebSocket ||
-				clientSession.ID() == 0 || !clientSession.Writable() || clientSession.Cause() != nil {
+				clientSession.ID() == "" || !clientSession.Writable() || clientSession.Cause() != nil {
 				t.Fatalf("client Session 无效：ok=%v session=%v", ok, clientSession)
 			}
 			for {
@@ -149,11 +149,19 @@ func TestSameServiceWebSocketClientCallsOwnServer(t *testing.T) {
 				case <-time.After(time.Millisecond):
 				}
 			}
-			serverID := network.SessionID(serverSessionID.Load())
+			var serverID network.SessionID
+			select {
+			case serverID = <-serverSessionID:
+			case <-ctx.Done():
+				t.Fatal("等待 WebSocket Server SessionID 超时")
+			}
 			serverSession, exists := server.Session(serverID)
 			if server.Addr() == nil || !exists || serverSession.ID() != serverID ||
-				server.SessionCount() != 1 {
-				t.Fatalf("Server 查询失败：addr=%v id=%d exists=%v", server.Addr(), serverID, exists)
+				server.SessionCount() != 1 || serverID == clientSession.ID() {
+				t.Fatalf(
+					"Server 查询失败或跨 Runtime ID 碰撞：addr=%v server_id=%q client_id=%q exists=%v",
+					server.Addr(), serverID, clientSession.ID(), exists,
+				)
 			}
 			if stats := client.Stats(); stats.OpenedSessions != 1 || stats.ActiveSessions != 1 {
 				t.Fatalf("client stats=%+v", stats)

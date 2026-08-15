@@ -40,7 +40,7 @@ type Session struct {
 	receivedBytes    atomic.Uint64
 }
 
-// ID 返回当前 Runtime 内稳定的非零标识。
+// ID 返回当前连接稳定且非空的全局唯一标识。
 func (session *Session) ID() public.SessionID { return session.id }
 
 // Transport 返回当前 Runtime 冻结的底层传输类型。

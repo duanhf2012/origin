@@ -3,7 +3,6 @@ package kcp_test
 import (
 	"context"
 	"net"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -64,10 +63,10 @@ func TestSameServiceKCPClientCallsOwnServerForEveryFrame(t *testing.T) {
 			t.Run(name+"_frame_"+string(rune('0'+size)), func(t *testing.T) {
 				address := reserveUDPAddress(t)
 				response := make(chan string, 1)
-				var serverSessionID atomic.Uint64
+				serverSessionID := make(chan network.SessionID, 1)
 				serverHandler := network.HandlerFuncs{
 					Open: func(_ context.Context, session network.Session) error {
-						serverSessionID.Store(uint64(session.ID()))
+						serverSessionID <- session.ID()
 						return nil
 					},
 					Message: func(_ context.Context, session network.Session, payload []byte) error {
@@ -132,17 +131,21 @@ func TestSameServiceKCPClientCallsOwnServerForEveryFrame(t *testing.T) {
 					clientSession.LocalAddr() == nil || clientSession.RemoteAddr() == nil {
 					t.Fatalf("client session 无效：ok=%v session=%v", ok, clientSession)
 				}
-				deadline := time.Now().Add(5 * time.Second)
-				for serverSessionID.Load() == 0 && time.Now().Before(deadline) {
-					time.Sleep(time.Millisecond)
+				var serverID network.SessionID
+				select {
+				case serverID = <-serverSessionID:
+				case <-ctx.Done():
+					t.Fatal("等待 KCP Server SessionID 超时")
 				}
-				serverID := network.SessionID(serverSessionID.Load())
-				if serverID == 0 || server.SessionCount() != 1 {
-					t.Fatalf("server session id=%d count=%d", serverID, server.SessionCount())
+				if serverID == "" || server.SessionCount() != 1 || serverID == clientSession.ID() {
+					t.Fatalf(
+						"server session id=%q client_id=%q count=%d",
+						serverID, clientSession.ID(), server.SessionCount(),
+					)
 				}
 				serverSession, found := server.Session(serverID)
 				if !found || serverSession.ID() != serverID || !serverSession.Writable() {
-					t.Fatalf("server Session(%d)=%v,%v", serverID, serverSession, found)
+					t.Fatalf("server Session(%q)=%v,%v", serverID, serverSession, found)
 				}
 				if stats := clientSession.Stats(); stats.SentMessages == 0 || stats.ReceivedMessages == 0 {
 					t.Fatalf("client session stats=%+v", stats)

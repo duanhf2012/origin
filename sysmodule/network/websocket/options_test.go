@@ -136,10 +136,10 @@ func TestClientReconnectValidation(t *testing.T) {
 func TestNilAndUnstartedEndpointFacade(t *testing.T) {
 	var nilServer *Server
 	if nilServer.Addr() != nil || nilServer.SessionCount() != 0 ||
-		nilServer.CloseSession(1, nil) || nilServer.Stats() != (network.EndpointStats{}) {
+		nilServer.CloseSession("missing", nil) || nilServer.Stats() != (network.EndpointStats{}) {
 		t.Fatal("nil Server 外观异常")
 	}
-	if _, ok := nilServer.Session(1); ok {
+	if _, ok := nilServer.Session("missing"); ok {
 		t.Fatal("nil Server 返回 Session")
 	}
 	server := &Server{}

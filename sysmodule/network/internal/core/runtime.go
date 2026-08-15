@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -34,10 +36,11 @@ type Runtime struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	// sessionIDSource 固定为系统安全随机源；字段仅用于在不替换包级状态的情况下验证失败路径。
+	sessionIDSource io.Reader
 
 	mu           sync.Mutex
 	sessions     map[public.SessionID]*Session
-	nextID       public.SessionID
 	stopping     bool
 	pendingClose []*Session
 
@@ -82,11 +85,12 @@ func NewRuntime(
 		pool: bufferpool.NewPool(bufferpool.Options{
 			TrackUsage: trackBuffers,
 		}),
-		receive:  receive,
-		send:     send,
-		ctx:      ctx,
-		cancel:   cancel,
-		sessions: make(map[public.SessionID]*Session),
+		receive:         receive,
+		send:            send,
+		ctx:             ctx,
+		cancel:          cancel,
+		sessionIDSource: rand.Reader,
+		sessions:        make(map[public.SessionID]*Session),
 	}, nil
 }
 
@@ -119,44 +123,52 @@ func (runtime *Runtime) NewSession(conn TransportConn) (*Session, error) {
 	if runtime == nil || conn == nil {
 		return nil, errs.ErrInvalidArgument
 	}
+	// 先快速拒绝已经停止或达到容量的端点，避免过载连接继续消耗系统随机源。
 	runtime.mu.Lock()
 	if runtime.stopping || len(runtime.sessions) >= runtime.options.MaxSessions {
 		runtime.mu.Unlock()
 		runtime.rejected.Add(1)
 		return nil, errs.ErrTransportOverloaded
 	}
-
-	// ID 只在当前 Runtime 内单调递增；溢出后跳过零并检查活动 Map，避免复用活动连接。
-	var id public.SessionID
-	for attempts := 0; attempts <= runtime.options.MaxSessions; attempts++ {
-		runtime.nextID++
-		if runtime.nextID == 0 {
-			runtime.nextID++
-		}
-		if _, exists := runtime.sessions[runtime.nextID]; !exists {
-			id = runtime.nextID
-			break
-		}
-	}
-	if id == 0 {
-		runtime.mu.Unlock()
-		return nil, errs.ErrTransportOverloaded
-	}
-	sessionContext, cancel := context.WithCancel(runtime.ctx)
-	session := &Session{
-		id:                id,
-		runtime:           runtime,
-		transport:         conn,
-		ctx:               sessionContext,
-		cancel:            cancel,
-		done:              make(chan struct{}),
-		writableDelivered: true,
-		writableLatest:    true,
-	}
-	runtime.sessions[id] = session
 	runtime.mu.Unlock()
-	runtime.opened.Add(1)
-	return session, nil
+
+	for attempt := 0; attempt < maxSessionIDGenerationAttempts; attempt++ {
+		id, err := newSessionID(runtime.sessionIDSource)
+		if err != nil {
+			return nil, errs.Wrap(
+				errs.CodeInternal,
+				fmt.Errorf("network SessionID 生成失败: %w", err),
+			)
+		}
+
+		runtime.mu.Lock()
+		// 生成期间停止或其他连接可能改变容量，登记前必须在线性化锁内重新检查。
+		if runtime.stopping || len(runtime.sessions) >= runtime.options.MaxSessions {
+			runtime.mu.Unlock()
+			runtime.rejected.Add(1)
+			return nil, errs.ErrTransportOverloaded
+		}
+		if _, exists := runtime.sessions[id]; exists {
+			runtime.mu.Unlock()
+			continue
+		}
+		sessionContext, cancel := context.WithCancel(runtime.ctx)
+		session := &Session{
+			id:                id,
+			runtime:           runtime,
+			transport:         conn,
+			ctx:               sessionContext,
+			cancel:            cancel,
+			done:              make(chan struct{}),
+			writableDelivered: true,
+			writableLatest:    true,
+		}
+		runtime.sessions[id] = session
+		runtime.mu.Unlock()
+		runtime.opened.Add(1)
+		return session, nil
+	}
+	return nil, errs.NewMessage(errs.CodeInternal, "network SessionID 连续碰撞")
 }
 
 // Open 在读取首条消息前把 OnOpen 同步交付所属 Service。
@@ -393,7 +405,7 @@ func (runtime *Runtime) Finalize(ctx context.Context) error {
 
 // Session 按 ID 查询当前尚未完成最终 Close 的 Session。
 func (runtime *Runtime) Session(id public.SessionID) (public.Session, bool) {
-	if runtime == nil || id == 0 {
+	if runtime == nil || id == "" {
 		return nil, false
 	}
 	runtime.mu.Lock()
@@ -530,7 +542,7 @@ func (runtime *Runtime) completeClose(
 	}); err != nil {
 		runtime.logger.Error(
 			"network Handler OnClose panic",
-			originlog.Int64("session_id", int64(session.id)),
+			originlog.String("session_id", string(session.id)),
 			originlog.Err(err),
 		)
 	}

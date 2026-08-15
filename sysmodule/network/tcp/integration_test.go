@@ -65,11 +65,11 @@ func TestSameServiceTCPClientCallsOwnServer(t *testing.T) {
 			response := make(chan string, 1)
 			var serverClosed atomic.Int32
 			var clientClosed atomic.Int32
-			var serverSessionID atomic.Uint64
+			serverSessionID := make(chan network.SessionID, 1)
 
 			serverHandler := network.HandlerFuncs{
 				Open: func(_ context.Context, session network.Session) error {
-					serverSessionID.Store(uint64(session.ID()))
+					serverSessionID <- session.ID()
 					return nil
 				},
 				Message: func(_ context.Context, session network.Session, payload []byte) error {
@@ -132,11 +132,11 @@ func TestSameServiceTCPClientCallsOwnServer(t *testing.T) {
 			if !ok || server.SessionCount() != 1 {
 				t.Fatalf("sessions: client=%v server=%d", ok, server.SessionCount())
 			}
-			if clientSession.ID() == 0 || clientSession.Transport() != network.TransportTCP ||
+			if clientSession.ID() == "" || clientSession.Transport() != network.TransportTCP ||
 				clientSession.LocalAddr() == nil || clientSession.RemoteAddr() == nil ||
 				clientSession.Context() == nil || !clientSession.Writable() ||
 				clientSession.Cause() != nil {
-				t.Fatalf("client session 外观无效：id=%d stats=%+v", clientSession.ID(), clientSession.Stats())
+				t.Fatalf("client session 外观无效：id=%q stats=%+v", clientSession.ID(), clientSession.Stats())
 			}
 			statsDeadline := time.Now().Add(5 * time.Second)
 			for {
@@ -151,10 +151,19 @@ func TestSameServiceTCPClientCallsOwnServer(t *testing.T) {
 				}
 				time.Sleep(time.Millisecond)
 			}
-			serverID := network.SessionID(serverSessionID.Load())
+			var serverID network.SessionID
+			select {
+			case serverID = <-serverSessionID:
+			case <-time.After(5 * time.Second):
+				t.Fatal("等待 TCP Server SessionID 超时")
+			}
 			serverSession, exists := server.Session(serverID)
-			if server.Addr() == nil || !exists || serverSession.ID() != serverID {
-				t.Fatalf("server 查询失败：addr=%v id=%d exists=%v", server.Addr(), serverID, exists)
+			if server.Addr() == nil || !exists || serverSession.ID() != serverID ||
+				serverID == clientSession.ID() {
+				t.Fatalf(
+					"server 查询失败或跨 Runtime ID 碰撞：addr=%v server_id=%q client_id=%q exists=%v",
+					server.Addr(), serverID, clientSession.ID(), exists,
+				)
 			}
 			if stats := client.Stats(); stats.OpenedSessions != 1 || stats.ActiveSessions != 1 {
 				t.Fatalf("client stats=%+v", stats)

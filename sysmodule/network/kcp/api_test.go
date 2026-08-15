@@ -13,10 +13,10 @@ import (
 func TestNilAndUnstartedFacadeIsSafe(t *testing.T) {
 	var server *Server
 	if server.Addr() != nil || server.SessionCount() != 0 ||
-		server.CloseSession(1, nil) || server.Stats() != (network.EndpointStats{}) {
+		server.CloseSession("missing", nil) || server.Stats() != (network.EndpointStats{}) {
 		t.Fatal("nil Server facade 不安全")
 	}
-	if session, ok := server.Session(1); session != nil || ok {
+	if session, ok := server.Session("missing"); session != nil || ok {
 		t.Fatal("nil Server.Session 不安全")
 	}
 	var client *Client
