@@ -31,7 +31,7 @@ func (server *Server) Session(id SessionID) (Session, bool)
 func (server *Server) CloseSession(id SessionID, cause error) bool
 ```
 
-空字符串是无效 ID。每次建立新的逻辑 Session 都生成新的小写 RFC 9562 UUID v4 文本；
+空字符串是无效 ID。每次建立新的逻辑 Session 都生成新的固定 22 字符、无填充 Base64URL 文本；
 Client 重连不得复用旧 ID。TCP、WebSocket 和 KCP 通过公共 Core 使用同一生成逻辑，不在 ID
 中编码 Transport、地址、ServiceName 或业务玩家身份。
 
@@ -40,10 +40,11 @@ Client 重连不得复用旧 ID。TCP、WebSocket 和 KCP 通过公共 Core 使�
 
 ## 3. 生成与失败语义
 
-实现使用标准库 `crypto/rand` 读取 128 位随机数，设置 UUID v4 的 Version 和 Variant 位，
-再编码为 36 字节字符串。生成不依赖时间、机器信息、地址、PID、包级计数器或全局可变状态。
+实现使用标准库 `crypto/rand` 读取 128 位随机数，不改写任何位，直接通过标准库
+`base64.RawURLEncoding` 编码为 22 字符字符串。生成不依赖时间、机器信息、地址、PID、
+包级计数器或全局可变状态。
 
-UUID v4 提供 122 位随机空间，是工程意义上的全局唯一，而不是依赖中心协调的数学绝对唯一。
+ID 提供完整 128 位随机空间，是工程意义上的全局唯一，而不是依赖中心协调的数学绝对唯一。
 Runtime 在登记前仍检查自己的活动 Map；极端碰撞时重新生成，连续多次碰撞返回 `ErrInternal`。
 随机源失败同样返回 `ErrInternal`，不得退化为时间戳、弱随机或局部递增值。
 
@@ -54,7 +55,7 @@ Runtime 在登记前仍检查自己的活动 Map；极端碰撞时重新生成�
 Map 查询。
 
 字符串 Key 比 `uint64` 增加 Map 与 Session 内存，并增加哈希成本，但单端点 Session 上限为
-65,536，且查询不是框架消息热路径。验收必须记录 UUID 生成的 `ns/op`、`B/op`、`allocs/op`，
+65,536，且查询不是框架消息热路径。验收必须记录 SessionID 生成的 `ns/op`、`B/op`、`allocs/op`，
 并确认收发基准没有新增逐消息分配。
 
 ## 5. 兼容性
@@ -64,4 +65,5 @@ Map 查询。
 
 框架没有把该 SessionID 写入 TCP、WebSocket 或 KCP Wire，所以不存在协议迁移、灰度互通或
 历史数据解析。若业务自行持久化旧数值 ID，需要在升级时清空这些仅对旧进程有效的瞬时连接
-索引，不能把旧数值转换成新 UUID。
+索引，不能把旧数值转换成新 SessionID。Base64URL 文本区分大小写，业务如果存入数据库，
+对应字段和索引也必须使用区分大小写的比较规则。

@@ -14,7 +14,7 @@ import (
 	public "github.com/duanhf2012/origin/v3/sysmodule/network"
 )
 
-func TestNewSessionIDEncodesUUIDV4(t *testing.T) {
+func TestNewSessionIDEncodesBase64URL(t *testing.T) {
 	source := []byte{
 		0x00, 0x01, 0x02, 0x03,
 		0x04, 0x05,
@@ -26,7 +26,7 @@ func TestNewSessionIDEncodesUUIDV4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want public.SessionID = "00010203-0405-4607-8809-0a0b0c0d0e0f"
+	const want public.SessionID = "AAECAwQFBgcICQoLDA0ODw"
 	if id != want {
 		t.Fatalf("newSessionID() = %q, want %q", id, want)
 	}
@@ -79,7 +79,7 @@ func TestRuntimeNewSessionRejectsRandomFailureAndRepeatedCollision(t *testing.T)
 	})
 
 	t.Run("repeated collision", func(t *testing.T) {
-		// 第一段创建活动 Session，后四段固定产生相同 UUID，覆盖全部有界重试。
+		// 第一段创建活动 Session，后四段固定产生相同 ID，覆盖全部有界重试。
 		source := bytes.NewReader(make([]byte, 16*(maxSessionIDGenerationAttempts+1)))
 		runtime := newSessionIDTestRuntime(source, 2)
 		first, err := runtime.NewSession(sessionIDTestConn{})
@@ -126,7 +126,7 @@ func TestRuntimeNewSessionAdmissionAndCollisionRetry(t *testing.T) {
 		}
 	})
 
-	t.Run("collision retries with a new UUID", func(t *testing.T) {
+	t.Run("collision retries with a new ID", func(t *testing.T) {
 		zero := make([]byte, 16)
 		ones := bytes.Repeat([]byte{1}, 16)
 		source := bytes.NewReader(append(append(zero, zero...), ones...))
