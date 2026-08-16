@@ -17,6 +17,9 @@ func (conn transportConn) RemoteAddr() net.Addr { return conn.conn.RemoteAddr() 
 func (conn transportConn) Send(buffer *bufferpool.Buffer) error {
 	return conn.conn.Send(buffer)
 }
+func (conn transportConn) SendAndClose(buffer *bufferpool.Buffer) error {
+	return conn.conn.SendAndClose(buffer)
+}
 func (conn transportConn) Close()         { conn.conn.Close() }
 func (conn transportConn) Writable() bool { return conn.conn.Writable() }
 func (conn transportConn) Stats() core.TransportStats {

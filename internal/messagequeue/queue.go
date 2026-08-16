@@ -96,6 +96,23 @@ func (queue *Queue[T]) Enqueue(value T, chargeBytes int64) (
 	writable bool,
 	err error,
 ) {
+	return queue.enqueue(value, chargeBytes, false)
+}
+
+// EnqueueFinal 原子提交最后一个值并停止后续准入；消费者仍会按 FIFO 取完已有值和该值。
+func (queue *Queue[T]) EnqueueFinal(value T, chargeBytes int64) (
+	changed bool,
+	writable bool,
+	err error,
+) {
+	return queue.enqueue(value, chargeBytes, true)
+}
+
+func (queue *Queue[T]) enqueue(value T, chargeBytes int64, final bool) (
+	changed bool,
+	writable bool,
+	err error,
+) {
 	if queue == nil || chargeBytes < 0 {
 		return false, false, errs.ErrInvalidArgument
 	}
@@ -120,6 +137,13 @@ func (queue *Queue[T]) Enqueue(value T, chargeBytes int64) (
 	}
 	queue.bytes += chargeBytes
 	changed, writable = queue.updateWritabilityLocked(time.Time{})
+	if final {
+		queue.closed = true
+		if writable {
+			changed = true
+		}
+		writable = false
+	}
 	queue.mu.Unlock()
 	queue.signal()
 	return changed, writable, nil
@@ -180,7 +204,7 @@ func (queue *Queue[T]) Close() {
 		return
 	}
 	queue.mu.Lock()
-	if queue.closed {
+	if queue.closed && queue.items.Len() == 0 {
 		queue.mu.Unlock()
 		return
 	}

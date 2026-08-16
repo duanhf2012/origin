@@ -20,6 +20,11 @@ import (
 
 const initialReadBufferSize = 256
 
+type sendItem struct {
+	buffer     *bufferpool.Buffer
+	closeAfter bool
+}
+
 // Conn 表示一条完成 HTTP Upgrade、具有单 Reader/Writer 和有界发送队列的 WebSocket 连接。
 type Conn struct {
 	raw     *gorillaws.Conn
@@ -29,7 +34,7 @@ type Conn struct {
 
 	localAddr  net.Addr
 	remoteAddr net.Addr
-	send       *messagequeue.Queue[*bufferpool.Buffer]
+	send       *messagequeue.Queue[sendItem]
 
 	closeOnce sync.Once
 	stateMu   sync.Mutex
@@ -56,9 +61,9 @@ func newConn(
 		options.SendQueueMessages,
 		options.SendQueueBytes,
 		options.SendBudget,
-		func(buffer *bufferpool.Buffer) {
-			if buffer != nil {
-				buffer.Release()
+		func(item sendItem) {
+			if item.buffer != nil {
+				item.buffer.Release()
 			}
 		},
 	)
@@ -117,6 +122,15 @@ func (conn *Conn) Cause() error {
 
 // Send 提交唯一 Payload；成功时接管 Buffer，失败时所有权仍属于调用方。
 func (conn *Conn) Send(buffer *bufferpool.Buffer) error {
+	return conn.sendBuffer(buffer, false)
+}
+
+// SendAndClose 原子提交最后一条 Data Message，并在完整写出后关闭连接。
+func (conn *Conn) SendAndClose(buffer *bufferpool.Buffer) error {
+	return conn.sendBuffer(buffer, true)
+}
+
+func (conn *Conn) sendBuffer(buffer *bufferpool.Buffer, final bool) error {
 	if buffer == nil {
 		return invalidArgument("wsnet: Send Buffer 不能为空")
 	}
@@ -127,7 +141,14 @@ func (conn *Conn) Send(buffer *bufferpool.Buffer) error {
 	if conn.options.MessageType == TextMessage && !utf8.Valid(payload) {
 		return errs.NewMessage(errs.CodeTransportProtocol, "wsnet: Text Message 必须是有效 UTF-8")
 	}
-	changed, writable, err := conn.send.Enqueue(buffer, int64(buffer.Capacity()))
+	item := sendItem{buffer: buffer, closeAfter: final}
+	var changed, writable bool
+	var err error
+	if final {
+		changed, writable, err = conn.send.EnqueueFinal(item, int64(buffer.Capacity()))
+	} else {
+		changed, writable, err = conn.send.Enqueue(item, int64(buffer.Capacity()))
+	}
 	if err == nil && changed {
 		conn.notifyWritableChanged(writable)
 	}
@@ -423,7 +444,7 @@ func (conn *Conn) refreshReadDeadline(lastData, lastPong time.Time) error {
 }
 
 func (conn *Conn) writeLoop() {
-	var active messagequeue.Entry[*bufferpool.Buffer]
+	var active messagequeue.Entry[sendItem]
 	hasActive := false
 	defer func() {
 		if hasActive {
@@ -451,8 +472,9 @@ func (conn *Conn) writeLoop() {
 		}
 		active = entry
 		hasActive = true
-		payloadSize := len(entry.Value.Bytes())
-		err := conn.writeMessage(entry.Value.Bytes())
+		payloadSize := len(entry.Value.buffer.Bytes())
+		err := conn.writeMessage(entry.Value.buffer.Bytes())
+		closeAfter := entry.Value.closeAfter
 		conn.send.Release(&active)
 		hasActive = false
 		if err != nil {
@@ -461,6 +483,10 @@ func (conn *Conn) writeLoop() {
 		}
 		conn.sentMessages.Add(1)
 		conn.sentBytes.Add(uint64(payloadSize))
+		if closeAfter {
+			conn.initiateClose(errs.ErrTransportClosed)
+			return
+		}
 		if conn.send.IsSlow(conn.options.SlowClientTimeout) {
 			conn.initiateClose(slowClientError{})
 			return

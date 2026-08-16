@@ -75,6 +75,38 @@ func (session *Session) Send(payload []byte) error {
 	return nil
 }
 
+// SendAndClose 原子提交最后一条消息，并在底层完整写出后关闭连接。
+func (session *Session) SendAndClose(payload []byte, cause error) error {
+	if session == nil || session.runtime == nil {
+		return errs.ErrInvalidArgument
+	}
+	if len(payload) > session.runtime.options.MaxMessageSize {
+		return errs.ErrTransportMessageTooLarge
+	}
+	buffer := session.runtime.pool.Acquire(len(payload))
+	copy(buffer.Bytes(), payload)
+	transport, ok := session.transport.(FinalTransportConn)
+	if !ok {
+		buffer.Release()
+		return errs.ErrTransportUnavailable
+	}
+	if err := transport.SendAndClose(buffer); err != nil {
+		buffer.Release()
+		return err
+	}
+	session.stateMu.Lock()
+	if cause == nil {
+		cause = errs.ErrTransportClosed
+	}
+	if !session.closing {
+		session.closing = true
+		session.cancel()
+	}
+	session.requestedCause = cause
+	session.stateMu.Unlock()
+	return nil
+}
+
 // sendOwned 提交已经由框架唯一拥有的最终 Buffer；失败仍由调用方释放。
 func (session *Session) sendOwned(buffer *bufferpool.Buffer) error {
 	if session == nil || buffer == nil || session.isClosing() {
@@ -231,3 +263,4 @@ func (session *Session) markCloseDelivered() bool {
 }
 
 var _ public.Session = (*Session)(nil)
+var _ public.FinalMessageSession = (*Session)(nil)

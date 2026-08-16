@@ -29,6 +29,7 @@ type testRuntime struct {
 }
 
 func (runtime *testRuntime) ID() string               { return runtime.nodeID }
+func (runtime *testRuntime) SessionID() uint64        { return 1 }
 func (runtime *testRuntime) NodeID() string           { return runtime.nodeID }
 func (runtime *testRuntime) ServiceName() string      { return runtime.name }
 func (runtime *testRuntime) State() State             { return runtime.state }

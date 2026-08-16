@@ -137,6 +137,15 @@ func (conn *Conn) Cause() error {
 //
 // 返回 nil 时 Buffer 所有权已经转移给 Conn；返回 error 时所有权仍属于调用方。
 func (conn *Conn) Send(buffer *bufferpool.Buffer) error {
+	return conn.sendBuffer(buffer, false)
+}
+
+// SendAndClose 原子提交最后一帧；Writer 完整写出后关闭连接。
+func (conn *Conn) SendAndClose(buffer *bufferpool.Buffer) error {
+	return conn.sendBuffer(buffer, true)
+}
+
+func (conn *Conn) sendBuffer(buffer *bufferpool.Buffer, final bool) error {
 	// nil 与有效零长度 Buffer 语义不同，必须在读取 Buffer 前明确拒绝 nil。
 	if buffer == nil {
 		return invalidArgument("tcpnet: Send Buffer 不能为空")
@@ -159,7 +168,13 @@ func (conn *Conn) Send(buffer *bufferpool.Buffer) error {
 	)
 
 	// enqueue 是连接关闭状态、消息数额度和所有权转移的唯一原子边界。
-	changed, writable, err := conn.send.enqueue(item)
+	var changed, writable bool
+	var err error
+	if final {
+		changed, writable, err = conn.send.enqueueFinal(item)
+	} else {
+		changed, writable, err = conn.send.enqueue(item)
+	}
 	if err == nil && changed {
 		conn.notifyWritableChanged(writable)
 	}
@@ -430,6 +445,10 @@ func (conn *Conn) writeLoop() {
 		}
 		conn.sentMessages.Add(1)
 		conn.sentBytes.Add(uint64(item.payloadSize))
+		if item.closeAfter {
+			conn.initiateClose(errs.ErrTransportClosed)
+			return
+		}
 		if conn.send.isSlow(conn.options.SlowClientTimeout) {
 			conn.initiateClose(slowClientError{})
 			return

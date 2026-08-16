@@ -26,3 +26,9 @@ type TransportConn interface {
 	Writable() bool
 	Stats() TransportStats
 }
+
+// FinalTransportConn 是内置传输提供的最终消息原子入队能力。
+type FinalTransportConn interface {
+	TransportConn
+	SendAndClose(*bufferpool.Buffer) error
+}

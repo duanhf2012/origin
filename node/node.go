@@ -532,6 +532,15 @@ func (node *Node) ID() string {
 	return node.id
 }
 
+// SessionID 返回当前 Node 本次进程启动的随机会话标识。
+// 该值只读且不由业务配置，用于拒绝旧进程遗留的精确实例路由。
+func (node *Node) SessionID() uint64 {
+	if node == nil {
+		return 0
+	}
+	return node.sessionID
+}
+
 // Private 报告 Node 是否被配置为不公开。
 func (node *Node) Private() bool {
 	return node != nil && node.private
@@ -1120,6 +1129,14 @@ func (runtime *serviceRuntime) ID() string {
 		return ""
 	}
 	return runtime.node.ID()
+}
+
+// SessionID 实现 service.NodeRuntime，并返回所属 Node 本次启动的会话标识。
+func (runtime *serviceRuntime) SessionID() uint64 {
+	if runtime == nil || runtime.node == nil {
+		return 0
+	}
+	return runtime.node.SessionID()
 }
 
 // Now 实现 service.NodeRuntime，读取所属 Node 的游戏逻辑时间。

@@ -38,6 +38,7 @@ type schedulerTestFailure struct {
 }
 
 func (runtime *schedulerTestRuntime) ID() string          { return runtime.nodeID }
+func (runtime *schedulerTestRuntime) SessionID() uint64   { return 1 }
 func (runtime *schedulerTestRuntime) NodeID() string      { return runtime.nodeID }
 func (runtime *schedulerTestRuntime) ServiceName() string { return runtime.name }
 func (runtime *schedulerTestRuntime) State() State {

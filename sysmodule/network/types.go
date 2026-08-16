@@ -65,3 +65,12 @@ type Session interface {
 	// Stats 返回当前 Session 的固定字段统计快照。
 	Stats() SessionStats
 }
+
+// FinalMessageSession 可选地把一条消息作为连接最后一条完整写出后再关闭。
+//
+// 三种内置 Server Session 都实现该接口；独立接口避免破坏已有自定义 Session 测试替身。
+type FinalMessageSession interface {
+	Session
+	// SendAndClose 原子停止后续发送准入，并在此前队列和 payload 完整写出后关闭连接。
+	SendAndClose(payload []byte, cause error) error
+}

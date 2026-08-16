@@ -16,7 +16,7 @@ func TestServiceDispatchAsyncCompletionPassesTypedResult(t *testing.T) {
 	release := make(chan struct{})
 	completed := make(chan struct{})
 
-	err := fixture.service.DispatchAsyncCompletion(
+	err := DispatchAsyncCompletionResult(fixture.service,
 		context.Background(),
 		func(context.Context) (int, error) {
 			close(started)
@@ -54,7 +54,7 @@ func TestServiceDispatchAsyncCompletionPassesWaitErrorAndResult(t *testing.T) {
 	}
 	completed := make(chan completion, 1)
 
-	err := fixture.service.DispatchAsyncCompletion(
+	err := DispatchAsyncCompletionResult(fixture.service,
 		context.Background(),
 		func(context.Context) (int, error) { return 7, wantErr },
 		func(_ context.Context, value int, callbackErr error) {
@@ -106,7 +106,7 @@ func TestServiceDispatchAsyncCompletionSkipsWaitForFinishedContext(t *testing.T)
 			}
 			completed := make(chan completion, 1)
 
-			if err := fixture.service.DispatchAsyncCompletion(
+			if err := DispatchAsyncCompletionResult(fixture.service,
 				test.ctx(),
 				func(context.Context) (int, error) {
 					waitCalled.Store(true)
@@ -143,7 +143,7 @@ func TestServiceDispatchAsyncCompletionDelegatesAdmissionAndPanic(t *testing.T) 
 			t.Fatal(err)
 		}
 		waitSignal(t, started)
-		if err := fixture.service.DispatchAsyncCompletion(
+		if err := DispatchAsyncCompletionResult(fixture.service,
 			context.Background(),
 			func(context.Context) (int, error) { return 1, nil },
 			func(context.Context, int, error) {},
@@ -157,7 +157,7 @@ func TestServiceDispatchAsyncCompletionDelegatesAdmissionAndPanic(t *testing.T) 
 	t.Run("stopped", func(t *testing.T) {
 		fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
 		fixture.stop(t)
-		if err := fixture.service.DispatchAsyncCompletion(
+		if err := DispatchAsyncCompletionResult(fixture.service,
 			context.Background(),
 			func(context.Context) (int, error) { return 1, nil },
 			func(context.Context, int, error) {},
@@ -169,7 +169,7 @@ func TestServiceDispatchAsyncCompletionDelegatesAdmissionAndPanic(t *testing.T) 
 	t.Run("panic", func(t *testing.T) {
 		fixture := newSchedulerFixture(t, DefaultSchedulerConfig())
 		var callbackCalled atomic.Bool
-		if err := fixture.service.DispatchAsyncCompletion(
+		if err := DispatchAsyncCompletionResult(fixture.service,
 			context.Background(),
 			func(context.Context) (int, error) { panic("completion panic") },
 			func(context.Context, int, error) { callbackCalled.Store(true) },
@@ -192,16 +192,16 @@ func TestServiceDispatchAsyncCompletionRejectsInvalidArguments(t *testing.T) {
 	validCallback := func(context.Context, int, error) {}
 
 	var nilService *Service
-	if err := nilService.DispatchAsyncCompletion(context.Background(), validWait, validCallback); !errors.Is(err, errs.ErrInvalidArgument) {
+	if err := DispatchAsyncCompletionResult(nilService, context.Background(), validWait, validCallback); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("nil Service error = %v", err)
 	}
-	if err := fixture.service.DispatchAsyncCompletion(nil, validWait, validCallback); !errors.Is(err, errs.ErrInvalidArgument) {
+	if err := DispatchAsyncCompletionResult(fixture.service, nil, validWait, validCallback); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("nil context error = %v", err)
 	}
-	if err := fixture.service.DispatchAsyncCompletion(context.Background(), nil, validCallback); !errors.Is(err, errs.ErrInvalidArgument) {
+	if err := DispatchAsyncCompletionResult(fixture.service, context.Background(), nil, validCallback); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("nil wait error = %v", err)
 	}
-	if err := fixture.service.DispatchAsyncCompletion(context.Background(), validWait, nil); !errors.Is(err, errs.ErrInvalidArgument) {
+	if err := DispatchAsyncCompletionResult(fixture.service, context.Background(), validWait, nil); !errors.Is(err, errs.ErrInvalidArgument) {
 		t.Fatalf("nil callback error = %v", err)
 	}
 }

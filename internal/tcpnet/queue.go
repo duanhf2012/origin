@@ -15,6 +15,7 @@ type sendItem struct {
 	buffer      *bufferpool.Buffer
 	payloadSize int
 	chargeBytes int64
+	closeAfter  bool
 }
 
 // sendQueueSnapshot 保留 tcpnet 内部原有诊断形状，避免共享实现泄漏到具体传输 API。
@@ -49,6 +50,14 @@ func (queue *sendQueue) enqueue(item sendItem) (bool, bool, error) {
 		panic("tcpnet: 非法发送队列项")
 	}
 	return queue.shared.Enqueue(item, item.chargeBytes)
+}
+
+func (queue *sendQueue) enqueueFinal(item sendItem) (bool, bool, error) {
+	if item.buffer == nil || item.chargeBytes < 0 {
+		panic("tcpnet: 非法最终发送队列项")
+	}
+	item.closeAfter = true
+	return queue.shared.EnqueueFinal(item, item.chargeBytes)
 }
 
 func (queue *sendQueue) next() (sendItem, bool, bool, bool) {

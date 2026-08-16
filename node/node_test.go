@@ -32,6 +32,17 @@ func TestNewSessionIDReturnsNonZeroUint64(t *testing.T) {
 	}
 }
 
+func TestNodeSessionIDExposesCurrentProcessIdentity(t *testing.T) {
+	target := &Node{sessionID: 42}
+	if got := target.SessionID(); got != 42 {
+		t.Fatalf("SessionID() = %d, want 42", got)
+	}
+	var nilNode *Node
+	if got := nilNode.SessionID(); got != 0 {
+		t.Fatalf("nil SessionID() = %d, want 0", got)
+	}
+}
+
 // TestDiscoveryRuntimeRPCSnapshotPinsPublishedDirectory 验证 RPC 桥一次 Prepare 只看到一份
 // 已发布目录，后续完整快照替换不会污染旧视图。
 func TestDiscoveryRuntimeRPCSnapshotPinsPublishedDirectory(t *testing.T) {

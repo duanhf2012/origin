@@ -168,3 +168,51 @@ func TestQueueCloseWakesEmptyConsumerAndInvalidCalls(t *testing.T) {
 		t.Fatal("Close 未唤醒消费者")
 	}
 }
+
+func TestQueueEnqueueFinalDrainsInFIFOAndRejectsLaterValues(t *testing.T) {
+	budget, err := bytebudget.New(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue, err := New(3, 16, budget, func(int) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = queue.Enqueue(1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, writable, err := queue.EnqueueFinal(2, 1); err != nil || writable {
+		t.Fatalf("EnqueueFinal() writable=%v err=%v", writable, err)
+	}
+	if _, _, err = queue.Enqueue(3, 1); !errors.Is(err, errs.ErrTransportClosed) {
+		t.Fatalf("final 后 Enqueue() error=%v", err)
+	}
+	for _, want := range []int{1, 2} {
+		entry, ok, _, _ := queue.Next()
+		if !ok || entry.Value != want {
+			t.Fatalf("Next() value=%d ok=%v want=%d", entry.Value, ok, want)
+		}
+		queue.Release(&entry)
+	}
+	if _, ok, _, _ := queue.Next(); ok {
+		t.Fatal("最终值之后队列必须结束")
+	}
+}
+
+func TestQueueCloseReleasesSealedFinalQueueAfterWriterFailure(t *testing.T) {
+	budget, err := bytebudget.New(16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := 0
+	queue, err := New(3, 16, budget, func(int) { released++ })
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _ = queue.Enqueue(1, 1)
+	_, _, _ = queue.EnqueueFinal(2, 1)
+	queue.Close()
+	if released != 2 || budget.Snapshot().Used != 0 {
+		t.Fatalf("released=%d budget=%+v", released, budget.Snapshot())
+	}
+}

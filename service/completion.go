@@ -16,21 +16,21 @@ type completionContext struct {
 	caller    context.Context
 }
 
-// DispatchAsyncCompletion 为当前 Service 预留一个完成任务。wait 在释放 Service 执行槽后
+// DispatchAsyncCompletionResult 为当前 Service 预留一个带类型结果的完成任务。wait 在释放 Service 执行槽后
 // 运行，callback 在重新取得同一 Service 的串行执行权后运行。
 //
 // 类型化结果只从 wait 流向 callback；如果 wait 因 Context 已结束而没有执行，callback
 // 会收到 T 的零值和对应错误。调度、取消、超时及 panic 语义均委托给下方兼容的包级
 // DispatchAsyncCompletion。
 //
-// 该方法不能加入 IService：Go 1.27 不支持接口方法声明自身类型参数。业务 Service 通过
-// 内嵌的 Service 调用；框架代码可继续使用包级 API。
-func (service *Service) DispatchAsyncCompletion[T any](
+// Go 1.27 仍不允许方法声明自身类型参数，因此该能力使用包级泛型函数。
+func DispatchAsyncCompletionResult[T any](
+	service IService,
 	ctx context.Context,
 	wait func(context.Context) (T, error),
 	callback func(context.Context, T, error),
 ) error {
-	if service == nil || ctx == nil || wait == nil || callback == nil {
+	if service == nil || isNilService(service) || ctx == nil || wait == nil || callback == nil {
 		return errs.ErrInvalidArgument
 	}
 

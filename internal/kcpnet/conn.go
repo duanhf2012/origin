@@ -18,6 +18,11 @@ import (
 	originlog "github.com/duanhf2012/origin/v3/log"
 )
 
+type sendItem struct {
+	buffer     *bufferpool.Buffer
+	closeAfter bool
+}
+
 // Conn 表示一条启用 Stream Mode、具有长度帧和有界发送队列的 KCP Session。
 type Conn struct {
 	raw     *kcplib.UDPSession
@@ -27,7 +32,7 @@ type Conn struct {
 
 	localAddr  net.Addr
 	remoteAddr net.Addr
-	send       *messagequeue.Queue[*bufferpool.Buffer]
+	send       *messagequeue.Queue[sendItem]
 
 	readHeader  [4]byte
 	writeHeader [4]byte
@@ -56,9 +61,9 @@ func newConn(
 		options.SendQueueMessages,
 		options.SendQueueBytes,
 		options.SendBudget,
-		func(buffer *bufferpool.Buffer) {
-			if buffer != nil {
-				buffer.Release()
+		func(item sendItem) {
+			if item.buffer != nil {
+				item.buffer.Release()
 			}
 		},
 	)
@@ -113,6 +118,15 @@ func (conn *Conn) Cause() error {
 
 // Send 非阻塞提交唯一 Payload；成功时接管 Buffer，失败时所有权仍属于调用方。
 func (conn *Conn) Send(buffer *bufferpool.Buffer) error {
+	return conn.sendBuffer(buffer, false)
+}
+
+// SendAndClose 原子提交最后一帧，并在完整写出后关闭连接。
+func (conn *Conn) SendAndClose(buffer *bufferpool.Buffer) error {
+	return conn.sendBuffer(buffer, true)
+}
+
+func (conn *Conn) sendBuffer(buffer *bufferpool.Buffer, final bool) error {
 	if conn == nil || buffer == nil {
 		return invalidArgument("kcpnet: Send 的 Conn 和 Buffer 不能为空")
 	}
@@ -120,7 +134,14 @@ func (conn *Conn) Send(buffer *bufferpool.Buffer) error {
 	if len(payload) > conn.options.MaxMessageSize {
 		return errs.ErrTransportMessageTooLarge
 	}
-	changed, writable, err := conn.send.Enqueue(buffer, int64(buffer.Capacity()))
+	item := sendItem{buffer: buffer, closeAfter: final}
+	var changed, writable bool
+	var err error
+	if final {
+		changed, writable, err = conn.send.EnqueueFinal(item, int64(buffer.Capacity()))
+	} else {
+		changed, writable, err = conn.send.Enqueue(item, int64(buffer.Capacity()))
+	}
 	if err == nil && changed {
 		conn.notifyWritableChanged(writable)
 	}
@@ -307,7 +328,7 @@ func (conn *Conn) runReadLoop() (result error) {
 }
 
 func (conn *Conn) writeLoop() {
-	var active messagequeue.Entry[*bufferpool.Buffer]
+	var active messagequeue.Entry[sendItem]
 	hasActive := false
 	defer func() {
 		conn.clearWriteParts()
@@ -335,8 +356,9 @@ func (conn *Conn) writeLoop() {
 		}
 		active = entry
 		hasActive = true
-		payloadSize := len(entry.Value.Bytes())
-		err := conn.writeMessage(entry.Value.Bytes())
+		payloadSize := len(entry.Value.buffer.Bytes())
+		err := conn.writeMessage(entry.Value.buffer.Bytes())
+		closeAfter := entry.Value.closeAfter
 		conn.send.Release(&active)
 		hasActive = false
 		if err != nil {
@@ -345,6 +367,10 @@ func (conn *Conn) writeLoop() {
 		}
 		conn.sentMessages.Add(1)
 		conn.sentBytes.Add(uint64(payloadSize))
+		if closeAfter {
+			conn.initiateClose(errs.ErrTransportClosed)
+			return
+		}
 		if conn.send.IsSlow(conn.options.SlowClientTimeout) {
 			conn.initiateClose(slowClientError{})
 			return

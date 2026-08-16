@@ -10,6 +10,8 @@ import "time"
 type NodeRuntime interface {
 	// ID 返回当前 Node 的稳定身份。
 	ID() string
+	// SessionID 返回当前 Node 本次进程启动的非零随机会话标识。
+	SessionID() uint64
 	// Now 返回当前 Node 的游戏逻辑时间。
 	Now() time.Time
 	// SetTime 把当前 Node 的游戏逻辑时间设置到 value。
