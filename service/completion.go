@@ -23,7 +23,8 @@ type completionContext struct {
 // 会收到 T 的零值和对应错误。调度、取消、超时及 panic 语义均委托给下方兼容的包级
 // DispatchAsyncCompletion。
 //
-// Go 1.27 仍不允许方法声明自身类型参数，因此该能力使用包级泛型函数。
+// Go 1.27 支持具体类型的方法声明自身类型参数，但 IService 接口不能声明这类方法，
+// 因此该能力继续使用包级泛型函数。
 func DispatchAsyncCompletionResult[T any](
 	service IService,
 	ctx context.Context,

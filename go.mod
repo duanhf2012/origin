@@ -1,6 +1,6 @@
 module github.com/duanhf2012/origin/v3
 
-go 1.27rc2
+go 1.27.0
 
 require (
 	github.com/IBM/sarama v1.60.1

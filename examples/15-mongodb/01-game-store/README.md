@@ -11,7 +11,7 @@
 
 ## 前置条件
 
-需要 Go `1.26.5` 和支持事务的 MongoDB Replica Set。默认 URI 是：
+需要 Go `1.27.0` 和支持事务的 MongoDB Replica Set。默认 URI 是：
 
 ```text
 mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true

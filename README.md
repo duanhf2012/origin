@@ -4,7 +4,7 @@ Origin v3 是面向多节点 Go 服务的运行框架。本仓库的 README 是�
 
 ## 5 分钟快速开始
 
-前置条件：已安装 Go `1.26.5` 或兼容版本。这个示例不需要 NATS、etcd 或 Docker。
+前置条件：已安装 Go `1.27.0` 或兼容版本。这个示例不需要 NATS、etcd 或 Docker。
 
 Windows：
 
