@@ -86,12 +86,6 @@ func (conn *Conn) start() {
 	go conn.writeLoop()
 	go conn.readLoop()
 
-	// 生命周期日志不在逐帧热路径执行。
-	conn.logger.Info(
-		"TCP 连接已建立",
-		originlog.String("local_addr", addrString(conn.localAddr)),
-		originlog.String("remote_addr", addrString(conn.remoteAddr)),
-	)
 }
 
 // LocalAddr 返回连接建立时保存的本地地址。
@@ -319,12 +313,6 @@ func (conn *Conn) readLoop() {
 	if conn.onDone != nil {
 		conn.onDone(conn)
 	}
-	conn.logger.Info(
-		"TCP 连接已关闭",
-		originlog.String("local_addr", addrString(conn.localAddr)),
-		originlog.String("remote_addr", addrString(conn.remoteAddr)),
-		originlog.Err(finalCause),
-	)
 }
 
 // runReadLoop 顺序调用 Handler 并把每个完整长度帧交给其唯一所有者。

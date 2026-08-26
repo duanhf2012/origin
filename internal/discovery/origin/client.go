@@ -368,7 +368,18 @@ func (provider *clientProvider) ownerLoop(ctx context.Context) {
 					return
 				}
 				reportRecovering(errs.CodeDiscoveryUnavailable)
-				nextDial = time.Now().Add(jitterDelay(backoff, 20, &randomState))
+				// 每次真实 Dial 失败都明确记录目标、失败次数和下一次退避时间。启动期的
+				// 首次快照仍可等待短暂的网络恢复，但不能让使用者只能看到最终超时。
+				retryAfter := jitterDelay(backoff, 20, &randomState)
+				nextDial = time.Now().Add(retryAfter)
+				provider.logger.Warn(
+					"DiscoveryService 连接失败，将在退避后重试",
+					originlog.String("discovery_server_node", provider.target.NodeID),
+					originlog.String("discovery_server_address", provider.target.Address),
+					originlog.Uint32("consecutive_failures", failures),
+					originlog.Duration("retry_after", retryAfter),
+					originlog.Err(err),
+				)
 				backoff *= 2
 				if backoff > 5*time.Second {
 					backoff = 5 * time.Second

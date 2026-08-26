@@ -43,6 +43,21 @@ func TestNodeSessionIDExposesCurrentProcessIdentity(t *testing.T) {
 	}
 }
 
+func TestNodeLifecycleServicesPreservesConfiguredIdentity(t *testing.T) {
+	target := &Node{services: []*serviceEntry{
+		{name: "AccDBService", template: "DBService"},
+		{name: "RoleDBService", template: "DBService", private: true},
+	}}
+	got := target.lifecycleServices()
+	want := []lifecycleServiceInfo{
+		{ServiceName: "AccDBService", Template: "DBService"},
+		{ServiceName: "RoleDBService", Template: "DBService", Private: true},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("lifecycleServices() = %#v, want %#v", got, want)
+	}
+}
+
 // TestDiscoveryRuntimeRPCSnapshotPinsPublishedDirectory 验证 RPC 桥一次 Prepare 只看到一份
 // 已发布目录，后续完整快照替换不会污染旧视图。
 func TestDiscoveryRuntimeRPCSnapshotPinsPublishedDirectory(t *testing.T) {

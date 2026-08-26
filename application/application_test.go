@@ -768,6 +768,70 @@ nodes:
 	}
 }
 
+// TestLoadConfigNodeDiscoveryOptOut 确保默认 Node 仍参与服务发现，而纯客户端 Node
+// 可以明确跳过 Provider、系统 RPC 和服务发布。
+func TestLoadConfigNodeDiscoveryOptOut(t *testing.T) {
+	directory := writeApplicationConfig(t, `
+nodes:
+  - id: game-1
+    services: [lifecycleTestService]
+  - id: robot-1
+    discovery_enabled: false
+    allow_discovery: []
+    services: [lifecycleTestService]
+`)
+
+	loaded, err := loadConfig(directory)
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if loaded.nodes[0].DiscoveryDisabled {
+		t.Fatal("未配置 discovery_enabled 的 Node 不应禁用服务发现")
+	}
+	if !loaded.nodes[1].DiscoveryDisabled {
+		t.Fatal("discovery_enabled: false 未禁用服务发现")
+	}
+}
+
+// TestBuildNodesSkipsOriginDiscoveryForOptedOutNode 防止只启动客户端 Robot Node 时
+// 仍要求同进程包含 DiscoveryService Node。
+func TestBuildNodesSkipsOriginDiscoveryForOptedOutNode(t *testing.T) {
+	providerConfig, err := publicprovider.NewConfig(map[string]any{
+		"ttl": "5s",
+		"server": map[string]any{
+			"node": "discovery-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewConfig() error = %v", err)
+	}
+	app := New()
+	app.Setup(&lifecycleTestService{})
+	nodes, err := app.buildNodes([]node.Config{
+		{
+			ID:                "robot-1",
+			DiscoveryDisabled: true,
+			Scheduler:         service.DefaultSchedulerConfig(),
+			Services:          []string{"lifecycleTestService"},
+		},
+	}, &discoverySelection{kind: "origin", config: providerConfig})
+	if err != nil {
+		t.Fatalf("buildNodes() error = %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("buildNodes() 节点数量 = %d，want 1", len(nodes))
+	}
+	t.Cleanup(func() {
+		if rollbackErr := nodes[0].Rollback(context.Background()); rollbackErr != nil {
+			t.Errorf("Node.Rollback() error = %v", rollbackErr)
+		}
+	})
+	status := nodes[0].DiscoveryStatus()
+	if status.Kind != "none" || !status.Synchronized {
+		t.Fatalf("禁用发现的 Node 状态 = %+v，want local-only", status)
+	}
+}
+
 // TestTutorialRPCAndOriginDiscoveryConfigurationsLoad keeps the executable tutorials aligned
 // with the strict application-level RPC grammar. It intentionally only loads configuration:
 // NATS and TCP endpoints are documentation examples and need not be available during unit tests.

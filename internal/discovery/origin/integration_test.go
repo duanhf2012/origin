@@ -25,6 +25,40 @@ type hostRecorder struct {
 	snapshots chan struct{}
 }
 
+// retryLogHandler 收集 Origin Provider 重连失败日志，验证启动等待期间不会静默。
+type retryLogHandler struct {
+	mu      sync.Mutex
+	records []originlog.Record
+}
+
+func (*retryLogHandler) Enabled(level originlog.Level) bool {
+	// 仅接收本测试关心的 Warning，避免无关日志干扰断言。
+	return level >= originlog.WarnLevel
+}
+
+func (handler *retryLogHandler) Write(record originlog.Record, _ []originlog.Field) error {
+	// 日志 Runtime 串行调用 Write；锁只保护测试协程随后读取的快照。
+	handler.mu.Lock()
+	handler.records = append(handler.records, record)
+	handler.mu.Unlock()
+	return nil
+}
+
+func (*retryLogHandler) Sync() error  { return nil }
+func (*retryLogHandler) Close() error { return nil }
+
+func (handler *retryLogHandler) contains(message string) bool {
+	// 复制前在锁内遍历，避免异步日志协程与断言产生数据竞争。
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	for _, record := range handler.records {
+		if record.Message == message {
+			return true
+		}
+	}
+	return false
+}
+
 func newHostRecorder() *hostRecorder {
 	return &hostRecorder{snapshots: make(chan struct{}, 32)}
 }
@@ -284,6 +318,60 @@ func TestOriginProviderEndToEndAndDuplicateSession(t *testing.T) {
 		Config:  rawConfig,
 		Timeout: 5 * time.Second,
 	})
+}
+
+// TestOriginProviderLogsDialRetryDuringStart 防止发现端不可达时启动期只在最终超时后才暴露错误。
+func TestOriginProviderLogsDialRetryDuringStart(t *testing.T) {
+	rawConfig, err := publicprovider.NewConfig(map[string]any{
+		"ttl": "3s",
+		"server": map[string]any{
+			"node": "discovery-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewConfig() error = %v", err)
+	}
+	pool := bufferpool.NewPool(bufferpool.Options{TrackUsage: true})
+	clientRuntime := newOriginTestRuntime(t, "game-client", reserveAddress(t), pool)
+	if err := clientRuntime.Freeze(); err != nil {
+		t.Fatalf("client Runtime.Freeze() error = %v", err)
+	}
+	if err := clientRuntime.StartNetwork(context.Background(), newOriginTestEngine(t)); err != nil {
+		t.Fatalf("client Runtime.StartNetwork() error = %v", err)
+	}
+
+	// reserveAddress 返回后 Listener 已关闭，作为可稳定触发连接拒绝的 DiscoveryService 目标。
+	handler := &retryLogHandler{}
+	logRuntime, err := originlog.NewRuntime(originlog.DefaultConfig(), handler)
+	if err != nil {
+		t.Fatalf("log.NewRuntime() error = %v", err)
+	}
+	t.Cleanup(func() { _ = logRuntime.Close(context.Background()) })
+	factory := NewFactory(clientRuntime, rpc.SystemTarget{
+		NodeID:  "discovery-1",
+		Address: reserveAddress(t),
+	})
+	provider, err := factory(publicprovider.Context{
+		NodeID:    "game-1",
+		SessionID: 101,
+		Config:    rawConfig,
+		Host:      newHostRecorder().host(),
+		Logger:    logRuntime.Logger(),
+	})
+	if err != nil {
+		t.Fatalf("Factory() error = %v", err)
+	}
+	startCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := provider.Start(startCtx); err == nil {
+		t.Fatal("不可达 DiscoveryService 的 Start() 应在 Context 截止后失败")
+	}
+	if err := logRuntime.Flush(context.Background()); err != nil {
+		t.Fatalf("logRuntime.Flush() error = %v", err)
+	}
+	if !handler.contains("DiscoveryService 连接失败，将在退避后重试") {
+		t.Fatal("DiscoveryService 连接失败时未输出重试 Warning")
+	}
 }
 
 // TestOriginProviderServerRestartPreservesSnapshotDuringWarming catches a new server epoch

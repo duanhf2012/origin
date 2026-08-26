@@ -43,13 +43,14 @@ type bufferPoolConfig struct {
 
 // nodeConfig 与公开 node.Config 分离，使配置 Tag 不污染运行时对象。
 type nodeConfig struct {
-	ID             string                 `json:"id"`
-	Private        bool                   `json:"private"`
-	Labels         map[string]string      `json:"labels"`
-	AllowDiscovery json.RawMessage        `json:"allow_discovery"`
-	Scheduler      *schedulerConfigMirror `json:"scheduler"`
-	RPC            *nodeRPCConfigMirror   `json:"rpc"`
-	Services       []string               `json:"services"`
+	ID               string                 `json:"id"`
+	Private          bool                   `json:"private"`
+	DiscoveryEnabled *bool                  `json:"discovery_enabled"`
+	Labels           map[string]string      `json:"labels"`
+	AllowDiscovery   json.RawMessage        `json:"allow_discovery"`
+	Scheduler        *schedulerConfigMirror `json:"scheduler"`
+	RPC              *nodeRPCConfigMirror   `json:"rpc"`
+	Services         []string               `json:"services"`
 }
 
 // discoveryRuleMirror 保留关注规则两个可选维度的“省略”和“显式空值”区别。
@@ -333,13 +334,14 @@ func loadConfig(directory string) (loadedConfig, error) {
 			return loadedConfig{}, err
 		}
 		result.nodes[index] = node.Config{
-			ID:              configured.ID,
-			Private:         configured.Private,
-			Labels:          cloneStringMap(configured.Labels),
-			DiscoveryFilter: discoveryFilter,
-			Scheduler:       schedulerConfig,
-			RPC:             rpcConfig,
-			Services:        append([]string(nil), configured.Services...),
+			ID:                configured.ID,
+			Private:           configured.Private,
+			DiscoveryDisabled: configured.DiscoveryEnabled != nil && !*configured.DiscoveryEnabled,
+			Labels:            cloneStringMap(configured.Labels),
+			DiscoveryFilter:   discoveryFilter,
+			Scheduler:         schedulerConfig,
+			RPC:               rpcConfig,
+			Services:          append([]string(nil), configured.Services...),
 		}
 	}
 	if err := validateOriginDiscovery(result.discovery, nodes, result.nodes); err != nil {
@@ -401,6 +403,12 @@ func validateOriginDiscovery(
 		if selection != nil && selection.kind == "origin" &&
 			configured.ID == originConfig.Server.Node {
 			foundServer = true
+			if decoded[index].DiscoveryDisabled {
+				return invalidConfigf(
+					"DiscoveryService Node %q 不能禁用服务发现",
+					configured.ID,
+				)
+			}
 		}
 		if selection != nil && selection.kind == "origin" && decoded[index].RPC == nil {
 			return invalidConfigf(

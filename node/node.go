@@ -112,9 +112,52 @@ type serviceEntry struct {
 	failure atomic.Pointer[serviceFailureSnapshot]
 }
 
+// lifecycleServiceInfo 是 Node 生命周期日志中公开的本地 Service 装配摘要。
+// 它只包含稳定的运行身份，不包含配置值、地址或任何敏感信息。
+type lifecycleServiceInfo struct {
+	ServiceName string `json:"service_name"`
+	Template    string `json:"template"`
+	Private     bool   `json:"private"`
+}
+
 type serviceStateSnapshot struct {
 	State     service.State
 	EnteredAt time.Time
+}
+
+// lifecycleServices 按配置顺序返回当前 Node 实际装配的 Service 摘要，供冷路径日志使用。
+func (node *Node) lifecycleServices() []lifecycleServiceInfo {
+	if node == nil || len(node.services) == 0 {
+		return nil
+	}
+	result := make([]lifecycleServiceInfo, len(node.services))
+	for index, entry := range node.services {
+		result[index] = lifecycleServiceInfo{
+			ServiceName: entry.name,
+			Template:    entry.template,
+			Private:     entry.private,
+		}
+	}
+	return result
+}
+
+// logLifecycle 统一输出单个 Service 的启动或停止阶段，Service Logger 已绑定 Node 和实际名称。
+func (entry *serviceEntry) logLifecycle(message string) {
+	entry.logger.Info(
+		message,
+		originlog.String("service_template", entry.template),
+		originlog.Bool("service_private", entry.private),
+	)
+}
+
+// logLifecycleFailure 在 Application 聚合错误之外保留发生失败的具体 Service 和阶段。
+func (entry *serviceEntry) logLifecycleFailure(message string, cause error) {
+	entry.logger.Error(
+		message,
+		originlog.String("service_template", entry.template),
+		originlog.Bool("service_private", entry.private),
+		originlog.Err(cause),
+	)
 }
 
 // serviceRuntime 把 Service 的只读查询限制在所属 Node 和当前实例。
@@ -607,7 +650,12 @@ func (node *Node) Start(ctx context.Context) error {
 	}
 	node.state.Store(uint32(StateStarting))
 	node.refreshHealth()
-	node.logger.Info("node starting")
+	node.logger.Info(
+		"node starting",
+		originlog.Uint64("node_session_id", node.sessionID),
+		originlog.Any("node_labels", node.labels),
+		originlog.Any("local_services", node.lifecycleServices()),
+	)
 
 	// 第一阶段只执行纯初始化。业务 OnInit 错误不会跳过后续 Service，确保一次启动能够
 	// 报告完整配置/装配问题；只有外部 Context 已经结束时才不再开始新的生命周期回调。
@@ -624,9 +672,11 @@ func (node *Node) Start(ctx context.Context) error {
 			})
 		}
 		entry.setState(service.StateInitializing)
+		entry.logLifecycle("service initializing")
 		if err := service.BeginModuleInitialization(entry.instance); err != nil {
 			entry.setState(service.StateFailed)
 			entry.recordFailure(err)
+			entry.logLifecycleFailure("service initialization failed", err)
 			initializationErrors = errors.Join(initializationErrors, &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
@@ -643,10 +693,12 @@ func (node *Node) Start(ctx context.Context) error {
 		if err != nil {
 			entry.setState(service.StateFailed)
 			entry.recordFailure(err)
+			entry.logLifecycleFailure("service initialization failed", err)
 			initializationErrors = errors.Join(initializationErrors, err)
 			continue
 		}
 		entry.setState(service.StateInitialized)
+		entry.logLifecycle("service initialized")
 	}
 	if initializationErrors != nil {
 		node.state.Store(uint32(StateFailed))
@@ -729,6 +781,7 @@ func (node *Node) Start(ctx context.Context) error {
 			}
 		}
 		entry.setState(service.StateStarting)
+		entry.logLifecycle("service starting")
 		if err := service.PrepareScheduler(
 			entry.instance,
 			node.schedulerConfig,
@@ -737,6 +790,7 @@ func (node *Node) Start(ctx context.Context) error {
 			entry.setState(service.StateFailed)
 			node.state.Store(uint32(StateFailed))
 			node.refreshHealth()
+			entry.logLifecycleFailure("service scheduler preparation failed", err)
 			return &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
@@ -759,6 +813,7 @@ func (node *Node) Start(ctx context.Context) error {
 			entry.setState(service.StateFailed)
 			node.state.Store(uint32(StateFailed))
 			node.refreshHealth()
+			entry.logLifecycleFailure("service start context preparation failed", err)
 			return &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
@@ -775,6 +830,7 @@ func (node *Node) Start(ctx context.Context) error {
 			entry.setState(service.StateFailed)
 			node.state.Store(uint32(StateFailed))
 			node.refreshHealth()
+			entry.logLifecycleFailure("service start failed", err)
 			return err
 		}
 	}
@@ -799,6 +855,7 @@ func (node *Node) Start(ctx context.Context) error {
 			entry.setState(service.StateFailed)
 			node.state.Store(uint32(StateFailed))
 			node.refreshHealth()
+			entry.logLifecycleFailure("service scheduler activation failed", err)
 			return &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
@@ -806,6 +863,7 @@ func (node *Node) Start(ctx context.Context) error {
 				cause:       err,
 			}
 		}
+		entry.logLifecycle("service started")
 	}
 
 	// 全部 Runner 已激活后开放入站业务准入；随后一次性发布全部公开 Service。
@@ -833,7 +891,11 @@ func (node *Node) Start(ctx context.Context) error {
 	}
 	node.state.Store(uint32(StateReady))
 	node.refreshHealth()
-	node.logger.Info("node ready")
+	node.logger.Info(
+		"node ready",
+		originlog.Uint64("node_session_id", node.sessionID),
+		originlog.Any("local_services", node.lifecycleServices()),
+	)
 	return nil
 }
 
@@ -906,7 +968,11 @@ func (node *Node) Stop(ctx context.Context) error {
 	node.state.Store(uint32(StateStopping))
 	node.gameTimeMu.Unlock()
 	node.refreshHealth()
-	node.logger.Info("node stopping")
+	node.logger.Info(
+		"node stopping",
+		originlog.Uint64("node_session_id", node.sessionID),
+		originlog.Any("local_services", node.lifecycleServices()),
+	)
 	node.stopDiscoveryPublication()
 	result := node.withdrawDiscovery(ctx)
 	result = errors.Join(result, node.rpcRuntime.BeginStop(ctx))
@@ -939,7 +1005,7 @@ func (node *Node) Stop(ctx context.Context) error {
 	}
 	node.state.Store(uint32(StateStopped))
 	node.refreshHealth()
-	node.logger.Info("node stopped")
+	node.logger.Info("node stopped", originlog.Uint64("node_session_id", node.sessionID))
 	node.stopComplete = true
 	node.stopResult = nil
 	return result
@@ -1077,6 +1143,7 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 	var result error
 	for index := len(node.started) - 1; index >= 0; index-- {
 		entry := node.started[index]
+		entry.logLifecycle("service stopping")
 		// 停止准入前先删除监听器并唤醒当前 Service 的发现等待，避免排空被新变化延长。
 		node.discovery.removeOwner(entry, errs.ErrServiceStopping)
 		// 先在 Scheduler 锁内关闭新任务和新 Timer 的准入，再向业务发布 Stopping。
@@ -1101,6 +1168,7 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 				return service.StopWithModules(finalizerContext, entry.instance)
 			},
 		); err != nil {
+			entry.logLifecycleFailure("service stop failed", err)
 			result = errors.Join(result, &lifecycleContext{
 				nodeID:      node.id,
 				serviceName: entry.name,
@@ -1108,10 +1176,17 @@ func (node *Node) stopStarted(ctx context.Context, rollback bool) error {
 				cause:       err,
 			})
 		}
-		if entry.failureCause() != nil || (rollback && entry.startError) {
+		if failure := entry.failureCause(); failure != nil || (rollback && entry.startError) {
 			entry.setState(service.StateFailed)
+			if failure != nil {
+				entry.logLifecycleFailure("service stopped with failures", failure)
+			} else {
+				// 启动失败已在原始阶段记录根因；这里仅说明回滚完成，避免输出无 error 字段的 Error 日志。
+				entry.logLifecycle("service stopped after failed start")
+			}
 		} else {
 			entry.setState(service.StateStopped)
+			entry.logLifecycle("service stopped")
 		}
 	}
 	node.started = node.started[:0]

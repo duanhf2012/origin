@@ -91,11 +91,6 @@ func (conn *Conn) start() {
 	go conn.writeLoop()
 	go conn.pingLoop()
 	go conn.readLoop()
-	conn.logger.Info(
-		"WebSocket 连接已建立",
-		originlog.String("local_addr", addrString(conn.localAddr)),
-		originlog.String("remote_addr", addrString(conn.remoteAddr)),
-	)
 }
 
 func (conn *Conn) LocalAddr() net.Addr  { return conn.localAddr }
@@ -292,12 +287,6 @@ func (conn *Conn) readLoop() {
 	if conn.onDone != nil {
 		conn.onDone(conn)
 	}
-	conn.logger.Info(
-		"WebSocket 连接已关闭",
-		originlog.String("local_addr", addrString(conn.localAddr)),
-		originlog.String("remote_addr", addrString(conn.remoteAddr)),
-		originlog.Err(finalCause),
-	)
 }
 
 func (conn *Conn) runReadLoop() (result error) {

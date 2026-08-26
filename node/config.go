@@ -58,6 +58,11 @@ type Config struct {
 	ID string
 	// Private 表示该 Node 后续不发布到服务发现。
 	Private bool
+	// DiscoveryDisabled 表示当前 Node 不创建远端服务发现 Provider，也不发布自身服务。
+	//
+	// 默认 false，保持 Node 默认参与 Application 配置的服务发现；仅客户端机器人等只通过
+	// 外部 HTTP/TCP 入口访问目标、且不需要 Origin 内部 RPC 的隔离 Node 才应显式禁用。
+	DiscoveryDisabled bool
 	// Labels 是当前 Node 对外发布、供其他 Node 关注规则精确匹配的业务标签。
 	Labels map[string]string
 	// DiscoveryFilter 是配置加载阶段已经校验并预编译的远端服务关注规则。

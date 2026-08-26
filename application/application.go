@@ -486,14 +486,20 @@ func validateSelectedDiscoveryOrder(
 	if err != nil {
 		return err
 	}
-	serverIndex := -1
-	for index := range selected {
-		if selected[index].ID == config.Server.Node {
-			serverIndex = index
-			break
+	firstEnabledNode := ""
+	serverSelected := false
+	for _, configured := range selected {
+		if configured.DiscoveryDisabled {
+			continue
+		}
+		if firstEnabledNode == "" {
+			firstEnabledNode = configured.ID
+		}
+		if configured.ID == config.Server.Node {
+			serverSelected = true
 		}
 	}
-	if serverIndex > 0 {
+	if serverSelected && firstEnabledNode != config.Server.Node {
 		return invalidConfigf(
 			"同一进程选择多个 Node 时，DiscoveryService Node %q 必须位于显式启动顺序第一位",
 			config.Server.Node,
@@ -626,7 +632,14 @@ func (app *Application) buildNodes(
 	var originSystemTarget rpc.SystemTarget
 	var discoveryKind string
 	var discoveryConfig publicprovider.Config
-	if discovery != nil {
+	discoveryRequired := false
+	for _, configured := range configs {
+		if !configured.DiscoveryDisabled {
+			discoveryRequired = true
+			break
+		}
+	}
+	if discovery != nil && discoveryRequired {
 		discoveryKind = discovery.kind
 		discoveryConfig = discovery.config
 		switch discovery.kind {
@@ -670,6 +683,18 @@ func (app *Application) buildNodes(
 	}
 	result := make([]*node.Node, 0, len(configs))
 	for _, configured := range configs {
+		currentDiscoveryKind := discoveryKind
+		currentDiscoveryConfig := discoveryConfig
+		currentDiscoveryFactory := factory
+		currentDiscoverySystemTarget := originSystemTarget
+		if configured.DiscoveryDisabled {
+			// 机器人等纯客户端 Node 仍可保留自身 TCP Listener，但不建立发现系统 RPC、
+			// Provider 或公开服务记录；它无法依赖 Origin 内部 RPC。
+			currentDiscoveryKind = ""
+			currentDiscoveryConfig = publicprovider.Config{}
+			currentDiscoveryFactory = nil
+			currentDiscoverySystemTarget = rpc.SystemTarget{}
+		}
 		bindings := make([]node.ServiceBinding, 0, len(configured.Services))
 		names := make(map[string]struct{}, len(configured.Services))
 		for _, declaration := range configured.Services {
@@ -734,10 +759,10 @@ func (app *Application) buildNodes(
 				MaxTimersPerNode:      app.options.Timer.MaxTimersPerNode,
 				TimerLocation:         app.options.Timer.Location,
 				BufferPool:            app.bufferPool,
-				DiscoveryKind:         discoveryKind,
-				DiscoveryConfig:       discoveryConfig,
-				DiscoveryFactory:      factory,
-				DiscoverySystemTarget: originSystemTarget,
+				DiscoveryKind:         currentDiscoveryKind,
+				DiscoveryConfig:       currentDiscoveryConfig,
+				DiscoveryFactory:      currentDiscoveryFactory,
+				DiscoverySystemTarget: currentDiscoverySystemTarget,
 				ServiceFailure:        app.handleServiceFailure,
 			},
 		)
