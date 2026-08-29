@@ -18,23 +18,23 @@ const (
 // FrameConfig 配置 TCP Payload 前的无符号长度字段。
 type FrameConfig struct {
 	// LengthFieldSize 是长度字段字节数，只允许 1、2、4。
-	LengthFieldSize int
+	LengthFieldSize int `json:"length_field_size"`
 	// ByteOrder 是长度字段端序，只允许 big、little；通信双方必须一致。
-	ByteOrder string
+	ByteOrder string `json:"byte_order"`
 }
 
 // ReconnectConfig 配置托管 TCP Client 每轮断线后的有界指数退避。
 type ReconnectConfig struct {
 	// Enabled 控制是否在初始连接失败或活动连接关闭后自动重试。
-	Enabled bool
+	Enabled bool `json:"enabled"`
 	// MaxAttempts 是每轮连续失败允许执行的最大重试次数。
-	MaxAttempts int
+	MaxAttempts int `json:"max_attempts"`
 	// InitialDelay 是第一次重试前的等待时间。
-	InitialDelay originconfig.Duration
+	InitialDelay originconfig.Duration `json:"initial_delay"`
 	// MaxDelay 是指数退避单次等待时间的上限。
-	MaxDelay originconfig.Duration
+	MaxDelay originconfig.Duration `json:"max_delay"`
 	// Jitter 是退避随机抖动比例，范围为 0 到 1。
-	Jitter float64
+	Jitter float64 `json:"jitter"`
 }
 
 // ServerConfig 是可以从 Service 配置严格解码的 TCP Server 配置。
@@ -42,33 +42,33 @@ type ReconnectConfig struct {
 // 配置只保存可序列化数据；Handler 等运行期对象通过 Options 方法显式注入。
 type ServerConfig struct {
 	// Address 是包含端口的 TCP 监听地址。
-	Address string
+	Address string `json:"address"`
 	// Frame 配置每条 TCP 逻辑消息的长度前缀。
-	Frame FrameConfig
+	Frame FrameConfig `json:"frame"`
 	// KeepAlive 是连接空闲到 OS 开始发送 TCP KeepAlive 探测前的时间；0s 表示关闭。
-	KeepAlive originconfig.Duration
+	KeepAlive originconfig.Duration `json:"keep_alive"`
 	// MaxSessions 是当前 Server 同时活动的 Session 上限。
-	MaxSessions int
+	MaxSessions int `json:"max_sessions"`
 	// MaxMessageSize 同时限制入站和出站完整逻辑消息长度。
-	MaxMessageSize originconfig.ByteSize
+	MaxMessageSize originconfig.ByteSize `json:"max_message_size"`
 	// ReceivePendingMessages 限制每个 Session 已投递但尚未处理完成的消息数。
-	ReceivePendingMessages int
+	ReceivePendingMessages int `json:"receive_pending_messages"`
 	// ReceivePendingSize 限制每个 Session 待处理 Buffer 的保留容量。
-	ReceivePendingSize originconfig.ByteSize
+	ReceivePendingSize originconfig.ByteSize `json:"receive_pending_size"`
 	// ReceivePendingTotalSize 限制当前 Server 全部待处理 Buffer 的保留容量。
-	ReceivePendingTotalSize originconfig.ByteSize
+	ReceivePendingTotalSize originconfig.ByteSize `json:"receive_pending_total_size"`
 	// SendQueueMessages 限制每个 Session 等待发送的完整消息数。
-	SendQueueMessages int
+	SendQueueMessages int `json:"send_queue_messages"`
 	// SendQueueSize 限制每个 Session 排队 Payload 的保留容量。
-	SendQueueSize originconfig.ByteSize
+	SendQueueSize originconfig.ByteSize `json:"send_queue_size"`
 	// SendQueueTotalSize 限制当前 Server 排队及正在写出 Payload 的总保留容量。
-	SendQueueTotalSize originconfig.ByteSize
+	SendQueueTotalSize originconfig.ByteSize `json:"send_queue_total_size"`
 	// ReadIdleTimeout 是读取完整业务消息的空闲上限；0s 表示关闭。
-	ReadIdleTimeout originconfig.Duration
+	ReadIdleTimeout originconfig.Duration `json:"read_idle_timeout"`
 	// WriteTimeout 是写出一条完整业务消息的强制上限。
-	WriteTimeout originconfig.Duration
+	WriteTimeout originconfig.Duration `json:"write_timeout"`
 	// SlowClientTimeout 是发送队列连续处于高水位的最长时间。
-	SlowClientTimeout originconfig.Duration
+	SlowClientTimeout originconfig.Duration `json:"slow_client_timeout"`
 }
 
 // ClientConfig 配置由 Service 生命周期托管的单连接 TCP Client。
@@ -76,31 +76,31 @@ type ServerConfig struct {
 // Dialer 是一次性的代码对象，只使用 DialOptions，不从 Service 配置读取参数。
 type ClientConfig struct {
 	// Address 是托管 Client 使用的远端 TCP 地址。
-	Address string
+	Address string `json:"address"`
 	// DialTimeout 是一次 TCP 建连尝试的最长时间；调用方 Context 更早到期时以 Context 为准。
-	DialTimeout originconfig.Duration
+	DialTimeout originconfig.Duration `json:"dial_timeout"`
 	// Frame 配置每条 TCP 逻辑消息的长度前缀。
-	Frame FrameConfig
+	Frame FrameConfig `json:"frame"`
 	// KeepAlive 是连接空闲到 OS 开始发送 TCP KeepAlive 探测前的时间；0s 表示关闭。
-	KeepAlive originconfig.Duration
+	KeepAlive originconfig.Duration `json:"keep_alive"`
 	// MaxMessageSize 同时限制入站和出站完整逻辑消息长度。
-	MaxMessageSize originconfig.ByteSize
+	MaxMessageSize originconfig.ByteSize `json:"max_message_size"`
 	// ReceivePendingMessages 限制当前 Session 已投递但尚未处理完成的消息数。
-	ReceivePendingMessages int
+	ReceivePendingMessages int `json:"receive_pending_messages"`
 	// ReceivePendingSize 限制当前 Session 待处理 Buffer 的保留容量。
-	ReceivePendingSize originconfig.ByteSize
+	ReceivePendingSize originconfig.ByteSize `json:"receive_pending_size"`
 	// SendQueueMessages 限制当前 Session 等待发送的完整消息数。
-	SendQueueMessages int
+	SendQueueMessages int `json:"send_queue_messages"`
 	// SendQueueSize 限制当前 Session 排队 Payload 的保留容量。
-	SendQueueSize originconfig.ByteSize
+	SendQueueSize originconfig.ByteSize `json:"send_queue_size"`
 	// ReadIdleTimeout 是读取完整业务消息的空闲上限；0s 表示关闭。
-	ReadIdleTimeout originconfig.Duration
+	ReadIdleTimeout originconfig.Duration `json:"read_idle_timeout"`
 	// WriteTimeout 是写出一条完整业务消息的强制上限。
-	WriteTimeout originconfig.Duration
+	WriteTimeout originconfig.Duration `json:"write_timeout"`
 	// SlowClientTimeout 是发送队列连续处于高水位的最长时间。
-	SlowClientTimeout originconfig.Duration
+	SlowClientTimeout originconfig.Duration `json:"slow_client_timeout"`
 	// Reconnect 配置初始失败和断线后的有界自动重连。
-	Reconnect ReconnectConfig
+	Reconnect ReconnectConfig `json:"reconnect"`
 }
 
 // DefaultServerConfig 返回与 DefaultServerOptions 完全一致的 TCP Server 默认配置。

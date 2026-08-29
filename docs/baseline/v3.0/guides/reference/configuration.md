@@ -28,6 +28,14 @@ nodes:
 Node 常用字段：`id`、`services`、`private`、`labels`、`allow_discovery`、`scheduler`；仅 TCP
 模式的 Node 还需要 `rpc.tcp.listen/advertise`。
 
+业务配置结构体优先使用标准 `json` Tag 作为字段名；没有 Tag 时使用 Go 字段原名精确匹配。
+不会把 `RefreshInterval` 隐式转换为 `refresh_interval`，也不读取 `yaml` 或 `config` Tag。
+JSON 与 YAML 共享该规则。需要 `snake_case` 时应显式声明，例如：
+
+```go
+RefreshInterval originconfig.Duration `json:"refresh_interval"`
+```
+
 `id` 使用小写 kebab-case。顶层 `rpc.transport` 在 Application 级选择 `tcp` 或 `nats`。
 TCP 的共享队列和超时配置写在顶层 `rpc.tcp`，每个 Node 只在 `rpc.tcp.listen/advertise` 写
 自身地址；NATS 的 `urls/namespace/auth/tls` 只在顶层 `rpc.nats` 写一次，所有 Node 分别以

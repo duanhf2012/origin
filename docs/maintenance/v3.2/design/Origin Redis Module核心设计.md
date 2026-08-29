@@ -167,102 +167,102 @@ func WithHook(hooks ...redis.Hook) Option
 ### 5.1 Config 外观
 
 所有 Duration 字段使用 Origin 带单位字符串配置类型，YAML 中只接受 `500ms`、`3s`、`30m` 等值。
-配置结构不机械添加 Tag，按 Origin `snake_case` 规则映射。
+配置结构使用显式 `json` Tag 固定现有 `snake_case` 外部契约。
 
 ```go
 type Config struct {
     // Mode 指定 Redis 拓扑，支持 standalone、sentinel、cluster；省略时为 standalone。
-    Mode Mode
+    Mode Mode `json:"mode"`
 
     // Addresses 是 host:port 地址列表。Standalone 必须一个，其他模式至少一个。
-    Addresses []string
+    Addresses []string `json:"addresses"`
 
     // Username 和 Password 是数据节点 ACL 凭证；留空表示不认证。
-    Username string
-    Password string
+    Username string `json:"username"`
+    Password string `json:"password"`
 
     // Database 是逻辑数据库编号；默认 0，Cluster 只能为 0。
-    Database int
+    Database int `json:"database"`
 
     // ClientName 是 CLIENT SETNAME 使用的连接名称；留空不设置。
-    ClientName string
+    ClientName string `json:"client_name"`
 
     // Protocol 是 RESP 协议版本；省略时为 3，只允许 2 或 3。
-    Protocol int
+    Protocol int `json:"protocol"`
 
     // TLS 控制是否启用 TLS。
-    TLS bool
+    TLS bool `json:"tls"`
 
     // TLSCAFile 是追加到系统 Root CA Pool 的可选 PEM CA 文件。
-    TLSCAFile string
+    TLSCAFile string `json:"tls_ca_file"`
 
     // DialTimeout 是单次建连超时；省略时为 5s。
-    DialTimeout config.Duration
+    DialTimeout config.Duration `json:"dial_timeout"`
 
     // DialAttempts 是一次取连接时最多执行的建连尝试总数（包含第一次）；0 使用 5。
     // 它只重试建立连接，不表示 Redis 命令可以安全重放。
-    DialAttempts int
+    DialAttempts int `json:"dial_attempts"`
 
     // DialRetryInterval 是建连失败后再次尝试前的固定等待时间；省略时为 100ms。
-    DialRetryInterval config.Duration
+    DialRetryInterval config.Duration `json:"dial_retry_interval"`
 
     // ReadTimeout 和 WriteTimeout 是网络读写兜底超时；省略时均为 5s。
-    ReadTimeout  config.Duration
-    WriteTimeout config.Duration
+    ReadTimeout  config.Duration `json:"read_timeout"`
+    WriteTimeout config.Duration `json:"write_timeout"`
 
     // PoolTimeout 是连接池达到上限后等待连接的最长时间；省略时为 6s。
-    PoolTimeout config.Duration
+    PoolTimeout config.Duration `json:"pool_timeout"`
 
     // PoolSize 是每个 Redis 节点的基础连接数；0 时 Standalone/Sentinel 使用
     // 10×GOMAXPROCS，Cluster 使用 5×GOMAXPROCS。
-    PoolSize int
+    PoolSize int `json:"pool_size"`
 
     // MaxConcurrentDials 是并发创建连接的上限；0 取最终 PoolSize。
     // 它限制故障恢复时的建连风暴，不改变连接池总上限。
-    MaxConcurrentDials int
+    MaxConcurrentDials int `json:"max_concurrent_dials"`
 
     // MaxActiveConnections 是每个节点的连接硬上限；0 取最终 PoolSize。
-    MaxActiveConnections int
+    MaxActiveConnections int `json:"max_active_connections"`
 
     // MinIdleConnections 是每个节点预热的最小空闲连接数；默认 0。
-    MinIdleConnections int
+    MinIdleConnections int `json:"min_idle_connections"`
 
     // ConnectionMaxIdleTime 是连接最大空闲时间；省略时为 30m。
-    ConnectionMaxIdleTime config.Duration
+    ConnectionMaxIdleTime config.Duration `json:"connection_max_idle_time"`
 
     // MaxRetries 是每条命令的最大自动重试次数；默认 0，表示禁用命令自动重试。
-    MaxRetries int
+    MaxRetries int `json:"max_retries"`
 
     // MinRetryBackoff 和 MaxRetryBackoff 仅在开启重试时生效；默认 10ms 和 1s。
-    MinRetryBackoff config.Duration
-    MaxRetryBackoff config.Duration
+    MinRetryBackoff config.Duration `json:"min_retry_backoff"`
+    MaxRetryBackoff config.Duration `json:"max_retry_backoff"`
 
     // Sentinel 保存 Sentinel 模式专属配置。
-    Sentinel SentinelConfig
+    Sentinel SentinelConfig `json:"sentinel"`
 
     // Cluster 保存 Cluster 模式专属配置。
-    Cluster ClusterConfig
+    Cluster ClusterConfig `json:"cluster"`
 }
 
 type SentinelConfig struct {
     // MasterName 是 Sentinel 监控的 Master 名称；Sentinel 模式必填。
-    MasterName string
+    MasterName string `json:"master_name"`
 
     // Username 和 Password 是 Sentinel 自身凭证，不回退使用数据节点凭证。
-    Username string
-    Password string
+    Username string `json:"username"`
+    Password string `json:"password"`
 }
 
 type ClusterConfig struct {
     // ReadFromReplicas 允许只读命令访问 Replica；默认关闭，避免无意读取复制延迟数据。
-    ReadFromReplicas bool
+    ReadFromReplicas bool `json:"read_from_replicas"`
 
     // RouteByLatency 在允许 Replica 读取后按延迟选择节点。
-    RouteByLatency bool
+    RouteByLatency bool `json:"route_by_latency"`
 
     // MaxRedirects 是 Cluster 对网络错误和 MOVED/ASK 的最大处理次数；省略时为 3。
     // 它不是单纯的重定向次数，过大同样会放大故障尾延迟。
-    MaxRedirects int
+    MaxRedirects int `json:"max_redirects"`
 }
 ```
 

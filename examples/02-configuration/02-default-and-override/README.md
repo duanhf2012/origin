@@ -21,6 +21,10 @@ node_services:
 
 `game-1` 的专属块存在，因此公共块不参与合并。专属块缺少 `max_players`，于是保留 `main.go` 中 `serviceConfig{MaxPlayers: 10}` 的 Go 默认值，而不是得到公共值 `100`。
 
+`main.go` 中的 `Welcome` 和 `MaxPlayers` 分别声明 `json:"welcome"` 与
+`json:"max_players"`，因此 JSON/YAML 都使用这里展示的小写字段名。若不声明 Tag，配置必须
+使用完整 Go 字段原名；Origin 不会把 `MaxPlayers` 自动转换成 `max_players`。
+
 ## 运行与练习
 
 执行 `run.bat` 或 `./run.sh`，预期日志为 `welcome="hello-from-game-1" max_players=10`。删除 `node_services` 块后会看到公共值；在专属块补上 `max_players: 50` 后会看到 `50`。

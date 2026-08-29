@@ -11,11 +11,11 @@ import (
 // benchmarkConfig 覆盖 Benchmark 样本需要的 Sequence、Map 和大字符串字段。
 type benchmarkConfig struct {
 	Servers []struct {
-		ID      string
-		Address string
-	}
-	Metadata map[string]string
-	Payload  string
+		ID      string `json:"id"`
+		Address string `json:"address"`
+	} `json:"servers"`
+	Metadata map[string]string `json:"metadata"`
+	Payload  string            `json:"payload"`
 }
 
 func BenchmarkLoadDir(b *testing.B) {
@@ -163,11 +163,11 @@ services:
 
 	b.Run("full_service", func(b *testing.B) {
 		target := struct {
-			Timeout int `config:"timeout"`
+			Timeout int `json:"timeout"`
 			Nested  struct {
-				Enabled bool `config:"enabled"`
-			} `config:"nested"`
-			Labels map[string]string `config:"labels"`
+				Enabled bool `json:"enabled"`
+			} `json:"nested"`
+			Labels map[string]string `json:"labels"`
 		}{}
 		b.ReportAllocs()
 		for b.Loop() {

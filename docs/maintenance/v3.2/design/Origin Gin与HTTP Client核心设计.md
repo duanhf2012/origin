@@ -70,17 +70,17 @@ func (module *PlayerHTTPModule) OnInit() error {
 package ginmodule
 
 type ServerConfig struct {
-    Address                    string
-    RequestTimeout             config.Duration
-    ReadHeaderTimeout          config.Duration
-    ReadTimeout                config.Duration
-    WriteTimeout               config.Duration
-    IdleTimeout                config.Duration
-    MaxHeaderBytes             config.ByteSize
-    MaxRequestBodySize         config.ByteSize
-    MaxSafeResponseBodySize    config.ByteSize
-    MaxActiveRequests          int
-    TrustedProxies             []string
+    Address                    string          `json:"address"`
+    RequestTimeout             config.Duration `json:"request_timeout"`
+    ReadHeaderTimeout          config.Duration `json:"read_header_timeout"`
+    ReadTimeout                config.Duration `json:"read_timeout"`
+    WriteTimeout               config.Duration `json:"write_timeout"`
+    IdleTimeout                config.Duration `json:"idle_timeout"`
+    MaxHeaderBytes             config.ByteSize `json:"max_header_bytes"`
+    MaxRequestBodySize         config.ByteSize `json:"max_request_body_size"`
+    MaxSafeResponseBodySize    config.ByteSize `json:"max_safe_response_body_size"`
+    MaxActiveRequests          int             `json:"max_active_requests"`
+    TrustedProxies             []string        `json:"trusted_proxies"`
 }
 
 func DefaultServerConfig() ServerConfig

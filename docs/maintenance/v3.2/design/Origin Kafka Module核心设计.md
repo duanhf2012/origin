@@ -522,40 +522,40 @@ Session `Setup` 成功或启动 Context 失败，不能在尚未完成认证、M
 
 ```go
 type ClusterConfig struct {
-    Brokers                   []string
-    Version                   string
-    ClientID                  string
-    DialTimeout               config.Duration
-    ReadTimeout               config.Duration
-    WriteTimeout              config.Duration
-    KeepAlive                 config.Duration
-    MetadataTimeout           config.Duration
-    MetadataRefreshInterval   config.Duration
-    MetadataRetryMax          int
-    MetadataRetryBackoff      config.Duration
-    AllowAutoTopicCreation    bool
-    TLS                       TLSConfig
-    SASL                      SASLConfig
+    Brokers                   []string        `json:"brokers"`
+    Version                   string          `json:"version"`
+    ClientID                  string          `json:"client_id"`
+    DialTimeout               config.Duration `json:"dial_timeout"`
+    ReadTimeout               config.Duration `json:"read_timeout"`
+    WriteTimeout              config.Duration `json:"write_timeout"`
+    KeepAlive                 config.Duration `json:"keep_alive"`
+    MetadataTimeout           config.Duration `json:"metadata_timeout"`
+    MetadataRefreshInterval   config.Duration `json:"metadata_refresh_interval"`
+    MetadataRetryMax          int             `json:"metadata_retry_max"`
+    MetadataRetryBackoff      config.Duration `json:"metadata_retry_backoff"`
+    AllowAutoTopicCreation    bool            `json:"allow_auto_topic_creation"`
+    TLS                       TLSConfig       `json:"tls"`
+    SASL                      SASLConfig      `json:"sasl"`
 }
 
 type TLSConfig struct {
-    Enable     bool
-    CAFile     string
-    CertFile   string
-    KeyFile    string
-    ServerName string
+    Enable     bool   `json:"enable"`
+    CAFile     string `json:"ca_file"`
+    CertFile   string `json:"cert_file"`
+    KeyFile    string `json:"key_file"`
+    ServerName string `json:"server_name"`
 }
 
 type SASLConfig struct {
-    Enable    bool
-    Mechanism string
-    Username  string
-    Password  string
+    Enable    bool   `json:"enable"`
+    Mechanism string `json:"mechanism"`
+    Username  string `json:"username"`
+    Password  string `json:"password"`
 }
 ```
 
 ProducerConfig 与 ConsumerConfig 分别组合 ClusterConfig，避免把不相关字段放进同一大结构。所有 Duration
-和 ByteSize 遵守 Origin 带单位字符串规则；配置结构体普通字段不机械添加 Tag。
+和 ByteSize 遵守 Origin 带单位字符串规则；配置结构体使用显式 `json` Tag 固定 `snake_case` 外部契约。
 
 TLS 使用系统 Root CA，并可追加 `ca_file`；同时提供 Cert/Key 时启用双向 TLS。禁止配置
 `InsecureSkipVerify`。密码建议使用 `${KAFKA_PASSWORD}` 环境变量，不写入 YAML、日志或错误。
@@ -564,23 +564,23 @@ TLS 使用系统 Root CA，并可追加 `ca_file`；同时提供 Cert/Key 时启
 
 ```go
 type ProducerConfig struct {
-    Cluster                 ClusterConfig
-    RequiredAcks            string
-    Idempotent              *bool
-    Compression             string
-    MaxMessageSize          config.ByteSize
-    DeliveryTimeout         config.Duration
-    RetryMax                int
-    RetryBackoff            config.Duration
-    RetryBufferMessages     int
-    RetryBufferSize         config.ByteSize
-    FlushMessages           int
-    FlushSize               config.ByteSize
-    FlushInterval           config.Duration
-    FlushMaxMessages        int
-    SubmitQueueMessages     int
-    SubmitQueueSize         config.ByteSize
-    ChannelBufferMessages   int
+    Cluster                 ClusterConfig  `json:"cluster"`
+    RequiredAcks            string         `json:"required_acks"`
+    Idempotent              *bool          `json:"idempotent"`
+    Compression             string         `json:"compression"`
+    MaxMessageSize          config.ByteSize `json:"max_message_size"`
+    DeliveryTimeout         config.Duration `json:"delivery_timeout"`
+    RetryMax                int            `json:"retry_max"`
+    RetryBackoff            config.Duration `json:"retry_backoff"`
+    RetryBufferMessages     int            `json:"retry_buffer_messages"`
+    RetryBufferSize         config.ByteSize `json:"retry_buffer_size"`
+    FlushMessages           int            `json:"flush_messages"`
+    FlushSize               config.ByteSize `json:"flush_size"`
+    FlushInterval           config.Duration `json:"flush_interval"`
+    FlushMaxMessages        int            `json:"flush_max_messages"`
+    SubmitQueueMessages     int            `json:"submit_queue_messages"`
+    SubmitQueueSize         config.ByteSize `json:"submit_queue_size"`
+    ChannelBufferMessages   int            `json:"channel_buffer_messages"`
 }
 ```
 
@@ -632,36 +632,36 @@ type ProducerConfig struct {
 
 ```go
 type ConsumerConfig struct {
-    Cluster                    ClusterConfig
-    GroupID                    string
-    Topics                     []string
-    InitialOffset              string
-    BalanceStrategy            string
-    InstanceID                 string
-    SessionTimeout             config.Duration
-    HeartbeatInterval          config.Duration
-    RebalanceTimeout           config.Duration
-    AutoCommitInterval         config.Duration
-    IsolationLevel             string
-    ResetInvalidOffsets        bool
-    FetchMinSize               config.ByteSize
-    FetchDefaultPartitionSize  config.ByteSize
-    FetchMaxPartitionSize      config.ByteSize
-    FetchMaxTotalSize          config.ByteSize
-    FetchMaxWait               config.Duration
-    MaxProcessingTime          config.Duration
-    ChannelBufferMessages      int
-    RecoveryInitialBackoff     config.Duration
-    RecoveryMaxBackoff         config.Duration
-    HandlerRetryMax            int
-    HandlerRetryBackoff        config.Duration
-    Batch                      BatchConfig
+    Cluster                    ClusterConfig  `json:"cluster"`
+    GroupID                    string         `json:"group_id"`
+    Topics                     []string       `json:"topics"`
+    InitialOffset              string         `json:"initial_offset"`
+    BalanceStrategy            string         `json:"balance_strategy"`
+    InstanceID                 string         `json:"instance_id"`
+    SessionTimeout             config.Duration `json:"session_timeout"`
+    HeartbeatInterval          config.Duration `json:"heartbeat_interval"`
+    RebalanceTimeout           config.Duration `json:"rebalance_timeout"`
+    AutoCommitInterval         config.Duration `json:"auto_commit_interval"`
+    IsolationLevel             string         `json:"isolation_level"`
+    ResetInvalidOffsets        bool           `json:"reset_invalid_offsets"`
+    FetchMinSize               config.ByteSize `json:"fetch_min_size"`
+    FetchDefaultPartitionSize  config.ByteSize `json:"fetch_default_partition_size"`
+    FetchMaxPartitionSize      config.ByteSize `json:"fetch_max_partition_size"`
+    FetchMaxTotalSize          config.ByteSize `json:"fetch_max_total_size"`
+    FetchMaxWait               config.Duration `json:"fetch_max_wait"`
+    MaxProcessingTime          config.Duration `json:"max_processing_time"`
+    ChannelBufferMessages      int            `json:"channel_buffer_messages"`
+    RecoveryInitialBackoff     config.Duration `json:"recovery_initial_backoff"`
+    RecoveryMaxBackoff         config.Duration `json:"recovery_max_backoff"`
+    HandlerRetryMax            int            `json:"handler_retry_max"`
+    HandlerRetryBackoff        config.Duration `json:"handler_retry_backoff"`
+    Batch                      BatchConfig    `json:"batch"`
 }
 
 type BatchConfig struct {
-    MaxMessages int
-    MaxSize     config.ByteSize
-    MaxWait     config.Duration
+    MaxMessages int             `json:"max_messages"`
+    MaxSize     config.ByteSize `json:"max_size"`
+    MaxWait     config.Duration `json:"max_wait"`
 }
 ```
 

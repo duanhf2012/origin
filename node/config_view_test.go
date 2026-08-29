@@ -49,7 +49,7 @@ node_services:
 	}
 	t.Cleanup(func() { _ = current.Rollback(t.Context()) })
 	configured := struct {
-		Value string `config:"value"`
+		Value string `json:"value"`
 	}{}
 	if err := target.ParseServiceConfig(&configured); err != nil {
 		t.Fatalf("ParseServiceConfig() error = %v", err)

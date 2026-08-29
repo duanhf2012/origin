@@ -62,28 +62,28 @@ actual_field: yaml-tag-is-ignored
 
 	// 目标模型覆盖匿名嵌入、yaml Tag 忽略和所有主要强类型。
 	type Embedded struct {
-		ActualField string `yaml:"wrong_name"`
+		ActualField string `json:"actual_field" yaml:"wrong_name"`
 	}
 	type serverInfo struct {
-		Name           string
-		DefaultTimeout Duration
-		MaxMessageSize ByteSize
-		Address        string
-		Port           uint16
-		Enabled        bool
-		Ratio          float64
-		Literal        string
-		Custom         testText
-		Labels         map[string]string
+		Name           string            `json:"name"`
+		DefaultTimeout Duration          `json:"default_timeout"`
+		MaxMessageSize ByteSize          `json:"max_message_size"`
+		Address        string            `json:"address"`
+		Port           uint16            `json:"port"`
+		Enabled        bool              `json:"enabled"`
+		Ratio          float64           `json:"ratio"`
+		Literal        string            `json:"literal"`
+		Custom         testText          `json:"custom"`
+		Labels         map[string]string `json:"labels"`
 	}
 	type node struct {
-		ID string
+		ID string `json:"id"`
 	}
 	type target struct {
 		Embedded
-		ServerInfo serverInfo
-		Nodes      []node
-		Dynamic    map[int]string
+		ServerInfo serverInfo     `json:"server_info"`
+		Nodes      []node         `json:"nodes"`
+		Dynamic    map[int]string `json:"dynamic"`
 	}
 
 	// 执行唯一公开加载入口。
@@ -119,6 +119,46 @@ actual_field: yaml-tag-is-ignored
 	}
 }
 
+func TestLoadDirUsesJSONTagBeforeFieldName(t *testing.T) {
+	t.Run("field name without tag", func(t *testing.T) {
+		// 未声明 Tag 时直接使用 Go 字段原名。
+		dir := t.TempDir()
+		writeConfig(t, dir, "config.yaml", "RefreshInterval: 1m\n")
+		var got struct{ RefreshInterval Duration }
+		if err := LoadDir(dir, &got); err != nil {
+			t.Fatalf("LoadDir() error = %v", err)
+		}
+		if got.RefreshInterval.Duration() != time.Minute {
+			t.Fatalf("RefreshInterval = %s", got.RefreshInterval.Duration())
+		}
+	})
+
+	t.Run("json tag overrides field name", func(t *testing.T) {
+		// 显式 Tag 是唯一配置名，适合保持 snake_case 配置契约。
+		dir := t.TempDir()
+		writeConfig(t, dir, "config.yaml", "refresh_interval: 1m\n")
+		var got struct {
+			RefreshInterval Duration `json:"refresh_interval"`
+		}
+		if err := LoadDir(dir, &got); err != nil {
+			t.Fatalf("LoadDir() error = %v", err)
+		}
+		if got.RefreshInterval.Duration() != time.Minute {
+			t.Fatalf("RefreshInterval = %s", got.RefreshInterval.Duration())
+		}
+	})
+
+	t.Run("no implicit snake case", func(t *testing.T) {
+		// 无 Tag 时不能把下划线名称静默映射到 Go 字段。
+		dir := t.TempDir()
+		writeConfig(t, dir, "config.yaml", "refresh_interval: 1m\n")
+		var got struct{ RefreshInterval Duration }
+		if err := LoadDir(dir, &got); !errs.IsCode(err, errs.CodeInvalidConfig) {
+			t.Fatalf("LoadDir() error = %v", err)
+		}
+	})
+}
+
 // TestLoadDirNumericBoundaries 验证无符号整数和浮点数的正常位宽、负数、溢出与
 // 非有限值边界；失败必须统一表现为 InvalidConfig。
 func TestLoadDirNumericBoundaries(t *testing.T) {
@@ -131,10 +171,10 @@ ratio: 1.5
 count: 2
 `)
 		var got struct {
-			Small uint8
-			Large uint64
-			Ratio float32
-			Count float64
+			Small uint8   `json:"small"`
+			Large uint64  `json:"large"`
+			Ratio float32 `json:"ratio"`
+			Count float64 `json:"count"`
 		}
 		if err := LoadDir(dir, &got); err != nil {
 			t.Fatalf("LoadDir() error = %v", err)
@@ -154,7 +194,9 @@ count: 2
 			name:    "negative unsigned",
 			content: "value: -1\n",
 			decode: func(dir string) error {
-				var target struct{ Value uint8 }
+				var target struct {
+					Value uint8 `json:"value"`
+				}
 				return LoadDir(dir, &target)
 			},
 		},
@@ -162,7 +204,9 @@ count: 2
 			name:    "unsigned overflow",
 			content: "value: 256\n",
 			decode: func(dir string) error {
-				var target struct{ Value uint8 }
+				var target struct {
+					Value uint8 `json:"value"`
+				}
 				return LoadDir(dir, &target)
 			},
 		},
@@ -170,7 +214,9 @@ count: 2
 			name:    "float32 overflow",
 			content: "value: 3.5e38\n",
 			decode: func(dir string) error {
-				var target struct{ Value float32 }
+				var target struct {
+					Value float32 `json:"value"`
+				}
 				return LoadDir(dir, &target)
 			},
 		},
@@ -178,7 +224,9 @@ count: 2
 			name:    "non finite float",
 			content: "value: .inf\n",
 			decode: func(dir string) error {
-				var target struct{ Value float64 }
+				var target struct {
+					Value float64 `json:"value"`
+				}
 				return LoadDir(dir, &target)
 			},
 		},
@@ -186,7 +234,9 @@ count: 2
 			name:    "literal numeric string",
 			content: "value: '12'\n",
 			decode: func(dir string) error {
-				var target struct{ Value uint16 }
+				var target struct {
+					Value uint16 `json:"value"`
+				}
 				return LoadDir(dir, &target)
 			},
 		},
@@ -213,8 +263,8 @@ func TestLoadDirRecursivelyMergesMappingsAndSequences(t *testing.T) {
 
 	// 加载后验证 Mapping 递归补充、Sequence 追加以及不支持格式忽略。
 	var got struct {
-		Nested map[string]int
-		Items  []string
+		Nested map[string]int `json:"nested"`
+		Items  []string       `json:"items"`
 	}
 	if err := LoadDir(dir, &got); err != nil {
 		t.Fatalf("LoadDir 返回错误: %v", err)
@@ -233,11 +283,11 @@ func TestLoadDirTestdata(t *testing.T) {
 	// 使用仓库静态样本验证测试运行目录下的真实相对路径加载。
 	var got struct {
 		Framework struct {
-			Name string
-		}
+			Name string `json:"name"`
+		} `json:"framework"`
 		Nodes []struct {
-			ID string
-		}
+			ID string `json:"id"`
+		} `json:"nodes"`
 	}
 	// 执行加载并断言两个文件按名称顺序合并。
 	if err := LoadDir("testdata/merged", &got); err != nil {
@@ -254,11 +304,11 @@ func TestLoadDirTestdata(t *testing.T) {
 func TestLoadDirPreservesDefaultsAndDestinationOnFailure(t *testing.T) {
 	// 嵌套指针和 Map 用于验证默认值所有权不会被反射解码污染。
 	type nested struct {
-		Name string
+		Name string `json:"name"`
 	}
 	type target struct {
-		ANested *nested
-		Values  map[string]int
+		ANested *nested        `json:"a_nested"`
+		Values  map[string]int `json:"values"`
 	}
 
 	t.Run("preserve defaults", func(t *testing.T) {
@@ -404,8 +454,8 @@ func TestLoadDirStrictErrors(t *testing.T) {
 			dir := t.TempDir()
 			writeConfig(t, dir, test.filename, test.content)
 			var got struct {
-				Known string
-				Small int8
+				Known string `json:"known"`
+				Small int8   `json:"small"`
 			}
 			err := LoadDir(dir, &got)
 			// 所有样本必须返回稳定配置错误码。
@@ -433,7 +483,9 @@ func TestLoadDirAcceptsSupportedExtensionCase(t *testing.T) {
 	writeConfig(t, dir, "30-third.YAML", "items: [yaml]\n")
 
 	// 加载后验证扩展名匹配不区分大小写且排序保持稳定。
-	var got struct{ Items []string }
+	var got struct {
+		Items []string `json:"items"`
+	}
 	if err := LoadDir(dir, &got); err != nil {
 		t.Fatalf("LoadDir 返回错误: %v", err)
 	}
@@ -503,7 +555,9 @@ func TestLoadDirEnvironmentErrorsDoNotLeakValues(t *testing.T) {
 		// 未定义变量应报告变量名和来源位置。
 		dir := t.TempDir()
 		writeConfig(t, dir, "config.yaml", "value: ${ORIGIN_M3_MISSING}\n")
-		var got struct{ Value string }
+		var got struct {
+			Value string `json:"value"`
+		}
 		err := LoadDir(dir, &got)
 		if err == nil || !strings.Contains(err.Error(), "ORIGIN_M3_MISSING") ||
 			!strings.Contains(err.Error(), "config.yaml:1:") {
@@ -517,7 +571,9 @@ func TestLoadDirEnvironmentErrorsDoNotLeakValues(t *testing.T) {
 		t.Setenv("ORIGIN_M3_SECRET", secret)
 		dir := t.TempDir()
 		writeConfig(t, dir, "config.yaml", "value: ${ORIGIN_M3_SECRET}\n")
-		var got struct{ Value int }
+		var got struct {
+			Value int `json:"value"`
+		}
 		err := LoadDir(dir, &got)
 		if err == nil {
 			t.Fatal("非法整数环境变量应返回错误")
@@ -577,7 +633,9 @@ func TestLoadDirConcurrent(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			var got struct{ Value int }
+			var got struct {
+				Value int `json:"value"`
+			}
 			if err := LoadDir(dir, &got); err != nil {
 				errorsFound <- err
 				return
@@ -655,7 +713,9 @@ func TestLoadDirDoesNotFollowSymlinkDirectory(t *testing.T) {
 	}
 
 	// 加载目标不声明 outside 字段；成功即证明未递归进入链接目录。
-	var got struct{ Inside bool }
+	var got struct {
+		Inside bool `json:"inside"`
+	}
 	if err := LoadDir(root, &got); err != nil {
 		t.Fatalf("符号链接目录应被忽略: %v", err)
 	}
@@ -721,9 +781,9 @@ anything:
 `)
 	// 目标类型触发基础 Map Key 转换和空接口恢复。
 	var got struct {
-		Bools    map[bool]string
-		Uints    map[uint8]string
-		Anything any
+		Bools    map[bool]string  `json:"bools"`
+		Uints    map[uint8]string `json:"uints"`
+		Anything any              `json:"anything"`
 	}
 	if err := LoadDir(dir, &got); err != nil {
 		t.Fatalf("LoadDir 返回错误: %v", err)
@@ -742,7 +802,9 @@ func TestLoadDirDecodesFixedArraysAtomically(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		directory := t.TempDir()
 		writeConfig(t, directory, "config.yaml", "values: [1, 2, 3]\n")
-		target := struct{ Values [3]int }{Values: [3]int{7, 8, 9}}
+		target := struct {
+			Values [3]int `json:"values"`
+		}{Values: [3]int{7, 8, 9}}
 		if err := LoadDir(directory, &target); err != nil {
 			t.Fatalf("LoadDir() error = %v", err)
 		}
@@ -762,7 +824,9 @@ func TestLoadDirDecodesFixedArraysAtomically(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
 			writeConfig(t, directory, "config.yaml", test.content)
-			target := struct{ Values [3]int }{Values: [3]int{7, 8, 9}}
+			target := struct {
+				Values [3]int `json:"values"`
+			}{Values: [3]int{7, 8, 9}}
 			if err := LoadDir(directory, &target); !errs.IsCode(err, errs.CodeInvalidConfig) {
 				t.Fatalf("LoadDir() error = %v", err)
 			}
@@ -781,7 +845,9 @@ func TestLoadDirRejectsNonFiniteYAMLFloat(t *testing.T) {
 			if _, err := LoadSnapshot(directory); !errs.IsCode(err, errs.CodeInvalidConfig) {
 				t.Fatalf("LoadSnapshot() error = %v", err)
 			}
-			target := struct{ Ratio float64 }{Ratio: 1.25}
+			target := struct {
+				Ratio float64 `json:"ratio"`
+			}{Ratio: 1.25}
 			if err := LoadDir(directory, &target); !errs.IsCode(err, errs.CodeInvalidConfig) {
 				t.Fatalf("LoadDir() error = %v", err)
 			}
@@ -825,7 +891,9 @@ func TestLoadDirEnvironmentNumericBoundaries(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "config.yaml", "value: ${ORIGIN_M3_MAX_INT64}\n")
 	// 加载并确认值没有截断或符号变化。
-	var got struct{ Value int64 }
+	var got struct {
+		Value int64 `json:"value"`
+	}
 	if err := LoadDir(dir, &got); err != nil {
 		t.Fatalf("LoadDir 返回错误: %v", err)
 	}

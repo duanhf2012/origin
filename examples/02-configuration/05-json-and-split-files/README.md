@@ -28,6 +28,9 @@ config/
   Mapping 根文档。
 - 环境变量只替换字符串值，不生成字段名或容器；变量缺失会启动失败，错误不会打印变量值。
 
+业务结构体的 `json` Tag 同时决定 JSON 和 YAML 字段名；无 Tag 时使用 Go 字段原名，不自动
+转换为 `snake_case`。本例的 `Welcome` 显式声明 `json:"welcome"`，所以两个格式都写 `welcome`。
+
 修改文件后需要重新启动 Application；配置加载后冻结，不做运行期热更新。
 
 对应教程：[配置应用](../../../docs/baseline/v3.0/guides/02.configuration.md)。

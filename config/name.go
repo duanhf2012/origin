@@ -4,12 +4,11 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 // structField 保存一个配置名到嵌套结构体字段索引路径的映射。
 type structField struct {
-	// name 是 json Tag 或自动 snake_case 得到的精确配置名。
+	// name 是 json Tag 或 Go 字段原名得到的精确配置名。
 	name string
 	// index 是从根结构体开始的 reflect.FieldByIndex 等价路径。
 	index []int
@@ -82,10 +81,10 @@ func collectFields(
 			continue
 		}
 
-		// Tag 名为空时应用统一 snake_case 自动命名。
+		// Tag 名为空时使用 Go 字段原名，避免隐式改变公开字段名称。
 		name := tagName
 		if name == "" {
-			name = snakeCase(field.Name)
+			name = field.Name
 		}
 		// 同一个配置名只能对应一个字段，禁止依赖声明顺序静默选择。
 		if previous, exists := fields[name]; exists {
@@ -112,7 +111,7 @@ func appendIndex(parent []int, index int) []int {
 
 // jsonTagName 只解析标准 json Tag 的名称和忽略标记。
 func jsonTagName(tag string) (name string, ignored bool) {
-	// 没有 Tag 时由调用方使用自动名称。
+	// 没有 Tag 时由调用方使用 Go 字段原名。
 	if tag == "" {
 		return "", false
 	}
@@ -123,36 +122,6 @@ func jsonTagName(tag string) (name string, ignored bool) {
 		return "", true
 	}
 	return name, false
-}
-
-// snakeCase 把 Go 导出字段名转换为稳定的下划线小写名称。
-func snakeCase(name string) string {
-	// 空名称直接返回，主要保护内部辅助调用。
-	runes := []rune(name)
-	if len(runes) == 0 {
-		return ""
-	}
-
-	// 预留少量下划线增长空间，常见字段名只分配一次。
-	var builder strings.Builder
-	builder.Grow(len(name) + 4)
-	for index, current := range runes {
-		// 大写字母前是否加下划线取决于前后字符，用于正确处理连续缩写。
-		if index > 0 && unicode.IsUpper(current) {
-			previous := runes[index-1]
-			var next rune
-			if index+1 < len(runes) {
-				next = runes[index+1]
-			}
-			if unicode.IsLower(previous) || unicode.IsDigit(previous) ||
-				unicode.IsUpper(previous) && next != 0 && unicode.IsLower(next) {
-				builder.WriteByte('_')
-			}
-		}
-		// 所有字符统一转小写写入结果。
-		builder.WriteRune(unicode.ToLower(current))
-	}
-	return builder.String()
 }
 
 // formatFieldIndex 把反射索引路径转换为错误消息使用的点分十进制文本。

@@ -18,15 +18,15 @@ const (
 // ReconnectConfig 配置托管 WebSocket Client 每轮断线后的有界指数退避。
 type ReconnectConfig struct {
 	// Enabled 控制是否在初始连接失败或活动连接关闭后自动重试。
-	Enabled bool
+	Enabled bool `json:"enabled"`
 	// MaxAttempts 是每轮连续失败允许执行的最大重试次数。
-	MaxAttempts int
+	MaxAttempts int `json:"max_attempts"`
 	// InitialDelay 是第一次重试前的等待时间。
-	InitialDelay originconfig.Duration
+	InitialDelay originconfig.Duration `json:"initial_delay"`
 	// MaxDelay 是指数退避单次等待时间的上限。
-	MaxDelay originconfig.Duration
+	MaxDelay originconfig.Duration `json:"max_delay"`
 	// Jitter 是退避随机抖动比例，范围为 0 到 1。
-	Jitter float64
+	Jitter float64 `json:"jitter"`
 }
 
 // ServerConfig 是可以从 Service 配置严格解码的 WebSocket Server 配置。
@@ -34,41 +34,41 @@ type ReconnectConfig struct {
 // TLS、Origin 校验和响应 Header 保存运行期对象或安全策略，必须在 Options 转换后由代码注入。
 type ServerConfig struct {
 	// Address 是 HTTP/WebSocket 监听地址。
-	Address string
+	Address string `json:"address"`
 	// Path 是执行 WebSocket Upgrade 的 HTTP 路由，必须以斜杠开头。
-	Path string
+	Path string `json:"path"`
 	// MessageType 只允许 binary 或 text，并在连接生命周期内保持不变。
-	MessageType string
+	MessageType string `json:"message_type"`
 	// HandshakeTimeout 是 HTTP Upgrade 握手的最长时间。
-	HandshakeTimeout originconfig.Duration
+	HandshakeTimeout originconfig.Duration `json:"handshake_timeout"`
 	// PingInterval 是发送 WebSocket 协议 Ping 控制帧的间隔；与 PongTimeout 同为 0s 时关闭。
-	PingInterval originconfig.Duration
+	PingInterval originconfig.Duration `json:"ping_interval"`
 	// PongTimeout 是协议 Ping 发出后等待 Pong 的最长时间，启用时必须大于 PingInterval。
-	PongTimeout originconfig.Duration
+	PongTimeout originconfig.Duration `json:"pong_timeout"`
 	// Subprotocols 是允许协商的 WebSocket 子协议，空切片表示不协商。
-	Subprotocols []string
+	Subprotocols []string `json:"subprotocols"`
 	// MaxSessions 是当前 Server 同时活动的 Session 上限。
-	MaxSessions int
+	MaxSessions int `json:"max_sessions"`
 	// MaxMessageSize 同时限制入站和出站完整 Data Message 长度。
-	MaxMessageSize originconfig.ByteSize
+	MaxMessageSize originconfig.ByteSize `json:"max_message_size"`
 	// ReceivePendingMessages 限制每个 Session 已投递但尚未处理完成的 Data Message 数。
-	ReceivePendingMessages int
+	ReceivePendingMessages int `json:"receive_pending_messages"`
 	// ReceivePendingSize 限制每个 Session 待处理 Buffer 的保留容量。
-	ReceivePendingSize originconfig.ByteSize
+	ReceivePendingSize originconfig.ByteSize `json:"receive_pending_size"`
 	// ReceivePendingTotalSize 限制当前 Server 全部待处理 Buffer 的保留容量。
-	ReceivePendingTotalSize originconfig.ByteSize
+	ReceivePendingTotalSize originconfig.ByteSize `json:"receive_pending_total_size"`
 	// SendQueueMessages 限制每个 Session 等待发送的完整 Data Message 数。
-	SendQueueMessages int
+	SendQueueMessages int `json:"send_queue_messages"`
 	// SendQueueSize 限制每个 Session 排队 Payload 的保留容量。
-	SendQueueSize originconfig.ByteSize
+	SendQueueSize originconfig.ByteSize `json:"send_queue_size"`
 	// SendQueueTotalSize 限制当前 Server 排队及正在写出 Payload 的总保留容量。
-	SendQueueTotalSize originconfig.ByteSize
+	SendQueueTotalSize originconfig.ByteSize `json:"send_queue_total_size"`
 	// ReadIdleTimeout 是业务 Data Message 的读空闲上限；0s 表示关闭，协议 Ping/Pong 不刷新它。
-	ReadIdleTimeout originconfig.Duration
+	ReadIdleTimeout originconfig.Duration `json:"read_idle_timeout"`
 	// WriteTimeout 是写出一条完整 Data Message 的强制上限。
-	WriteTimeout originconfig.Duration
+	WriteTimeout originconfig.Duration `json:"write_timeout"`
 	// SlowClientTimeout 是发送队列连续处于高水位的最长时间。
-	SlowClientTimeout originconfig.Duration
+	SlowClientTimeout originconfig.Duration `json:"slow_client_timeout"`
 }
 
 // ClientConfig 配置由 Service 生命周期托管的单连接 WebSocket Client。
@@ -76,35 +76,35 @@ type ServerConfig struct {
 // Dialer 是一次性的代码对象，只使用 DialOptions，不从 Service 配置读取参数。
 type ClientConfig struct {
 	// URL 是托管 Client 使用的完整远端地址，包含 ws/wss Scheme、主机和路径。
-	URL string
+	URL string `json:"url"`
 	// MessageType 只允许 binary 或 text，并在连接生命周期内保持不变。
-	MessageType string
+	MessageType string `json:"message_type"`
 	// HandshakeTimeout 是 DNS、TCP、TLS 和 HTTP Upgrade 整体握手的最长时间。
-	HandshakeTimeout originconfig.Duration
+	HandshakeTimeout originconfig.Duration `json:"handshake_timeout"`
 	// PingInterval 是发送 WebSocket 协议 Ping 控制帧的间隔；与 PongTimeout 同为 0s 时关闭。
-	PingInterval originconfig.Duration
+	PingInterval originconfig.Duration `json:"ping_interval"`
 	// PongTimeout 是协议 Ping 发出后等待 Pong 的最长时间，启用时必须大于 PingInterval。
-	PongTimeout originconfig.Duration
+	PongTimeout originconfig.Duration `json:"pong_timeout"`
 	// Subprotocols 是 Client 提议的 WebSocket 子协议，空切片表示不协商。
-	Subprotocols []string
+	Subprotocols []string `json:"subprotocols"`
 	// MaxMessageSize 同时限制入站和出站完整 Data Message 长度。
-	MaxMessageSize originconfig.ByteSize
+	MaxMessageSize originconfig.ByteSize `json:"max_message_size"`
 	// ReceivePendingMessages 限制当前 Session 已投递但尚未处理完成的 Data Message 数。
-	ReceivePendingMessages int
+	ReceivePendingMessages int `json:"receive_pending_messages"`
 	// ReceivePendingSize 限制当前 Session 待处理 Buffer 的保留容量。
-	ReceivePendingSize originconfig.ByteSize
+	ReceivePendingSize originconfig.ByteSize `json:"receive_pending_size"`
 	// SendQueueMessages 限制当前 Session 等待发送的完整 Data Message 数。
-	SendQueueMessages int
+	SendQueueMessages int `json:"send_queue_messages"`
 	// SendQueueSize 限制当前 Session 排队 Payload 的保留容量。
-	SendQueueSize originconfig.ByteSize
+	SendQueueSize originconfig.ByteSize `json:"send_queue_size"`
 	// ReadIdleTimeout 是业务 Data Message 的读空闲上限；0s 表示关闭，协议 Ping/Pong 不刷新它。
-	ReadIdleTimeout originconfig.Duration
+	ReadIdleTimeout originconfig.Duration `json:"read_idle_timeout"`
 	// WriteTimeout 是写出一条完整 Data Message 的强制上限。
-	WriteTimeout originconfig.Duration
+	WriteTimeout originconfig.Duration `json:"write_timeout"`
 	// SlowClientTimeout 是发送队列连续处于高水位的最长时间。
-	SlowClientTimeout originconfig.Duration
+	SlowClientTimeout originconfig.Duration `json:"slow_client_timeout"`
 	// Reconnect 配置初始失败和断线后的有界自动重连。
-	Reconnect ReconnectConfig
+	Reconnect ReconnectConfig `json:"reconnect"`
 }
 
 // DefaultServerConfig 返回与 DefaultServerOptions 完全一致的 WebSocket Server 默认配置。

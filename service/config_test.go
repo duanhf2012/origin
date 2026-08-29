@@ -54,7 +54,7 @@ services:
 	}
 
 	configured := struct {
-		Timeout int `config:"timeout"`
+		Timeout int `json:"timeout"`
 	}{Timeout: 3}
 	if err := target.ParseServiceConfig(&configured); err != nil {
 		t.Fatalf("ParseServiceConfig() error = %v", err)
@@ -63,7 +63,7 @@ services:
 		t.Fatalf("Timeout = %d", configured.Timeout)
 	}
 	nested := struct {
-		Enabled bool `config:"enabled"`
+		Enabled bool `json:"enabled"`
 	}{}
 	if err := target.GetServiceConfig("nested", &nested); err != nil {
 		t.Fatalf("GetServiceConfig() error = %v", err)
@@ -122,7 +122,9 @@ services:
 	}
 
 	// 目标预填默认值；严格解码失败后必须保持原值，避免使用半份基础设施配置。
-	configured := struct{ Timeout int }{Timeout: 3}
+	configured := struct {
+		Timeout int `json:"timeout"`
+	}{Timeout: 3}
 	err = target.GetServiceConfigStrict("network", &configured)
 	if !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("GetServiceConfigStrict() error = %v", err)
@@ -207,7 +209,9 @@ func TestServiceMissingBusinessConfigKeepsDefaults(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	configured := struct{ Timeout int }{Timeout: 3}
+	configured := struct {
+		Timeout int `json:"timeout"`
+	}{Timeout: 3}
 	if err := target.ParseServiceConfig(&configured); err != nil {
 		t.Fatalf("ParseServiceConfig() error = %v", err)
 	}

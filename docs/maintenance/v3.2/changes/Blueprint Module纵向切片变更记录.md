@@ -20,8 +20,8 @@
 
 ## 2. Review 后的调整
 
-- 配置字段遵循 Origin 配置映射约定，不增加 `yaml` 标签；`NodeDir/GraphDir` 自动对应
-  `node_dir/graph_dir`。
+- 配置字段遵循 Origin 配置映射约定，使用显式 `json` Tag 将 `NodeDir/GraphDir` 固定为
+  JSON/YAML 共用的 `node_dir/graph_dir`，不读取 `yaml` Tag。
 - 引擎关闭错误通过 `ErrBlueprintClosed` 别名直接暴露，业务无需额外导入底层引擎包。
 - 补充 Service 队列满测试：Resume 提交失败不会消费 Yield 句柄，可在有界策略内重试；
   `OnComplete` 登记失败不会取消 Execution，并允许容量恢复后重新登记。

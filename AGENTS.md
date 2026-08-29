@@ -173,11 +173,11 @@ JSON/YAML 配置支持 `${NAME}` 环境变量占位符，但只在文件解析�
 
 环境变量值不得出现在日志和错误中。完整 Scalar 只有一个占位符时，允许按目标基础类型、`Duration`、`ByteSize` 或文本解码接口进行严格转换；占位符与其他文本组合时结果只作为字符串处理。环境变量不能生成 Mapping、Sequence 或字段名。
 
-### 19. 配置结构体默认不要求 Tag
+### 19. 配置结构体字段遵循 Go 默认命名
 
-Origin 的 JSON/YAML 配置结构体默认不要求 Tag。未声明 Tag 的可导出字段按确定性的 Go 字段名转 `snake_case` 规则匹配，例如 `DefaultTimeout` 对应 `default_timeout`、`NodeID` 对应 `node_id`、`HTTPServerURL` 对应 `http_server_url`。
+Origin 的 JSON/YAML 配置结构体未声明 Tag 时，使用可导出 Go 字段原名精确匹配，例如 `DefaultTimeout` 对应 `DefaultTimeout`、`NodeID` 对应 `NodeID`、`HTTPServerURL` 对应 `HTTPServerURL`，不隐式转换大小写或下划线。
 
-只有字段需要改名或忽略时才使用标准 `json` Tag，例如 `json:"timeout"` 或 `json:"-"`。配置加载只把 `json` Tag 的名称部分作为覆盖名称，`omitempty` 等编码选项不改变配置解码语义。Origin 不定义 `config` Tag，也不把 `yaml` Tag 作为配置加载契约；新建 Origin 配置结构体和示例不得为了普通字段机械添加 Tag。
+配置需要使用 `snake_case`、其他名称或忽略字段时，必须声明标准 `json` Tag，例如 `json:"default_timeout"` 或 `json:"-"`。配置加载只把 `json` Tag 的名称部分作为覆盖名称，`omitempty` 等编码选项不改变配置解码语义。Origin 不定义 `config` Tag，也不把 `yaml` Tag 作为配置加载契约。
 
 配置 Key 与最终映射名称精确匹配。多个字段、匿名嵌入或 Tag 产生相同名称时必须返回配置模型冲突错误，不得按声明顺序静默选择。不能自然表达或容易产生歧义的字段名应显式使用 `json` Tag。
 

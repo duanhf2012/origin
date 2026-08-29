@@ -12,7 +12,7 @@ import (
 // app 是当前示例唯一的 Application。
 var app = application.New()
 
-// serviceConfig 使用 JSON Tag 同时映射 YAML 解码后的字段名。
+// serviceConfig 使用 JSON Tag 固定 JSON/YAML 共用的 snake_case 字段名。
 type serviceConfig struct {
 	Welcome    string `json:"welcome"`
 	MaxPlayers int    `json:"max_players"`

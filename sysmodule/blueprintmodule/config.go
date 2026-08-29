@@ -11,9 +11,9 @@ import (
 // JSON 解析和蓝图编译统一在 OnStart 执行，Setup 本身不进行文件 I/O。
 type Config struct {
 	// NodeDir 是节点定义 JSON 根目录；引擎按自身规则递归加载。
-	NodeDir string
+	NodeDir string `json:"node_dir"`
 	// GraphDir 是 .vgf、.obp 和 .obpf 蓝图根目录；引擎按自身规则递归加载。
-	GraphDir string
+	GraphDir string `json:"graph_dir"`
 }
 
 func normalizeConfig(input Config) (Config, error) {

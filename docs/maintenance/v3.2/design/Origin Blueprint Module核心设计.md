@@ -97,10 +97,10 @@ github.com/duanhf2012/OriginBlueprint v0.1.6
 ```go
 type Config struct {
     // NodeDir 是节点定义 JSON 根目录；引擎按自身规则递归加载。
-    NodeDir string
+    NodeDir string `json:"node_dir"`
 
     // GraphDir 是 .vgf、.obp、.obpf 蓝图根目录；引擎按自身规则递归加载。
-    GraphDir string
+    GraphDir string `json:"graph_dir"`
 }
 ```
 
@@ -380,8 +380,8 @@ func (m *Module) Reload(ctx context.Context) (ReloadResult, error)
 
 ```go
 type Config struct {
-    NodeDir  string
-    GraphDir string
+    NodeDir  string `json:"node_dir"`
+    GraphDir string `json:"graph_dir"`
 }
 
 func New(config Config, options ...Option) (*Module, error)

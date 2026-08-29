@@ -25,8 +25,8 @@ services:
 		t.Fatalf("Lookup() error = %v", err)
 	}
 	configured := struct {
-		Timeout int    `config:"timeout"`
-		Mode    string `config:"mode"`
+		Timeout int    `json:"timeout"`
+		Mode    string `json:"mode"`
 	}{Timeout: 1, Mode: "safe"}
 	if err := view.Decode(&configured); err != nil {
 		t.Fatalf("View.Decode() error = %v", err)
@@ -36,7 +36,7 @@ services:
 	}
 
 	strict := struct {
-		Timeout int `config:"timeout"`
+		Timeout int `json:"timeout"`
 	}{}
 	if err := view.DecodeStrict(&strict); !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("View.DecodeStrict() error = %v", err)
@@ -63,7 +63,7 @@ func TestSnapshotViewMissingAndAtomicDecode(t *testing.T) {
 		t.Fatalf("Lookup(service) error = %v", err)
 	}
 	target := struct {
-		Count int `config:"count"`
+		Count int `json:"count"`
 	}{Count: 7}
 	if err := view.Decode(&target); !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("View.Decode() error = %v", err)
@@ -86,7 +86,7 @@ func TestLoadDirStillRejectsUnknownFieldsThroughSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	writeConfig(t, directory, "runtime.yaml", "known: 1\nunknown: 2\n")
 	target := struct {
-		Known int `config:"known"`
+		Known int `json:"known"`
 	}{}
 	if err := LoadDir(directory, &target); !errs.IsCode(err, errs.CodeInvalidConfig) {
 		t.Fatalf("LoadDir() error = %v", err)

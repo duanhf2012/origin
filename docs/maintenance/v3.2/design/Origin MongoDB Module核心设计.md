@@ -151,14 +151,14 @@ Command/Pool Monitor、特殊认证或 BSON 配置；它不能成为第二套普
 ```go
 type Config struct {
     // URI 是完整 MongoDB Driver 连接字符串。凭证应通过环境变量注入。
-    URI string
+    URI string `json:"uri"`
 
     // Database 是 Database() 和 Collection() 使用的默认业务数据库。
-    Database string
+    Database string `json:"database"`
 
     // TLSCAFile 是需要追加到系统 Root CA Pool 的可选 PEM CA 文件路径。
     // 留空时使用 URI 产生的 TLS 配置或系统 Root CA。
-    TLSCAFile string
+    TLSCAFile string `json:"tls_ca_file"`
 }
 ```
 
